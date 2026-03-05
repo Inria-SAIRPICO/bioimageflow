@@ -1,0 +1,17 @@
+[project]
+name = "bioimageflow"
+version = "0.1.0"
+description = "Python library for orchestrating bioimage analysis workflows"
+requires-python = ">=3.10"
+dependencies = [
+    "bioimageflow-core",
+    "pandas",
+    "pydantic",
+]
+
+[tool.uv.sources]
+bioimageflow-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

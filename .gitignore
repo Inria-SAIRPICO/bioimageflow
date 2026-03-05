@@ -1,0 +1,7 @@
+.DS_Store
+bif_data/
+.pytest_cache/
+.claude/
+.venv/
+__pycache__/
+IMPLEMENTATION_PLAN.md

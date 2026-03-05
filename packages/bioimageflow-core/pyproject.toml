@@ -1,0 +1,10 @@
+[project]
+name = "bioimageflow-core"
+version = "0.1.0"
+description = "Core types and tool base classes for BioImageFlow — zero dependencies"
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
