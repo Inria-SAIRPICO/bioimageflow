@@ -1,0 +1,79 @@
+BioImageFlow
+=============
+
+A Python library for orchestrating bioimage analysis workflows as reproducible
+DAG pipelines.
+
+BioImageFlow lets you declare image-processing tools, wire them into directed
+acyclic graphs, and execute them with automatic caching, type checking, and
+provenance tracking.
+
+.. code-block:: python
+
+   from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments
+   from bioimageflow import Workflow, DataFrameTool
+
+   class Threshold(ProcessingTool):
+       name = "threshold"
+       environment = EnvironmentSpec(name="base", dependencies={})
+
+       class Inputs:
+           image: ImagePath()
+           cutoff: float = 128.0
+
+       class Outputs:
+           mask: ImagePath(semantics={"binary"}) = "{image.stem}_mask.tif"
+
+       def process_row(self, arguments: Arguments) -> "Threshold.Outputs":
+           import numpy as np
+           from skimage.io import imread, imsave
+
+           img = imread(arguments.image)
+           mask = (img > arguments.cutoff).astype(np.uint8) * 255
+           imsave(str(arguments.mask), mask)
+           return self.Outputs(mask=arguments.mask)
+
+   threshold = Threshold()
+   loader = FileLoader()
+
+   with Workflow() as wf:
+       raw = loader(folder="/data/images")
+       masks = threshold(image=raw["path"], cutoff=100.0)
+       result = wf.compute(masks)
+
+Features
+--------
+
+- **DAG workflow engine** --- build pipelines by connecting tools, not writing glue code
+- **Two-package architecture** --- a zero-dependency core for workers, a pandas/pydantic orchestrator for the main process
+- **Typed image I/O** --- semantic, layout, and dtype constraints checked at graph-construction time
+- **Automatic caching** --- signature-hash based caching skips redundant computation
+- **Shared memory** --- zero-copy array transfer between tools
+- **Merge strategies** --- inner join, cross join, concat, and collect
+- **Output templating** --- declarative output path patterns
+- **Environment isolation** --- each tool declares its own dependencies
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Getting Started
+
+   installation
+   quickstart
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Tutorials
+
+   tutorials/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Concepts
+
+   concepts/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
+
+   api/index

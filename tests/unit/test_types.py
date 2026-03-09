@@ -7,6 +7,7 @@ from typing import Annotated, get_args
 import pytest
 
 from bioimageflow_core.types import (
+    GUIMeta,
     ImageSpec,
     Layout,
     Semantic,
@@ -14,6 +15,7 @@ from bioimageflow_core.types import (
     ImagePath,
     ImageShared,
     check_compatibility,
+    extract_gui_meta,
     _normalize_param,
 )
 
@@ -116,6 +118,62 @@ class TestCheckCompatibility:
             layouts={Layout.VOLUMETRIC},
         )
         assert check_compatibility(producer, consumer) is False
+
+
+class TestGUIMeta:
+
+    def test_defaults(self):
+        meta = GUIMeta()
+        assert meta.connectable is True
+        assert meta.min is None
+        assert meta.max is None
+        assert meta.step is None
+
+    def test_custom_values(self):
+        meta = GUIMeta(connectable=False, min=0.0, max=100.0, step=0.1)
+        assert meta.connectable is False
+        assert meta.min == 0.0
+        assert meta.max == 100.0
+        assert meta.step == 0.1
+
+    def test_frozen(self):
+        meta = GUIMeta()
+        with pytest.raises(AttributeError):
+            meta.connectable = False  # type: ignore[reportAttributeAccessIssue]
+
+    def test_hashable(self):
+        m1 = GUIMeta(connectable=False, min=1.0)
+        m2 = GUIMeta(connectable=False, min=1.0)
+        assert hash(m1) == hash(m2)
+        assert m1 == m2
+
+    def test_equality(self):
+        assert GUIMeta(min=1.0) != GUIMeta(min=2.0)
+
+
+class TestExtractGUIMeta:
+
+    def test_returns_gui_meta(self):
+        meta = GUIMeta(connectable=False, min=0.0, max=10.0, step=0.5)
+        ann = Annotated[float, meta]
+        assert extract_gui_meta(ann) is meta
+
+    def test_returns_none_for_plain_type(self):
+        assert extract_gui_meta(float) is None
+        assert extract_gui_meta(int) is None
+
+    def test_returns_none_for_annotated_without_gui_meta(self):
+        ann = Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        assert extract_gui_meta(ann) is None
+
+    def test_coexists_with_image_spec(self):
+        spec = ImageSpec(semantics={Semantic.INTENSITY})
+        meta = GUIMeta(connectable=True)
+        ann = Annotated[Path, spec, meta]
+        assert extract_gui_meta(ann) is meta
+        # ImageSpec is still extractable via its own function
+        from bioimageflow_core.types import extract_gui_meta as _
+        assert get_args(ann)[1] is spec
 
 
 class TestSharedArray:

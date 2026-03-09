@@ -1,0 +1,62 @@
+# Configuration file for the Sphinx documentation builder.
+
+import sys
+from pathlib import Path
+
+# Add both packages to sys.path for autodoc
+root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(root / "packages" / "bioimageflow-core"))
+sys.path.insert(0, str(root / "packages" / "bioimageflow"))
+
+# -- Project information -----------------------------------------------------
+
+project = "BioImageFlow"
+copyright = "2026, BioImageFlow Contributors"
+author = "BioImageFlow Contributors"
+release = "0.1.0"
+
+# -- General configuration ---------------------------------------------------
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.viewcode",
+    "sphinx_copybutton",
+    "sphinx_autodoc_typehints",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = []
+
+language = "en"
+
+# -- Options for HTML output -------------------------------------------------
+
+html_theme = "furo"
+html_static_path = ["_static"]
+html_title = "BioImageFlow"
+
+html_theme_options = {
+    "source_repository": "https://github.com/your-org/bioimageflow",
+    "source_branch": "main",
+    "source_directory": "docs/source/",
+}
+
+# -- Autodoc options ---------------------------------------------------------
+
+autodoc_member_order = "bysource"
+autodoc_typehints = "description"
+autodoc_class_signature = "separated"
+
+# -- Napoleon options --------------------------------------------------------
+
+napoleon_google_docstrings = True
+napoleon_numpy_docstrings = True
+
+# -- Intersphinx -------------------------------------------------------------
+
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+}

@@ -5,3 +5,4 @@ bif_data/
 .venv/
 __pycache__/
 IMPLEMENTATION_PLAN.md
+docs/build/

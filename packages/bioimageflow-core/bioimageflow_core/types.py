@@ -4,7 +4,7 @@ import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Set, Tuple
+from typing import Annotated, Any, Set, Tuple, get_args, get_origin
 
 
 class Semantic(str, Enum):
@@ -90,6 +90,41 @@ def ImageShared(
         formats={"memory"},
     )
     return Annotated[SharedArray, spec]
+
+
+@dataclass(frozen=True)
+class GUIMeta:
+    """Declarative GUI hints for a tool input field.
+
+    Attach to an ``Inputs`` annotation via ``Annotated`` to control how a
+    GUI renders the field.
+
+    Parameters
+    ----------
+    connectable : bool
+        Whether this input can be bound to an upstream column.  Defaults to
+        ``True``.  Set to ``False`` for pure user-parameters (e.g. a
+        threshold slider).
+    min : float | None
+        Minimum allowed value (numeric fields only).
+    max : float | None
+        Maximum allowed value (numeric fields only).
+    step : float | None
+        Step increment for spinbox / slider widgets (numeric fields only).
+    """
+    connectable: bool = True
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+
+
+def extract_gui_meta(annotation: Any) -> GUIMeta | None:
+    """Extract :class:`GUIMeta` from an ``Annotated`` type, or return ``None``."""
+    if get_origin(annotation) is Annotated:
+        for arg in get_args(annotation):
+            if isinstance(arg, GUIMeta):
+                return arg
+    return None
 
 
 def check_compatibility(producer_spec: ImageSpec, consumer_spec: ImageSpec) -> bool:

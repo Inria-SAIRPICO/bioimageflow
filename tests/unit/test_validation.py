@@ -3,11 +3,14 @@
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core.types import ImageSpec, Semantic, SharedArray
+from bioimageflow_core.types import GUIMeta, ImageSpec, Semantic, SharedArray
+from bioimageflow_core.tool import IOModel, ProcessingTool
+from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow.validation import (
     is_path_type,
     is_image_type,
     extract_image_spec,
+    get_inputs_schema,
     get_source_hash,
 )
 
@@ -53,6 +56,116 @@ class TestExtractImageSpec:
 
     def test_returns_none_for_plain(self):
         assert extract_image_spec(int) is None
+
+
+class TestGetInputsSchema:
+
+    def test_basic_schema(self):
+        class Tool(ProcessingTool):
+            name = "test_tool"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+                sigma: float = 1.0
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        assert "image" in schema
+        assert "sigma" in schema
+        assert schema["image"]["required"] is True
+        assert schema["image"]["connectable"] is True
+        assert schema["image"]["type"] is Path
+        assert schema["image"]["image_spec"] is not None
+        assert schema["sigma"]["required"] is False
+        assert schema["sigma"]["default"] == 1.0
+        assert schema["sigma"]["connectable"] is True
+
+    def test_gui_meta_numeric_constraints(self):
+        class Tool(ProcessingTool):
+            name = "test_tool_meta"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                diameter: Annotated[float, GUIMeta(connectable=False, min=1.0, max=500.0, step=0.5)] = 30.0
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        d = schema["diameter"]
+        assert d["connectable"] is False
+        assert d["min"] == 1.0
+        assert d["max"] == 500.0
+        assert d["step"] == 0.5
+        assert d["default"] == 30.0
+        assert d["type"] is float
+
+    def test_gui_meta_coexists_with_image_spec(self):
+        class Tool(ProcessingTool):
+            name = "test_tool_both"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=True)]
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        assert schema["image"]["connectable"] is True
+        assert schema["image"]["image_spec"] is not None
+        assert schema["image"]["type"] is Path
+
+    def test_no_gui_meta_defaults_connectable(self):
+        class Tool(ProcessingTool):
+            name = "test_tool_no_meta"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                threshold: float = 0.5
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        assert schema["threshold"]["connectable"] is True
+        assert "min" not in schema["threshold"]
+        assert "max" not in schema["threshold"]
+        assert "step" not in schema["threshold"]
+
+    def test_partial_numeric_constraints(self):
+        class Tool(ProcessingTool):
+            name = "test_tool_partial"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                count: Annotated[int, GUIMeta(min=0)] = 5
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        assert schema["count"]["min"] == 0
+        assert "max" not in schema["count"]
+        assert "step" not in schema["count"]
 
 
 class TestGetSourceHash:

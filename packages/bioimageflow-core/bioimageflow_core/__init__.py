@@ -1,4 +1,5 @@
 from bioimageflow_core.types import (
+    GUIMeta,
     ImagePath,
     ImageShared,
     ImageSpec,
@@ -6,6 +7,7 @@ from bioimageflow_core.types import (
     Semantic,
     SharedArray,
     check_compatibility,
+    extract_gui_meta,
 )
 from bioimageflow_core.environment import EnvironmentSpec, EnvironmentMismatchError, ResourceSpec
 from bioimageflow_core.tool import BaseTool, IOModel, ProcessingTool
