@@ -1020,11 +1020,9 @@ registered = register(
 - **Edges** represent data dependency: an edge from Node A to Node B means Node B references columns from Node A (via `ColumnRef`) or receives Node A's output DataFrame (via positional argument to a DataFrameTool).
 - **`ColumnRef`** is created by subscripting a Node: `node["col"]`. It records the upstream node and column name. The engine validates column existence at construction time for upstream nodes with known output schemas (i.e., nodes whose tool declares `Outputs`). For DataFrameTool nodes without `Outputs` — whose schema is dynamic — validation is deferred to execution time.
 - The graph must remain a DAG. Cycles are detected synchronously inside `__call__()` when the edge is created, providing instant feedback in scripts and notebooks.
-- **Source nodes** are nodes with no upstream data dependencies. Both tool types can act as source nodes:
+- **Source nodes** are simply nodes with no upstream data dependencies — they are not a separate tool type or code path. Both tool types can act as source nodes:
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
-  - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) acts as a source that produces data in an isolated environment. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process. The engine creates a single-row input (with only the constant arguments) and the tool returns one or more `Outputs` rows.
-
-  Source nodes are not a separate tool type — any tool can act as a source when called with no upstream references.
+  - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, the engine uses a single-row index (`["0"]`), builds arguments from constants and defaults only, and dispatches to `process_row`/`process_batch` as usual. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
 
 ### 4.3 The `Workflow` Object
 
@@ -1437,7 +1435,7 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
 /workflow_root/
   ├── data/
   │   └── <node_name>/
-  │       └── <hash_signature>/
+  │       └── <YYYYMMDD_HHMMSS>_<hash_12chars>/
   │           ├── metadata.json     # Tool version, timestamp, user
   │           ├── parameters.json   # Resolved configuration
   │           ├── dataframe.csv     # Output table
@@ -1446,6 +1444,8 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
   │               └── img2_seg.tif
   └── provenance_graph.json         # Full DAG dump
 ```
+
+The hash directory name is prefixed with a creation timestamp (`YYYYMMDD_HHMMSS`) for easy chronological sorting, followed by the first 12 characters of the signature hash (e.g., `20260309_143022_a1b2c3d4e5f6`). Cache lookup matches directories by the trailing hash suffix.
 
 ---
 

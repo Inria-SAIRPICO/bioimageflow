@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,6 @@ def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[
 
     if isinstance(source, SharedArray):
         import numpy as np
-        from multiprocessing.shared_memory import SharedMemory
         shm = SharedMemory(name=source.name)
         try:
             arr = np.ndarray(source.shape, dtype=source.dtype, buffer=shm.buf)

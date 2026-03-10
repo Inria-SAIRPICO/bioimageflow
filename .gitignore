@@ -1,5 +1,6 @@
 .DS_Store
 bif_data/
+data/
 .pytest_cache/
 .claude/
 .venv/

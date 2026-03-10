@@ -6,6 +6,7 @@ from bioimageflow_core.types import (
     Layout,
     Semantic,
     SharedArray,
+    Template,
     check_compatibility,
     extract_gui_meta,
 )

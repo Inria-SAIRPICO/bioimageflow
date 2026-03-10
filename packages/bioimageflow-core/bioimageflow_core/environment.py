@@ -8,7 +8,7 @@ from typing import Any
 class EnvironmentSpec:
     """Defines a reusable Wetlands environment specification."""
     name: str
-    dependencies: dict[str, Any]
+    dependencies: dict[str, str | list[str]]
 
 
 @dataclass(frozen=True)

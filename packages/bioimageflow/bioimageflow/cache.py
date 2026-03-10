@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from bioimageflow.storage import get_node_dir, get_hash_dir, get_assets_dir, ensure_dirs
+from bioimageflow.storage import ensure_dirs, find_hash_dir, create_hash_dir
 
 
 def normalize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
@@ -74,10 +74,11 @@ def compute_signature_hash(
 
 def cache_lookup(node_dir: Path, sig_hash: str) -> Path | None:
     """Check if a cached result exists. Returns Path to dataframe.csv or None."""
-    hash_dir = get_hash_dir(node_dir, sig_hash)
-    csv_path = hash_dir / "dataframe.csv"
-    if csv_path.exists():
-        return csv_path
+    hash_dir = find_hash_dir(node_dir, sig_hash)
+    if hash_dir is not None:
+        csv_path = hash_dir / "dataframe.csv"
+        if csv_path.exists():
+            return csv_path
     return None
 
 
@@ -87,10 +88,17 @@ def cache_save(
     df: pd.DataFrame,
     metadata: dict[str, Any] | None = None,
     parameters: dict[str, Any] | None = None,
+    hash_dir: Path | None = None,
 ) -> None:
-    """Save a DataFrame and metadata to the cache."""
-    hash_dir = get_hash_dir(node_dir, sig_hash)
-    ensure_dirs(hash_dir)
+    """Save a DataFrame and metadata to the cache.
+
+    If *hash_dir* is provided (already created during execution), reuse it.
+    Otherwise create a new timestamped hash directory.
+    """
+    if hash_dir is None:
+        hash_dir = create_hash_dir(node_dir, sig_hash)
+    else:
+        ensure_dirs(hash_dir)
     df.to_csv(hash_dir / "dataframe.csv", index=True)
     if metadata:
         (hash_dir / "metadata.json").write_text(
