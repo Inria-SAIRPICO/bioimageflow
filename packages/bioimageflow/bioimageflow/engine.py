@@ -147,7 +147,10 @@ class SequentialEngine:
         if isinstance(node.tool, DataFrameTool):
             return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
         elif isinstance(node.tool, ProcessingTool):
-            return self._execute_processing_tool(node, results, sig_hashes, workflow)
+            if not node._column_bindings:
+                return self._execute_source_processing_tool(node, results, sig_hashes, workflow)
+            else:
+                return self._execute_processing_tool_with_column_bindings(node, results, sig_hashes, workflow)
         else:
             raise RuntimeError(f"Unknown tool type: {type(node.tool)}")
 
@@ -197,40 +200,81 @@ class SequentialEngine:
 
     # ── ProcessingTool execution ───────────────────────────────────────
 
-    def _execute_processing_tool(
+    def _execute_source_processing_tool(
         self,
         node: Node,
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str],
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
-        """Execute a ProcessingTool node (with or without upstream column refs)."""
+        """Execute a ProcessingTool node that has no upstream column bindings (source node)."""
         assert isinstance(node.tool, ProcessingTool)
 
         input_annotations = node.tool.Inputs._get_all_annotations()
         assert node.tool.Outputs is not None  # ProcessingTool always has Outputs
         templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
-        is_source = not node._column_bindings
 
-        if is_source:
-            aligned_index: list[Any] = ["0"]
-            upstream_nodes: dict[str, Node] = {}
-        else:
-            upstream_nodes = {cr.node.name: cr.node
-                             for cr in node._column_bindings.values()}
-            aligned_index, _ = self._align_indices(node, upstream_nodes, results)
-            self._validate_column_bindings(node, results)
+        aligned_index: list[Any] = ["0"]
+        upstream_nodes: dict[str, Node] = {}
 
         # --- Signature hash ---
-        if is_source:
-            env_hash = compute_env_hash(node.tool.environment.dependencies)
-            sig_hash = self._compute_sig_hash(
-                node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
-            )
-        else:
-            sig_hash = self._compute_processing_sig_hash(
-                node, input_annotations, upstream_nodes, sig_hashes, workflow,
-            )
+        env_hash = compute_env_hash(node.tool.environment.dependencies)
+        sig_hash = self._compute_sig_hash(
+            node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
+        )
+
+        # --- Cache check ---
+        node_dir = get_node_dir(workflow.storage_path, node.name)
+        cached = cache_lookup(node_dir, sig_hash)
+        if cached:
+            self._emit_progress(workflow, node.name, "cached")
+            return cache_load(cached), sig_hash
+
+        # --- Resolve arguments ---
+        self._emit_progress(workflow, node.name, "started")
+        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
+
+        row_args = self._resolve_defaults(node, input_annotations)
+        context = self._build_template_context(
+            node.name, '0', row_args, path_input_fields=[], upstream_nodes={},
+            results={}, idx='0',
+        )
+        for out_field, template in templates.items():
+            row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
+        arguments_dicts = [row_args]
+
+        # --- Dispatch & build output ---
+        raw_results = self._dispatch_tool(node.tool, arguments_dicts, workflow, node.name)
+        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        self._emit_progress(workflow, node.name, "completed")
+
+        self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
+                               hash_dir=hash_dir)
+        return df, sig_hash
+
+    def _execute_processing_tool_with_column_bindings(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+    ) -> tuple[pd.DataFrame, str]:
+        """Execute a ProcessingTool node that has upstream column bindings."""
+        assert isinstance(node.tool, ProcessingTool)
+
+        input_annotations = node.tool.Inputs._get_all_annotations()
+        assert node.tool.Outputs is not None  # ProcessingTool always has Outputs
+        templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
+
+        upstream_nodes = {cr.node.name: cr.node
+                         for cr in node._column_bindings.values()}
+        aligned_index, _ = self._align_indices(node, upstream_nodes, results)
+        self._validate_column_bindings(node, results)
+
+        # --- Signature hash ---
+        sig_hash = self._compute_processing_sig_hash(
+            node, input_annotations, upstream_nodes, sig_hashes, workflow,
+        )
 
         # --- Cache check ---
         node_dir = get_node_dir(workflow.storage_path, node.name)
@@ -238,40 +282,28 @@ class SequentialEngine:
         if cached:
             self._emit_progress(workflow, node.name, "cached")
             df = cache_load(cached)
-            if not is_source:
-                cached_hash_dir = find_hash_dir(node_dir, sig_hash)
-                if cached_hash_dir is not None:
-                    df = self._restore_shared_arrays(df, cached_hash_dir)
+            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
+            if cached_hash_dir is not None:
+                df = self._restore_shared_arrays(df, cached_hash_dir)
             return df, sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
         hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
 
-        if is_source:
-            row_args = self._resolve_defaults(node, input_annotations)
-            context = self._build_template_context(
-                node.name, '0', row_args, path_input_fields=[], upstream_nodes={},
-                results={}, idx='0',
-            )
-            for out_field, template in templates.items():
-                row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
-            arguments_dicts = [row_args]
-        else:
-            path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
-            arguments_dicts = self._resolve_all_row_arguments(
-                node, aligned_index, results, upstream_nodes,
-                input_annotations, templates, path_input_fields, workflow,
-            )
-            self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
+        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
+        arguments_dicts = self._resolve_all_row_arguments(
+            node, aligned_index, results, upstream_nodes,
+            input_annotations, templates, path_input_fields, workflow,
+        )
+        self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
 
         # --- Dispatch & build output ---
         raw_results = self._dispatch_tool(node.tool, arguments_dicts, workflow, node.name)
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
-        if not is_source:
-            df = self._persist_shared_arrays(df, hash_dir)
+        df = self._persist_shared_arrays(df, hash_dir)
         self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
                                hash_dir=hash_dir)
         return df, sig_hash
