@@ -12,7 +12,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 imageio_env = EnvironmentSpec(
@@ -48,7 +47,7 @@ class ExtractChannel(ProcessingTool):
                 semantics={Semantic.INTENSITY},
                 layouts={Layout.PLANAR},
             ),
-        ] = Template("{input_image.stem}_ch{channel}{ext}")
+        ] = Path("{input_image.stem}_ch{channel}{ext}")
 
     def process_row(self, arguments: Arguments) -> Any:
         import imageio.v3 as iio

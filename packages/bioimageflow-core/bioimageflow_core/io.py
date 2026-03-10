@@ -6,6 +6,8 @@ from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Any
 
+from bioimageflow_core.types import SharedArray
+
 
 @contextmanager
 def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[Any, None, None]:
@@ -14,8 +16,6 @@ def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[
     - SharedArray: attaches to shared memory, yields numpy view.
     - Path or str: delegates to file_reader, yields result.
     """
-    from bioimageflow_core.types import SharedArray
-
     if isinstance(source, SharedArray):
         import numpy as np
         shm = SharedMemory(name=source.name)

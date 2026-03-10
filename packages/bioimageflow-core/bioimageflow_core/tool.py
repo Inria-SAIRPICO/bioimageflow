@@ -41,7 +41,7 @@ class BaseTool:
     documentation: ClassVar[str] = ""
     tags: ClassVar[list[str]] = []
     Inputs: ClassVar[type[IOModel]] = IOModel
-    Outputs: ClassVar[type[IOModel]] = IOModel
+    Outputs: ClassVar[type[IOModel] | None] = None
 
     def __init__(self) -> None:
         pass
@@ -50,7 +50,7 @@ class BaseTool:
 class ProcessingTool(BaseTool):
     """Tool that processes data in an isolated Wetlands environment."""
     environment: ClassVar[Any]
-    Outputs: ClassVar[type[IOModel]]
+    Outputs: ClassVar[type[IOModel] | None]
     resources: ClassVar[Any] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:

@@ -1,11 +1,17 @@
 """Output templating engine for ProcessingTool."""
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 from bioimageflow_core.tool import IOModel
 from bioimageflow.validation import is_path_type
+
+logger = logging.getLogger("bioimageflow")
+
+_SPECIAL_VARS = {'node_name', 'row_index', 'timestamp', 'ext'}
+_VALID_PROPERTIES = {'stem', 'name', 'ext', 'exts'}
 
 
 def get_output_templates(outputs_cls: type[IOModel], inputs_cls: type[IOModel]) -> dict[str, str]:
@@ -36,19 +42,41 @@ def get_output_templates(outputs_cls: type[IOModel], inputs_cls: type[IOModel]) 
 
 
 def validate_template(template_str: str, input_annotations: dict[str, Any]) -> None:
-    """Check that all {field.xxx} references in the template exist in Inputs."""
-    # Find all {field.xxx} patterns
-    field_refs = re.findall(r'\{(\w+)\.\w+\}', template_str)
-    # Also find bare {field} patterns that aren't special variables
-    special_vars = {'node_name', 'row_index', 'timestamp', 'ext'}
+    """Check that all template references are valid.
 
-    for field_name in field_refs:
-        if field_name not in input_annotations and field_name not in special_vars:
+    - ``{field.xxx}`` — *field* must exist in Inputs, *xxx* must be a valid
+      property (stem, name, ext, exts).
+    - ``{bare}`` — must be a special variable, a ``column:`` reference, or an
+      input field.  Unknown bare references emit a warning.
+    """
+    # Check {field.property} patterns
+    for match in re.finditer(r'\{(\w+)\.(\w+)\}', template_str):
+        field_name, prop_name = match.group(1), match.group(2)
+        if field_name not in input_annotations and field_name not in _SPECIAL_VARS:
             if not field_name.startswith('column:'):
                 raise ValueError(
                     f"Template references undefined input field '{field_name}'. "
                     f"Available input fields: {list(input_annotations.keys())}"
                 )
+        if prop_name not in _VALID_PROPERTIES:
+            logger.warning(
+                "Template property '%s' on field '%s' is not recognised. "
+                "Valid properties: %s",
+                prop_name, field_name, sorted(_VALID_PROPERTIES),
+            )
+
+    # Check bare {name} patterns (not {field.prop}, not {column:name})
+    for match in re.finditer(r'\{(\w+)\}', template_str):
+        bare = match.group(1)
+        if bare in _SPECIAL_VARS:
+            continue
+        if bare in input_annotations:
+            continue
+        logger.warning(
+            "Template references undefined variable '{%s}'. "
+            "Known special variables: %s, known input fields: %s",
+            bare, sorted(_SPECIAL_VARS), list(input_annotations.keys()),
+        )
 
 
 def resolve_template(template_str: str, context: dict[str, Any]) -> str:

@@ -11,6 +11,55 @@ from typing import Any
 from bioimageflow.node import set_active_workflow, get_active_workflow, _reset_name_counters, Node
 
 
+def _serialize_constant(value: Any) -> dict[str, Any]:
+    """Serialize a constant value with type metadata for lossless round-trip."""
+    if isinstance(value, bool):
+        return {"__type__": "bool", "value": value}
+    if isinstance(value, int):
+        return {"__type__": "int", "value": value}
+    if isinstance(value, float):
+        return {"__type__": "float", "value": value}
+    if isinstance(value, (list, tuple)):
+        return {"__type__": type(value).__name__, "value": list(value)}
+    return {"__type__": "str", "value": str(value)}
+
+
+def _deserialize_constant(data: Any) -> Any:
+    """Deserialize a constant value from its typed representation.
+
+    Supports both the new typed format (``{__type__, value}``) and the
+    legacy format (bare string) for backwards compatibility.
+    """
+    if isinstance(data, dict) and "__type__" in data:
+        t = data["__type__"]
+        v = data["value"]
+        if t == "bool":
+            return bool(v)
+        if t == "int":
+            return int(v)
+        if t == "float":
+            return float(v)
+        if t == "tuple":
+            return tuple(v)
+        if t == "list":
+            return list(v)
+        return str(v)
+    # Legacy fallback: bare string — try numeric coercion
+    if isinstance(data, str):
+        try:
+            int_val = int(data)
+            # Check if it was originally an int (no decimal point)
+            if "." not in data:
+                return int_val
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(data)
+        except (ValueError, TypeError):
+            pass
+    return data
+
+
 @dataclass
 class ProgressEvent:
     """Progress event reported by the engine."""
@@ -31,12 +80,16 @@ class Workflow:
         max_executions: int = 0,
         max_age: str | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        use_wetlands: bool = True,
+        wetlands_config: dict[str, Any] | None = None,
     ) -> None:
         self.storage_path = Path(storage_path)
         self.engine_type = engine
         self.max_executions = max_executions
         self.max_age = max_age
         self.on_progress = on_progress
+        self.use_wetlands = use_wetlands
+        self.wetlands_config = wetlands_config
         self._nodes: dict[str, Node] = {}
         self._prev_workflow: Any = None
         self._dev_mode: bool = False
@@ -86,7 +139,10 @@ class Workflow:
         self._discover_graph(target_list)
 
         from bioimageflow.engine import SequentialEngine
-        engine = SequentialEngine()
+        engine = SequentialEngine(
+            use_wetlands=self.use_wetlands,
+            wetlands_config=self.wetlands_config,
+        )
         results = engine.execute(target_list, self)
 
         if len(target_list) == 1:
@@ -125,7 +181,7 @@ class Workflow:
                 "args": [arg.name for arg in node._args if isinstance(arg, Node)],
             }
             for field, value in node._constant_bindings.items():
-                node_info["constants"][field] = str(value)
+                node_info["constants"][field] = _serialize_constant(value)
             nodes_data.append(node_info)
 
             for field, col_ref in node._column_bindings.items():
@@ -192,60 +248,52 @@ class Workflow:
         for edge in data["edges"]:
             edge_map.setdefault(edge["to"], []).append(edge)
 
+        # Build dependency graph for O(V+E) topological sort
+        from graphlib import TopologicalSorter
+
+        dep_graph: dict[str, set[str]] = {}
+        node_data_by_name: dict[str, dict[str, Any]] = {}
+        for node_data in data["nodes"]:
+            name = node_data["name"]
+            node_data_by_name[name] = node_data
+            deps: set[str] = set()
+            for edge in edge_map.get(name, []):
+                deps.add(edge["from"])
+            for arg_name in node_data.get("args", []):
+                deps.add(arg_name)
+            dep_graph[name] = deps
+
+        build_order = list(TopologicalSorter(dep_graph).static_order())
+
         prev_wf = get_active_workflow()
         set_active_workflow(wf)
         _reset_name_counters()
 
         try:
-            max_iterations = len(remaining) * len(remaining) + 1
-            iteration = 0
-            while remaining and iteration < max_iterations:
-                iteration += 1
-                for node_data in list(remaining):
-                    name = node_data["name"]
-                    # Check if all dependencies are built
-                    deps_ready = True
-                    edges = edge_map.get(name, [])
-                    for edge in edges:
-                        if edge["from"] not in built:
-                            deps_ready = False
-                            break
-                    # Also check positional args
-                    for arg_name in node_data.get("args", []):
-                        if arg_name not in built:
-                            deps_ready = False
-                            break
+            from bioimageflow.dataframe_tool import DataFrameTool
 
-                    if not deps_ready:
-                        continue
+            for name in build_order:
+                node_data = node_data_by_name[name]
+                tool = tool_instances[name]
+                kwargs: dict[str, Any] = {}
+                positional_args: list[Node] = []
 
-                    tool = tool_instances[name]
-                    kwargs: dict[str, Any] = {}
-                    positional_args: list[Node] = []
-
-                    for edge in edges:
-                        if edge["field"] == "__positional__":
-                            positional_args.append(node_map[edge["from"]])
-                        else:
-                            kwargs[edge["field"]] = node_map[edge["from"]][edge["column"]]
-
-                    # Add constants
-                    for field, value in node_data.get("constants", {}).items():
-                        # Try to convert to appropriate type
-                        try:
-                            kwargs[field] = float(value)
-                        except (ValueError, TypeError):
-                            kwargs[field] = value
-
-                    from bioimageflow.dataframe_tool import DataFrameTool
-                    if isinstance(tool, DataFrameTool):
-                        node = tool(*positional_args, name=name, **kwargs)
+                for edge in edge_map.get(name, []):
+                    if edge["field"] == "__positional__":
+                        positional_args.append(node_map[edge["from"]])
                     else:
-                        node = tool(name=name, **kwargs)
+                        kwargs[edge["field"]] = node_map[edge["from"]][edge["column"]]
 
-                    node_map[name] = node
-                    built.add(name)
-                    remaining.remove(node_data)
+                # Add constants with type recovery
+                for field, value in node_data.get("constants", {}).items():
+                    kwargs[field] = _deserialize_constant(value)
+
+                if isinstance(tool, DataFrameTool):
+                    node = tool(*positional_args, name=name, **kwargs)
+                else:
+                    node = tool(name=name, **kwargs)
+
+                node_map[name] = node
         finally:
             set_active_workflow(prev_wf)
 

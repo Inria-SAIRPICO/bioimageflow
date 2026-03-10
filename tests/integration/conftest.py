@@ -491,6 +491,18 @@ class PrepareRegistration(DataFrameTool):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _disable_wetlands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable Wetlands in all tests — stub tools run in the main process."""
+    original_init = Workflow.__init__
+
+    def patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("use_wetlands", False)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(Workflow, "__init__", patched_init)
+
+
 @pytest.fixture
 def tmp_workspace(tmp_path: Path) -> Path:
     """Create a temporary workspace with sample image files."""

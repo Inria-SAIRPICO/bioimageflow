@@ -10,7 +10,6 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
-    Template,
 )
 
 bioio_env = EnvironmentSpec(
@@ -26,7 +25,6 @@ bioio_env = EnvironmentSpec(
             "bioio-imageio",
             "bioio-tifffile",
             "bioio-tiff-glob",
-            "bioio-bioformats",
         ],
     },
 )
@@ -56,7 +54,7 @@ class ConvertImage(ProcessingTool):
         timepoint: Annotated[int | None, GUIMeta(connectable=False)] = None
 
     class Outputs(IOModel):
-        output_image: Annotated[Path, ImageSpec()] = Template("{input_image.stem}.ome.tiff")
+        output_image: Annotated[Path, ImageSpec()] = Path("{input_image.stem}.ome.tiff")
 
     def process_row(self, arguments: Arguments) -> Any:
         from bioio import BioImage                          #type: ignore
@@ -95,6 +93,12 @@ class ConvertImage(ProcessingTool):
             data = image.get_image_data(dim_order, **dim_kwargs)
         else:
             data = image.get_image_data(dim_order)
+
+        # Squeeze singleton leading dimensions (T, Z) so downstream tools
+        # see CYX / YX shapes rather than TCZYX with size-1 axes.
+        while data.ndim > 2 and data.shape[0] == 1:
+            data = data[0]
+            dim_order = dim_order[1:]
 
         print(f"  Output shape ({dim_order}): {data.shape}")
 

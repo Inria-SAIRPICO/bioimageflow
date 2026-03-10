@@ -34,7 +34,6 @@ Pipeline topology:
 """
 
 import sys
-from pathlib import Path
 
 from bioimageflow import Workflow, Collect
 
@@ -51,7 +50,7 @@ from bioimageflow_common_tools import (
 from tools import DownloadImages, AverageSpotsPerNucleus
 
 CIL_URLS = """\
-https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
+https://cildata.crbs.ucsd.edu/media/images/13433/13433.tif
 https://cildata.crbs.ucsd.edu/media/images/13434/13434.tif
 https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
 https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
@@ -153,7 +152,7 @@ def build_fish_workflow(
             name="avg_spots_per_nucleus",
         )
 
-    return wf, stats
+    return wf, stats  # type: ignore[possibly-undefined]  # always defined in with-block
 
 
 def main() -> None:

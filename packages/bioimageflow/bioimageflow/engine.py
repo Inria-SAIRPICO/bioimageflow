@@ -32,8 +32,27 @@ logger = logging.getLogger("bioimageflow")
 class SequentialEngine:
     """Executes workflow nodes sequentially."""
 
+    def __init__(
+        self,
+        use_wetlands: bool = False,
+        wetlands_config: dict[str, Any] | None = None,
+    ) -> None:
+        self._use_wetlands = use_wetlands
+        self._env_manager = None
+        if use_wetlands:
+            from bioimageflow.env_manager import WetlandsEnvManager
+            self._env_manager = WetlandsEnvManager(**(wetlands_config or {}))
+
     def execute(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Execute the workflow, returning results for target nodes."""
+        try:
+            return self._execute_impl(targets, workflow)
+        finally:
+            if self._env_manager is not None:
+                self._env_manager.shutdown_all()
+
+    def _execute_impl(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
+        """Internal execution logic."""
         reachable: set[Node] = set()
         for target in targets:
             self._collect_reachable(target, reachable)
@@ -185,91 +204,74 @@ class SequentialEngine:
         sig_hashes: dict[Node, str],
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
-        """Execute a ProcessingTool node."""
+        """Execute a ProcessingTool node (with or without upstream column refs)."""
         assert isinstance(node.tool, ProcessingTool)
 
-        if not node._column_bindings:
-            return self._execute_source_processing_tool(node, sig_hashes, workflow)
-
-        upstream_nodes = {cr.node.name: cr.node
-                         for cr in node._column_bindings.values()}
-        aligned_index, _ = self._align_indices(node, upstream_nodes, results)
-        self._validate_column_bindings(node, results)
-
         input_annotations = node.tool.Inputs._get_all_annotations()
+        assert node.tool.Outputs is not None  # ProcessingTool always has Outputs
         templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
-        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
+        is_source = not node._column_bindings
 
-        arguments_dicts = self._resolve_all_row_arguments(
-            node, aligned_index, results, upstream_nodes,
-            input_annotations, templates, path_input_fields, workflow,
-        )
-        sig_hash = self._compute_processing_sig_hash(
-            node, input_annotations, upstream_nodes, sig_hashes, workflow,
-        )
+        if is_source:
+            aligned_index: list[Any] = ["0"]
+            upstream_nodes: dict[str, Node] = {}
+        else:
+            upstream_nodes = {cr.node.name: cr.node
+                             for cr in node._column_bindings.values()}
+            aligned_index, _ = self._align_indices(node, upstream_nodes, results)
+            self._validate_column_bindings(node, results)
 
+        # --- Signature hash ---
+        if is_source:
+            env_hash = compute_env_hash(node.tool.environment.dependencies)
+            sig_hash = self._compute_sig_hash(
+                node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
+            )
+        else:
+            sig_hash = self._compute_processing_sig_hash(
+                node, input_annotations, upstream_nodes, sig_hashes, workflow,
+            )
+
+        # --- Cache check ---
         node_dir = get_node_dir(workflow.storage_path, node.name)
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
             df = cache_load(cached)
-            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
-            if cached_hash_dir is not None:
-                df = self._restore_shared_arrays(df, cached_hash_dir)
+            if not is_source:
+                cached_hash_dir = find_hash_dir(node_dir, sig_hash)
+                if cached_hash_dir is not None:
+                    df = self._restore_shared_arrays(df, cached_hash_dir)
             return df, sig_hash
 
+        # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
         hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
-        self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
 
+        if is_source:
+            row_args = self._resolve_defaults(node, input_annotations)
+            context = self._build_template_context(
+                node.name, '0', row_args, path_input_fields=[], upstream_nodes={},
+                results={}, idx='0',
+            )
+            for out_field, template in templates.items():
+                row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
+            arguments_dicts = [row_args]
+        else:
+            path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
+            arguments_dicts = self._resolve_all_row_arguments(
+                node, aligned_index, results, upstream_nodes,
+                input_annotations, templates, path_input_fields, workflow,
+            )
+            self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
+
+        # --- Dispatch & build output ---
         raw_results = self._dispatch_tool(node.tool, arguments_dicts, workflow, node.name)
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
-        df = self._persist_shared_arrays(df, hash_dir)
-        self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
-                               hash_dir=hash_dir)
-        return df, sig_hash
-
-    def _execute_source_processing_tool(
-        self,
-        node: Node,
-        sig_hashes: dict[Node, str],
-        workflow: Any,
-    ) -> tuple[pd.DataFrame, str]:
-        """Execute a ProcessingTool as a source node (no upstream column refs)."""
-        assert isinstance(node.tool, ProcessingTool)
-        input_annotations = node.tool.Inputs._get_all_annotations()
-        templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
-        row_args = self._resolve_defaults(node, input_annotations)
-
-        env_hash = compute_env_hash(node.tool.environment.dependencies)
-        sig_hash = self._compute_sig_hash(
-            node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
-        )
-
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if cached:
-            self._emit_progress(workflow, node.name, "cached")
-            return cache_load(cached), sig_hash
-
-        self._emit_progress(workflow, node.name, "started")
-        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
-
-        context = self._build_template_context(
-            node.name, '0', row_args, path_input_fields=[], upstream_nodes={},
-            results={}, idx='0',
-        )
-        for out_field, template in templates.items():
-            row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
-
-        raw_results = self._dispatch_tool(node.tool, [row_args], workflow, node.name)
-        all_outputs = raw_results[0] if raw_results else []
-        df = self._build_output_dataframe([all_outputs], ["0"], node.tool)
-
-        self._emit_progress(workflow, node.name, "row_complete", row=0, total_rows=1)
-        self._emit_progress(workflow, node.name, "completed")
+        if not is_source:
+            df = self._persist_shared_arrays(df, hash_dir)
         self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
                                hash_dir=hash_dir)
         return df, sig_hash
@@ -312,9 +314,16 @@ class SequentialEngine:
         arguments_dicts: list[dict[str, Any]] = []
         timestamp = str(int(time.time()))
 
+        # Pre-compute index sets for O(1) lookup
+        index_sets: dict[str, set[str]] = {
+            n.name: set(str(i) for i in results[n].index)
+            for n in upstream_nodes.values()
+            if n in results
+        }
+
         for idx in aligned_index:
             row_args = self._resolve_single_row(
-                node, idx, results, input_annotations,
+                node, idx, results, input_annotations, index_sets,
             )
             context = self._build_template_context(
                 node.name, str(idx), row_args, path_input_fields,
@@ -335,16 +344,18 @@ class SequentialEngine:
         idx: Any,
         results: dict[Node, pd.DataFrame],
         input_annotations: dict[str, Any],
+        index_sets: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
         """Resolve column bindings, constants, and defaults for one row."""
         row_args: dict[str, Any] = {}
 
         for field, col_ref in node._column_bindings.items():
             up_df = results[col_ref.node]
-            if idx in up_df.index:
+            idx_set = (index_sets or {}).get(col_ref.node.name) or set(up_df.index)
+            if idx in idx_set:
                 row_args[field] = up_df.at[idx, col_ref.column]
             else:
-                parent_idx = self._find_parent_index(idx, up_df.index)
+                parent_idx = self._find_parent_index(idx, idx_set)
                 if parent_idx is not None:
                     row_args[field] = up_df.at[parent_idx, col_ref.column]
                 else:
@@ -393,7 +404,8 @@ class SequentialEngine:
             up_df = results.get(up_node)
             if up_df is None:
                 continue
-            resolved_idx = idx if idx in up_df.index else self._find_parent_index(idx, up_df.index)
+            idx_set = set(str(i) for i in up_df.index)
+            resolved_idx = idx if idx in idx_set else self._find_parent_index(idx, idx_set)
             if resolved_idx is not None:
                 for col in up_df.columns:
                     columns[col] = up_df.at[resolved_idx, col]
@@ -490,6 +502,22 @@ class SequentialEngine:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
 
+        if self._use_wetlands and self._env_manager is not None:
+            return self._dispatch_via_wetlands(tool, arguments_dicts, workflow,
+                                               node_name, has_batch)
+
+        return self._dispatch_direct(tool, arguments_dicts, workflow,
+                                     node_name, has_batch)
+
+    def _dispatch_direct(
+        self,
+        tool: ProcessingTool,
+        arguments_dicts: list[dict[str, Any]],
+        workflow: Any,
+        node_name: str,
+        has_batch: bool,
+    ) -> list[list[Any]]:
+        """Direct dispatch — tool runs in the main process."""
         if has_batch:
             args_list = [Arguments(**d) for d in arguments_dicts]
             raw_results = tool.process_batch(args_list)
@@ -503,6 +531,40 @@ class SequentialEngine:
             if not isinstance(result, list):
                 result = [result]
             raw_results.append(result)
+            self._emit_progress(workflow, node_name, "row_complete",
+                                row=i, total_rows=len(arguments_dicts))
+        return raw_results
+
+    def _dispatch_via_wetlands(
+        self,
+        tool: ProcessingTool,
+        arguments_dicts: list[dict[str, Any]],
+        workflow: Any,
+        node_name: str,
+        has_batch: bool,
+    ) -> list[list[Any]]:
+        """Dispatch through Wetlands — tool runs in an isolated environment."""
+        from bioimageflow.env_manager import _find_tool_file
+
+        assert self._env_manager is not None
+        env_spec = tool.environment
+        tool_file_path = _find_tool_file(type(tool))
+        tool_class_name = type(tool).__name__
+
+        if has_batch:
+            result_dicts = self._env_manager.dispatch_process_batch(
+                env_spec, tool_file_path, tool_class_name, arguments_dicts,
+            )
+            assert tool.Outputs is not None
+            return [[tool.Outputs(**d) for d in row] for row in result_dicts]
+
+        raw_results: list[list[Any]] = []
+        assert tool.Outputs is not None
+        for i, args_dict in enumerate(arguments_dicts):
+            result_dicts = self._env_manager.dispatch_process_row(
+                env_spec, tool_file_path, tool_class_name, args_dict,
+            )
+            raw_results.append([tool.Outputs(**d) for d in result_dicts])
             self._emit_progress(workflow, node_name, "row_complete",
                                 row=i, total_rows=len(arguments_dicts))
         return raw_results
@@ -529,6 +591,7 @@ class SequentialEngine:
                 index=[idx for idx, _ in expanded],
             )
         else:
+            assert tool.Outputs is not None
             output_annotations = tool.Outputs._get_all_annotations()
             df = pd.DataFrame(columns=list(output_annotations.keys()))
 
@@ -557,11 +620,19 @@ class SequentialEngine:
     # ── Index alignment ────────────────────────────────────────────────
 
     def _align_dataframes_for_merge(self, dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
-        """Align DataFrames with different index granularity for merge."""
+        """Align DataFrames with different index granularity for merge.
+
+        Uses ``::`` depth to determine the finest-grained index rather than
+        row count, which is correct when some DataFrames have fewer rows due
+        to filtering rather than coarser granularity.
+        """
         if len(dfs) <= 1:
             return dfs
 
-        finest_idx = max(range(len(dfs)), key=lambda i: len(dfs[i]))
+        def _max_depth(index: pd.Index) -> int:
+            return max((str(i).count('::') for i in index), default=0)
+
+        finest_idx = max(range(len(dfs)), key=lambda i: (_max_depth(dfs[i].index), len(dfs[i])))
         finest_index = dfs[finest_idx].index
 
         aligned: list[pd.DataFrame] = []
@@ -573,14 +644,15 @@ class SequentialEngine:
                 aligned.append(df)
                 continue
             # Parent-index expansion
+            df_idx_set = set(str(j) for j in df.index)
             expanded_rows: list[Any] = []
             expanded_indices: list[Any] = []
             for idx in finest_index:
-                if idx in df.index:
+                if idx in df_idx_set:
                     expanded_rows.append(df.loc[idx])
                     expanded_indices.append(idx)
                 else:
-                    parent = self._find_parent_index(idx, df.index)
+                    parent = self._find_parent_index(idx, df_idx_set)
                     if parent is not None:
                         expanded_rows.append(df.loc[parent])
                         expanded_indices.append(idx)
@@ -623,8 +695,11 @@ class SequentialEngine:
                     f"Insert a merge DataFrameTool (e.g., CrossJoin) to combine them."
                 )
 
+        def _max_depth(idx_set: set[Any]) -> int:
+            return max((str(i).count('::') for i in idx_set), default=0)
+
         all_indices = [set(results[n].index) for n in upstream_nodes.values()]
-        finest_index = max(all_indices, key=len)
+        finest_index = max(all_indices, key=lambda s: (_max_depth(s), len(s)))
         aligned = sorted(finest_index, key=str)
         return aligned, {n.name: results[n] for n in upstream_nodes.values()}
 
@@ -657,7 +732,12 @@ class SequentialEngine:
     # ── Utility helpers ────────────────────────────────────────────────
 
     def _find_parent_index(self, idx: Any, available_indices: Any) -> str | None:
-        """Find the parent index by stripping :: levels progressively."""
+        """Find the parent index by stripping :: levels progressively.
+
+        *available_indices* may be a ``set`` for O(1) lookup or a pandas
+        Index (O(n) per ``in`` check).  Callers on hot paths should pass a
+        ``set`` for performance.
+        """
         idx_str = str(idx)
         if idx_str in available_indices:
             return idx_str
@@ -710,7 +790,7 @@ class SequentialEngine:
                             from bioimageflow_core.shm import create_shared_output
                             data = np.load(str(npy_path))
                             with create_shared_output(data) as ref:
-                                df.at[idx, col] = ref
+                                df.at[idx, col] = ref  # type: ignore[call-overload]
                         except (OSError, ValueError) as e:
                             logger.warning(
                                 "Failed to restore SharedArray col=%s idx=%s: %s",

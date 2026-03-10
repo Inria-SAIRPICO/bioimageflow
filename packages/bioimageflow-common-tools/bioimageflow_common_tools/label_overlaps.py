@@ -11,7 +11,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 imageio_env = EnvironmentSpec(
@@ -52,7 +51,7 @@ class LabelOverlaps(ProcessingTool):
         ]
 
     class Outputs(IOModel):
-        overlaps: Path = Template("{label_image.stem}_overlaps.csv")
+        overlaps: Path = Path("{label_image.stem}_overlaps.csv")
 
     def process_row(self, arguments: Arguments) -> Any:
         import numpy as np

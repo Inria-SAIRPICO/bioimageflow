@@ -1,0 +1,104 @@
+"""Worker-side dispatcher for Wetlands environments.
+
+This module is loaded by the orchestrator via env.import_module()
+inside isolated Conda environments. It discovers tool classes in a
+given module file and dispatches process_row/process_batch calls.
+
+All functions accept and return only picklable types (dicts, lists,
+strings, numbers) to cross the Wetlands serialization boundary.
+"""
+
+import importlib.util
+import inspect
+import sys
+from pathlib import Path
+
+from bioimageflow_core.arguments import Arguments
+from bioimageflow_core.tool import BaseTool
+
+
+# Per-file registries: file_path -> {class_name -> class}
+_tool_registries: dict[str, dict[str, type]] = {}
+# Per-file instances: file_path -> {class_name -> instance}
+_instances: dict[str, dict[str, BaseTool]] = {}
+
+
+def _discover_tools(module: object) -> dict[str, type]:
+    """Build a name->class registry from all BaseTool subclasses in the module."""
+    registry: dict[str, type] = {}
+    for name, obj in inspect.getmembers(module, inspect.isclass):
+        if issubclass(obj, BaseTool) and obj is not BaseTool and hasattr(obj, 'name'):
+            registry[obj.__name__] = obj
+    return registry
+
+
+def _load_module_from_file(file_path: str) -> object:
+    """Load a Python module from a file path."""
+    path = Path(file_path)
+    module_name = path.stem
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module from '{file_path}'")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _get_instance(tool_file_path: str, tool_class_name: str) -> BaseTool:
+    """Get or create a cached tool instance for the given file and class."""
+    if tool_file_path not in _tool_registries:
+        mod = _load_module_from_file(tool_file_path)
+        _tool_registries[tool_file_path] = _discover_tools(mod)
+        _instances[tool_file_path] = {}
+    registry = _tool_registries[tool_file_path]
+    instances = _instances[tool_file_path]
+    if tool_class_name not in instances:
+        if tool_class_name not in registry:
+            raise ValueError(
+                f"Tool class '{tool_class_name}' not found in '{tool_file_path}'. "
+                f"Available: {list(registry.keys())}"
+            )
+        instances[tool_class_name] = registry[tool_class_name]()
+    return instances[tool_class_name]
+
+
+def _outputs_to_dict(outputs: object) -> dict:
+    """Convert an Outputs instance to a plain dict with picklable values."""
+    if hasattr(outputs, '_get_all_annotations'):
+        d: dict = {}
+        for k in outputs._get_all_annotations():
+            v = getattr(outputs, k)
+            if isinstance(v, Path):
+                v = str(v)
+            d[k] = v
+        return d
+    return {k: str(v) if isinstance(v, Path) else v for k, v in vars(outputs).items()}
+
+
+def run_process_row(tool_file_path: str, tool_class_name: str, arguments_dict: dict) -> list[dict]:
+    """Dispatch a single-row call to a tool's process_row method.
+
+    Returns a list of output dicts (one per output row, usually one).
+    """
+    tool = _get_instance(tool_file_path, tool_class_name)
+    args = Arguments(**arguments_dict)
+    result = tool.process_row(args)
+    outputs = result if isinstance(result, list) else [result]
+    return [_outputs_to_dict(out) for out in outputs]
+
+
+def run_process_batch(
+    tool_file_path: str, tool_class_name: str, arguments_dicts: list[dict],
+) -> list[list[dict]]:
+    """Dispatch a batch call to a tool's process_batch method.
+
+    Returns a list of lists of output dicts (one inner list per input row).
+    """
+    tool = _get_instance(tool_file_path, tool_class_name)
+    args_list = [Arguments(**d) for d in arguments_dicts]
+    results = tool.process_batch(args_list)
+    # Auto-wrap list[Outputs] -> list[list[Outputs]] for 1-to-1 batch tools
+    if results and not isinstance(results[0], list):
+        results = [[r] for r in results]
+    return [[_outputs_to_dict(out) for out in row_outputs] for row_outputs in results]

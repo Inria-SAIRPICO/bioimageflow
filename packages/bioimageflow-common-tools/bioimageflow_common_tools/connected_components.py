@@ -11,7 +11,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 simpleitk_env = EnvironmentSpec(
@@ -51,7 +50,7 @@ class ConnectedComponents(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
-        ] = Template("{input_image.stem}_labels{ext}")
+        ] = Path("{input_image.stem}_labels{ext}")
         num_labels: int
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -67,6 +66,6 @@ class ConnectedComponents(ProcessingTool):
 
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        sitk.WriteImage(sitk.Cast(labeled, sitk.sitkUInt32), str(output_path))
+        sitk.WriteImage(sitk.Cast(labeled, sitk.sitkUInt16), str(output_path))
 
         return self.Outputs(output_image=output_path, num_labels=num_labels)

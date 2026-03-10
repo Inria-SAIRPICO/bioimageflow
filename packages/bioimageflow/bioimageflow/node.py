@@ -101,8 +101,13 @@ class Node:
             if isinstance(arg, Node):
                 self._upstream_nodes.add(arg)
 
-        # Process keyword arguments
-        self._process_kwargs()
+        # Process keyword arguments — unregister on failure
+        try:
+            self._process_kwargs()
+        except Exception:
+            if wf is not None:
+                wf._nodes.pop(self._name, None)
+            raise
 
     def _process_kwargs(self) -> None:
         """Validate and categorize keyword arguments."""
@@ -147,7 +152,7 @@ class Node:
             )
 
         # Validate output templates for ProcessingTool
-        if isinstance(self.tool, ProcessingTool) and 'Outputs' in type(self.tool).__dict__:
+        if isinstance(self.tool, ProcessingTool) and self.tool.Outputs is not None:
             outputs_cls = self.tool.Outputs
             if hasattr(outputs_cls, '_get_all_annotations'):
                 templates = get_output_templates(outputs_cls, self.tool.Inputs)
@@ -162,10 +167,7 @@ class Node:
             return
 
         upstream_tool = col_ref.node.tool
-        if not hasattr(upstream_tool, 'Outputs') or 'Outputs' not in type(upstream_tool).__dict__:
-            pass
-
-        upstream_outputs = getattr(upstream_tool, 'Outputs', None)
+        upstream_outputs = upstream_tool.Outputs
         if upstream_outputs is None:
             return
 
@@ -195,10 +197,11 @@ class Node:
 
         # Validate column exists if tool has known Outputs
         tool = self.tool
-        has_own_outputs = 'Outputs' in type(tool).__dict__
+        has_own_outputs = tool.Outputs is not None
 
         if has_own_outputs:
             outputs_cls = tool.Outputs
+            assert outputs_cls is not None  # guarded by has_own_outputs
             output_annotations = outputs_cls._get_all_annotations()
 
             # For Passthrough, we can't validate columns at construction time

@@ -1676,11 +1676,11 @@ env = environment_manager.create(
 env.launch()
 
 # Option 1: Proxy-based execution (accepts file path or dotted module path)
-module = env.import_module("my_tools.cellpose_tools")
+module = env.import_module("my_tools/cellpose_tools.py")
 result = module.segment(str(image_path), str(output_path))
 
 # Option 2: Direct execution
-result = env.execute("my_tools.cellpose_tools", "segment", (str(image_path), str(output_path)))
+result = env.execute("my_tools/cellpose_tools.py", "segment", (str(image_path), str(output_path)))
 ```
 
 - `env.import_module()` returns a proxy object. Calling methods on it sends the call to the worker, executes the real function there, and returns the result.

@@ -142,4 +142,4 @@ uv run pytest tests/integration/
 
 ## License
 
-TBD
+BSD 4-Clause License.

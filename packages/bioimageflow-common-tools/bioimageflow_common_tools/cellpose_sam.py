@@ -12,7 +12,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 cellpose_env = EnvironmentSpec(
@@ -61,7 +60,7 @@ class CellposeSAM(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR},
             ),
-        ] = Template("{input_image.stem}_mask{ext}")
+        ] = Path("{input_image.stem}_mask{ext}")
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Any:

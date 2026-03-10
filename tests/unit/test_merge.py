@@ -82,12 +82,12 @@ class TestConcat:
         assert len(result) == 4
         assert list(result["x"]) == [1, 2, 3, 4]
 
-    def test_resets_index(self):
-        df1 = pd.DataFrame({"x": [1]}, index=[5])
-        df2 = pd.DataFrame({"x": [2]}, index=[5])
+    def test_preserves_index(self):
+        df1 = pd.DataFrame({"x": [1]}, index=["a"])
+        df2 = pd.DataFrame({"x": [2]}, index=["b"])
         tool = Concat()
         result = tool.merge_dataframes([df1, df2], Arguments())
-        assert list(result.index) == [0, 1]
+        assert list(result.index) == ["a", "b"]
 
 
 class TestCollect:

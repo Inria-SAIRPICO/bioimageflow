@@ -73,9 +73,15 @@ def compute_signature_hash(
 
 
 def cache_lookup(node_dir: Path, sig_hash: str) -> Path | None:
-    """Check if a cached result exists. Returns Path to dataframe.csv or None."""
+    """Check if a cached result exists. Returns Path to the cache file or None.
+
+    Prefers Parquet; falls back to CSV for backwards compatibility.
+    """
     hash_dir = find_hash_dir(node_dir, sig_hash)
     if hash_dir is not None:
+        parquet_path = hash_dir / "dataframe.parquet"
+        if parquet_path.exists():
+            return parquet_path
         csv_path = hash_dir / "dataframe.csv"
         if csv_path.exists():
             return csv_path
@@ -92,6 +98,9 @@ def cache_save(
 ) -> None:
     """Save a DataFrame and metadata to the cache.
 
+    Writes Parquet (lossless) as the primary format and CSV as a
+    human-readable secondary output.
+
     If *hash_dir* is provided (already created during execution), reuse it.
     Otherwise create a new timestamped hash directory.
     """
@@ -99,7 +108,15 @@ def cache_save(
         hash_dir = create_hash_dir(node_dir, sig_hash)
     else:
         ensure_dirs(hash_dir)
-    df.to_csv(hash_dir / "dataframe.csv", index=True)
+    # Parquet requires Arrow-serializable types — convert Path/SharedArray to str
+    df_save = df.copy()
+    for col in df_save.columns:
+        if df_save[col].dtype == object:
+            df_save[col] = df_save[col].apply(
+                lambda v: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+            )
+    df_save.to_parquet(hash_dir / "dataframe.parquet", index=True)
+    df_save.to_csv(hash_dir / "dataframe.csv", index=True)
     if metadata:
         (hash_dir / "metadata.json").write_text(
             json.dumps(metadata, indent=2, default=str)
@@ -110,22 +127,31 @@ def cache_save(
         )
 
 
-def cache_load(csv_path: Path) -> pd.DataFrame:
-    """Load a DataFrame from cache."""
-    df = pd.read_csv(csv_path, index_col=0, keep_default_na=False)
+def cache_load(cache_path: Path) -> pd.DataFrame:
+    """Load a DataFrame from cache.
+
+    Accepts either a ``.parquet`` or ``.csv`` path.
+    """
+    if cache_path.suffix == ".parquet":
+        df = pd.read_parquet(cache_path)
+    else:
+        # Legacy CSV fallback
+        df = pd.read_csv(cache_path, index_col=0, keep_default_na=False)
+        # Restore numeric columns where possible
+        for col in df.columns:
+            if pd.api.types.is_string_dtype(df[col]):
+                try:
+                    df[col] = pd.to_numeric(df[col])
+                except (ValueError, TypeError):
+                    pass
     df.index = df.index.astype(str)
-    # Restore numeric columns where possible
-    for col in df.columns:
-        if pd.api.types.is_string_dtype(df[col]):
-            try:
-                df[col] = pd.to_numeric(df[col])
-            except (ValueError, TypeError):
-                pass
     return df
 
 
 def cleanup_cache(node_dir: Path, max_executions: int = 0, max_age: str | None = None) -> None:
     """Remove old hash dirs based on retention policy."""
+    import shutil
+
     node_dir = Path(node_dir)
     if not node_dir.exists():
         return
@@ -137,7 +163,6 @@ def cleanup_cache(node_dir: Path, max_executions: int = 0, max_age: str | None =
     # max_executions=0 means keep only the latest; N means keep N total
     to_keep = max_executions if max_executions > 0 else 1
     for d in hash_dirs[to_keep:]:
-        import shutil
         shutil.rmtree(d)
 
     if max_age is not None:
@@ -150,5 +175,4 @@ def cleanup_cache(node_dir: Path, max_executions: int = 0, max_age: str | None =
             max_seconds = int(max_age)
         for d in node_dir.iterdir():
             if d.is_dir() and (now - d.stat().st_mtime) > max_seconds:
-                import shutil
                 shutil.rmtree(d)

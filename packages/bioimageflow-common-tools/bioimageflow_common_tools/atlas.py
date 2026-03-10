@@ -13,13 +13,12 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 atlas_env = EnvironmentSpec(
     name="atlas",
     dependencies={
-        "conda": ["bioimageit::atlas|win-64,linux-64,osx-arm64"],
+        "conda": ["bioimageit::atlas"],
     },
 )
 
@@ -67,7 +66,7 @@ class Atlas(ProcessingTool):
                 layouts={Layout.PLANAR},
                 formats={"tiff"},
             ),
-        ] = Template("{input_image.stem}_detections{ext}")
+        ] = Path("{input_image.stem}_detections{ext}")
 
     def process_row(self, arguments: Arguments) -> Any:
         input_path = Path(arguments.input_image)

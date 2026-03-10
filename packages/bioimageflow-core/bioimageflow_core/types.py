@@ -61,11 +61,6 @@ def _normalize_param(value: Any) -> set[Any]:
     return {value}
 
 
-def Template(pattern: str) -> Path:
-    """Output path template — resolved at runtime by the framework."""
-    return pattern  # type: ignore[return-type]
-
-
 def ImagePath(
     semantics: Any = None,
     layouts: Any = None,
