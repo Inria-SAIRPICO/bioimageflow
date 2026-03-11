@@ -149,6 +149,54 @@ class Workflow:
             return list(results.values())[0]
         return results
 
+    def compute_steps(
+        self, *targets: Node, dev_mode: bool = False,
+    ) -> "Generator[NodeStep, None, None]":
+        """Execute the workflow step by step, yielding a :class:`NodeStep`
+        for each node in topological (dependency) order.
+
+        The engine stays alive between yields so Wetlands environments
+        remain warm — ideal for interactive debugging.
+
+        Usage::
+
+            for step in wf.compute_steps(results):
+                print(f"Next: {step.node_name}")
+                step.prepare()     # optional: launches env — attach debugger here
+                df = step.execute()
+                print(df.head())
+
+        If ``step.execute()`` is not called before advancing to the next
+        iteration, the step auto-executes to keep downstream nodes consistent.
+        """
+        self._dev_mode = dev_mode
+
+        if not targets:
+            all_upstream: set[str] = set()
+            for node in self._nodes.values():
+                for up in node._upstream_nodes:
+                    all_upstream.add(up.name)
+                for arg in node._args:
+                    if isinstance(arg, Node):
+                        all_upstream.add(arg.name)
+            terminals = [
+                n for name, n in self._nodes.items()
+                if name not in all_upstream
+            ]
+            if not terminals:
+                terminals = list(self._nodes.values())
+            targets = tuple(terminals)
+
+        target_list = list(targets)
+        self._discover_graph(target_list)
+
+        from bioimageflow.engine import SequentialEngine
+        engine = SequentialEngine(
+            use_wetlands=self.use_wetlands,
+            wetlands_config=self.wetlands_config,
+        )
+        yield from engine.execute_steps(target_list, self)
+
     def _discover_graph(self, targets: list[Node]) -> None:
         """Discover and register all nodes reachable from targets."""
         visited: set[str] = set()

@@ -59,6 +59,7 @@ https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
 def build_fish_workflow(
     storage_path: str = "./fish_results",
     data_dir: str = "./data",
+    debug: bool=False
 ) -> tuple:
     """Build and return the FISH analysis workflow and its terminal node.
 
@@ -74,7 +75,7 @@ def build_fish_workflow(
     tuple of (Workflow, Node)
         The workflow and the terminal stats node.
     """
-    wf = Workflow(storage_path=storage_path)
+    wf = Workflow(storage_path=storage_path, wetlands_config={"debug": debug})
 
     with wf:
         # -- 1. Data ingestion --
@@ -159,12 +160,18 @@ def main() -> None:
     storage_path = sys.argv[1] if len(sys.argv) > 1 else "./fish_results"
     data_dir = sys.argv[2] if len(sys.argv) > 2 else "./data"
 
-    wf, stats = build_fish_workflow(storage_path, data_dir)
-    result = wf.compute(stats)
+    wf, stats = build_fish_workflow(storage_path, data_dir, debug=True)
+    
+    for step in wf.compute_steps():
+        print(f"Next: {step.node_name} (env: {step.environment})")
+        step.prepare()     # launches Wetlands env — attach debugger here
+        df = step.execute() # runs the tool
+        print(df.head())
+    # result = wf.compute(stats)
 
-    print("\n=== FISH Analysis Results ===")
-    print(result.to_string(index=False))
-    print()
+    # print("\n=== FISH Analysis Results ===")
+    # print(result.to_string(index=False))
+    # print()
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from bioimageflow_core.environment import EnvironmentSpec, EnvironmentMismatchEr
 from bioimageflow.cache import compute_env_hash
 
 from wetlands._internal.dependency_manager import Dependencies
+import threading
 
 logger = logging.getLogger("bioimageflow")
 
@@ -38,20 +39,22 @@ class WetlandsEnvManager:
         wetlands_instance_path: Path = Path("wetlands/"),
         conda_path: str | None = None,
         main_conda_environment_path: str | None = None,
+        **kwargs: Any,
     ) -> None:
         from wetlands.environment_manager import EnvironmentManager
 
-        kwargs: dict[str, Any] = {"wetlands_instance_path": wetlands_instance_path}
-        if conda_path is not None:
-            kwargs["conda_path"] = conda_path
-        if main_conda_environment_path is not None:
-            kwargs["main_conda_environment_path"] = main_conda_environment_path
+        kwargs.update({
+            "wetlands_instance_path": wetlands_instance_path,
+            "conda_path": conda_path,
+            "main_conda_environment_path": main_conda_environment_path,
+        })
 
         self._manager = EnvironmentManager(**kwargs)
         self._envs: dict[str, Any] = {}            # name -> wetlands env
         self._env_hashes: dict[str, str] = {}       # name -> dep hash
         self._worker_proxies: dict[str, Any] = {}   # name -> proxy to worker module
         self._worker_file = _find_worker_file()
+        self._lock = threading.RLock()
 
     def _augment_dependencies(self, dependencies: dict) -> Dependencies:
         """Auto-inject bioimageflow-core into the environment deps."""
@@ -63,9 +66,13 @@ class WetlandsEnvManager:
         return deps
 
     def get_or_create(self, env_spec: EnvironmentSpec) -> Any:
-        """Get or create a Wetlands environment, validating dependency consistency."""
+        """Get or create a Wetlands environment, validating dependency consistency.
+
+        This method is thread-safe and may be called concurrently.
+        """
         dep_hash = compute_env_hash(env_spec.dependencies)
 
+        # Fast path: check without lock first
         if env_spec.name in self._envs:
             if self._env_hashes[env_spec.name] != dep_hash:
                 raise EnvironmentMismatchError(
@@ -73,13 +80,23 @@ class WetlandsEnvManager:
                 )
             return self._envs[env_spec.name]
 
-        augmented_deps = self._augment_dependencies(env_spec.dependencies)
-        logger.info("Creating Wetlands environment '%s'", env_spec.name)
-        env = self._manager.create(env_spec.name, augmented_deps)
-        env.launch()
-        self._envs[env_spec.name] = env
-        self._env_hashes[env_spec.name] = dep_hash
-        return env
+        # Acquire lock for double-checked creation
+        with self._lock:
+            # Double-check after acquiring lock
+            if env_spec.name in self._envs:
+                if self._env_hashes[env_spec.name] != dep_hash:
+                    raise EnvironmentMismatchError(
+                        f"Environment '{env_spec.name}' already created with different deps."
+                    )
+                return self._envs[env_spec.name]
+
+            augmented_deps = self._augment_dependencies(env_spec.dependencies)
+            logger.info("Creating Wetlands environment '%s'", env_spec.name)
+            env = self._manager.create(env_spec.name, augmented_deps)
+            env.launch()
+            self._envs[env_spec.name] = env
+            self._env_hashes[env_spec.name] = dep_hash
+            return env
 
     def _get_worker_proxy(self, env_spec: EnvironmentSpec) -> Any:
         """Get a proxy to bioimageflow_core.worker in the given environment."""

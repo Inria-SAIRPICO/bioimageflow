@@ -4,6 +4,7 @@ import logging
 import time
 from pathlib import Path
 from collections import defaultdict
+from collections.abc import Generator
 from typing import Any, cast
 
 import numpy as np
@@ -29,6 +30,80 @@ from bioimageflow.validation import get_tool_version, get_source_hash, is_path_t
 logger = logging.getLogger("bioimageflow")
 
 
+class NodeStep:
+    """Handle for a single node in a stepped workflow execution.
+
+    Yielded by :meth:`SequentialEngine.execute_steps`.  The caller may
+    optionally call :meth:`prepare` (to warm up the Wetlands environment
+    before execution — useful for attaching a debugger) and **must** call
+    :meth:`execute` to run the node (or it will auto-execute when the
+    generator advances to the next step).
+    """
+
+    def __init__(
+        self,
+        node: Node,
+        engine: "SequentialEngine",
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+    ) -> None:
+        self._node = node
+        self._engine = engine
+        self._results = results
+        self._sig_hashes = sig_hashes
+        self._workflow = workflow
+        self._executed = False
+        self._df: pd.DataFrame | None = None
+        self._sig_hash: str | None = None
+
+    @property
+    def node_name(self) -> str:
+        """Name of the node about to be executed."""
+        return self._node.name
+
+    @property
+    def tool(self) -> Any:
+        """The tool instance associated with this node."""
+        return self._node.tool
+
+    @property
+    def environment(self) -> Any:
+        """The EnvironmentSpec for ProcessingTools, None for DataFrameTools."""
+        if isinstance(self._node.tool, ProcessingTool):
+            return self._node.tool.environment
+        return None
+
+    def prepare(self) -> None:
+        """Launch the tool's Wetlands environment (ProcessingTool only).
+
+        No-op for DataFrameTools or when Wetlands is disabled.  After this
+        call the environment is running and a debugger can be attached to it
+        before :meth:`execute` triggers the actual computation.
+        """
+        if (
+            isinstance(self._node.tool, ProcessingTool)
+            and self._engine._env_manager is not None
+        ):
+            self._engine._env_manager.get_or_create(self._node.tool.environment)
+
+    def execute(self) -> pd.DataFrame:
+        """Execute the node and return its output DataFrame.
+
+        Idempotent — calling more than once returns the cached result.
+        """
+        if self._executed:
+            assert self._df is not None
+            return self._df
+        df, sig_hash = self._engine._execute_node(
+            self._node, self._results, self._sig_hashes, self._workflow,
+        )
+        self._df = df
+        self._sig_hash = sig_hash
+        self._executed = True
+        return df
+
+
 class SequentialEngine:
     """Executes workflow nodes sequentially."""
 
@@ -47,6 +122,41 @@ class SequentialEngine:
         """Execute the workflow, returning results for target nodes."""
         try:
             return self._execute_impl(targets, workflow)
+        finally:
+            if self._env_manager is not None:
+                self._env_manager.shutdown_all()
+
+    def execute_steps(
+        self, targets: list[Node], workflow: Any,
+    ) -> Generator[NodeStep, None, None]:
+        """Yield a :class:`NodeStep` for each node in topological order.
+
+        The engine (and any Wetlands environments) stays alive between yields.
+        The caller controls execution via ``step.prepare()`` / ``step.execute()``.
+        If ``execute()`` is not called before advancing, the step auto-executes
+        to keep the results chain consistent for downstream nodes.
+
+        Cleanup runs when the generator is exhausted or closed (early ``break``).
+        """
+        try:
+            reachable: set[Node] = set()
+            for target in targets:
+                self._collect_reachable(target, reachable)
+
+            self._check_env_mismatches(reachable)
+            order = self._topological_sort(reachable)
+
+            results: dict[Node, pd.DataFrame] = {}
+            sig_hashes: dict[Node, str] = {}
+
+            for node in order:
+                step = NodeStep(node, self, results, sig_hashes, workflow)
+                yield step
+                # Auto-execute if the user didn't call step.execute()
+                if not step._executed:
+                    step.execute()
+                results[node] = step._df  # type: ignore[assignment]
+                sig_hashes[node] = step._sig_hash  # type: ignore[assignment]
         finally:
             if self._env_manager is not None:
                 self._env_manager.shutdown_all()
