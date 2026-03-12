@@ -70,6 +70,7 @@ class WetlandsEnvManager:
 
         This method is thread-safe and may be called concurrently.
         """
+        augmented_deps = self._augment_dependencies(env_spec.dependencies)
         dep_hash = compute_env_hash(env_spec.dependencies)
 
         # Fast path: check without lock first
@@ -90,7 +91,6 @@ class WetlandsEnvManager:
                     )
                 return self._envs[env_spec.name]
 
-            augmented_deps = self._augment_dependencies(env_spec.dependencies)
             logger.info("Creating Wetlands environment '%s'", env_spec.name)
             env = self._manager.create(env_spec.name, augmented_deps)
             env.launch()

@@ -36,6 +36,7 @@ Pipeline topology:
 import sys
 
 from bioimageflow import Workflow, Collect
+from bioimageflow.engine import SequentialEngine
 
 from bioimageflow_common_tools import (
     ConvertImage,
@@ -50,7 +51,7 @@ from bioimageflow_common_tools import (
 from tools import DownloadImages, AverageSpotsPerNucleus
 
 CIL_URLS = """\
-https://cildata.crbs.ucsd.edu/media/images/13433/13433.tif
+https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
 https://cildata.crbs.ucsd.edu/media/images/13434/13434.tif
 https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
 https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
@@ -161,12 +162,21 @@ def main() -> None:
     data_dir = sys.argv[2] if len(sys.argv) > 2 else "./data"
 
     wf, stats = build_fish_workflow(storage_path, data_dir, debug=True)
-    
-    for step in wf.compute_steps():
+
+    # Create an explicit engine for debugging and inspection
+    engine = SequentialEngine(
+        use_wetlands=wf.use_wetlands,
+        wetlands_config=wf.wetlands_config,
+    )
+
+    for step in wf.compute_steps(engine=engine):
         print(f"Next: {step.node_name} (env: {step.environment})")
         step.prepare()     # launches Wetlands env — attach debugger here
         df = step.execute() # runs the tool
         print(df.head())
+
+    # After execution, the engine can be inspected for internal state
+    # For example: print(engine._env_manager) if wetlands were used
     # result = wf.compute(stats)
 
     # print("\n=== FISH Analysis Results ===")

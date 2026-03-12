@@ -7,8 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from typing import TYPE_CHECKING
 
 from bioimageflow.node import set_active_workflow, get_active_workflow, _reset_name_counters, Node
+
+if TYPE_CHECKING:
+    from bioimageflow.engine import SequentialEngine
 
 
 def _serialize_constant(value: Any) -> dict[str, Any]:
@@ -112,8 +116,12 @@ class Workflow:
     def nodes(self) -> dict[str, Node]:
         return dict(self._nodes)
 
-    def compute(self, *targets: Node, dev_mode: bool = False) -> Any:
-        """Execute the workflow and return results."""
+    def compute(self, *targets: Node, dev_mode: bool = False, engine: "SequentialEngine | None" = None) -> Any:
+        """Execute the workflow and return results.
+
+        Parameters:
+            dev_mode: Development mode flag
+            engine: Optional pre-configured engine to use. If None, a default SequentialEngine is created using this workflow's use_wetlands and wetlands_config. Providing an engine allows post-execution inspection and testing."""
         self._dev_mode = dev_mode
 
         if not targets:
@@ -138,11 +146,12 @@ class Workflow:
         target_list = list(targets)
         self._discover_graph(target_list)
 
-        from bioimageflow.engine import SequentialEngine
-        engine = SequentialEngine(
-            use_wetlands=self.use_wetlands,
-            wetlands_config=self.wetlands_config,
-        )
+        if engine is None:
+            from bioimageflow.engine import SequentialEngine
+            engine = SequentialEngine(
+                use_wetlands=self.use_wetlands,
+                wetlands_config=self.wetlands_config,
+            )
         results = engine.execute(target_list, self)
 
         if len(target_list) == 1:
@@ -150,10 +159,14 @@ class Workflow:
         return results
 
     def compute_steps(
-        self, *targets: Node, dev_mode: bool = False,
+        self, *targets: Node, dev_mode: bool = False, engine: "SequentialEngine | None" = None
     ) -> "Generator[NodeStep, None, None]":
         """Execute the workflow step by step, yielding a :class:`NodeStep`
         for each node in topological (dependency) order.
+
+        Parameters:
+            dev_mode: Development mode flag
+            engine: Optional pre-configured engine to use. If None, a default SequentialEngine is created.
 
         The engine stays alive between yields so Wetlands environments
         remain warm — ideal for interactive debugging.
@@ -190,11 +203,12 @@ class Workflow:
         target_list = list(targets)
         self._discover_graph(target_list)
 
-        from bioimageflow.engine import SequentialEngine
-        engine = SequentialEngine(
-            use_wetlands=self.use_wetlands,
-            wetlands_config=self.wetlands_config,
-        )
+        if engine is None:
+            from bioimageflow.engine import SequentialEngine
+            engine = SequentialEngine(
+                use_wetlands=self.use_wetlands,
+                wetlands_config=self.wetlands_config,
+            )
         yield from engine.execute_steps(target_list, self)
 
     def _discover_graph(self, targets: list[Node]) -> None:
