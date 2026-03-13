@@ -140,6 +140,21 @@ uv run pytest tests/unit/
 uv run pytest tests/integration/
 ```
 
+## FAQ
+
+### Why tools should be instantiated before being executed? `download = DownloadImages()(urls=CIL_URLS)` instead of `download = DownloadImages(urls=CIL_URLS)`?
+
+1. Tool reuse is a first-class use case, not a rare edge case. The spec shows it prominently, and the test suite exercises it extensively (two 
+segmenter nodes with different diameters). It enables branching and parameter sweeps without duplicating class definitions.                    
+2. The two-call pattern is explicit and clear: tool = MyTool(); node = tool(...). It reads as "create a tool, then use it." This is similar to 
+many Python APIs (e.g., logger = logging.getLogger(name); logger.info(...)).                                                                   
+3. Cannot have both patterns safely without causing confusion. Supporting both would require magic behavior based on whether kwargs are        
+present, which is error-prone (e.g., what if a tool has no required inputs? tool() vs tool(constant=1) would return different types).          
+4. Implementation complexity: Using __new__ to return a Node is a non-standard pattern that would confuse readers and tools (type checkers,    
+IDEs). It would also make it harder to access tool metadata on the node (you'd need node.tool anyway, so why hide the tool?).                  
+                        
+
 ## License
 
 BSD 4-Clause License.
+
