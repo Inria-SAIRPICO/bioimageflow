@@ -24,3 +24,19 @@ class ResourceSpec:
 class EnvironmentMismatchError(Exception):
     """Raised when two EnvironmentSpecs share a name but differ in dependencies."""
     pass
+
+
+GENERAL_ENV = EnvironmentSpec(
+    name="bioimageflow-general",
+    dependencies={
+        "python": "3.12",
+        "pip": [
+            "numpy",
+            "scipy",
+            "scikit-image",
+            "imageio",
+            "tifffile",
+            "Pillow",
+        ],
+    },
+)

@@ -5,17 +5,12 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
-    EnvironmentSpec,
+    GENERAL_ENV,
     ImageSpec,
     IOModel,
     Layout,
     ProcessingTool,
     Semantic,
-)
-
-imageio_env = EnvironmentSpec(
-    name="imageio",
-    dependencies={"python": "3.12", "pip": ["imageio", "numpy"]},
 )
 
 
@@ -32,7 +27,7 @@ class LabelOverlaps(ProcessingTool):
         "Outputs a CSV table of (reference_label, spot_label, overlap_count) tuples."
     )
     tags = ["measurement", "spatial correlation"]
-    environment = imageio_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         label_image: Annotated[

@@ -231,6 +231,56 @@ Multiple tools reference the same `EnvironmentSpec`. The framework passes `spec.
 
 It is possible to directly define the EnvironmentSpec in ProcessingTool.environment if only one tool requires the environment.
 
+#### Pre-Built General Environment
+
+*Module: `bioimageflow_core.environment`*
+
+`bioimageflow-core` provides a pre-defined `GENERAL_ENV` constant — a standard scientific image processing environment that covers the majority of "glue" tools. Tools that only need common packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow) should use `GENERAL_ENV` instead of declaring ad-hoc environments.
+
+```python
+from bioimageflow_core import GENERAL_ENV
+
+GENERAL_ENV = EnvironmentSpec(
+    name="bioimageflow-general",
+    dependencies={
+        "python": "3.12",
+        "pip": [
+            "numpy",
+            "scipy",
+            "scikit-image",
+            "imageio",
+            "tifffile",
+            "Pillow",
+        ]
+    }
+)
+```
+
+**When to use `GENERAL_ENV`:** Tools whose only runtime dependencies are a subset of the packages above. For example, a tool that reads an image with imageio, processes it with numpy, and writes it back — no need to declare a custom environment.
+
+**When NOT to use `GENERAL_ENV`:** Tools that require specialized libraries (cellpose, stardist, SimpleITK, bioio, opencv, etc.) still declare their own `EnvironmentSpec`. The general env catches the long tail of tools that just need standard scientific Python.
+
+**Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine creates it on first use and reuses it for all tools referencing it. All tools with `environment = GENERAL_ENV` share a single Wetlands worker process.
+
+```python
+from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImagePath, Semantic
+
+class ExtractChannel(ProcessingTool):
+    name = "extract_channel"
+    environment = GENERAL_ENV
+
+    class Inputs(IOModel):
+        input_image: ImagePath(semantics=Semantic.INTENSITY)
+        channel: int = 0
+
+    class Outputs(IOModel):
+        output_image: ImagePath(semantics=Semantic.INTENSITY) = "{input_image.stem}_ch{channel}{ext}"
+
+    def process_row(self, arguments: Arguments) -> "Outputs":
+        import imageio.v3 as iio
+        ...
+```
+
 ### 3.2 BaseTool
 
 *Module: `bioimageflow_core.tool`*
@@ -1592,7 +1642,7 @@ from bioimageflow_core import (
     Semantic, Layout, ImageSpec, SharedArray, ImagePath, ImageShared,
     check_compatibility,
     # Environment
-    EnvironmentSpec, ResourceSpec,
+    EnvironmentSpec, GENERAL_ENV, ResourceSpec,
     # Tool
     BaseTool, ProcessingTool, IOModel,
     # Arguments

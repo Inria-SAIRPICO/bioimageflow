@@ -5,18 +5,13 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
-    EnvironmentSpec,
+    GENERAL_ENV,
     GUIMeta,
     ImageSpec,
     IOModel,
     Layout,
     ProcessingTool,
     Semantic,
-)
-
-imageio_env = EnvironmentSpec(
-    name="imageio",
-    dependencies={"python": "3.12", "pip": ["imageio", "numpy"]},
 )
 
 
@@ -29,7 +24,7 @@ class ExtractChannel(ProcessingTool):
     name = "extract_channel"
     documentation = "Extract a single channel (by index) from a multi-channel image."
     tags = ["preprocessing", "channel"]
-    environment = imageio_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[

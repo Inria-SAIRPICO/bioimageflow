@@ -14,9 +14,11 @@ measurement --- anything that operates on individual images or arrays.
 
 .. code-block:: python
 
+   from bioimageflow_core import GENERAL_ENV
+
    class MyTool(ProcessingTool):
        name = "my_tool"
-       environment = EnvironmentSpec(name="my_env", dependencies={})
+       environment = GENERAL_ENV  # or a custom EnvironmentSpec for specialized deps
 
        class Inputs:
            image: ImagePath()
@@ -31,8 +33,10 @@ measurement --- anything that operates on individual images or arrays.
 Key properties:
 
 - **Isolated execution**: each tool declares an
-  :class:`~bioimageflow_core.EnvironmentSpec`. The framework ensures the right
-  environment is used.
+  :class:`~bioimageflow_core.EnvironmentSpec`. Use
+  :data:`~bioimageflow_core.GENERAL_ENV` for tools that only need standard
+  scientific packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow).
+  Tools with specialized dependencies declare their own ``EnvironmentSpec``.
 - **Row-level parallelism**: ``process_row`` is called once per row, enabling
   future parallel execution.
 - **Batch mode**: override ``process_batch`` for GPU-batched operations.

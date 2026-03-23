@@ -8,3 +8,4 @@ __pycache__/
 IMPLEMENTATION_PLAN.md
 docs/build/
 wetlands/
+packages/bioimageflow-common-tools/bioimageflow_common_tools/.vscode/
