@@ -1148,6 +1148,7 @@ loaded.compute(loaded.nodes["measure_stats_1"])
 The serialized format includes:
 - Tool references (module path + class name + package version for each node).
 - Parameter bindings (constants, column references with upstream node names).
+- Node enabled/disabled state (see [Section 4.6](#46-enabling-and-disabling-nodes)).
 - Graph edges (upstream-downstream relationships).
 - Workflow-level configuration (storage path, cache policy, engine choice).
 
@@ -1204,6 +1205,76 @@ Construction-time validation checks that keyword arguments match the tool's `Inp
 
 There is no implicit name-based or type-based column matching. Every column binding is explicit — the developer specifies exactly which column from which upstream node feeds each input field. This eliminates fragility from upstream schema changes and makes every data flow visible in the code.
 
+### 4.6 Enabling and Disabling Nodes
+
+Nodes can be temporarily disabled so the engine skips them during execution. This is designed for GUI workflows where users want to iterate on part of a pipeline without executing expensive downstream nodes.
+
+#### Node-Level API
+
+Each node has an `enabled` attribute (default: `True`) and convenience methods:
+
+```python
+masks = segment(input_image=raw["path"])
+masks.enabled          # True (default)
+masks.disable()        # Sets enabled = False
+masks.enable()         # Sets enabled = True
+masks.enabled = False  # Direct assignment also works
+```
+
+#### Workflow-Level API
+
+The Workflow provides `disable()` and `enable()` methods that accept node references or node names (strings). This is convenient for GUIs that know node names but may not hold Python references:
+
+```python
+wf.disable(masks)               # By reference
+wf.disable("stub_segmenter_1")  # By name
+wf.enable("stub_segmenter_1")   # Re-enable by name
+wf.disable(masks, results)      # Multiple nodes at once
+```
+
+Passing an unknown name raises `KeyError`.
+
+#### Execution Semantics
+
+1. **Disabled nodes are not executed** — no cache lookup, no computation, no side effects.
+2. **Implicit skip propagation** — any node whose upstream dependency chain includes a disabled node is also skipped (it cannot run without its inputs). This propagation is computed in O(V) after topological sort.
+3. **Graph structure is preserved** — disabling a node does not alter edges, bindings, or registration. Re-enabling restores the original wiring.
+4. **Caching is unaffected** — the `enabled` flag is not part of the signature hash. Re-enabling a node with the same parameters hits the existing cache.
+5. **Return value** — `compute()` returns results only for target nodes that were actually executed:
+   - If all targets are disabled or have disabled upstreams, `DisabledNodeError` is raised.
+   - If some targets are disabled in a multi-target call, only executed targets appear in the returned dict.
+
+#### Step-by-Step Execution (`compute_steps`)
+
+When using `compute_steps()`, skipped nodes are still yielded so the GUI can display them (e.g., grayed out). Each `NodeStep` exposes a `skipped` property:
+
+```python
+for step in wf.compute_steps(results):
+    if step.skipped:
+        print(f"  [skipped] {step.node_name}")
+        continue
+    df = step.execute()
+    print(f"  [done] {step.node_name}: {len(df)} rows")
+```
+
+Calling `execute()` on a skipped step raises `DisabledNodeError`.
+
+#### Serialization
+
+The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, the node entry includes `"enabled": false`. Enabled nodes (the default) omit the key to keep the format clean:
+
+```json
+{
+  "name": "segmenter_1",
+  "tool_module": "my_tools",
+  "tool_class": "Segmenter",
+  "constants": {"diameter": {"__type__": "float", "value": 30.0}},
+  "enabled": false
+}
+```
+
+`Workflow.load()` restores the flag: disabled nodes remain disabled in the loaded workflow.
+
 ---
 
 ## 5. Execution
@@ -1230,7 +1301,9 @@ When `node.compute()` is called:
 
 1. **Graph Traversal:** Topological sort determines execution order. Only nodes in the dependency chain of the requested node are executed.
 
-2. **Per-Node Execution** (in topological order). The engine dispatches to different paths depending on the tool type:
+1b. **Disabled-Node Filtering:** After topological sort, the engine walks the ordered list and removes disabled nodes and any node whose upstream includes a disabled node (see [Section 4.6](#46-enabling-and-disabling-nodes)). This is O(V) since upstreams are already classified by the time each node is visited.
+
+2. **Per-Node Execution** (in topological order, skipping filtered nodes). The engine dispatches to different paths depending on the tool type:
 
 #### DataFrameTool Execution Path
 
@@ -1572,6 +1645,7 @@ When a tool stores a `SharedArray` in an output DataFrame column, it carries the
 - **Template errors**: Raised at graph construction time if a ProcessingTool output template references undefined variables or input fields.
 - **Worker exceptions:** Exceptions raised in `process_row` or `process_batch` are captured by Wetlands and re-raised in the main process with the original stack trace.
 - **DataFrameTool exceptions:** Exceptions raised in `merge_dataframes` or `transform` propagate directly since they run in the main process.
+- **Disabled node errors** (`DisabledNodeError`): Raised at execution time when all requested target nodes are disabled or have disabled upstream dependencies. When only some targets are disabled in a multi-target `compute()` call, the disabled targets are silently omitted from the result dict.
 - **Row-level failure:** When a single row fails in `process_row`, the entire node execution fails. The engine does not produce partial results.
 
 ---
@@ -1655,19 +1729,198 @@ from bioimageflow_core.shm import create_shared_output, open_shared_array
 from bioimageflow import (
     DataFrameTool, Passthrough,
     Workflow,
+    SubWorkflow,
     # Built-in merge tools
     InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect,
 )
 from bioimageflow.node import Node, ColumnRef
+from bioimageflow.engine import DisabledNodeError
+from bioimageflow.sub_workflow import SubWorkflow
 ```
 
 ---
 
-## 14. Future Work
+## 14. Sub-Workflows
+
+Sub-workflows allow users to package an entire workflow DAG as a reusable node. A `SubWorkflow` encapsulates an internal DAG with declared inputs and outputs, and behaves like a single node in the parent workflow.
+
+### 14.1 SubWorkflow Definition
+
+*Module: `bioimageflow.sub_workflow`*
+
+`SubWorkflow` is a new base class in the `bioimageflow` package (orchestrator-only — not in `bioimageflow-core`). It is **not** a subclass of `BaseTool`; it is a standalone callable that produces a `SubWorkflowNode`.
+
+```python
+from bioimageflow.sub_workflow import SubWorkflow
+from bioimageflow_core import IOModel, ImagePath, Semantic, Arguments
+
+class SegmentAndMeasure(SubWorkflow):
+    name = "segment_and_measure"
+
+    class Inputs(IOModel):
+        image: ImagePath(semantics=Semantic.INTENSITY)
+        diameter: float = 30.0
+
+    class Outputs(IOModel):
+        mask: ImagePath(semantics=Semantic.LABEL)
+        cell_count: int
+        mean_intensity: float
+
+    def build(self, inputs):
+        """Build the internal DAG.
+
+        Args:
+            inputs: A SubWorkflowInputProxy providing ColumnRef-like handles
+                    for each declared input field.
+
+        Returns:
+            A dict mapping output field names to ColumnRefs from internal nodes.
+        """
+        segment = CellposeSegmenter()
+        measure = MeasureStats()
+
+        masks = segment(input_image=inputs.image, diameter=inputs.diameter)
+        stats = measure(image=inputs.image, mask=masks["mask"])
+
+        return {
+            "mask": masks["mask"],
+            "cell_count": masks["cell_count"],
+            "mean_intensity": stats["mean_intensity"],
+        }
+```
+
+**SubWorkflow class attributes:**
+
+| Attribute  | Type               | Description                                   |
+|-----------|-------------------|-----------------------------------------------|
+| `name`     | `str`              | Unique identifier for the sub-workflow         |
+| `Inputs`   | `IOModel subclass` | Declared inputs (exposed to parent workflow)   |
+| `Outputs`  | `IOModel subclass` | Declared outputs (exposed to parent workflow)  |
+
+**Concrete `SubWorkflow` subclasses must:**
+- Declare `name`, `Inputs`, and `Outputs` as class attributes.
+- Override `build(self, inputs)` → `dict[str, ColumnRef]` mapping each `Outputs` field to an internal node column.
+
+### 14.2 Using a Sub-Workflow
+
+From the parent workflow's perspective, a `SubWorkflow` is called like any other tool — keyword arguments bind to `Inputs`, and the returned node exposes `Outputs` columns:
+
+```python
+seg_measure = SegmentAndMeasure()
+
+with Workflow(storage_path="./results") as wf:
+    raw = load_images(path="./data")
+    results = seg_measure(image=raw["path"], diameter=25.0)
+
+    # Access outputs like any other node
+    export = save(mask=results["mask"], stats=results["mean_intensity"])
+    wf.compute(export)
+```
+
+### 14.3 SubWorkflowInputProxy
+
+When `SubWorkflow.__call__()` is invoked, it creates a `SubWorkflowInputProxy` — a lightweight proxy that acts as a virtual source node for the internal DAG. Internal nodes can reference proxy fields via attribute access (`inputs.image`) or subscript (`inputs["image"]`), both of which return `ColumnRef` objects.
+
+The proxy is backed by a real `Node` (with no tool) that the engine replaces with the actual parent-workflow upstream data at execution time.
+
+### 14.4 SubWorkflowNode
+
+`SubWorkflowNode` is a `Node` subclass that represents a sub-workflow in the parent DAG. It holds:
+
+- The `SubWorkflow` definition
+- The internal nodes (encapsulated — not registered with the parent workflow)
+- Input mappings: parent ColumnRefs/constants → internal proxy fields
+- Output mappings: internal node columns → declared `Outputs` fields
+
+`SubWorkflowNode` supports `__getitem__` for output column access: `results["mask"]` returns a `ColumnRef` pointing to the sub-workflow node.
+
+**Internal nodes are not directly accessible from the parent workflow's `nodes` dict.** They are accessible via `sub_workflow_node.internal_nodes` for debugging.
+
+### 14.5 Execution Strategy: Flattening
+
+At execution time, the engine **flattens** the sub-workflow into its constituent internal nodes:
+
+1. When the engine encounters a `SubWorkflowNode`, it expands it into its internal nodes.
+2. Input proxy nodes are replaced with direct references to the parent's upstream data.
+3. Internal nodes execute normally in topological order, using existing execution paths.
+4. After all internal nodes execute, the engine assembles the sub-workflow's output DataFrame by collecting columns from the output mapping.
+
+**Consequences of flattening:**
+- **Caching:** Each internal node caches independently (fine-grained).
+- **Environment reuse:** Internal `ProcessingTool`s with the same `EnvironmentSpec` as parent-level tools share the same Wetlands environment.
+- **Name scoping:** Internal node names are prefixed with the sub-workflow node name: `"segment_and_measure_1/cellpose_segmenter_1"`. Cache directories follow the same scoping.
+
+### 14.6 Debugging with `compute_steps`
+
+Internal nodes are visible during step-by-step execution via `compute_steps()`. Each internal node is yielded as its own `NodeStep` with a scoped name:
+
+```python
+for step in wf.compute_steps(results):
+    print(f"Next: {step.node_name} (env: {step.environment})")
+    step.prepare()     # launches Wetlands env — attach debugger here
+    df = step.execute()
+```
+
+This yields steps like:
+```
+Next: file_loader_1 (env: None)
+Next: segment_and_measure_1/cellpose_segmenter_1 (env: cellpose)
+Next: segment_and_measure_1/stub_stats_1 (env: imageio)
+```
+
+### 14.7 Cache Directory Structure
+
+Internal nodes store their cache under the sub-workflow node's directory:
+
+```text
+storage_path/data/
+├── segment_and_measure_1/
+│   ├── cellpose_segmenter_1/
+│   │   └── 20260323_.../
+│   └── stub_stats_1/
+│       └── 20260323_.../
+├── file_loader_1/
+│   └── 20260323_.../
+```
+
+### 14.8 Serialization
+
+`Workflow.export()` serializes `SubWorkflowNode` with its internal structure:
+
+```json
+{
+  "name": "segment_and_measure_1",
+  "type": "sub_workflow",
+  "sub_workflow_module": "my_tools.pipelines",
+  "sub_workflow_class": "SegmentAndMeasure",
+  "constants": {"diameter": {"__type__": "float", "value": 25.0}},
+  "input_mapping": {...},
+  "output_mapping": {...},
+  "internal_nodes": [...],
+  "internal_edges": [...]
+}
+```
+
+`Workflow.load()` reconstructs `SubWorkflowNode` from the serialized form by re-importing and re-calling the `SubWorkflow` class.
+
+### 14.9 Nesting
+
+Sub-workflows may contain other sub-workflows. The engine flattens recursively — all internal nodes at every nesting level are expanded into the parent execution graph. Name scoping nests: `"outer_1/inner_1/tool_1"`.
+
+### 14.10 Error Handling
+
+- **Missing output mapping:** If `build()` returns a dict missing a declared `Outputs` field, a `ValueError` is raised at graph construction time.
+- **Extra output mapping:** If `build()` returns keys not in `Outputs`, they are ignored with a warning.
+- **Input binding errors:** The same `BindingError` rules as `ProcessingTool` apply — missing required inputs with no default raise `BindingError`.
+- **Cycle detection:** Cycles involving sub-workflow internals are detected during flattening.
+
+---
+
+## 15. Future Work
 
 The following items are acknowledged design concerns that will be addressed in future iterations:
 
-### 14.1 Row-Level Error Policy
+### 15.1 Row-Level Error Policy
 
 Currently, when a single row fails in `process_row`, the entire node execution fails and no partial results are saved. For large datasets (e.g., 10,000 images where one is corrupted), this discards all successful results.
 
@@ -1676,7 +1929,7 @@ Currently, when a single row fails in `process_row`, the entire node execution f
 - `on_error="skip"`: Failed rows are excluded from the output DataFrame. A row-level error log is saved alongside the results.
 - Partial results saved to cache with a metadata flag marking the node as incomplete, enabling incremental re-execution.
 
-### 14.2 Content-Based Cache Hashing
+### 15.2 Content-Based Cache Hashing
 
 The signature hash includes file *paths*, not file *contents*. If an input file is modified without changing its path, the cache reports a false hit.
 

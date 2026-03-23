@@ -116,6 +116,29 @@ class Workflow:
     def nodes(self) -> dict[str, Node]:
         return dict(self._nodes)
 
+    def disable(self, *nodes: "Node | str") -> None:
+        """Disable nodes by reference or name."""
+        for item in nodes:
+            node = self._resolve_node(item)
+            node.enabled = False
+
+    def enable(self, *nodes: "Node | str") -> None:
+        """Enable nodes by reference or name."""
+        for item in nodes:
+            node = self._resolve_node(item)
+            node.enabled = True
+
+    def _resolve_node(self, item: "Node | str") -> Node:
+        """Resolve a node reference or name to a Node object."""
+        if isinstance(item, str):
+            if item not in self._nodes:
+                raise KeyError(
+                    f"Node '{item}' not found in workflow. "
+                    f"Available nodes: {list(self._nodes.keys())}"
+                )
+            return self._nodes[item]
+        return item
+
     def compute(self, *targets: Node, dev_mode: bool = False, engine: "SequentialEngine | None" = None) -> Any:
         """Execute the workflow and return results.
 
@@ -230,37 +253,64 @@ class Workflow:
 
     def export(self, path: str | Path) -> None:
         """Serialize the workflow to JSON."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
         path = Path(path)
         nodes_data: list[dict[str, Any]] = []
         edges_data: list[dict[str, str]] = []
 
         for name, node in self._nodes.items():
-            node_info: dict[str, Any] = {
-                "name": name,
-                "tool_module": type(node.tool).__module__,
-                "tool_class": type(node.tool).__name__,
-                "constants": {},
-                "args": [arg.name for arg in node._args if isinstance(arg, Node)],
-            }
-            for field, value in node._constant_bindings.items():
-                node_info["constants"][field] = _serialize_constant(value)
-            nodes_data.append(node_info)
+            if isinstance(node, SubWorkflowNode):
+                node_info: dict[str, Any] = {
+                    "name": name,
+                    "type": "sub_workflow",
+                    "sub_workflow_module": type(node.sub_workflow).__module__,
+                    "sub_workflow_class": type(node.sub_workflow).__name__,
+                    "constants": {},
+                }
+                if not node.enabled:
+                    node_info["enabled"] = False
+                for field, value in node._input_constant_bindings.items():
+                    node_info["constants"][field] = _serialize_constant(value)
+                nodes_data.append(node_info)
 
-            for field, col_ref in node._column_bindings.items():
-                edges_data.append({
-                    "from": col_ref.node.name,
-                    "to": name,
-                    "column": col_ref.column,
-                    "field": field,
-                })
-            for arg in node._args:
-                if isinstance(arg, Node):
+                # Input column binding edges
+                for field, col_ref in node._input_column_bindings.items():
                     edges_data.append({
-                        "from": arg.name,
+                        "from": col_ref.node.name,
                         "to": name,
-                        "column": "__positional__",
-                        "field": "__positional__",
+                        "column": col_ref.column,
+                        "field": field,
                     })
+            else:
+                node_info = {
+                    "name": name,
+                    "tool_module": type(node.tool).__module__,
+                    "tool_class": type(node.tool).__name__,
+                    "constants": {},
+                    "args": [arg.name for arg in node._args if isinstance(arg, Node)],
+                }
+                if not node.enabled:
+                    node_info["enabled"] = False
+                for field, value in node._constant_bindings.items():
+                    node_info["constants"][field] = _serialize_constant(value)
+                nodes_data.append(node_info)
+
+                for field, col_ref in node._column_bindings.items():
+                    edges_data.append({
+                        "from": col_ref.node.name,
+                        "to": name,
+                        "column": col_ref.column,
+                        "field": field,
+                    })
+                for arg in node._args:
+                    if isinstance(arg, Node):
+                        edges_data.append({
+                            "from": arg.name,
+                            "to": name,
+                            "column": "__positional__",
+                            "field": "__positional__",
+                        })
 
         data: dict[str, Any] = {
             "nodes": nodes_data,
@@ -294,12 +344,16 @@ class Workflow:
         node_map: dict[str, Node] = {}
         tool_instances: dict[str, Any] = {}
 
-        # First pass: create tool instances
+        # First pass: create tool/sub-workflow instances
         for node_data in data["nodes"]:
-            module = importlib.import_module(node_data["tool_module"])
-            tool_class = getattr(module, node_data["tool_class"])
-            tool = tool_class()
-            tool_instances[node_data["name"]] = tool
+            if node_data.get("type") == "sub_workflow":
+                module = importlib.import_module(node_data["sub_workflow_module"])
+                sw_class = getattr(module, node_data["sub_workflow_class"])
+                tool_instances[node_data["name"]] = sw_class()
+            else:
+                module = importlib.import_module(node_data["tool_module"])
+                tool_class = getattr(module, node_data["tool_class"])
+                tool_instances[node_data["name"]] = tool_class()
 
         # Build nodes in dependency order
         built: set[str] = set()
@@ -333,10 +387,11 @@ class Workflow:
 
         try:
             from bioimageflow.dataframe_tool import DataFrameTool
+            from bioimageflow.sub_workflow import SubWorkflow
 
             for name in build_order:
                 node_data = node_data_by_name[name]
-                tool = tool_instances[name]
+                instance = tool_instances[name]
                 kwargs: dict[str, Any] = {}
                 positional_args: list[Node] = []
 
@@ -350,11 +405,14 @@ class Workflow:
                 for field, value in node_data.get("constants", {}).items():
                     kwargs[field] = _deserialize_constant(value)
 
-                if isinstance(tool, DataFrameTool):
-                    node = tool(*positional_args, name=name, **kwargs)
+                if isinstance(instance, SubWorkflow):
+                    node = instance(name=name, **kwargs)
+                elif isinstance(instance, DataFrameTool):
+                    node = instance(*positional_args, name=name, **kwargs)
                 else:
-                    node = tool(name=name, **kwargs)
+                    node = instance(name=name, **kwargs)
 
+                node.enabled = node_data.get("enabled", True)
                 node_map[name] = node
         finally:
             set_active_workflow(prev_wf)

@@ -76,6 +76,7 @@ class Node:
         self.tool = tool
         self._kwargs = kwargs or {}
         self._args: list[Any] = args or []
+        self.enabled: bool = True
         self._upstream_nodes: set[Node] = set()
         self._column_bindings: dict[str, ColumnRef] = {}
         self._constant_bindings: dict[str, Any] = {}
@@ -220,6 +221,14 @@ class Node:
                     raise ColumnNotFoundError(msg)
 
         return ColumnRef(node=self, column=column)
+
+    def disable(self) -> None:
+        """Disable this node so it is skipped during execution."""
+        self.enabled = False
+
+    def enable(self) -> None:
+        """Re-enable this node for execution."""
+        self.enabled = True
 
     def compute(self, **kwargs: Any) -> Any:
         """Shorthand: create/use a Workflow and compute this node."""

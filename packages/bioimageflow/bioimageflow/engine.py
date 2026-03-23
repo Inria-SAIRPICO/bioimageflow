@@ -30,6 +30,11 @@ from bioimageflow.validation import get_tool_version, get_source_hash, is_path_t
 logger = logging.getLogger("bioimageflow")
 
 
+class DisabledNodeError(Exception):
+    """Raised when all requested target nodes are disabled or unreachable."""
+    pass
+
+
 class NodeStep:
     """Handle for a single node in a stepped workflow execution.
 
@@ -47,15 +52,22 @@ class NodeStep:
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str],
         workflow: Any,
+        skipped: bool = False,
     ) -> None:
         self._node = node
         self._engine = engine
         self._results = results
         self._sig_hashes = sig_hashes
         self._workflow = workflow
+        self._skipped = skipped
         self._executed = False
         self._df: pd.DataFrame | None = None
         self._sig_hash: str | None = None
+
+    @property
+    def skipped(self) -> bool:
+        """True if the node is disabled or has a disabled upstream."""
+        return self._skipped
 
     @property
     def node_name(self) -> str:
@@ -91,7 +103,12 @@ class NodeStep:
         """Execute the node and return its output DataFrame.
 
         Idempotent — calling more than once returns the cached result.
+        Raises :class:`DisabledNodeError` if the node is skipped.
         """
+        if self._skipped:
+            raise DisabledNodeError(
+                f"Node '{self._node.name}' is disabled and cannot be executed."
+            )
         if self._executed:
             assert self._df is not None
             return self._df
@@ -136,6 +153,9 @@ class SequentialEngine:
         If ``execute()`` is not called before advancing, the step auto-executes
         to keep the results chain consistent for downstream nodes.
 
+        SubWorkflowNodes are expanded: their internal nodes are yielded
+        individually with scoped names (``subworkflow_name/internal_name``).
+
         Cleanup runs when the generator is exhausted or closed (early ``break``).
         """
         try:
@@ -145,11 +165,26 @@ class SequentialEngine:
 
             self._check_env_mismatches(reachable)
             order = self._topological_sort(reachable)
+            _executable, skipped = self._filter_executable(order)
 
             results: dict[Node, pd.DataFrame] = {}
             sig_hashes: dict[Node, str] = {}
 
             for node in order:
+                if node in skipped:
+                    logger.info(
+                        "Skipping node '%s' (disabled or upstream disabled)", node.name
+                    )
+                    yield NodeStep(node, self, results, sig_hashes, workflow, skipped=True)
+                    continue
+
+                from bioimageflow.sub_workflow import SubWorkflowNode
+                if isinstance(node, SubWorkflowNode):
+                    yield from self._execute_sub_workflow_steps(
+                        node, results, sig_hashes, workflow,
+                    )
+                    continue
+
                 step = NodeStep(node, self, results, sig_hashes, workflow)
                 yield step
                 # Auto-execute if the user didn't call step.execute()
@@ -161,6 +196,69 @@ class SequentialEngine:
             if self._env_manager is not None:
                 self._env_manager.shutdown_all()
 
+    def _execute_sub_workflow_steps(
+        self,
+        node: "SubWorkflowNode",
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+    ) -> Generator[NodeStep, None, None]:
+        """Yield individual steps for a SubWorkflowNode's internal nodes."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
+        # Build proxy DataFrame
+        proxy_df = self._build_proxy_dataframe(node, results)
+        proxy_node = node._proxy_node
+        results[proxy_node] = proxy_df
+        sig_hashes[proxy_node] = "proxy"
+
+        # Sort internal nodes
+        internal_nodes = set(node.internal_nodes)
+        internal_nodes.add(proxy_node)
+        internal_order = self._topological_sort(internal_nodes)
+
+        # Scope names
+        original_names: dict[Node, str] = {}
+        for inode in node.internal_nodes:
+            original_names[inode] = inode._name
+            inode._name = f"{node.name}/{inode._name}"
+            if isinstance(inode, SubWorkflowNode):
+                self._scope_internal_names(inode, node.name)
+
+        try:
+            for inode in internal_order:
+                if inode is proxy_node:
+                    continue
+
+                if isinstance(inode, SubWorkflowNode):
+                    yield from self._execute_sub_workflow_steps(
+                        inode, results, sig_hashes, workflow,
+                    )
+                    continue
+
+                step = NodeStep(inode, self, results, sig_hashes, workflow)
+                yield step
+                if not step._executed:
+                    step.execute()
+                results[inode] = step._df  # type: ignore[assignment]
+                sig_hashes[inode] = step._sig_hash  # type: ignore[assignment]
+
+            # Assemble output
+            output_df = self._assemble_sub_workflow_output(node, results)
+            import hashlib, json
+            terminal_hashes = {}
+            for field, col_ref in node._output_mapping.items():
+                if col_ref.node in sig_hashes:
+                    terminal_hashes[field] = sig_hashes[col_ref.node]
+            combined = hashlib.sha256(
+                json.dumps(terminal_hashes, sort_keys=True).encode()
+            ).hexdigest()
+            results[node] = output_df
+            sig_hashes[node] = combined
+        finally:
+            for inode, orig_name in original_names.items():
+                inode._name = orig_name
+
     def _execute_impl(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Internal execution logic."""
         reachable: set[Node] = set()
@@ -169,16 +267,31 @@ class SequentialEngine:
 
         self._check_env_mismatches(reachable)
         order = self._topological_sort(reachable)
+        executable, skipped = self._filter_executable(order)
+
+        # Check that at least one target is executable
+        executable_targets = [t for t in targets if t not in skipped]
+        if not executable_targets:
+            disabled_names = [t.name for t in targets]
+            raise DisabledNodeError(
+                f"All target nodes are disabled or have disabled "
+                f"upstream dependencies: {disabled_names}"
+            )
 
         results: dict[Node, pd.DataFrame] = {}
         sig_hashes: dict[Node, str] = {}
 
-        for node in order:
+        for node in executable:
             df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
             results[node] = df
             sig_hashes[node] = sig_hash
 
-        return {t.name: results[t] for t in targets}
+        # Log skipped targets
+        for t in targets:
+            if t in skipped:
+                logger.info("Skipping disabled target node '%s'", t.name)
+
+        return {t.name: results[t] for t in targets if t not in skipped}
 
     # ── Graph traversal ────────────────────────────────────────────────
 
@@ -192,6 +305,33 @@ class SequentialEngine:
         for arg in node._args:
             if isinstance(arg, Node):
                 self._collect_reachable(arg, visited)
+
+    def _filter_executable(
+        self, order: list[Node]
+    ) -> tuple[list[Node], set[Node]]:
+        """Remove disabled nodes and nodes with disabled upstreams.
+
+        Returns (executable_nodes, skipped_nodes). Walks in topological order
+        so that by the time we visit a node, all its upstreams are classified.
+        """
+        skipped: set[Node] = set()
+        executable: list[Node] = []
+        for node in order:
+            if not node.enabled:
+                skipped.add(node)
+                continue
+            upstream_skipped = any(
+                up in skipped for up in node._upstream_nodes
+            ) or any(
+                arg in skipped
+                for arg in node._args
+                if isinstance(arg, Node)
+            )
+            if upstream_skipped:
+                skipped.add(node)
+                continue
+            executable.append(node)
+        return executable, skipped
 
     def _check_env_mismatches(self, nodes: set[Node]) -> None:
         """Check for environment name conflicts with different dependencies."""
@@ -239,8 +379,11 @@ class SequentialEngine:
     ) -> tuple[pd.DataFrame, str]:
         """Execute a single node, return (DataFrame, signature_hash)."""
         from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.sub_workflow import SubWorkflowNode
 
-        if isinstance(node.tool, DataFrameTool):
+        if isinstance(node, SubWorkflowNode):
+            return self._execute_sub_workflow(node, results, sig_hashes, workflow)
+        elif isinstance(node.tool, DataFrameTool):
             return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
         elif isinstance(node.tool, ProcessingTool):
             if not node._column_bindings:
@@ -731,6 +874,160 @@ class SequentialEngine:
 
         df.index = df.index.astype(str)
         return df
+
+    # ── Sub-workflow execution ─────────────────────────────────────────
+
+    def _execute_sub_workflow(
+        self,
+        node: "SubWorkflowNode",
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+    ) -> tuple[pd.DataFrame, str]:
+        """Execute a SubWorkflowNode by running its internal nodes."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
+        # Build a proxy DataFrame from the parent's upstream data.
+        # The proxy node should expose columns matching SubWorkflow.Inputs.
+        proxy_df = self._build_proxy_dataframe(node, results)
+        proxy_node = node._proxy_node
+        results[proxy_node] = proxy_df
+        sig_hashes[proxy_node] = "proxy"
+
+        # Collect and sort internal nodes
+        internal_nodes = set(node.internal_nodes)
+        internal_nodes.add(proxy_node)
+        order = self._topological_sort(internal_nodes)
+
+        # Execute internal nodes with scoped names for caching/progress
+        original_names: dict[Node, str] = {}
+        for inode in node.internal_nodes:
+            original_names[inode] = inode._name
+            inode._name = f"{node.name}/{inode._name}"
+            # Recursively scope nested sub-workflows
+            if isinstance(inode, SubWorkflowNode):
+                self._scope_internal_names(inode, node.name)
+
+        try:
+            for inode in order:
+                if inode is proxy_node:
+                    continue  # Already have proxy data
+                df, sig_hash = self._execute_node(inode, results, sig_hashes, workflow)
+                results[inode] = df
+                sig_hashes[inode] = sig_hash
+        finally:
+            # Restore original names
+            for inode, orig_name in original_names.items():
+                inode._name = orig_name
+
+        # Assemble output DataFrame from output mapping
+        output_df = self._assemble_sub_workflow_output(node, results)
+
+        # Compute a combined sig hash from internal terminal hashes
+        terminal_hashes = {}
+        for field, col_ref in node._output_mapping.items():
+            if col_ref.node in sig_hashes:
+                terminal_hashes[field] = sig_hashes[col_ref.node]
+        import hashlib, json
+        combined = hashlib.sha256(
+            json.dumps(terminal_hashes, sort_keys=True).encode()
+        ).hexdigest()
+
+        return output_df, combined
+
+    def _build_proxy_dataframe(
+        self,
+        node: "SubWorkflowNode",
+        results: dict[Node, pd.DataFrame],
+    ) -> pd.DataFrame:
+        """Build a DataFrame for the proxy node from parent upstream data."""
+        # Collect all upstream DataFrames referenced by input bindings
+        upstream_dfs: dict[Node, pd.DataFrame] = {}
+        for field, col_ref in node._input_column_bindings.items():
+            if col_ref.node in results:
+                upstream_dfs[col_ref.node] = results[col_ref.node]
+
+        if not upstream_dfs:
+            # No column bindings — all inputs are constants
+            # Create a single-row DataFrame with constants
+            row = dict(node._input_constant_bindings)
+            # Add defaults
+            input_annotations = node.sub_workflow.Inputs._get_all_annotations()
+            for field_name in input_annotations:
+                if field_name not in row and hasattr(node.sub_workflow.Inputs, field_name):
+                    row[field_name] = getattr(node.sub_workflow.Inputs, field_name)
+            return pd.DataFrame([row], index=["0"])
+
+        # Use the finest-grained index from upstream
+        all_indices = [set(df.index) for df in upstream_dfs.values()]
+
+        def _max_depth(idx_set: set) -> int:
+            return max((str(i).count('::') for i in idx_set), default=0)
+
+        finest_index = sorted(
+            max(all_indices, key=lambda s: (_max_depth(s), len(s))),
+            key=str,
+        )
+
+        # Build proxy DataFrame: one column per Inputs field
+        rows = []
+        for idx in finest_index:
+            row: dict[str, Any] = {}
+            for field, col_ref in node._input_column_bindings.items():
+                up_df = results[col_ref.node]
+                idx_set = set(str(i) for i in up_df.index)
+                if idx in idx_set:
+                    row[field] = up_df.at[idx, col_ref.column]
+                else:
+                    parent = self._find_parent_index(idx, idx_set)
+                    if parent is not None:
+                        row[field] = up_df.at[parent, col_ref.column]
+            # Add constants
+            row.update(node._input_constant_bindings)
+            # Add defaults
+            input_annotations = node.sub_workflow.Inputs._get_all_annotations()
+            for field_name in input_annotations:
+                if field_name not in row and hasattr(node.sub_workflow.Inputs, field_name):
+                    row[field_name] = getattr(node.sub_workflow.Inputs, field_name)
+            rows.append(row)
+
+        return pd.DataFrame(rows, index=[str(i) for i in finest_index])
+
+    def _assemble_sub_workflow_output(
+        self,
+        node: "SubWorkflowNode",
+        results: dict[Node, pd.DataFrame],
+    ) -> pd.DataFrame:
+        """Assemble the sub-workflow output from its output mapping."""
+        # Collect columns from internal nodes
+        output_data: dict[str, pd.Series] = {}
+        reference_index = None
+
+        for field, col_ref in node._output_mapping.items():
+            if col_ref.node not in results:
+                raise RuntimeError(
+                    f"Internal node '{col_ref.node.name}' not executed — "
+                    f"cannot assemble SubWorkflow output."
+                )
+            df = results[col_ref.node]
+            output_data[field] = df[col_ref.column]
+            if reference_index is None:
+                reference_index = df.index
+
+        if not output_data:
+            return pd.DataFrame()
+
+        output_df = pd.DataFrame(output_data, index=reference_index)
+        output_df.index = output_df.index.astype(str)
+        return output_df
+
+    def _scope_internal_names(self, sub_node: "SubWorkflowNode", prefix: str) -> None:
+        """Recursively scope internal node names for nested sub-workflows."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+        for inode in sub_node.internal_nodes:
+            inode._name = f"{prefix}/{inode._name}"
+            if isinstance(inode, SubWorkflowNode):
+                self._scope_internal_names(inode, prefix)
 
     # ── Cache persistence ──────────────────────────────────────────────
 
