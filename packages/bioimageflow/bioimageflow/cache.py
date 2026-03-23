@@ -111,7 +111,7 @@ def cache_save(
     # Parquet requires Arrow-serializable types — convert Path/SharedArray to str
     df_save = df.copy()
     for col in df_save.columns:
-        if df_save[col].dtype == object:
+        if df_save[col].dtype == object or pd.api.types.is_string_dtype(df_save[col]):
             df_save[col] = df_save[col].apply(
                 lambda v: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
             )

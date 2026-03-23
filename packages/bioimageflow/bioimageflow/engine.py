@@ -3,8 +3,8 @@
 import logging
 import time
 from pathlib import Path
-from collections import defaultdict
 from collections.abc import Generator
+from graphlib import CycleError, TopologicalSorter
 from typing import Any, cast
 
 import numpy as np
@@ -195,52 +195,38 @@ class SequentialEngine:
 
     def _check_env_mismatches(self, nodes: set[Node]) -> None:
         """Check for environment name conflicts with different dependencies."""
-        env_specs: dict[str, Any] = {}
+        env_specs: dict[str, tuple[Any, str]] = {}  # name -> (env, tool_name)
         for node in nodes:
             if isinstance(node.tool, ProcessingTool) and hasattr(node.tool, 'environment'):
                 env = node.tool.environment
                 if env.name in env_specs:
-                    existing = env_specs[env.name]
-                    if existing.dependencies != env.dependencies:
+                    existing_env, existing_tool = env_specs[env.name]
+                    if existing_env.dependencies != env.dependencies:
                         raise EnvironmentMismatchError(
                             f"Environment mismatch for '{env.name}': "
-                            f"expected dependencies {existing.dependencies}, "
-                            f"but found {env.dependencies}."
+                            f"tool '{existing_tool}' requires {existing_env.dependencies}, "
+                            f"but tool '{node.tool.name}' requires {env.dependencies}."
                         )
                 else:
-                    env_specs[env.name] = env
+                    env_specs[env.name] = (env, node.tool.name)
 
     def _topological_sort(self, nodes: set[Node]) -> list[Node]:
-        """Topological sort of reachable nodes via Kahn's algorithm."""
-        in_degree: dict[Node, int] = {n: 0 for n in nodes}
-        downstream: dict[Node, set[Node]] = defaultdict(set)
-
+        """Topological sort of reachable nodes using graphlib.TopologicalSorter."""
+        dep_graph: dict[Node, set[Node]] = {}
         for node in nodes:
             all_upstream: set[Node] = set(node._upstream_nodes)
             for arg in node._args:
                 if isinstance(arg, Node):
                     all_upstream.add(arg)
-            for up in all_upstream:
-                if up in nodes:
-                    in_degree[node] += 1
-                    downstream[up].add(node)
+            dep_graph[node] = {up for up in all_upstream if up in nodes}
 
-        queue = [n for n in nodes if in_degree[n] == 0]
-        order: list[Node] = []
-
-        while queue:
-            node = queue.pop(0)
-            order.append(node)
-            for child in downstream[node]:
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    queue.append(child)
-
-        if len(order) != len(nodes):
+        try:
+            return list(TopologicalSorter(dep_graph).static_order())
+        except CycleError as exc:
             raise RuntimeError(
-                "Cycle detected in the DAG. The workflow graph must be acyclic."
-            )
-        return order
+                f"Cycle detected in the DAG. The workflow graph must be acyclic. "
+                f"Cycle info: {exc.args[1]}"
+            ) from exc
 
     # ── Node dispatch ──────────────────────────────────────────────────
 
@@ -290,7 +276,7 @@ class SequentialEngine:
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
-            return cache_load(cached), sig_hash
+            return self._coerce_numeric_columns(cache_load(cached)), sig_hash
 
         self._emit_progress(workflow, node.name, "started")
 
@@ -338,7 +324,7 @@ class SequentialEngine:
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
-            return cache_load(cached), sig_hash
+            return self._coerce_numeric_columns(cache_load(cached)), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
@@ -391,7 +377,7 @@ class SequentialEngine:
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
-            df = cache_load(cached)
+            df = self._coerce_numeric_columns(cache_load(cached))
             cached_hash_dir = find_hash_dir(node_dir, sig_hash)
             if cached_hash_dir is not None:
                 df = self._restore_shared_arrays(df, cached_hash_dir)
@@ -528,7 +514,7 @@ class SequentialEngine:
         """Build the template variable context for a single row."""
         context: dict[str, Any] = {
             'node_name': node_name,
-            'row_index': row_index,
+            'row_index': row_index.replace('::', '_'),
             'timestamp': timestamp or str(int(time.time())),
         }
         for field_name, value in row_args.items():
@@ -598,7 +584,13 @@ class SequentialEngine:
     ) -> str:
         """Compute signature hash for a non-source ProcessingTool."""
         env_hash = compute_env_hash(cast(ProcessingTool, node.tool).environment.dependencies)
-        upstream_hash_map = {n.name: sig_hashes.get(n, "")
+        missing = [n.name for n in upstream_nodes.values() if n not in sig_hashes]
+        if missing:
+            raise RuntimeError(
+                f"Cannot compute signature hash for node: upstream nodes "
+                f"{missing} have not been executed yet."
+            )
+        upstream_hash_map = {n.name: sig_hashes[n]
                             for n in upstream_nodes.values()}
         resolved_params: dict[str, Any] = {
             'bindings': {f: {'node': cr.node.name, 'column': cr.column}
@@ -910,7 +902,8 @@ class SequentialEngine:
                 if isinstance(val, SharedArray):
                     try:
                         from bioimageflow_core.shm import open_shared_array
-                        npy_path = assets_dir / f"shm_{col}_{idx}.npy"
+                        safe_idx = str(idx).replace('::', '_')
+                        npy_path = assets_dir / f"shm_{col}_{safe_idx}.npy"
                         with open_shared_array(val) as arr:
                             np.save(str(npy_path), arr)
                     except (OSError, ValueError) as e:
@@ -926,7 +919,8 @@ class SequentialEngine:
             for idx in df.index:
                 val = df.at[idx, col]
                 if isinstance(val, str):
-                    npy_path = assets_dir / f"shm_{col}_{idx}.npy"
+                    safe_idx = str(idx).replace('::', '_')
+                    npy_path = assets_dir / f"shm_{col}_{safe_idx}.npy"
                     if npy_path.exists():
                         try:
                             from bioimageflow_core.shm import create_shared_output
