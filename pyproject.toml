@@ -2,7 +2,9 @@
 name = "bioimageflow-workspace"
 version = "0.0.0"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "bioimageflow-core==0.1.1",
+]
 
 [dependency-groups]
 dev = [
@@ -24,5 +26,5 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 bioimageflow = { workspace = true }
-bioimageflow-core = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
+bioimageflow-core = { workspace = true }

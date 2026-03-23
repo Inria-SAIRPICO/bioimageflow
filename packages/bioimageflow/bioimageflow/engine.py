@@ -30,6 +30,18 @@ from bioimageflow.validation import get_tool_version, get_source_hash, is_path_t
 logger = logging.getLogger("bioimageflow")
 
 
+def _to_python(val: Any) -> Any:
+    """Convert numpy scalars to native Python types.
+
+    pandas DataFrames store numeric values as numpy scalars (np.int64,
+    np.float64, etc.).  When these are pickled and sent to Wetlands worker
+    environments that don't have numpy installed, unpickling fails.
+    The ``.item()`` method is the standard way to get the native Python
+    equivalent and is available on all numpy scalar types.
+    """
+    return val.item() if hasattr(val, "item") else val
+
+
 class DisabledNodeError(Exception):
     """Raised when all requested target nodes are disabled or unreachable."""
     pass
@@ -217,13 +229,12 @@ class SequentialEngine:
         internal_nodes.add(proxy_node)
         internal_order = self._topological_sort(internal_nodes)
 
-        # Scope names
+        # Scope names — only direct children, not recursively.
+        # Nested sub-workflows get scoped when they are recursively expanded.
         original_names: dict[Node, str] = {}
         for inode in node.internal_nodes:
             original_names[inode] = inode._name
             inode._name = f"{node.name}/{inode._name}"
-            if isinstance(inode, SubWorkflowNode):
-                self._scope_internal_names(inode, node.name)
 
         try:
             for inode in internal_order:
@@ -624,11 +635,11 @@ class SequentialEngine:
             up_df = results[col_ref.node]
             idx_set = (index_sets or {}).get(col_ref.node.name) or set(up_df.index)
             if idx in idx_set:
-                row_args[field] = up_df.at[idx, col_ref.column]
+                row_args[field] = _to_python(up_df.at[idx, col_ref.column])
             else:
                 parent_idx = self._find_parent_index(idx, idx_set)
                 if parent_idx is not None:
-                    row_args[field] = up_df.at[parent_idx, col_ref.column]
+                    row_args[field] = _to_python(up_df.at[parent_idx, col_ref.column])
                 else:
                     raise KeyError(
                         f"Column '{col_ref.column}' not found for index '{idx}' "
@@ -899,14 +910,13 @@ class SequentialEngine:
         internal_nodes.add(proxy_node)
         order = self._topological_sort(internal_nodes)
 
-        # Execute internal nodes with scoped names for caching/progress
+        # Execute internal nodes with scoped names for caching/progress.
+        # Only scope direct children — nested sub-workflows get scoped
+        # when _execute_sub_workflow is called recursively for them.
         original_names: dict[Node, str] = {}
         for inode in node.internal_nodes:
             original_names[inode] = inode._name
             inode._name = f"{node.name}/{inode._name}"
-            # Recursively scope nested sub-workflows
-            if isinstance(inode, SubWorkflowNode):
-                self._scope_internal_names(inode, node.name)
 
         try:
             for inode in order:
@@ -940,23 +950,22 @@ class SequentialEngine:
         node: "SubWorkflowNode",
         results: dict[Node, pd.DataFrame],
     ) -> pd.DataFrame:
-        """Build a DataFrame for the proxy node from parent upstream data."""
-        # Collect all upstream DataFrames referenced by input bindings
+        """Build a proxy DataFrame containing only column-bound fields.
+
+        Constants and defaults are NOT included — they flow through the
+        internal nodes' ``_constant_bindings`` instead, which keeps them
+        as native Python types and avoids numpy coercion by pandas.
+        """
+        if not node._input_column_bindings:
+            # No column bindings at all — return an empty single-row DataFrame
+            # so internal nodes still have an index to iterate over.
+            return pd.DataFrame(index=["0"])
+
+        # Collect upstream DataFrames
         upstream_dfs: dict[Node, pd.DataFrame] = {}
         for field, col_ref in node._input_column_bindings.items():
             if col_ref.node in results:
                 upstream_dfs[col_ref.node] = results[col_ref.node]
-
-        if not upstream_dfs:
-            # No column bindings — all inputs are constants
-            # Create a single-row DataFrame with constants
-            row = dict(node._input_constant_bindings)
-            # Add defaults
-            input_annotations = node.sub_workflow.Inputs._get_all_annotations()
-            for field_name in input_annotations:
-                if field_name not in row and hasattr(node.sub_workflow.Inputs, field_name):
-                    row[field_name] = getattr(node.sub_workflow.Inputs, field_name)
-            return pd.DataFrame([row], index=["0"])
 
         # Use the finest-grained index from upstream
         all_indices = [set(df.index) for df in upstream_dfs.values()]
@@ -969,7 +978,7 @@ class SequentialEngine:
             key=str,
         )
 
-        # Build proxy DataFrame: one column per Inputs field
+        # Build proxy DataFrame: only column-bound fields
         rows = []
         for idx in finest_index:
             row: dict[str, Any] = {}
@@ -982,13 +991,6 @@ class SequentialEngine:
                     parent = self._find_parent_index(idx, idx_set)
                     if parent is not None:
                         row[field] = up_df.at[parent, col_ref.column]
-            # Add constants
-            row.update(node._input_constant_bindings)
-            # Add defaults
-            input_annotations = node.sub_workflow.Inputs._get_all_annotations()
-            for field_name in input_annotations:
-                if field_name not in row and hasattr(node.sub_workflow.Inputs, field_name):
-                    row[field_name] = getattr(node.sub_workflow.Inputs, field_name)
             rows.append(row)
 
         return pd.DataFrame(rows, index=[str(i) for i in finest_index])
@@ -1020,14 +1022,6 @@ class SequentialEngine:
         output_df = pd.DataFrame(output_data, index=reference_index)
         output_df.index = output_df.index.astype(str)
         return output_df
-
-    def _scope_internal_names(self, sub_node: "SubWorkflowNode", prefix: str) -> None:
-        """Recursively scope internal node names for nested sub-workflows."""
-        from bioimageflow.sub_workflow import SubWorkflowNode
-        for inode in sub_node.internal_nodes:
-            inode._name = f"{prefix}/{inode._name}"
-            if isinstance(inode, SubWorkflowNode):
-                self._scope_internal_names(inode, prefix)
 
     # ── Cache persistence ──────────────────────────────────────────────
 

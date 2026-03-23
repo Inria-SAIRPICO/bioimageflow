@@ -127,13 +127,16 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-core"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/bioimageflow-core" }
 
 [[package]]
 name = "bioimageflow-workspace"
 version = "0.0.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "bioimageflow-core" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -158,6 +161,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow-core" }]
 
 [package.metadata.requires-dev]
 dev = [

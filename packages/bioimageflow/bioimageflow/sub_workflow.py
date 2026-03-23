@@ -35,18 +35,42 @@ class _ProxyTool:
 class SubWorkflowInputProxy:
     """Proxy passed to ``SubWorkflow.build()``.
 
-    Provides ``proxy.field`` and ``proxy["field"]`` access that returns
-    :class:`ColumnRef` objects pointing to a hidden proxy node.  Internal
-    nodes bind to these refs, and the engine later replaces them with the
-    real parent-workflow upstream data.
+    Provides ``proxy.field`` and ``proxy["field"]`` access.  For
+    column-bound inputs the proxy returns a :class:`ColumnRef` pointing
+    to the hidden proxy node.  For constant or default inputs it returns
+    the raw Python value, so the internal node stores it as a constant
+    binding (avoiding numpy-coercion issues when constants travel through
+    a pandas DataFrame).
     """
 
-    def __init__(self, inputs_cls: type[IOModel], proxy_node: Node) -> None:
+    def __init__(
+        self,
+        inputs_cls: type[IOModel],
+        proxy_node: Node,
+        column_bound_fields: set[str],
+        constant_values: dict[str, Any],
+    ) -> None:
         self._inputs_cls = inputs_cls
         self._proxy_node = proxy_node
         self._annotations = inputs_cls._get_all_annotations()
+        self._column_bound_fields = column_bound_fields
+        self._constant_values = constant_values
 
-    def __getattr__(self, name: str) -> ColumnRef:
+    def _resolve(self, name: str) -> Any:
+        """Return a ColumnRef for column-bound fields, or the constant value."""
+        if name in self._column_bound_fields:
+            return ColumnRef(node=self._proxy_node, column=name)
+        if name in self._constant_values:
+            return self._constant_values[name]
+        # Default from Inputs class
+        if hasattr(self._inputs_cls, name):
+            return getattr(self._inputs_cls, name)
+        raise AttributeError(
+            f"SubWorkflow.Inputs field '{name}' has no column binding, "
+            f"constant, or default."
+        )
+
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
         if name not in self._annotations:
@@ -54,15 +78,15 @@ class SubWorkflowInputProxy:
                 f"SubWorkflow.Inputs has no field '{name}'. "
                 f"Available: {list(self._annotations)}"
             )
-        return ColumnRef(node=self._proxy_node, column=name)
+        return self._resolve(name)
 
-    def __getitem__(self, name: str) -> ColumnRef:
+    def __getitem__(self, name: str) -> Any:
         if name not in self._annotations:
             raise KeyError(
                 f"SubWorkflow.Inputs has no field '{name}'. "
                 f"Available: {list(self._annotations)}"
             )
-        return ColumnRef(node=self._proxy_node, column=name)
+        return self._resolve(name)
 
 
 class SubWorkflowNode(Node):
@@ -217,7 +241,12 @@ class SubWorkflow:
             proxy_node._column_bindings = {}
             proxy_node._constant_bindings = {}
 
-            proxy = SubWorkflowInputProxy(self.Inputs, proxy_node)
+            proxy = SubWorkflowInputProxy(
+                self.Inputs,
+                proxy_node,
+                column_bound_fields=set(input_column_bindings),
+                constant_values=input_constant_bindings,
+            )
 
             # Build internal DAG — nodes created here are NOT registered
             # with the parent workflow
