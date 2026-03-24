@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -26,6 +26,9 @@ from bioimageflow.node import IndexAlignmentError, Node
 from bioimageflow.storage import get_node_dir, get_hash_dir, get_assets_dir, find_hash_dir, create_hash_dir
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
+
+if TYPE_CHECKING:
+    from bioimageflow.sub_workflow import SubWorkflowNode
 
 logger = logging.getLogger("bioimageflow")
 
@@ -876,12 +879,12 @@ class SequentialEngine:
         if expanded:
             df = pd.DataFrame(
                 [d for _, d in expanded],
-                index=[idx for idx, _ in expanded],
+                index=pd.Index([idx for idx, _ in expanded]),
             )
         else:
             assert tool.Outputs is not None
             output_annotations = tool.Outputs._get_all_annotations()
-            df = pd.DataFrame(columns=list(output_annotations.keys()))
+            df = pd.DataFrame(columns=pd.Index(list(output_annotations.keys())))
 
         df.index = df.index.astype(str)
         return df
@@ -959,7 +962,7 @@ class SequentialEngine:
         if not node._input_column_bindings:
             # No column bindings at all — return an empty single-row DataFrame
             # so internal nodes still have an index to iterate over.
-            return pd.DataFrame(index=["0"])
+            return pd.DataFrame(index=pd.Index(["0"]))
 
         # Collect upstream DataFrames
         upstream_dfs: dict[Node, pd.DataFrame] = {}
@@ -993,7 +996,7 @@ class SequentialEngine:
                         row[field] = up_df.at[parent, col_ref.column]
             rows.append(row)
 
-        return pd.DataFrame(rows, index=[str(i) for i in finest_index])
+        return pd.DataFrame(rows, index=pd.Index([str(i) for i in finest_index]))
 
     def _assemble_sub_workflow_output(
         self,
@@ -1012,7 +1015,7 @@ class SequentialEngine:
                     f"cannot assemble SubWorkflow output."
                 )
             df = results[col_ref.node]
-            output_data[field] = df[col_ref.column]
+            output_data[field] = cast(pd.Series, df[col_ref.column])
             if reference_index is None:
                 reference_index = df.index
 
@@ -1082,7 +1085,7 @@ class SequentialEngine:
                         expanded_rows.append(df.loc[parent])
                         expanded_indices.append(idx)
             if expanded_rows:
-                expanded_df = pd.DataFrame(expanded_rows, index=expanded_indices)
+                expanded_df = pd.DataFrame(expanded_rows, index=pd.Index(expanded_indices))
                 expanded_df.columns = df.columns
                 aligned.append(expanded_df)
             else:

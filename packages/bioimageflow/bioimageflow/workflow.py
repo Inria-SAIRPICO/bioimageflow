@@ -3,7 +3,7 @@
 import json
 import importlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from bioimageflow.node import set_active_workflow, get_active_workflow, _reset_name_counters, Node
 
 if TYPE_CHECKING:
-    from bioimageflow.engine import SequentialEngine
+    from bioimageflow.engine import SequentialEngine, NodeStep
 
 
 def _serialize_constant(value: Any) -> dict[str, Any]:

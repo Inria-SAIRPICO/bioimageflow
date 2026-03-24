@@ -12,15 +12,16 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
+from typing import Any
 
 from bioimageflow_core.arguments import Arguments
-from bioimageflow_core.tool import BaseTool
+from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
 
 
 # Per-file registries: file_path -> {class_name -> class}
 _tool_registries: dict[str, dict[str, type]] = {}
 # Per-file instances: file_path -> {class_name -> instance}
-_instances: dict[str, dict[str, BaseTool]] = {}
+_instances: dict[str, dict[str, ProcessingTool]] = {}
 
 
 def _discover_tools(module: object) -> dict[str, type]:
@@ -45,7 +46,7 @@ def _load_module_from_file(file_path: str) -> object:
     return mod
 
 
-def _get_instance(tool_file_path: str, tool_class_name: str) -> BaseTool:
+def _get_instance(tool_file_path: str, tool_class_name: str) -> ProcessingTool:
     """Get or create a cached tool instance for the given file and class."""
     if tool_file_path not in _tool_registries:
         mod = _load_module_from_file(tool_file_path)
@@ -63,10 +64,10 @@ def _get_instance(tool_file_path: str, tool_class_name: str) -> BaseTool:
     return instances[tool_class_name]
 
 
-def _outputs_to_dict(outputs: object) -> dict:
+def _outputs_to_dict(outputs: IOModel) -> dict[str, Any]:
     """Convert an Outputs instance to a plain dict with picklable values."""
     if hasattr(outputs, '_get_all_annotations'):
-        d: dict = {}
+        d: dict[str, Any] = {}
         for k in outputs._get_all_annotations():
             v = getattr(outputs, k)
             if isinstance(v, Path):
