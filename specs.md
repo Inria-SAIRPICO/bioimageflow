@@ -43,6 +43,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ├── io.py           # I/O dispatch (*)     ├── node.py         # Node, ColumnRef
 └── shm.py          # Shared memory (*)    ├── engine.py       # Execution engines
                                            ├── validation.py   # Pydantic validation
+                                           ├── tool_loader.py  # Versioned package loading
                                            └── workflow.py     # Workflow container
 
 (*) io.py and shm.py use numpy at runtime via import — not as a declared
@@ -945,7 +946,92 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 
 ### 3.10 Tool Packaging and Versioning
 
+*Module: `bioimageflow.tool_loader`*
+
 Tools are distributed as standard Python packages. The package version is used in the signature hash for caching (see [Section 6.1](#61-signature-hash)). When a tool's package version changes, cached results for that tool are automatically invalidated.
+
+#### Tool Store
+
+Tool packages are installed in a **tool store** — a directory under `~/.bioimageflow/tool_packages/` that holds versioned copies of each package. Multiple versions of the same package coexist as distinct directory trees:
+
+```text
+~/.bioimageflow/tool_packages/
+  simpleitk_tools/
+    1.0.0/
+      simpleitk_tools/           # full Python package tree
+        __init__.py
+        gaussian.py
+        base.py
+        utils/
+          __init__.py
+          filters.py
+    2.0.0/
+      simpleitk_tools/
+        __init__.py              # different code
+        gaussian.py
+        ...
+```
+
+Packages are installed with `uv pip install --target <dir> simpleitk-tools==X.Y.Z`. The tool store path can be overridden via the `BIOIMAGEFLOW_TOOL_STORE` environment variable.
+
+#### Versioned Loading
+
+`load_versioned_package(package, version, store_path)` loads a tool package from the tool store into an **isolated namespace** in `sys.modules`. The package is scoped under a synthetic name (e.g., `simpleitk_tools__1_0_0`) so that two loads of the same package at different versions produce **distinct class objects** that share `bioimageflow-core` base classes (since those come from the orchestrator's own environment).
+
+```python
+from bioimageflow import load_versioned_package
+
+v1 = load_versioned_package("simpleitk_tools", "1.0.0")
+v2 = load_versioned_package("simpleitk_tools", "2.0.0")
+
+# Two distinct class objects
+assert v1.GaussianSmooth is not v2.GaussianSmooth
+
+# Both are subclasses of ProcessingTool
+assert issubclass(v1.GaussianSmooth, ProcessingTool)
+assert issubclass(v2.GaussianSmooth, ProcessingTool)
+
+# Both can coexist in the same workflow
+with Workflow() as wf:
+    old_result = v1.GaussianSmooth()(input_image=raw["path"], sigma=1.0)
+    new_result = v2.GaussianSmooth()(input_image=raw["path"], sigma=1.0)
+    results = wf.compute(old_result, new_result)
+```
+
+The loading mechanism:
+
+1. Creates a top-level module entry in `sys.modules` under the scoped name with `submodule_search_locations` pointing at the versioned directory.
+2. Installs a temporary meta-path import hook so that relative imports within the package (e.g., `from .gaussian import GaussianSmooth`) resolve to the versioned directory under the scoped namespace.
+3. Executes the package's `__init__.py`, which triggers all `from .xxx import ...` chains.
+4. Stamps every `BaseTool` and `SubWorkflow` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
+
+This works transparently for all tool types:
+
+- **ProcessingTools**: Loaded as real subclasses with real `process_row`/`process_batch`. `inspect.getfile()` returns the versioned path. Wetlands dispatch works unchanged.
+- **DataFrameTools**: Loaded as real subclasses with real `transform()`/`merge_dataframes()`. They execute in the main process as usual.
+- **SubWorkflows**: `build()` instantiates tools via relative imports (`from .gaussian import GaussianSmooth`). Since the entire package is loaded under the scoped namespace, relative imports resolve within that version's directory. Internal tools are automatically from the correct version.
+
+#### Version Metadata
+
+Every tool class loaded from the tool store carries three attributes stamped by the loader:
+
+| Attribute | Description |
+|-----------|-------------|
+| `_bif_package` | Package name (e.g., `"simpleitk_tools"`) |
+| `_bif_package_version` | Package version (e.g., `"1.0.0"`) |
+| `_bif_canonical_module` | The canonical (unscoped) module path (e.g., `"simpleitk_tools.gaussian"`) |
+
+The `get_tool_package_info(tool)` helper returns `(package, version, canonical_module)` for any tool class or instance. For tools not loaded from the tool store, it returns `(None, None, tool.__module__)`.
+
+The `get_tool_version()` function (used by the cache system) checks `_bif_package_version` first, falling back to `importlib.metadata` and file mtime for non-versioned tools.
+
+#### Resolving Tool Classes
+
+`resolve_tool_class(package, version, canonical_module, class_name)` finds a tool class within a loaded versioned package. It maps the canonical module path (e.g., `simpleitk_tools.gaussian`) to the scoped module (`simpleitk_tools__1_0_0.gaussian`) and retrieves the class by name. This is used by `Workflow.load()` to reconstruct nodes from serialized JSON.
+
+#### Cleanup
+
+`unload_versioned_package(package, version)` removes all `sys.modules` entries for a scoped package version. After unloading, `load_versioned_package` for the same version loads fresh module and class objects.
 
 ---
 
@@ -1146,13 +1232,14 @@ loaded.compute(loaded.nodes["measure_stats_1"])
 ```
 
 The serialized format includes:
-- Tool references (module path + class name + package version for each node).
+- Tool references (module path + class name for each node).
+- Tool package info (package name + package version, when loaded from the tool store). This allows `Workflow.load()` to call `load_versioned_package()` and resolve the correct tool class.
 - Parameter bindings (constants, column references with upstream node names).
 - Node enabled/disabled state (see [Section 4.6](#46-enabling-and-disabling-nodes)).
 - Graph edges (upstream-downstream relationships).
 - Workflow-level configuration (storage path, cache policy, engine choice).
 
-Tool code is **not** serialized — the same tool packages must be installed to re-execute a loaded workflow.
+Tool code is **not** serialized — the same tool packages (at the referenced versions) must be available in the tool store to re-execute a loaded workflow.
 
 ### 4.4 Progress Monitoring
 
@@ -1266,12 +1353,16 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 ```json
 {
   "name": "segmenter_1",
-  "tool_module": "my_tools",
+  "tool_module": "my_tools.segmenter",
   "tool_class": "Segmenter",
+  "tool_package": "my_tools",
+  "tool_package_version": "1.0.0",
   "constants": {"diameter": {"__type__": "float", "value": 30.0}},
   "enabled": false
 }
 ```
+
+`tool_module` stores the **canonical** module path (not the scoped `__1_0_0` variant). When `tool_package` and `tool_package_version` are present, `Workflow.load()` uses `load_versioned_package()` to load the package and `resolve_tool_class()` to find the class in the scoped namespace. When these fields are absent or `null`, the loader falls back to `importlib.import_module()` for backwards compatibility with non-versioned tools.
 
 `Workflow.load()` restores the flag: disabled nodes remain disabled in the loaded workflow.
 
@@ -1460,7 +1551,7 @@ SHA256(tool_name + tool_version + env_dependencies_hash + JSON(resolved_paramete
 
 Where:
 - `tool_name`: The tool's `name` attribute.
-- `tool_version`: The version of the Python package containing the tool. For tools not distributed as packages, the engine uses the source file's modification time. Falls back to `"unversioned"` in interactive/REPL contexts.
+- `tool_version`: For tools loaded from the tool store, the stamped `_bif_package_version` (e.g., `"1.0.0"`). For tools installed as regular packages, the version from `importlib.metadata`. For tools not distributed as packages, the engine uses the source file's modification time. Falls back to `"unversioned"` in interactive/REPL contexts. This ensures that different versions of the same tool produce different cache keys.
 - `env_dependencies_hash`: SHA256 of the normalized `EnvironmentSpec.dependencies` (see [Section 3.1](#31-environmentspec)). Empty string for `DataFrameTool` (no environment). This ensures that changing a tool's environment (e.g., `cellpose==3.0` → `cellpose==4.0`) invalidates the cache.
 - `resolved_parameters`: All resolved input values (constants and column mappings), serialized deterministically via a custom serializer:
 
@@ -1732,10 +1823,12 @@ from bioimageflow import (
     SubWorkflow,
     # Built-in merge tools
     InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect,
+    # Versioned tool loading
+    load_versioned_package, unload_versioned_package, get_tool_package_info,
 )
 from bioimageflow.node import Node, ColumnRef
 from bioimageflow.engine import DisabledNodeError
-from bioimageflow.sub_workflow import SubWorkflow
+from bioimageflow.tool_loader import resolve_tool_class
 ```
 
 ---
@@ -1893,6 +1986,8 @@ storage_path/data/
   "type": "sub_workflow",
   "sub_workflow_module": "my_tools.pipelines",
   "sub_workflow_class": "SegmentAndMeasure",
+  "sub_workflow_package": "my_tools",
+  "sub_workflow_package_version": "1.0.0",
   "constants": {"diameter": {"__type__": "float", "value": 25.0}},
   "input_mapping": {...},
   "output_mapping": {...},
@@ -1901,7 +1996,9 @@ storage_path/data/
 }
 ```
 
-`Workflow.load()` reconstructs `SubWorkflowNode` from the serialized form by re-importing and re-calling the `SubWorkflow` class.
+`sub_workflow_module` stores the canonical module path. When `sub_workflow_package` and `sub_workflow_package_version` are present, `Workflow.load()` uses `load_versioned_package()` and `resolve_tool_class()` to find the `SubWorkflow` class. When absent, it falls back to `importlib.import_module()`.
+
+`Workflow.load()` reconstructs `SubWorkflowNode` from the serialized form by re-importing and re-calling the `SubWorkflow` class. Because `build()` uses relative imports that resolve within the scoped namespace, the internal tools are automatically from the correct package version.
 
 ### 14.9 Nesting
 

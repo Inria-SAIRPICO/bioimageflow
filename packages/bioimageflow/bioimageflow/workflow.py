@@ -254,6 +254,7 @@ class Workflow:
     def export(self, path: str | Path) -> None:
         """Serialize the workflow to JSON."""
         from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.tool_loader import get_tool_package_info
 
         path = Path(path)
         nodes_data: list[dict[str, Any]] = []
@@ -261,11 +262,16 @@ class Workflow:
 
         for name, node in self._nodes.items():
             if isinstance(node, SubWorkflowNode):
+                pkg, pkg_ver, canonical_module = get_tool_package_info(
+                    node.sub_workflow
+                )
                 node_info: dict[str, Any] = {
                     "name": name,
                     "type": "sub_workflow",
-                    "sub_workflow_module": type(node.sub_workflow).__module__,
+                    "sub_workflow_module": canonical_module,
                     "sub_workflow_class": type(node.sub_workflow).__name__,
+                    "sub_workflow_package": pkg,
+                    "sub_workflow_package_version": pkg_ver,
                     "constants": {},
                 }
                 if not node.enabled:
@@ -283,10 +289,13 @@ class Workflow:
                         "field": field,
                     })
             else:
+                pkg, pkg_ver, canonical_module = get_tool_package_info(node.tool)
                 node_info = {
                     "name": name,
-                    "tool_module": type(node.tool).__module__,
+                    "tool_module": canonical_module,
                     "tool_class": type(node.tool).__name__,
+                    "tool_package": pkg,
+                    "tool_package_version": pkg_ver,
                     "constants": {},
                     "args": [arg.name for arg in node._args if isinstance(arg, Node)],
                 }
@@ -347,12 +356,38 @@ class Workflow:
         # First pass: create tool/sub-workflow instances
         for node_data in data["nodes"]:
             if node_data.get("type") == "sub_workflow":
-                module = importlib.import_module(node_data["sub_workflow_module"])
-                sw_class = getattr(module, node_data["sub_workflow_class"])
+                pkg = node_data.get("sub_workflow_package")
+                pkg_ver = node_data.get("sub_workflow_package_version")
+                if pkg and pkg_ver:
+                    from bioimageflow.tool_loader import (
+                        load_versioned_package, resolve_tool_class,
+                    )
+                    load_versioned_package(pkg, pkg_ver, _get_tool_store_path())
+                    sw_class = resolve_tool_class(
+                        pkg, pkg_ver,
+                        node_data["sub_workflow_module"],
+                        node_data["sub_workflow_class"],
+                    )
+                else:
+                    module = importlib.import_module(node_data["sub_workflow_module"])
+                    sw_class = getattr(module, node_data["sub_workflow_class"])
                 tool_instances[node_data["name"]] = sw_class()
             else:
-                module = importlib.import_module(node_data["tool_module"])
-                tool_class = getattr(module, node_data["tool_class"])
+                pkg = node_data.get("tool_package")
+                pkg_ver = node_data.get("tool_package_version")
+                if pkg and pkg_ver:
+                    from bioimageflow.tool_loader import (
+                        load_versioned_package, resolve_tool_class,
+                    )
+                    load_versioned_package(pkg, pkg_ver, _get_tool_store_path())
+                    tool_class = resolve_tool_class(
+                        pkg, pkg_ver,
+                        node_data["tool_module"],
+                        node_data["tool_class"],
+                    )
+                else:
+                    module = importlib.import_module(node_data["tool_module"])
+                    tool_class = getattr(module, node_data["tool_class"])
                 tool_instances[node_data["name"]] = tool_class()
 
         # Build nodes in dependency order
@@ -418,3 +453,12 @@ class Workflow:
             set_active_workflow(prev_wf)
 
         return wf
+
+
+def _get_tool_store_path() -> Path:
+    """Return the tool store path, configurable via environment variable."""
+    import os
+    return Path(os.environ.get(
+        "BIOIMAGEFLOW_TOOL_STORE",
+        str(Path.home() / ".bioimageflow" / "tool_packages"),
+    ))

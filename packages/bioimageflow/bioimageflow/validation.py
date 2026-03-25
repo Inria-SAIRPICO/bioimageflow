@@ -96,7 +96,14 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
 
 
 def get_tool_version(tool: BaseTool) -> str:
-    """Extract version of the Python package containing the tool class."""
+    """Extract version of the Python package containing the tool class.
+
+    Checks ``_bif_package_version`` first (set by the versioned tool loader),
+    then falls back to ``importlib.metadata`` and finally file mtime.
+    """
+    bif_version = getattr(type(tool), "_bif_package_version", None)
+    if bif_version is not None:
+        return bif_version
     try:
         module = tool.__module__
         package = module.split('.')[0]
