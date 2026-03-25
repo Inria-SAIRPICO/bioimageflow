@@ -11,4 +11,5 @@ from bioimageflow.tool_loader import (
     load_versioned_package,
     unload_versioned_package,
     get_tool_package_info,
+    require_tool_packages,
 )

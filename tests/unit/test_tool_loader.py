@@ -115,11 +115,14 @@ def tool_store(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _cleanup_sys_modules():
-    """Remove any dummy_tools scoped modules after each test."""
+    """Remove any dummy_tools scoped and canonical modules after each test."""
     yield
-    to_remove = [k for k in sys.modules if k.startswith("dummy_tools__")]
+    to_remove = [k for k in sys.modules
+                 if k.startswith("dummy_tools__") or k.startswith("dummy_tools")]
     for k in to_remove:
         del sys.modules[k]
+    # Clean sys.path entries that point into tmp tool stores
+    sys.path[:] = [p for p in sys.path if "dummy_tools" not in p]
 
 
 # ---------------------------------------------------------------------------
@@ -418,3 +421,201 @@ class TestGetToolVersion:
         # Should be either a package version or an mtime string, not "unversioned"
         assert version is not None
         assert isinstance(version, str)
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEP 723 parsing
+# ---------------------------------------------------------------------------
+
+class TestParsePep723:
+
+    def test_parse_basic_dependencies(self, tmp_path):
+        from bioimageflow.tool_loader import _parse_pep723_dependencies
+
+        script = tmp_path / "workflow.py"
+        script.write_text(
+            '# /// script\n'
+            '# dependencies = [\n'
+            '#   "simpleitk-tools==1.0.0",\n'
+            '#   "cellpose-tools==2.3.1",\n'
+            '# ]\n'
+            '# ///\n'
+            '\n'
+            'print("hello")\n'
+        )
+        deps = _parse_pep723_dependencies(script)
+        assert deps == [("simpleitk-tools", "1.0.0"), ("cellpose-tools", "2.3.1")]
+
+    def test_parse_no_metadata_returns_empty(self, tmp_path):
+        from bioimageflow.tool_loader import _parse_pep723_dependencies
+
+        script = tmp_path / "no_meta.py"
+        script.write_text('print("hello")\n')
+        deps = _parse_pep723_dependencies(script)
+        assert deps == []
+
+    def test_parse_rejects_non_pinned_version(self, tmp_path):
+        from bioimageflow.tool_loader import _parse_pep723_dependencies
+
+        script = tmp_path / "flexible.py"
+        script.write_text(
+            '# /// script\n'
+            '# dependencies = [\n'
+            '#   "simpleitk-tools>=1.0",\n'
+            '# ]\n'
+            '# ///\n'
+        )
+        with pytest.raises(ValueError, match="exact.*=="):
+            _parse_pep723_dependencies(script)
+
+    def test_parse_ignores_non_tool_deps(self, tmp_path):
+        """Dependencies without == pins are allowed if they aren't tool
+        packages — but since we can't distinguish, we require == on all."""
+        from bioimageflow.tool_loader import _parse_pep723_dependencies
+
+        script = tmp_path / "mixed.py"
+        script.write_text(
+            '# /// script\n'
+            '# dependencies = [\n'
+            '#   "simpleitk-tools==1.0.0",\n'
+            '# ]\n'
+            '# requires-python = ">=3.11"\n'
+            '# ///\n'
+        )
+        deps = _parse_pep723_dependencies(script)
+        assert deps == [("simpleitk-tools", "1.0.0")]
+
+    def test_parse_with_extra_whitespace(self, tmp_path):
+        from bioimageflow.tool_loader import _parse_pep723_dependencies
+
+        script = tmp_path / "whitespace.py"
+        script.write_text(
+            '# /// script\n'
+            '#dependencies = [\n'
+            '#  "my-tools == 3.2.0" ,\n'
+            '#]\n'
+            '# ///\n'
+        )
+        deps = _parse_pep723_dependencies(script)
+        assert deps == [("my-tools", "3.2.0")]
+
+
+# ---------------------------------------------------------------------------
+# Tests: canonical name registration
+# ---------------------------------------------------------------------------
+
+class TestCanonicalNameRegistration:
+
+    def test_register_enables_normal_import(self, tool_store):
+        from bioimageflow.tool_loader import (
+            load_versioned_package, _register_canonical_names,
+        )
+
+        load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        _register_canonical_names("dummy_tools", "1.0.0")
+
+        # Now canonical names should be in sys.modules
+        assert "dummy_tools" in sys.modules
+        assert "dummy_tools.alpha" in sys.modules
+
+        # Normal import-style access should work
+        mod = sys.modules["dummy_tools"]
+        assert hasattr(mod, "AlphaTool")
+        assert mod.AlphaTool._bif_package_version == "1.0.0"
+
+    def test_unload_also_removes_canonical_names(self, tool_store):
+        from bioimageflow.tool_loader import (
+            load_versioned_package, _register_canonical_names,
+            unload_versioned_package,
+        )
+
+        load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        _register_canonical_names("dummy_tools", "1.0.0")
+        assert "dummy_tools" in sys.modules
+
+        unload_versioned_package("dummy_tools", "1.0.0")
+        assert "dummy_tools" not in sys.modules
+        assert "dummy_tools.alpha" not in sys.modules
+
+
+# ---------------------------------------------------------------------------
+# Tests: require_tool_packages
+# ---------------------------------------------------------------------------
+
+class TestRequireToolPackages:
+
+    def test_require_loads_and_registers(self, tool_store, tmp_path):
+        """require_tool_packages parses PEP 723, loads packages, and
+        registers canonical names so normal imports work."""
+        from bioimageflow.tool_loader import require_tool_packages
+
+        script = tmp_path / "workflow.py"
+        script.write_text(
+            '# /// script\n'
+            '# dependencies = [\n'
+            '#   "dummy-tools==1.0.0",\n'
+            '# ]\n'
+            '# ///\n'
+        )
+
+        require_tool_packages(script, store_path=tool_store)
+
+        # Canonical import should work
+        assert "dummy_tools" in sys.modules
+        mod = sys.modules["dummy_tools"]
+        assert hasattr(mod, "AlphaTool")
+        assert mod.AlphaTool._bif_package_version == "1.0.0"
+
+    def test_require_empty_script(self, tmp_path, tool_store):
+        """Script with no PEP 723 metadata loads nothing."""
+        from bioimageflow.tool_loader import require_tool_packages
+
+        script = tmp_path / "empty.py"
+        script.write_text('print("hello")\n')
+
+        require_tool_packages(script, store_path=tool_store)
+        # Should not crash, just do nothing
+
+    def test_require_missing_package_raises(self, tmp_path, tool_store):
+        """If package isn't in the store and can't be installed, raise."""
+        from bioimageflow.tool_loader import require_tool_packages
+
+        script = tmp_path / "missing.py"
+        script.write_text(
+            '# /// script\n'
+            '# dependencies = [\n'
+            '#   "nonexistent-pkg==9.9.9",\n'
+            '# ]\n'
+            '# ///\n'
+        )
+        with pytest.raises(FileNotFoundError):
+            require_tool_packages(script, store_path=tool_store, auto_install=False)
+
+
+# ---------------------------------------------------------------------------
+# Tests: sys.path for transitive dependencies
+# ---------------------------------------------------------------------------
+
+class TestTransitiveDeps:
+
+    def test_store_dir_added_to_sys_path(self, tool_store):
+        """The version's store directory is added to sys.path so transitive
+        deps installed alongside the package are importable."""
+        from bioimageflow.tool_loader import load_versioned_package
+
+        load_versioned_package("dummy_tools", "1.0.0", tool_store)
+
+        expected = str(tool_store / "dummy_tools" / "1.0.0")
+        assert expected in sys.path
+
+    def test_store_dir_removed_on_unload(self, tool_store):
+        from bioimageflow.tool_loader import (
+            load_versioned_package, unload_versioned_package,
+        )
+
+        load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        expected = str(tool_store / "dummy_tools" / "1.0.0")
+        assert expected in sys.path
+
+        unload_versioned_package("dummy_tools", "1.0.0")
+        assert expected not in sys.path

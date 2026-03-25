@@ -124,11 +124,13 @@ def data_dir(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _cleanup_scoped_modules():
-    """Remove scoped modules after each test."""
+    """Remove scoped and canonical dummy_tools modules after each test."""
     yield
-    to_remove = [k for k in sys.modules if k.startswith("dummy_tools__")]
+    to_remove = [k for k in sys.modules
+                 if k.startswith("dummy_tools__") or k.startswith("dummy_tools")]
     for k in to_remove:
         del sys.modules[k]
+    sys.path[:] = [p for p in sys.path if "dummy_tools" not in p]
 
 
 # ---------------------------------------------------------------------------

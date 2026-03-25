@@ -354,15 +354,19 @@ class Workflow:
         tool_instances: dict[str, Any] = {}
 
         # First pass: create tool/sub-workflow instances
+        from bioimageflow.tool_loader import (
+            load_versioned_package, resolve_tool_class,
+            _ensure_installed, _normalize_package_name,
+        )
+        store = _get_store_path()
+
         for node_data in data["nodes"]:
             if node_data.get("type") == "sub_workflow":
                 pkg = node_data.get("sub_workflow_package")
                 pkg_ver = node_data.get("sub_workflow_package_version")
                 if pkg and pkg_ver:
-                    from bioimageflow.tool_loader import (
-                        load_versioned_package, resolve_tool_class,
-                    )
-                    load_versioned_package(pkg, pkg_ver, _get_tool_store_path())
+                    _auto_install_if_missing(pkg, pkg_ver, store)
+                    load_versioned_package(pkg, pkg_ver, store)
                     sw_class = resolve_tool_class(
                         pkg, pkg_ver,
                         node_data["sub_workflow_module"],
@@ -376,10 +380,8 @@ class Workflow:
                 pkg = node_data.get("tool_package")
                 pkg_ver = node_data.get("tool_package_version")
                 if pkg and pkg_ver:
-                    from bioimageflow.tool_loader import (
-                        load_versioned_package, resolve_tool_class,
-                    )
-                    load_versioned_package(pkg, pkg_ver, _get_tool_store_path())
+                    _auto_install_if_missing(pkg, pkg_ver, store)
+                    load_versioned_package(pkg, pkg_ver, store)
                     tool_class = resolve_tool_class(
                         pkg, pkg_ver,
                         node_data["tool_module"],
@@ -455,10 +457,17 @@ class Workflow:
         return wf
 
 
-def _get_tool_store_path() -> Path:
-    """Return the tool store path, configurable via environment variable."""
-    import os
-    return Path(os.environ.get(
-        "BIOIMAGEFLOW_TOOL_STORE",
-        str(Path.home() / ".bioimageflow" / "tool_packages"),
-    ))
+def _get_store_path() -> Path:
+    from bioimageflow.tool_loader import _get_tool_store_path
+    return _get_tool_store_path()
+
+
+def _auto_install_if_missing(pkg: str, pkg_ver: str, store: Path) -> None:
+    """Install a versioned package into the tool store if missing."""
+    pkg_dir = store / pkg / pkg_ver / pkg
+    if pkg_dir.exists():
+        return
+    from bioimageflow.tool_loader import _ensure_installed
+    # Use the module name as the PyPI name (hyphens for underscores)
+    pypi_name = pkg.replace("_", "-")
+    _ensure_installed(pkg, pkg_ver, pypi_name, store)

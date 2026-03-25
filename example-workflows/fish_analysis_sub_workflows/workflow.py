@@ -54,14 +54,14 @@ _fish_dir = str(Path(__file__).resolve().parent.parent / "fish_analysis")
 if _fish_dir not in sys.path:
     sys.path.insert(0, _fish_dir)
 
-from tools import AverageSpotsPerNucleus, DownloadImages  # noqa: E402
+from tools import AverageSpotsPerNucleus, DownloadImages
 
 # Sub-workflows defined in this package
 _this_dir = str(Path(__file__).resolve().parent)
 if _this_dir not in sys.path:
     sys.path.insert(0, _this_dir)
 
-from sub_workflows import SpotAnalysis  # noqa: E402
+from sub_workflows import SpotAnalysis
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
