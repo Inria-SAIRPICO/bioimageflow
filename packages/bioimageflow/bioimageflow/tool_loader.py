@@ -9,7 +9,6 @@ self-contained shareable workflow scripts.
 import importlib.util
 import logging
 import re
-import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -360,7 +359,13 @@ def _ensure_installed(
     pypi_name: str,
     store_path: Path,
 ) -> None:
-    """Install a package into the tool store if not already present."""
+    """Install a package into the tool store if not already present.
+
+    Uses the shared Wetlands ``EnvironmentManager`` (see
+    :func:`~bioimageflow.env_manager.get_shared_environment_manager`) to
+    run ``pip install --target`` via pixi, so neither ``uv`` nor a
+    system pip is required on ``PATH``.
+    """
     pkg_dir = store_path / pkg_name / version / pkg_name
     if pkg_dir.exists():
         return
@@ -369,25 +374,30 @@ def _ensure_installed(
     target.mkdir(parents=True, exist_ok=True)
 
     logger.info("Installing %s==%s into tool store (%s)", pypi_name, version, target)
+
+    from bioimageflow.env_manager import get_shared_environment_manager
+
+    manager = get_shared_environment_manager()
+    executor = manager.command_executor
+    generator = manager.command_generator
+    conda_bin = manager.settings_manager.conda_bin
+
+    commands = generator.get_activate_conda_commands()
+    commands += [
+        f"{conda_bin} run pip install --target {target} "
+        f"{pypi_name}=={version}"
+    ]
+
     try:
-        subprocess.run(
-            ["uv", "pip", "install", "--target", str(target),
-             f"{pypi_name}=={version}"],
-            check=True,
-            capture_output=True,
-            text=True,
+        output = executor.execute_commands_and_get_output(
+            commands, exit_if_command_error=True,
         )
-    except FileNotFoundError:
-        raise RuntimeError(
-            "Could not find 'uv' on PATH. Install it with: "
-            "curl -LsSf https://astral.sh/uv/install.sh | sh"
-        )
-    except subprocess.CalledProcessError as exc:
-        # Clean up the empty directory on failure
+    except Exception as exc:
         import shutil
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
-            f"Failed to install {pypi_name}=={version}:\n{exc.stderr}"
+            f"Failed to install {pypi_name}=={version} into tool store.\n"
+            f"{exc}"
         ) from exc
 
     # Verify the package appeared
@@ -416,6 +426,10 @@ def require_tool_packages(
     statements work for every dependency declared in the script's
     PEP 723 ``# /// script`` block.
 
+    Wetlands configuration (pixi path, etc.) is set once via
+    :func:`~bioimageflow.env_manager.configure_wetlands` — the same
+    configuration is shared with the execution engine.
+
     Parameters
     ----------
     script_path
@@ -426,7 +440,7 @@ def require_tool_packages(
         ``~/.bioimageflow/tool_packages/`` (or ``$BIOIMAGEFLOW_TOOL_STORE``).
     auto_install
         If ``True`` (default), missing packages are installed
-        automatically via ``uv pip install --target``.  Set to ``False``
+        automatically via Wetlands' pixi.  Set to ``False``
         to raise ``FileNotFoundError`` instead.
     """
     if store_path is None:

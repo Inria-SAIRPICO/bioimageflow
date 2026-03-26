@@ -1,4 +1,10 @@
-"""Orchestrator-side Wetlands environment management."""
+"""Orchestrator-side Wetlands environment management.
+
+Provides a single shared ``EnvironmentManager`` instance used by both
+the execution engine (tool dispatch) and the tool loader (package install).
+Call :func:`configure_wetlands` once at the top of your script to set paths;
+everything else picks up the same instance automatically.
+"""
 
 import inspect
 import logging
@@ -12,6 +18,62 @@ from wetlands._internal.dependency_manager import Dependencies
 import threading
 
 logger = logging.getLogger("bioimageflow")
+
+# ── Shared EnvironmentManager singleton ──────────────────────────────
+
+_shared_manager: Any = None
+_shared_manager_lock = threading.Lock()
+_wetlands_config: dict[str, Any] = {}
+
+
+def configure_wetlands(**config: Any) -> None:
+    """Set Wetlands configuration for the entire process.
+
+    Must be called **before** any tool loading or workflow execution.
+    Subsequent calls are ignored with a warning if the manager is
+    already initialized.
+
+    Common parameters:
+        wetlands_instance_path: Path for Wetlands state (logs, pixi).
+        conda_path: Path to the pixi or micromamba installation.
+        main_conda_environment_path: Main conda env for dep checking.
+        debug: Enable debugpy in worker processes.
+    """
+    global _wetlands_config, _shared_manager
+    with _shared_manager_lock:
+        if _shared_manager is not None:
+            logger.warning(
+                "Wetlands already initialized; ignoring configure_wetlands() call. "
+                "Call configure_wetlands() before require_tool_packages() or Workflow.compute()."
+            )
+            return
+        _wetlands_config = dict(config)
+
+
+def get_shared_environment_manager(**config: Any) -> Any:
+    """Return the process-wide Wetlands ``EnvironmentManager``.
+
+    On first call, creates the manager using configuration from
+    :func:`configure_wetlands` (merged with any *config* kwargs passed
+    here).  Subsequent calls return the cached instance.
+    """
+    global _shared_manager
+    if _shared_manager is not None:
+        return _shared_manager
+    with _shared_manager_lock:
+        if _shared_manager is not None:
+            return _shared_manager
+        from wetlands.environment_manager import EnvironmentManager
+        merged = {**_wetlands_config, **config}
+        _shared_manager = EnvironmentManager(**merged)
+        return _shared_manager
+
+
+def _reset_shared_manager() -> None:
+    """Reset the shared manager (for testing only)."""
+    global _shared_manager, _wetlands_config
+    _shared_manager = None
+    _wetlands_config = {}
 
 
 def _find_worker_file() -> str:
@@ -41,15 +103,13 @@ class WetlandsEnvManager:
         main_conda_environment_path: str | None = None,
         **kwargs: Any,
     ) -> None:
-        from wetlands.environment_manager import EnvironmentManager
-
         kwargs.update({
             "wetlands_instance_path": wetlands_instance_path,
             "conda_path": conda_path,
             "main_conda_environment_path": main_conda_environment_path,
         })
 
-        self._manager = EnvironmentManager(**kwargs)
+        self._manager = get_shared_environment_manager(**kwargs)
         self._envs: dict[str, Any] = {}            # name -> wetlands env
         self._env_hashes: dict[str, str] = {}       # name -> dep hash
         self._worker_proxies: dict[str, Any] = {}   # name -> proxy to worker module

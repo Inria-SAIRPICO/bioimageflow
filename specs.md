@@ -972,7 +972,7 @@ Tool packages are installed in a **tool store** — a directory under `~/.bioima
         ...
 ```
 
-Packages are installed with `uv pip install --target <dir> simpleitk-tools==X.Y.Z`. The tool store path can be overridden via the `BIOIMAGEFLOW_TOOL_STORE` environment variable.
+Packages are installed via `pip install --target <dir> simpleitk-tools==X.Y.Z`, executed through Wetlands' pixi installation (no separate `pip` or `uv` on `PATH` required). The tool store path can be overridden via the `BIOIMAGEFLOW_TOOL_STORE` environment variable.
 
 #### Versioned Loading
 
@@ -1031,7 +1031,56 @@ The `get_tool_version()` function (used by the cache system) checks `_bif_packag
 
 #### Cleanup
 
-`unload_versioned_package(package, version)` removes all `sys.modules` entries for a scoped package version. After unloading, `load_versioned_package` for the same version loads fresh module and class objects.
+`unload_versioned_package(package, version)` removes all `sys.modules` entries for a scoped package version, including any canonical name aliases created by `require_tool_packages`. It also removes the corresponding `sys.path` entry for transitive dependencies. After unloading, `load_versioned_package` for the same version loads fresh module and class objects.
+
+#### Transitive Dependencies
+
+When a versioned package is loaded, its version directory (e.g., `~/.bioimageflow/tool_packages/simpleitk_tools/1.0.0/`) is prepended to `sys.path`. This makes third-party libraries installed alongside the package (via `uv pip install --target`) importable by main-process code — important for `DataFrameTool` classes or `__init__.py` files that import non-standard libraries at module level. The entry is removed on `unload_versioned_package`.
+
+#### Shareable Workflow Scripts (PEP 723)
+
+Workflow scripts can declare their tool dependencies using [PEP 723](https://peps.python.org/pep-0723/) inline script metadata. This makes scripts fully self-contained and shareable — a recipient can run the file directly, and missing packages are installed automatically.
+
+```python
+# /// script
+# dependencies = [
+#   "simpleitk-tools==1.0.0",
+#   "cellpose-tools==2.3.1",
+# ]
+# ///
+
+from bioimageflow import Workflow, require_tool_packages, configure_wetlands
+# Optionally configure wetlands
+configure_wetlands(wetlands_instance_path="./wetlands")
+
+# Parse PEP 723, install missing packages into tool store, load all
+require_tool_packages(__file__)
+
+# Normal imports work — no scoped names needed
+from simpleitk_tools import GaussianSmooth
+from cellpose_tools import CellposeSegmenter
+
+with Workflow(storage_path="./results") as wf:
+    raw = FileLoader()(path="./data")
+    smoothed = GaussianSmooth()(input_image=raw["path"], sigma=2.0)
+    cells = CellposeSegmenter()(input_image=smoothed["output"])
+    wf.compute(cells)
+```
+
+`require_tool_packages(script_path, *, store_path=None, auto_install=True)` does the following:
+
+1. **Parses PEP 723 metadata** from the given script file. Extracts the `dependencies` list from the `# /// script` TOML block.
+2. **Requires exact version pins** (`==`). Flexible specifiers like `>=1.0` or `~=1.0` are rejected with a `ValueError` — reproducibility demands pinned versions.
+3. **Normalizes package names**: converts PyPI names to Python module names (`simpleitk-tools` → `simpleitk_tools`).
+4. **Auto-installs missing packages** into the tool store via `pip install --target`, executed through Wetlands' pixi (so no separate `pip` or `uv` needs to be on `PATH`). Set `auto_install=False` to raise `FileNotFoundError` instead.
+5. **Loads each package** via `load_versioned_package()`.
+6. **Registers canonical names** in `sys.modules`: copies every scoped entry (e.g., `simpleitk_tools__1_0_0.gaussian`) to its canonical equivalent (`simpleitk_tools.gaussian`). This enables standard `from simpleitk_tools import GaussianSmooth` syntax.
+
+This is safe because PEP 723 declares exactly one version per package — there is no ambiguity about which version to bind to the canonical name. For the advanced case of loading two versions of the same package simultaneously, use `load_versioned_package()` directly.
+
+#### Auto-Install on JSON Load
+
+`Workflow.load()` also auto-installs missing versioned packages. When a serialized workflow references `tool_package` and `tool_package_version`, the loader checks the tool store and installs via Wetlands' pixi if the package is absent. This means both `.py` scripts and `.json` workflow files are self-resolving — the user only needs `bioimageflow` (which bundles Wetlands) installed.
 
 ---
 
@@ -1823,8 +1872,9 @@ from bioimageflow import (
     SubWorkflow,
     # Built-in merge tools
     InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect,
-    # Versioned tool loading
+    # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,
+    require_tool_packages,
 )
 from bioimageflow.node import Node, ColumnRef
 from bioimageflow.engine import DisabledNodeError

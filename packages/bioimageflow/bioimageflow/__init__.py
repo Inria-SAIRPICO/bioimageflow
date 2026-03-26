@@ -13,3 +13,4 @@ from bioimageflow.tool_loader import (
     get_tool_package_info,
     require_tool_packages,
 )
+from bioimageflow.env_manager import configure_wetlands
