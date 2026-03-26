@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -23,6 +24,7 @@ class ExtractChannel(ProcessingTool):
     """
     name = "extract_channel"
     documentation = "Extract a single channel (by index) from a multi-channel image."
+    category = Category.IMAGE_PROCESSING
     tags = ["preprocessing", "channel"]
     environment = GENERAL_ENV
 

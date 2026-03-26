@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     EnvironmentSpec,
     GUIMeta,
     ImageSpec,
@@ -35,6 +36,7 @@ class Atlas(ProcessingTool):
         "automatically selected and the detection threshold adapts to "
         "the local image dynamics."
     )
+    category = Category.SPOT_DETECTION
     tags = ["detection", "spots"]
     environment = atlas_env
 

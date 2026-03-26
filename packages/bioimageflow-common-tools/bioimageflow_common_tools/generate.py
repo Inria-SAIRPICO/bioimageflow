@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from bioimageflow_core import IOModel
+from bioimageflow_core import Category, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -13,6 +13,7 @@ class Generate(DataFrameTool):
         "Creates a DataFrame with one column from a list of values. "
         "Useful for parameter value generation in combinatorial workflows."
     )
+    category = Category.UTILITIES
     tags = ["dataframe", "generator"]
 
     class Inputs(IOModel):

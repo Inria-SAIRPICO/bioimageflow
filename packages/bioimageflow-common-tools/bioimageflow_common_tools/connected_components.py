@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     EnvironmentSpec,
     ImageSpec,
     IOModel,
@@ -31,6 +32,7 @@ class ConnectedComponents(ProcessingTool):
         "Convert a binary image into a labeled image by assigning "
         "a unique identifier to each connected component."
     )
+    category = Category.SEGMENTATION
     tags = ["labeling", "segmentation"]
     environment = simpleitk_env
 

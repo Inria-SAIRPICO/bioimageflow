@@ -192,7 +192,7 @@ BioImageFlow provides two kinds of tools, each with a single execution context:
 - **`ProcessingTool`** — runs computation in an isolated Wetlands environment. Every method the tool author implements (`process_row`, `process_batch`) executes in the worker.
 - **`DataFrameTool`** — transforms DataFrames in the main process. The single `transform` method has full access to Pandas.
 
-Both inherit from `BaseTool`, which provides shared identity attributes (`name`, `tags`, `Inputs`) and graph wiring via `__call__`.
+Both inherit from `BaseTool`, which provides shared identity attributes (`name`, `category`, `tags`, `Inputs`) and graph wiring via `__call__`.
 
 ### 3.1 EnvironmentSpec
 
@@ -282,7 +282,49 @@ class ExtractChannel(ProcessingTool):
         ...
 ```
 
-### 3.2 BaseTool
+### 3.2 Category
+
+*Module: `bioimageflow_core.tool`*
+
+`Category` is a `str` enum that classifies tools into high-level functional areas. It is optional — tools that don't fit a predefined category can leave it as `None`. Unlike `tags` (free-form, multiple per tool), `category` assigns exactly one canonical function to a tool, making it suitable for UI grouping and filtering.
+
+```python
+class Category(str, Enum):
+    """High-level functional category for a tool."""
+    CONVERSION = "conversion"
+    IMAGE_PROCESSING = "image_processing"
+    SEGMENTATION = "segmentation"
+    REGISTRATION = "registration"
+    SPECTRAL_ANALYSIS = "spectral_analysis"
+    TRACKING = "tracking"
+    MEASUREMENT = "measurement"
+    SPOT_DETECTION = "spot_detection"
+    DECONVOLUTION = "deconvolution"
+    RESTORATION = "restoration"
+    COLOCALIZATION = "colocalization"
+    STITCHING = "stitching"
+    CLASSIFICATION = "classification"
+    UTILITIES = "utilities"
+```
+
+| Value                | Description                                      |
+|---------------------|--------------------------------------------------|
+| `CONVERSION`         | Format conversion (file types, bit depth, etc.)  |
+| `IMAGE_PROCESSING`   | General image processing (filtering, transforms) |
+| `SEGMENTATION`       | Object / region segmentation                     |
+| `REGISTRATION`       | Spatial alignment and registration               |
+| `SPECTRAL_ANALYSIS`  | Spectral unmixing, channel analysis              |
+| `TRACKING`           | Object tracking across time                      |
+| `MEASUREMENT`        | Measurement and quantification                   |
+| `SPOT_DETECTION`     | Spot / puncta detection                          |
+| `DECONVOLUTION`      | Image deconvolution                              |
+| `RESTORATION`        | Restoration and super-resolution                 |
+| `COLOCALIZATION`     | Colocalization analysis                          |
+| `STITCHING`          | Image stitching / montage assembly               |
+| `CLASSIFICATION`     | Image or object classification                   |
+| `UTILITIES`          | General-purpose utilities                        |
+
+### 3.3 BaseTool
 
 *Module: `bioimageflow_core.tool`*
 
@@ -299,6 +341,7 @@ class BaseTool(ABC):
     """
     name: str                       # Unique identifier for the tool
     documentation: str = ""         # Human-readable description
+    category: Category | None = None  # High-level functional category
     tags: list[str] = []            # Searchable tags
 
     class Inputs(IOModel): ...      # Declared by each concrete tool
@@ -306,7 +349,7 @@ class BaseTool(ABC):
 
 `__call__` is defined on each subclass (`ProcessingTool`, `DataFrameTool`) rather than on `BaseTool`, because the calling conventions differ: `ProcessingTool` accepts only keyword arguments (column references, node shorthand, or constants); `DataFrameTool` accepts positional arguments (upstream nodes) and keyword arguments (`Inputs` parameters). Both use a lazy import guard so that the method exists in worker environments but raises a clear error if accidentally invoked there (see below).
 
-### 3.3 ProcessingTool
+### 3.4 ProcessingTool
 
 *Module: `bioimageflow_core.tool`*
 
@@ -373,11 +416,12 @@ Concrete `ProcessingTool` subclasses must override at least one of `process_row`
 
 **Direct tool definition:**
 ```python
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments
+from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, Category
 
 class MySegmenter(ProcessingTool):
     name = "my_segmenter"
     documentation = "Segments cells."
+    category = Category.SEGMENTATION
     tags = ["segmentation"]
     environment = cellpose_env
 
@@ -454,6 +498,7 @@ class SomeOtherTool(ProcessingTool):
 |----------------|--------------------|----------------------------------------------------|
 | `name`          | `str`              | Unique identifier for the tool                     |
 | `documentation` | `str`              | Human-readable description                         |
+| `category`      | `Category \| None` | High-level functional category (optional)          |
 | `tags`          | `list[str]`        | Searchable tags                                    |
 | `environment`   | `EnvironmentSpec`  | Wetlands environment specification (shared object) |
 | `resources`     | `ResourceSpec`     | Optional resource requirements (GPU, memory, concurrency). See [Section 10](#10-resource-constraints). |
@@ -470,7 +515,7 @@ class MyTool(ProcessingTool):
         result = self._model.predict(...)
 ```
 
-### 3.4 DataFrameTool
+### 3.5 DataFrameTool
 
 *Module: `bioimageflow.dataframe_tool`*
 
@@ -577,6 +622,7 @@ A merge-only tool overrides `merge_dataframes` and keeps the default `transform`
 |----------------|-----------------------------------------|------------------------------------------------|
 | `name`          | `str`                                   | Unique identifier for the tool                 |
 | `documentation` | `str`                                   | Human-readable description                     |
+| `category`      | `Category \| None`                      | High-level functional category (optional)      |
 | `tags`          | `list[str]`                             | Searchable tags                                |
 | `Outputs`       | `IOModel subclass \| Passthrough subclass \| —` | Optional output schema for construction-time validation (see above) |
 
@@ -1943,7 +1989,7 @@ from bioimageflow_core import (
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
     # Tool
-    BaseTool, ProcessingTool, IOModel, GUIMeta,
+    BaseTool, ProcessingTool, IOModel, Category, GUIMeta,
     # Arguments
     Arguments,
 )

@@ -78,6 +78,8 @@ class NodeStep:
         self._executed = False
         self._df: pd.DataFrame | None = None
         self._sig_hash: str | None = None
+        self._cache_checked = False
+        self._cached_df: pd.DataFrame | None = None
 
     @property
     def skipped(self) -> bool:
@@ -101,13 +103,28 @@ class NodeStep:
             return self._node.tool.environment
         return None
 
+    @property
+    def cached(self) -> bool:
+        """True if the node's result is already in the cache.
+
+        The first access triggers a signature-hash computation and cache
+        lookup; subsequent accesses reuse the result.
+        """
+        if self._skipped:
+            return False
+        self._ensure_cache_checked()
+        return self._cached_df is not None
+
     def prepare(self) -> None:
         """Launch the tool's Wetlands environment (ProcessingTool only).
 
-        No-op for DataFrameTools or when Wetlands is disabled.  After this
+        No-op for DataFrameTools, when Wetlands is disabled, or when the
+        node's result is already cached (no environment needed).  After this
         call the environment is running and a debugger can be attached to it
         before :meth:`execute` triggers the actual computation.
         """
+        if self.cached:
+            return
         if (
             isinstance(self._node.tool, ProcessingTool)
             and self._engine._env_manager is not None
@@ -118,6 +135,9 @@ class NodeStep:
         """Execute the node and return its output DataFrame.
 
         Idempotent — calling more than once returns the cached result.
+        If the cache was already checked (via :attr:`cached` or
+        :meth:`prepare`) and a hit was found, returns it directly
+        without re-entering the engine.
         Raises :class:`DisabledNodeError` if the node is skipped.
         """
         if self._skipped:
@@ -127,6 +147,12 @@ class NodeStep:
         if self._executed:
             assert self._df is not None
             return self._df
+        # Reuse cache result if already checked by prepare() / cached
+        self._ensure_cache_checked()
+        if self._cached_df is not None:
+            self._df = self._cached_df
+            self._executed = True
+            return self._df
         df, sig_hash = self._engine._execute_node(
             self._node, self._results, self._sig_hashes, self._workflow,
         )
@@ -134,6 +160,18 @@ class NodeStep:
         self._sig_hash = sig_hash
         self._executed = True
         return df
+
+    def _ensure_cache_checked(self) -> None:
+        """Compute sig_hash and check the cache (at most once)."""
+        if self._cache_checked:
+            return
+        self._cache_checked = True
+        cached_df, sig_hash = self._engine._check_node_cache(
+            self._node, self._results, self._sig_hashes, self._workflow,
+        )
+        self._cached_df = cached_df
+        if sig_hash is not None:
+            self._sig_hash = sig_hash
 
 
 class SequentialEngine:
@@ -382,6 +420,71 @@ class SequentialEngine:
                 f"Cycle detected in the DAG. The workflow graph must be acyclic. "
                 f"Cycle info: {exc.args[1]}"
             ) from exc
+
+    # ── Cache pre-check ─────────────────────────────────────────────────
+
+    def _check_node_cache(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+    ) -> tuple[pd.DataFrame | None, str | None]:
+        """Check whether a node's result is already cached.
+
+        Returns ``(cached_df, sig_hash)`` if a cache hit is found, or
+        ``(None, sig_hash)`` if computable but not cached.  Returns
+        ``(None, None)`` for SubWorkflowNodes (not cacheable at this level).
+        """
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
+        if isinstance(node, SubWorkflowNode):
+            return None, None
+
+        # ── Compute signature hash ──
+        if isinstance(node.tool, DataFrameTool):
+            _arguments, args_dict = self._resolve_constant_arguments(node)
+            upstream_hashes = {
+                arg.name: sig_hashes[arg]
+                for arg in node._args
+                if isinstance(arg, Node) and arg in sig_hashes
+            }
+            sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_hashes, workflow)
+        elif isinstance(node.tool, ProcessingTool):
+            if not node._column_bindings:
+                env_hash = compute_env_hash(node.tool.environment.dependencies)
+                sig_hash = self._compute_sig_hash(
+                    node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
+                )
+            else:
+                input_annotations = node.tool.Inputs._get_all_annotations()
+                upstream_nodes = {
+                    cr.node.name: cr.node
+                    for cr in node._column_bindings.values()
+                }
+                sig_hash = self._compute_processing_sig_hash(
+                    node, input_annotations, upstream_nodes, sig_hashes, workflow,
+                )
+        else:
+            return None, None
+
+        # ── Cache lookup ──
+        node_dir = get_node_dir(workflow.storage_path, node.name)
+        cached = cache_lookup(node_dir, sig_hash)
+        if not cached:
+            return None, sig_hash
+
+        df = self._coerce_numeric_columns(cache_load(cached))
+        # Restore shared arrays for ProcessingTools with column bindings
+        if (
+            isinstance(node.tool, ProcessingTool)
+            and node._column_bindings
+        ):
+            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
+            if cached_hash_dir is not None:
+                df = self._restore_shared_arrays(df, cached_hash_dir)
+        return df, sig_hash
 
     # ── Node dispatch ──────────────────────────────────────────────────
 

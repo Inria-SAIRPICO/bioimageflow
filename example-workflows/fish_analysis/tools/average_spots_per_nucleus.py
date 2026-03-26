@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from bioimageflow_core import IOModel
+from bioimageflow_core import Category, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -20,6 +20,7 @@ class AverageSpotsPerNucleus(DataFrameTool):
         "Compute the average number of FOLS2 and CSF1R spots per nucleus "
         "from label overlap data."
     )
+    category = Category.MEASUREMENT
     tags = ["statistics", "aggregation", "fish"]
 
     class Inputs(IOModel):

@@ -4,13 +4,14 @@ from typing import Any
 
 import pandas as pd
 
-from bioimageflow_core.tool import IOModel
+from bioimageflow_core.tool import Category, IOModel
 from bioimageflow.dataframe_tool import DataFrameTool, Passthrough
 
 
 class InnerJoin(DataFrameTool):
     """Inner join upstream DataFrames on index (default merge behavior)."""
     name = "inner_join"
+    category = Category.UTILITIES
 
     class Inputs(IOModel):
         pass
@@ -20,6 +21,7 @@ class InnerJoin(DataFrameTool):
 class CrossJoin(DataFrameTool):
     """Cross join for combinatorial expansion."""
     name = "cross_join"
+    category = Category.UTILITIES
 
     class Inputs(IOModel):
         suffixes: tuple[str, str] = ("_left", "_right")
@@ -41,6 +43,7 @@ class CrossJoin(DataFrameTool):
 class JoinOnColumn(DataFrameTool):
     """Join upstream DataFrames on a named column."""
     name = "join_on_column"
+    category = Category.UTILITIES
 
     class Inputs(IOModel):
         join_column: str
@@ -66,6 +69,7 @@ class JoinOnColumn(DataFrameTool):
 class Concat(DataFrameTool):
     """Concatenate DataFrames vertically."""
     name = "concat"
+    category = Category.UTILITIES
 
     class Inputs(IOModel):
         pass
@@ -83,6 +87,7 @@ class Concat(DataFrameTool):
 class Collect(DataFrameTool):
     """Gather columns from multiple ancestor nodes into one DataFrame."""
     name = "collect"
+    category = Category.UTILITIES
 
     class Outputs(Passthrough):
         pass

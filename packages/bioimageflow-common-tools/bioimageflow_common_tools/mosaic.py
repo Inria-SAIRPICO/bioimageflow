@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -26,6 +27,7 @@ class Mosaic(ProcessingTool):
         "Aggregates images into a single mosaic image arranged in a grid. "
         "Each input row receives the mosaic path and the total image count."
     )
+    category = Category.UTILITIES
     tags = ["visualization", "aggregation"]
     environment = GENERAL_ENV
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from bioimageflow_core import IOModel
+from bioimageflow_core import Category, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -14,6 +14,7 @@ class Files(DataFrameTool):
         "List files in a directory matching a glob pattern. "
         "Produces a DataFrame with 'path' and 'filename' columns."
     )
+    category = Category.UTILITIES
     tags = ["source", "loader"]
 
     class Inputs(IOModel):

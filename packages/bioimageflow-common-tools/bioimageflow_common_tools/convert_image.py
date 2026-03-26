@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     EnvironmentSpec,
     GUIMeta,
     ImageSpec,
@@ -42,6 +43,7 @@ class ConvertImage(ProcessingTool):
         "Convert image file formats using bioio. The output format is "
         "determined by the output file extension."
     )
+    category = Category.CONVERSION
     tags = ["format conversion", "bioio"]
     environment = bioio_env
 

@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     EnvironmentSpec,
     GUIMeta,
     ImageSpec,
@@ -31,6 +32,7 @@ class CellposeSAM(ProcessingTool):
         "Segment cells or nuclei using the Cellpose algorithm. "
         "Produces a labeled mask image."
     )
+    category = Category.SEGMENTATION
     tags = ["segmentation", "cellpose", "deep learning"]
     environment = cellpose_env
 

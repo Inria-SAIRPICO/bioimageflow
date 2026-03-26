@@ -1,6 +1,25 @@
 """Tool base classes — zero external dependencies."""
 
+from enum import Enum
 from typing import Any, ClassVar
+
+
+class Category(str, Enum):
+    """High-level functional category for a tool."""
+    CONVERSION = "conversion"
+    IMAGE_PROCESSING = "image_processing"
+    SEGMENTATION = "segmentation"
+    REGISTRATION = "registration"
+    SPECTRAL_ANALYSIS = "spectral_analysis"
+    TRACKING = "tracking"
+    MEASUREMENT = "measurement"
+    SPOT_DETECTION = "spot_detection"
+    DECONVOLUTION = "deconvolution"
+    RESTORATION = "restoration"
+    COLOCALIZATION = "colocalization"
+    STITCHING = "stitching"
+    CLASSIFICATION = "classification"
+    UTILITIES = "utilities"
 
 
 class IOModel:
@@ -39,6 +58,7 @@ class BaseTool:
     """
     name: ClassVar[str]
     documentation: ClassVar[str] = ""
+    category: ClassVar[Category | None] = None
     tags: ClassVar[list[str]] = []
     Inputs: ClassVar[type[IOModel]] = IOModel
     Outputs: ClassVar[type[IOModel] | None] = None

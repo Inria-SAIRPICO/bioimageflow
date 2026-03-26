@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     GENERAL_ENV,
     ImageSpec,
     IOModel,
@@ -26,6 +27,7 @@ class LabelOverlaps(ProcessingTool):
         "Compute the spatial overlap between two labeled images. "
         "Outputs a CSV table of (reference_label, spot_label, overlap_count) tuples."
     )
+    category = Category.MEASUREMENT
     tags = ["measurement", "spatial correlation"]
     environment = GENERAL_ENV
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from bioimageflow_core import (
     Arguments,
+    Category,
     EnvironmentSpec,
     IOModel,
     ProcessingTool,
@@ -24,6 +25,7 @@ class DownloadImages(ProcessingTool):
     """
     name = "download_images"
     documentation = "Download images from URLs to a local directory."
+    category = Category.UTILITIES
     tags = ["source", "download"]
     environment = download_env
 
