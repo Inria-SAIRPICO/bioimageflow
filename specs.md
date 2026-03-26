@@ -950,6 +950,24 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 
 Tools are distributed as standard Python packages. The package version is used in the signature hash for caching (see [Section 6.1](#61-signature-hash)). When a tool's package version changes, cached results for that tool are automatically invalidated.
 
+#### Package Structure Requirements
+
+Tool packages **must use relative imports** for all intra-package references. This is critical for the versioned loading mechanism to work correctly:
+
+```python
+# Correct — relative imports
+from .gaussian import GaussianSmooth
+from .utils.filters import apply_filter
+
+# Wrong — absolute imports break versioned loading
+from simpleitk_tools.gaussian import GaussianSmooth
+from simpleitk_tools.utils.filters import apply_filter
+```
+
+**Why:** When multiple versions are loaded, each lives under a scoped namespace (e.g., `simpleitk_tools__1_0_0`). Relative imports resolve within the correct scoped namespace. Absolute imports bypass the scoping and resolve to whichever version was loaded first (or to the canonical name if registered), silently mixing code from different versions.
+
+This applies everywhere: `__init__.py`, tool modules, SubWorkflow `build()` methods, and utility modules.
+
 #### Tool Store
 
 Tool packages are installed in a **tool store** — a directory under `~/.bioimageflow/tool_packages/` that holds versioned copies of each package. Multiple versions of the same package coexist as distinct directory trees:
