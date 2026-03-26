@@ -72,6 +72,7 @@ class CellposeSAM(ProcessingTool):
 
         img = iio.imread(str(arguments.input_image))
 
+        print(f"Performing Cellpose segmentation (model={arguments.model_type})...")
         model = models.Cellpose(model_type=arguments.model_type)
         diameter = arguments.diameter if arguments.diameter > 0 else None
         masks, _, _, _ = model.eval(
@@ -82,6 +83,7 @@ class CellposeSAM(ProcessingTool):
         )
 
         cell_count = int(masks.max())
+        print(f"Cellpose: {cell_count} cells detected")
 
         mask_path = Path(arguments.mask)
         mask_path.parent.mkdir(parents=True, exist_ok=True)

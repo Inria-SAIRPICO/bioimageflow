@@ -33,6 +33,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bioimageflow")
 
 
+def _configure_default_logging() -> None:
+    """Attach a StreamHandler to the bioimageflow and wetlands loggers.
+
+    Called once at engine init so that worker output and engine messages
+    are visible on stdout by default.  No-op if handlers already exist.
+    """
+    fmt = logging.Formatter("%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
+
+    for name in ("bioimageflow", "wetlands"):
+        lg = logging.getLogger(name)
+        if not lg.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(fmt)
+            lg.addHandler(handler)
+            lg.setLevel(logging.INFO)
+
+
 def _to_python(val: Any) -> Any:
     """Convert numpy scalars to native Python types.
 
@@ -182,6 +199,7 @@ class SequentialEngine:
         use_wetlands: bool = False,
         wetlands_config: dict[str, Any] | None = None,
     ) -> None:
+        _configure_default_logging()
         self._use_wetlands = use_wetlands
         self._env_manager = None
         if use_wetlands:

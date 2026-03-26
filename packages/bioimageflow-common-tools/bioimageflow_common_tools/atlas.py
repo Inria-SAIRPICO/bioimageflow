@@ -81,6 +81,8 @@ class Atlas(ProcessingTool):
         if not blobs_file.exists():
             subprocess.run(["blobsref", "-o", str(blobs_file)], check=True)
 
+        print(f"Running Atlas spot detection on {input_path.name}...")
+
         command = [
             "atlas",
             "-ref", str(blobs_file),
@@ -93,5 +95,6 @@ class Atlas(ProcessingTool):
             command.append("-v")
 
         subprocess.run(command, check=True)
+        print(f"Atlas: detection complete -> {output_path.name}")
 
         return self.Outputs(output_image=output_path)

@@ -54,6 +54,7 @@ class LabelOverlaps(ProcessingTool):
         import numpy as np
         import imageio.v3 as iio
 
+        print(f"Computing label overlaps...")
         labels = iio.imread(str(arguments.label_image))
         reference = iio.imread(str(arguments.reference_image))
 
@@ -74,5 +75,6 @@ class LabelOverlaps(ProcessingTool):
         for (ref_lbl, spot_lbl), count in zip(pairs, counts):
             lines.append(f"{int(ref_lbl)},{int(spot_lbl)},{int(count)}")
         output_path.write_text("\n".join(lines) + "\n")
+        print(f"Label overlaps: {len(pairs)} pairs")
 
         return self.Outputs(overlaps=output_path)

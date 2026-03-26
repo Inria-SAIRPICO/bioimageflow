@@ -70,6 +70,7 @@ class ConvertImage(ProcessingTool):
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        print(f"Converting {input_path.name}...")
         image = BioImage(input_path)
 
         if arguments.scene is not None:
