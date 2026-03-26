@@ -38,7 +38,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ├── environment.py  # EnvironmentSpec      ├── merge.py        # Built-in merge DataFrameTools
 ├── tool.py         # BaseTool,            ├── resolution.py   # Column resolver
 │                   #   ProcessingTool,    ├── template.py     # Output templating
-│                   #   IOModel            ├── cache.py        # Hash & cache
+│                   #   IOModel, GUIMeta   ├── cache.py        # Hash & cache
 ├── arguments.py    # Arguments            ├── storage.py      # File management
 ├── io.py           # I/O dispatch (*)     ├── node.py         # Node, ColumnRef
 └── shm.py          # Shared memory (*)    ├── engine.py       # Execution engines
@@ -790,6 +790,73 @@ def build_pydantic_model(tool_model_cls):
         fields[name] = (annotation, default)
     return create_model(tool_model_cls.__name__, **fields)
 ```
+
+#### GUIMeta — Field-Level Metadata for GUI Frontends
+
+*Module: `bioimageflow_core.tool`*
+
+`Inputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`.
+
+```python
+@dataclass(frozen=True)
+class GUIMeta:
+    """
+    GUI hints for an Inputs field.
+    Attached via Annotated — invisible to runtime logic, read by frontends.
+    """
+    connectable: bool = True   # Can this field be wired to an upstream column?
+    min: float | int | None = None   # Minimum value (numeric fields)
+    max: float | int | None = None   # Maximum value (numeric fields)
+    step: float | int | None = None  # Step increment (numeric fields)
+```
+
+**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: True` with no numeric constraints. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable with no min/max/step.
+
+**Usage:**
+
+```python
+from typing import Annotated
+from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta
+
+class CellposeSegmenter(ProcessingTool):
+    name = "cellpose_segmenter"
+    environment = cellpose_env
+
+    class Inputs(IOModel):
+        input_image: ImagePath(semantics=Semantic.INTENSITY)
+        diameter: Annotated[float, GUIMeta(min=0.0, max=500.0, step=0.5)] = 30.0
+        model_type: Annotated[str, GUIMeta(connectable=False)] = "cyto3"
+
+    class Outputs(IOModel):
+        mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
+        cell_count: int
+
+    def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
+        ...
+```
+
+In this example:
+- `input_image` has no `GUIMeta` → defaults to `connectable: True`, no numeric constraints.
+- `diameter` is connectable (default) with a slider range of 0–500 and step 0.5.
+- `model_type` is **not connectable** — the GUI renders it as a text field or dropdown, never as an input port.
+
+**Extracting GUIMeta:** Frontends and introspection utilities use `typing.get_args()` to retrieve `GUIMeta` from `Annotated` types:
+
+```python
+import typing
+
+def get_gui_meta(annotation) -> GUIMeta | None:
+    """Extract GUIMeta from an Annotated type, if present."""
+    if typing.get_origin(annotation) is typing.Annotated:
+        for arg in typing.get_args(annotation)[1:]:
+            if isinstance(arg, GUIMeta):
+                return arg
+    return None
+```
+
+**Compatibility with ImagePath/ImageShared:** Since `ImagePath(...)` already returns `Annotated[Path, ImageSpec(...)]`, a field can carry both `ImageSpec` and `GUIMeta` by nesting: `Annotated[ImagePath(...), GUIMeta(connectable=True)]`. In practice, image fields are almost always connectable, so `GUIMeta` is rarely needed on them.
+
+**Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets and port visibility.
 
 ### 3.6 Arguments and Column References
 
@@ -1876,7 +1943,7 @@ from bioimageflow_core import (
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
     # Tool
-    BaseTool, ProcessingTool, IOModel,
+    BaseTool, ProcessingTool, IOModel, GUIMeta,
     # Arguments
     Arguments,
 )
