@@ -7,8 +7,6 @@ Covers:
 - Batch override detection (engine checks type(tool).process_batch)
 """
 
-import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 from bioimageflow_core import ProcessingTool

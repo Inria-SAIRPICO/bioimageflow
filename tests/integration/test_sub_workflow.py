@@ -21,14 +21,13 @@ import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.sub_workflow import SubWorkflow
-from bioimageflow_core import Arguments, IOModel, ImageSpec, Semantic
+from bioimageflow_core import IOModel, ImageSpec, Semantic
 
 from .conftest import (
     FileLoader,
     StubSegmenter,
     StubStats,
     FilterRows,
-    imageio_env,
 )
 
 from typing import Annotated
@@ -158,7 +157,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"], name="my_segmentation")
             assert results.name == "my_segmentation"
@@ -167,7 +166,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             r1 = seg(image=raw["path"])
             r2 = seg(image=raw["path"])
@@ -188,7 +187,7 @@ class TestSubWorkflowEncapsulation:
 
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
-            results = seg(image=raw["path"])
+            _results = seg(image=raw["path"])
 
             # Parent workflow should only have the file_loader and the sub-workflow node
             assert "file_loader_1" in wf.nodes
@@ -201,7 +200,7 @@ class TestSubWorkflowEncapsulation:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
 
@@ -338,8 +337,8 @@ class TestSubWorkflowMixedTools:
                 from bioimageflow import Collect
                 # Use a Collect to gather columns, then segment
                 collect = Collect()
-                gathered = collect(inputs._proxy_node)
-                filter_rows = FilterRows()
+                _gathered = collect(inputs._proxy_node)
+                _filter_rows = FilterRows()
                 # Can't really filter meaningfully here, but proves DFTool works
                 segment = StubSegmenter()
                 masks = segment(input_image=inputs.image)
@@ -524,7 +523,7 @@ class TestSubWorkflowErrors:
         load = FileLoader()
 
         with pytest.raises(ValueError, match="cell_count"):
-            with Workflow() as wf:
+            with Workflow():
                 raw = load(path="./data")
                 bad(image=raw["path"])
 
@@ -535,7 +534,7 @@ class TestSubWorkflowErrors:
         seg = SegmentAndMeasure()
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 # 'image' is required but not provided
                 seg()
 
@@ -547,7 +546,7 @@ class TestSubWorkflowErrors:
         seg = SegmentOnly()
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 seg(image=raw["path"], nonexistent_field=42)
 

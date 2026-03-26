@@ -8,9 +8,7 @@ Covers:
 - Engine state is accessible after execution
 - Default behavior (no engine) unchanged
 """
-from pathlib import Path
 import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.engine import SequentialEngine
@@ -119,7 +117,7 @@ class TestEngineInjection:
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
 
-            steps = list(wf.compute_steps(results, engine=tracking_engine))
+            _steps = list(wf.compute_steps(results, engine=tracking_engine))
 
             # Our tracking engine's execute_steps should have been called
             assert tracking_engine.execute_steps_called, "Injected engine's execute_steps not used"
@@ -179,7 +177,7 @@ class TestEngineInjection:
 
             # After compute, we should be able to inspect engine internals
             # For example, check that _use_wetlands is as configured
-            assert custom_engine._use_wetlands == False
+            assert not custom_engine._use_wetlands
             # If wetlands were used, we could check _env_manager
 
     def test_compute_steps_engine_state_accessible(self, tmp_workspace):
@@ -195,7 +193,7 @@ class TestEngineInjection:
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
 
-            steps = list(wf.compute_steps(results, engine=custom_engine))
+            _steps = list(wf.compute_steps(results, engine=custom_engine))
 
             # After generator exhausts, engine should be in a consistent state
-            assert custom_engine._use_wetlands == False
+            assert not custom_engine._use_wetlands

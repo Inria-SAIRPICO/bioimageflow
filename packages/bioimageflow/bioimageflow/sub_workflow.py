@@ -14,7 +14,6 @@ from bioimageflow.node import (
     _get_next_name,
     get_active_workflow,
     set_active_workflow,
-    _reset_name_counters,
 )
 
 

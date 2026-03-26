@@ -9,15 +9,13 @@ Covers:
 """
 
 import json
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from .conftest import FileLoader, StubSegmenter
 
 
 class TestWorkflowExport:

@@ -259,7 +259,8 @@ class SequentialEngine:
 
             # Assemble output
             output_df = self._assemble_sub_workflow_output(node, results)
-            import hashlib, json
+            import hashlib
+            import json
             terminal_hashes = {}
             for field, col_ref in node._output_mapping.items():
                 if col_ref.node in sig_hashes:
@@ -468,7 +469,6 @@ class SequentialEngine:
         templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
 
         aligned_index: list[Any] = ["0"]
-        upstream_nodes: dict[str, Node] = {}
 
         # --- Signature hash ---
         env_hash = compute_env_hash(node.tool.environment.dependencies)
@@ -899,7 +899,6 @@ class SequentialEngine:
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
         """Execute a SubWorkflowNode by running its internal nodes."""
-        from bioimageflow.sub_workflow import SubWorkflowNode
 
         # Build a proxy DataFrame from the parent's upstream data.
         # The proxy node should expose columns matching SubWorkflow.Inputs.
@@ -941,7 +940,8 @@ class SequentialEngine:
         for field, col_ref in node._output_mapping.items():
             if col_ref.node in sig_hashes:
                 terminal_hashes[field] = sig_hashes[col_ref.node]
-        import hashlib, json
+        import hashlib
+        import json
         combined = hashlib.sha256(
             json.dumps(terminal_hashes, sort_keys=True).encode()
         ).hexdigest()

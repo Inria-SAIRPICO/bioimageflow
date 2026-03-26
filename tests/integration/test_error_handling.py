@@ -21,9 +21,7 @@ from pathlib import Path
 
 from bioimageflow_core import (
     Arguments,
-    EnvironmentSpec,
     IOModel,
-    ImagePath,
     ImageSpec,
     ProcessingTool,
     Semantic,
@@ -40,8 +38,8 @@ class TestBindingError:
         segment = StubSegmenter()
 
         with pytest.raises(Exception, match="input_image|missing|required|Binding"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
-                raw = load(path=str(tmp_workspace / "data"))
+            with Workflow(storage_path=tmp_workspace / "results"):
+                _raw = load(path=str(tmp_workspace / "data"))
                 # Missing required 'input_image' argument
                 segment(diameter=30.0)
 
@@ -51,7 +49,7 @@ class TestBindingError:
         segment = StubSegmenter()
 
         with pytest.raises(Exception, match="unknown|unexpected|extra"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 segment(input_image=raw["path"], nonexistent_param=42)
 
@@ -64,7 +62,7 @@ class TestColumnNotFoundError:
         segment = StubSegmenter()
 
         with pytest.raises(Exception, match="column|not found|ColumnNotFound"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 segment(input_image=raw["nonexistent_column"])
 
@@ -74,7 +72,7 @@ class TestColumnNotFoundError:
         segment = StubSegmenter()
 
         with pytest.raises(Exception, match="(?i)path|did you mean"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 # "pat" is close to "path"
                 segment(input_image=raw["pat"])
@@ -85,7 +83,7 @@ class TestColumnNotFoundError:
         measure = StubStats()
 
         with pytest.raises(Exception, match="image|column|not found"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 # StubStats.Inputs.image → raw["image"], but raw has "path", not "image"
                 measure(image=raw, mask=raw)
@@ -184,7 +182,7 @@ class TestTypeIncompatibility:
         consumer = DisplacementConsumer()
 
         with pytest.raises(Exception, match="compatible|type|semantic|mismatch"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 masks = segment(input_image=raw["path"])
                 # mask is LABEL, consumer wants DISPLACEMENT → incompatible
@@ -301,7 +299,7 @@ class TestDeferredColumnValidation:
 
     def test_missing_column_in_dynamic_upstream_fails_at_execution(self, tmp_workspace):
         """Column ref to a DataFrameTool without Outputs is deferred; fails at compute."""
-        load = FileLoader()
+        _load = FileLoader()
         segment = StubSegmenter()
 
         # CsvLoader has no Outputs declaration — column validation is deferred

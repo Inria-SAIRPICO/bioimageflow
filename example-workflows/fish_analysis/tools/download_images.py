@@ -1,12 +1,11 @@
 """DownloadImages — download images from URLs."""
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 from bioimageflow_core import (
     Arguments,
     EnvironmentSpec,
-    GUIMeta,
     IOModel,
     ProcessingTool,
 )

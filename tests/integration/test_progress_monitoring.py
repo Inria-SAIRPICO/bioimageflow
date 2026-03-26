@@ -8,7 +8,6 @@ Covers:
 - Multiple node progress events interleave correctly
 """
 
-import pytest
 
 from bioimageflow import ProgressEvent, Workflow
 

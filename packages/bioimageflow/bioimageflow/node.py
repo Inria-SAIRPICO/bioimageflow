@@ -6,7 +6,7 @@ from difflib import get_close_matches
 from typing import Any
 
 from bioimageflow_core.tool import ProcessingTool, BaseTool
-from bioimageflow.validation import extract_image_spec, is_path_type
+from bioimageflow.validation import extract_image_spec
 from bioimageflow_core.types import check_compatibility
 
 
@@ -112,7 +112,6 @@ class Node:
 
     def _process_kwargs(self) -> None:
         """Validate and categorize keyword arguments."""
-        from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.template import validate_template, get_output_templates
 
         input_annotations = self.tool.Inputs._get_all_annotations()
@@ -194,7 +193,7 @@ class Node:
 
     def __getitem__(self, column: str) -> ColumnRef:
         """Create a ColumnRef: node['column_name']."""
-        from bioimageflow.dataframe_tool import DataFrameTool, Passthrough
+        from bioimageflow.dataframe_tool import Passthrough
 
         # Validate column exists if tool has known Outputs
         tool = self.tool

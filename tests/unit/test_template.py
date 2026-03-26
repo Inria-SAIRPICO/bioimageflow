@@ -5,8 +5,6 @@ import pytest
 from bioimageflow_core.tool import IOModel
 from bioimageflow.template import resolve_template, validate_template, get_output_templates
 from pathlib import Path
-from typing import Annotated
-from bioimageflow_core.types import ImageSpec
 
 
 class TestResolveTemplate:

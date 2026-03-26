@@ -9,7 +9,6 @@ Covers:
 - Implicit default Workflow via Node.compute()
 """
 
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -73,7 +72,7 @@ class TestNodeNaming:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             masks1 = segment(input_image=raw["path"], diameter=30.0)
             masks2 = segment(input_image=raw["path"], diameter=50.0)
@@ -86,7 +85,7 @@ class TestNodeNaming:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"), name="my_source")
             masks = segment(input_image=raw["path"], name="small_cells")
             assert raw.name == "my_source"
@@ -97,9 +96,9 @@ class TestNodeNaming:
         segment = StubSegmenter()
 
         with pytest.raises(ValueError, match="unique"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"), name="my_node")
-                masks = segment(input_image=raw["path"], name="my_node")
+                _masks = segment(input_image=raw["path"], name="my_node")
 
 
 class TestImplicitWorkflow:
@@ -154,9 +153,9 @@ class TestMultipleTerminals:
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
-            results = measure(image=raw["path"], mask=masks["mask"])
-            # masks is not terminal (results depends on it via mask=masks["mask"])
-            # results IS terminal
+            _results = measure(image=raw["path"], mask=masks["mask"])
+            # masks is not terminal (_results depends on it via mask=masks["mask"])
+            # _results IS terminal
             df = wf.compute()
             # Only one terminal: should return DataFrame directly
             assert isinstance(df, pd.DataFrame)

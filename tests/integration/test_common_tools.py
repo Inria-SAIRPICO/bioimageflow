@@ -23,7 +23,7 @@ from bioimageflow_core import (
     ProcessingTool,
     Semantic,
 )
-from bioimageflow import Workflow, Collect
+from bioimageflow import Workflow
 from bioimageflow_common_tools import (
     ExtractChannel,
     Files,

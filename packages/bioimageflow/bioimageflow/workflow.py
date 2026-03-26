@@ -2,7 +2,6 @@
 
 import json
 import importlib
-import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -356,7 +355,6 @@ class Workflow:
         # First pass: create tool/sub-workflow instances
         from bioimageflow.tool_loader import (
             load_versioned_package, resolve_tool_class,
-            _ensure_installed, _normalize_package_name,
         )
         store = _get_store_path()
 
@@ -393,8 +391,6 @@ class Workflow:
                 tool_instances[node_data["name"]] = tool_class()
 
         # Build nodes in dependency order
-        built: set[str] = set()
-        remaining: list[dict[str, Any]] = list(data["nodes"])
 
         # Build edge lookup
         edge_map: dict[str, list[dict[str, str]]] = {}

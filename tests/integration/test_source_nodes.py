@@ -7,8 +7,6 @@ Covers:
 - Source ProcessingTool with 1-to-N output
 """
 
-import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 

@@ -9,8 +9,6 @@ Covers:
 - Downstream processing of exploded rows
 """
 
-import pandas as pd
-import pytest
 
 from bioimageflow import Collect, Workflow
 

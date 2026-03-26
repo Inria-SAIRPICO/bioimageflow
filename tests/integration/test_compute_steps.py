@@ -14,17 +14,13 @@ Covers:
 """
 
 import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core.tool import ProcessingTool
 
 from .conftest import (
     FileLoader,
     StubSegmenter,
     StubStats,
-    ColumnRegex,
-    FilterRows,
 )
 
 
@@ -285,7 +281,7 @@ class TestComputeStepsTerminals:
 
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
-            masks = segment(input_image=raw["path"])
+            _masks = segment(input_image=raw["path"])
 
             names = []
             for step in wf.compute_steps():

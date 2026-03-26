@@ -9,7 +9,6 @@ Covers:
 - Cache converts SharedArray to file and back
 """
 
-import pytest
 
 from typing import Any
 

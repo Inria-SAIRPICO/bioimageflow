@@ -389,7 +389,7 @@ def _ensure_installed(
     ]
 
     try:
-        output = executor.execute_commands_and_get_output(
+        executor.execute_commands_and_get_output(
             commands, exit_if_command_error=True,
         )
     except Exception as exc:

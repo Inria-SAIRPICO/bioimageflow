@@ -6,7 +6,7 @@ import inspect
 import os
 from typing import Annotated, Any, get_args, get_origin
 
-from bioimageflow_core.types import ImageSpec, GUIMeta, extract_gui_meta
+from bioimageflow_core.types import ImageSpec, extract_gui_meta
 from bioimageflow_core.tool import IOModel, BaseTool
 
 

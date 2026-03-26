@@ -2,8 +2,7 @@
 
 import pytest
 
-from bioimageflow_core.tool import IOModel, ProcessingTool, BaseTool
-from bioimageflow_core.arguments import Arguments
+from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.environment import EnvironmentSpec
 
 

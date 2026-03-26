@@ -30,20 +30,20 @@ class TestNodeEnabledAttribute:
 
     def test_node_enabled_by_default(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             assert raw.enabled is True
 
     def test_disable_sets_enabled_false(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.disable()
             assert raw.enabled is False
 
     def test_enable_sets_enabled_true(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.disable()
             raw.enable()
@@ -51,7 +51,7 @@ class TestNodeEnabledAttribute:
 
     def test_enabled_can_be_set_directly(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.enabled = False
             assert raw.enabled is False
@@ -104,7 +104,7 @@ class TestWorkflowEnableDisable:
     def test_workflow_disable_unknown_name_raises(self, tmp_workspace):
         load = FileLoader()
         with Workflow(storage_path=tmp_workspace / "results") as wf:
-            raw = load(path=str(tmp_workspace / "data"))
+            _raw = load(path=str(tmp_workspace / "data"))
             with pytest.raises(KeyError):
                 wf.disable("nonexistent_node")
 

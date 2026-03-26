@@ -8,13 +8,10 @@ Covers:
 - Unrelated tool reusing an environment without inheritance
 """
 
-import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import EnvironmentSpec
 
 from .conftest import (
-    CellposeBase,
     CellposeSegmenter,
     CellposeTrain,
     FileLoader,
@@ -112,7 +109,6 @@ class TestInnerClassInheritance:
     def test_explicit_inner_class_inheritance(self):
         """When explicitly inheriting, parent fields are included."""
 
-        from bioimageflow_core import IOModel, ImagePath, Semantic
 
         class ExtendedInputs(CellposeSegmenter.Inputs):
             extra_param: float = 1.0

@@ -6,8 +6,6 @@ without requiring heavy dependencies (cellpose, stardist, etc.).
 They exercise the full BioImageFlow API surface.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -19,19 +17,13 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ImageSpec,
-    Layout,
     ProcessingTool,
     ResourceSpec,
     Semantic,
     SharedArray,
 )
 from bioimageflow import (
-    Collect,
-    Concat,
-    CrossJoin,
     DataFrameTool,
-    InnerJoin,
-    JoinOnColumn,
     Passthrough,
     Workflow,
 )

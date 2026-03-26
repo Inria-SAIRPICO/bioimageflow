@@ -14,7 +14,7 @@ from typing import Annotated
 
 import pytest
 
-from bioimageflow_core import IOModel, ImagePath, ImageShared, Semantic
+from bioimageflow_core import IOModel, Semantic
 from bioimageflow_core.types import ImageSpec, SharedArray
 
 

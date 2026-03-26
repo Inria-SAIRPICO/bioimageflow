@@ -10,13 +10,10 @@ Covers:
 - Chaining DataFrameTools before ProcessingTools (compound pattern)
 """
 
-import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 
 from .conftest import (
-    AddColumn,
     ColumnRegex,
     FileLoader,
     FilterRows,

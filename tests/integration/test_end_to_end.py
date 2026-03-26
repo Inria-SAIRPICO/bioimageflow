@@ -7,9 +7,8 @@ These tests combine multiple features into realistic pipeline scenarios.
 from typing import Any
 
 import pandas as pd
-import pytest
 
-from bioimageflow import Collect, Concat, CrossJoin, JoinOnColumn, Workflow
+from bioimageflow import Collect, Concat, JoinOnColumn, Workflow
 
 from .conftest import (
     CellposeSegmenter,
@@ -157,7 +156,7 @@ class TestComparativeAnalysis:
         load = FileLoader()
         cellpose = CellposeSegmenter()
         stardist = StardistSegmenter()
-        join = JoinOnColumn()
+        _join = JoinOnColumn()
 
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))

@@ -22,7 +22,6 @@ from bioimageflow import Workflow
 from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
-    ImagePath,
     ProcessingTool,
     Semantic,
 )
@@ -211,7 +210,6 @@ class TestEnvironmentDependencyChange:
 
     def test_env_dependency_change_invalidates_cache(self, tmp_workspace):
         """Changing EnvironmentSpec dependencies causes cache miss."""
-        from bioimageflow_core import Arguments
 
         env_v1 = EnvironmentSpec(
             name="versioned_env",

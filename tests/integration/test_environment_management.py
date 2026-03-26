@@ -43,7 +43,7 @@ class TestEnvironmentMismatch:
         from bioimageflow import Workflow
         from typing import Annotated
         from pathlib import Path
-        from bioimageflow_core import IOModel, ImagePath, ImageSpec, ProcessingTool, Semantic, Arguments
+        from bioimageflow_core import IOModel, ImageSpec, ProcessingTool, Semantic
 
         env_v1 = EnvironmentSpec(
             name="conflict_env",

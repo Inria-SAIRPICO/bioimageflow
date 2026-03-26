@@ -11,14 +11,11 @@ Covers:
 
 import json
 import sys
-from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import IOModel
 
 
 # ---------------------------------------------------------------------------
@@ -155,13 +152,13 @@ class TestVersionedNodeCreation:
 
     def test_processing_tool_creates_node(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.AlphaTool()(value=5)
             assert node.tool.name == "alpha"
 
     def test_dataframe_tool_creates_node(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.LoaderTool()(path=str(data_dir))
             assert node.tool.name == "dummy_loader"
 
@@ -169,13 +166,13 @@ class TestVersionedNodeCreation:
         from bioimageflow.node import BindingError
         v1 = _load_v1(tool_store)
         with pytest.raises(BindingError, match="nonexistent_field"):
-            with Workflow(storage_path=data_dir.parent / "results") as wf:
+            with Workflow(storage_path=data_dir.parent / "results"):
                 v1.AlphaTool()(nonexistent_field=5)
 
     def test_output_column_ref(self, tool_store, data_dir):
         from bioimageflow.node import ColumnRef, ColumnNotFoundError
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.AlphaTool()(value=0)
             ref = node["result"]
             assert isinstance(ref, ColumnRef)
@@ -185,7 +182,7 @@ class TestVersionedNodeCreation:
     def test_two_versions_in_same_workflow(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(storage_path=data_dir.parent / "results"):
             n1 = v1.AlphaTool()(value=0)
             n2 = v2.AlphaTool()(value=0)
             assert n1.name == "alpha_1"
@@ -237,7 +234,7 @@ class TestVersionedExecution:
         """LoaderTool -> AlphaTool pipeline using column bindings."""
         v1 = _load_v1(tool_store)
         with Workflow(storage_path=data_dir.parent / "results") as wf:
-            raw = v1.LoaderTool()(path=str(data_dir))
+            _raw = v1.LoaderTool()(path=str(data_dir))
             processed = v1.AlphaTool()(value=0)
             df = wf.compute(processed)
         assert "result" in df.columns
@@ -252,15 +249,15 @@ class TestVersionedSubWorkflow:
     def test_sub_workflow_creates_node(self, tool_store, data_dir):
         from bioimageflow.sub_workflow import SubWorkflowNode
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
-            raw = v1.LoaderTool()(path=str(data_dir))
+        with Workflow(storage_path=data_dir.parent / "results"):
+            _raw = v1.LoaderTool()(path=str(data_dir))
             node = v1.AlphaPipeline()(path=str(data_dir))
             assert isinstance(node, SubWorkflowNode)
 
     def test_sub_workflow_uses_correct_version_tools(self, tool_store, data_dir):
         """Internal nodes of v1 sub-workflow should carry v1 metadata."""
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.AlphaPipeline()(path=str(data_dir))
             for internal in node.internal_nodes:
                 version = getattr(type(internal.tool), "_bif_package_version", None)
@@ -339,7 +336,7 @@ class TestVersionedSerialization:
 
         with Workflow(storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
-            df1 = wf.compute(node)
+            _df1 = wf.compute(node)
             wf.export(data_dir.parent / "workflow.json")
 
         from bioimageflow.tool_loader import unload_versioned_package
@@ -358,7 +355,7 @@ class TestVersionedSerialization:
         v1 = _load_v1(tool_store)
 
         with Workflow(storage_path=data_dir.parent / "results") as wf:
-            raw = v1.LoaderTool()(path=str(data_dir))
+            _raw = v1.LoaderTool()(path=str(data_dir))
             node = v1.AlphaTool()(value=0)
             df1 = wf.compute(node)
             wf.export(data_dir.parent / "workflow.json")

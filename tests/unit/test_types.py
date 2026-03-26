@@ -172,7 +172,6 @@ class TestExtractGUIMeta:
         ann = Annotated[Path, spec, meta]
         assert extract_gui_meta(ann) is meta
         # ImageSpec is still extractable via its own function
-        from bioimageflow_core.types import extract_gui_meta as _
         assert get_args(ann)[1] is spec
 
 

@@ -8,7 +8,6 @@ Covers:
 """
 
 import pandas as pd
-import pytest
 
 from bioimageflow import Workflow
 
@@ -64,7 +63,7 @@ class TestDeadBranchPruning:
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = segment(input_image=raw["path"], diameter=30.0, name="branch_a")
-            masks_b = segment(input_image=raw["path"], diameter=50.0, name="branch_b")
+            _masks_b = segment(input_image=raw["path"], diameter=50.0, name="branch_b")
             # Only compute branch_a — branch_b should NOT be executed
             df = wf.compute(masks_a)
             assert isinstance(df, pd.DataFrame)

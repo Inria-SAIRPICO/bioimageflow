@@ -14,11 +14,10 @@ Covers:
 from pathlib import Path
 from typing import Annotated
 
-import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ImagePath, ProcessingTool, Semantic
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, Semantic
 from bioimageflow_core.types import ImageSpec
 
 from .conftest import FileLoader, StubTiler, imageio_env
@@ -256,6 +255,6 @@ class TestTemplateErrors:
         tool = BadTemplate()
 
         with pytest.raises(Exception, match="nonexistent_field|template|undefined"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 tool(input_image=raw["path"])

@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, Arguments
+from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec
 from bioimageflow.dataframe_tool import DataFrameTool
 
 
@@ -171,7 +171,7 @@ class TestLoadVersionedPackage:
         """The utils subpackage re-exports helper_func from its __init__.py."""
         from bioimageflow.tool_loader import load_versioned_package, _scoped_name
 
-        v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        _v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
         scoped = _scoped_name("dummy_tools", "1.0.0")
         utils_mod = sys.modules.get(f"{scoped}.utils")
         assert utils_mod is not None

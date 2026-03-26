@@ -10,8 +10,6 @@ Covers:
 - Custom merge strategies
 """
 
-import pandas as pd
-import pytest
 
 from bioimageflow import Collect, Concat, CrossJoin, InnerJoin, JoinOnColumn, Workflow
 
