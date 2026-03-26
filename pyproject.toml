@@ -20,6 +20,7 @@ dev = [
     "sphinx-autodoc-typehints>=3.0.1",
     "sphinx-copybutton>=0.5.2",
     "ruff>=0.15.7",
+    "ipython>=8.38.0",
 ]
 
 [tool.uv.workspace]
