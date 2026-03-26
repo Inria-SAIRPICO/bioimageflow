@@ -118,7 +118,7 @@ class WetlandsEnvManager:
 
     def _augment_dependencies(self, dependencies: dict) -> Dependencies:
         """Auto-inject bioimageflow-core into the environment deps."""
-        deps = cast(Dependencies, dependencies)
+        deps = cast(Dependencies, {k: v for k, v in dependencies.items()})
         pip_deps = list(deps.get("pip", []))
         if not any("bioimageflow-core" in d for d in pip_deps):
             pip_deps.append("bioimageflow-core==0.1.1")
