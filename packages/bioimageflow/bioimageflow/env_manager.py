@@ -121,7 +121,7 @@ class WetlandsEnvManager:
         deps = cast(Dependencies, {k: v for k, v in dependencies.items()})
         pip_deps = list(deps.get("pip", []))
         if not any("bioimageflow-core" in d for d in pip_deps):
-            pip_deps.append("bioimageflow-core==0.1.1")
+            pip_deps.append("bioimageflow-core==0.1.2")
         deps["pip"] = pip_deps
         return deps
 
