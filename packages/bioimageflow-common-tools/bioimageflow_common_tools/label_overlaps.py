@@ -54,7 +54,7 @@ class LabelOverlaps(ProcessingTool):
         import numpy as np
         import imageio.v3 as iio
 
-        print(f"Computing label overlaps...")
+        print("Computing label overlaps...")
         labels = iio.imread(str(arguments.label_image))
         reference = iio.imread(str(arguments.reference_image))
 

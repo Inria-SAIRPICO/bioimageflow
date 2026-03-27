@@ -14,3 +14,4 @@ from bioimageflow.tool_loader import (
     require_tool_packages as require_tool_packages,
 )
 from bioimageflow.env_manager import configure_wetlands as configure_wetlands
+from bioimageflow.paths import get_home as get_home, get_tool_store_path as get_tool_store_path, get_wetlands_path as get_wetlands_path

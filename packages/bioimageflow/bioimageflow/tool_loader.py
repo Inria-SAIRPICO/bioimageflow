@@ -14,7 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-DEFAULT_TOOL_STORE = Path.home() / ".bioimageflow" / "tool_packages"
+from bioimageflow.paths import get_tool_store_path
 
 logger = logging.getLogger("bioimageflow")
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("bioimageflow")
 def load_versioned_package(
     package: str,
     version: str,
-    store_path: Path = DEFAULT_TOOL_STORE,
+    store_path: Path | None = None,
 ) -> ModuleType:
     """Load a tool package from a versioned directory into an isolated namespace.
 
@@ -34,6 +34,8 @@ def load_versioned_package(
     with metadata: ``_bif_package``, ``_bif_package_version``,
     ``_bif_canonical_module``.
     """
+    if store_path is None:
+        store_path = get_tool_store_path()
     pkg_dir = store_path / package / version / package
     if not pkg_dir.exists():
         raise FileNotFoundError(
@@ -462,10 +464,6 @@ def require_tool_packages(
 
 def _get_tool_store_path() -> Path:
     """Return the tool store path, configurable via environment variable."""
-    import os
-    return Path(os.environ.get(
-        "BIOIMAGEFLOW_TOOL_STORE",
-        str(DEFAULT_TOOL_STORE),
-    ))
+    return get_tool_store_path()
 
 

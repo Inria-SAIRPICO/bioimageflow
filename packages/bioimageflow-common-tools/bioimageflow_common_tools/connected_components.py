@@ -62,7 +62,7 @@ class ConnectedComponents(ProcessingTool):
         # Binarize: threshold > 0
         binary = sitk.Cast(sitk_image > 0, sitk.sitkUInt8)
 
-        print(f"Computing connected components...")
+        print("Computing connected components...")
         labeled = sitk.ConnectedComponent(binary)
         labeled_array = sitk.GetArrayFromImage(labeled)
         num_labels = int(labeled_array.max())

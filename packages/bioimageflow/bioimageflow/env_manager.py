@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from bioimageflow_core.environment import EnvironmentSpec, EnvironmentMismatchError
 from bioimageflow.cache import compute_env_hash
+from bioimageflow.paths import get_wetlands_path
 
 from wetlands._internal.dependency_manager import Dependencies
 import threading
@@ -98,11 +99,13 @@ class WetlandsEnvManager:
 
     def __init__(
         self,
-        wetlands_instance_path: Path = Path("wetlands/"),
+        wetlands_instance_path: Path | None = None,
         conda_path: str | None = None,
         main_conda_environment_path: str | None = None,
         **kwargs: Any,
     ) -> None:
+        if wetlands_instance_path is None:
+            wetlands_instance_path = get_wetlands_path()
         kwargs.update({
             "wetlands_instance_path": wetlands_instance_path,
             "conda_path": conda_path,

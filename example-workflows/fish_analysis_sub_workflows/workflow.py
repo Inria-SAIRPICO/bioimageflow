@@ -91,14 +91,9 @@ def build_fish_workflow(
     tuple of (Workflow, Node)
         The workflow and the terminal stats node.
     """
-    # Reuse the root-level Wetlands environments (shared across all example workflows)
-    wetlands_path = Path(__file__).resolve().parent.parent.parent / "wetlands"
     wf = Workflow(
         storage_path=storage_path,
-        wetlands_config={
-            "debug": debug,
-            "wetlands_instance_path": wetlands_path,
-        },
+        wetlands_config={"debug": debug},
     )
 
     # Build the graph inside the context manager so nodes auto-register.
