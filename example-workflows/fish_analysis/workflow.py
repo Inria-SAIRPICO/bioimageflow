@@ -35,8 +35,10 @@ Pipeline topology:
 
 import sys
 
-from bioimageflow import Workflow, Collect
+from bioimageflow import Workflow
 from bioimageflow.engine import SequentialEngine
+
+from bioimageflow_common_tools.merge import Collect
 
 from bioimageflow_common_tools import (
     ConvertImage,

@@ -1,7 +1,6 @@
 """BioImageFlow orchestrator — main process only."""
 
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
-from bioimageflow.merge import InnerJoin as InnerJoin, CrossJoin as CrossJoin, JoinOnColumn as JoinOnColumn, Concat as Concat, Collect as Collect
 from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent
 from bioimageflow.engine import NodeStep as NodeStep, DisabledNodeError as DisabledNodeError
 from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError

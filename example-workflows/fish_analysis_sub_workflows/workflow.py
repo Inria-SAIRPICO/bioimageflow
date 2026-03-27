@@ -43,10 +43,11 @@ Data source: Cell Image Library (CIL)
 import sys
 from pathlib import Path
 
-from bioimageflow import Collect, Workflow
+from bioimageflow import Workflow
 from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
+from bioimageflow_common_tools.merge import Collect
 from bioimageflow_common_tools import CellposeSAM, ConvertImage
 
 # Workflow-specific tools (shared with the original fish_analysis)
