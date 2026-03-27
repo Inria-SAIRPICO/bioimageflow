@@ -111,11 +111,16 @@ class GUIMeta:
         Maximum allowed value (numeric fields only).
     step : float | None
         Step increment for spinbox / slider widgets (numeric fields only).
+    group : str | None
+        Logical group name for organising fields into tabs or sections
+        (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
+        the field belongs to the default / unnamed group.
     """
     connectable: bool = True
     min: float | None = None
     max: float | None = None
     step: float | None = None
+    group: str | None = None
 
 
 def extract_gui_meta(annotation: Any) -> GUIMeta | None:

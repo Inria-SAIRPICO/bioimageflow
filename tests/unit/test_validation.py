@@ -147,6 +147,30 @@ class TestGetInputsSchema:
         assert "min" not in schema["threshold"]
         assert "max" not in schema["threshold"]
         assert "step" not in schema["threshold"]
+        assert "group" not in schema["threshold"]
+
+    def test_gui_meta_group(self):
+        class Tool(ProcessingTool):
+            name = "test_tool_group"
+            environment = EnvironmentSpec(name="test", dependencies={})
+
+            class Inputs(IOModel):
+                sigma: Annotated[float, GUIMeta(group="general")] = 1.0
+                use_gpu: Annotated[bool, GUIMeta(connectable=False, group="gpu")] = False
+                iterations: Annotated[int, GUIMeta(min=1, max=100, group="advanced")] = 10
+
+            class Outputs(IOModel):
+                result: float
+
+            def process_row(self, arguments):
+                return self.Outputs(result=0.0)
+
+        schema = get_inputs_schema(Tool())
+        assert schema["sigma"]["group"] == "general"
+        assert schema["use_gpu"]["group"] == "gpu"
+        assert schema["use_gpu"]["connectable"] is False
+        assert schema["iterations"]["group"] == "advanced"
+        assert schema["iterations"]["min"] == 1
 
     def test_partial_numeric_constraints(self):
         class Tool(ProcessingTool):

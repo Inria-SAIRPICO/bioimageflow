@@ -854,9 +854,10 @@ class GUIMeta:
     min: float | int | None = None   # Minimum value (numeric fields)
     max: float | int | None = None   # Maximum value (numeric fields)
     step: float | int | None = None  # Step increment (numeric fields)
+    group: str | None = None   # Logical group for tab/section display (e.g. "general", "advanced", "gpu")
 ```
 
-**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: True` with no numeric constraints. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable with no min/max/step.
+**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: True` with no numeric constraints and no group. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable with no min/max/step and belongs to the default (unnamed) group.
 
 **Usage:**
 
@@ -870,8 +871,10 @@ class CellposeSegmenter(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: ImagePath(semantics=Semantic.INTENSITY)
-        diameter: Annotated[float, GUIMeta(min=0.0, max=500.0, step=0.5)] = 30.0
-        model_type: Annotated[str, GUIMeta(connectable=False)] = "cyto3"
+        diameter: Annotated[float, GUIMeta(min=0.0, max=500.0, step=0.5, group="general")] = 30.0
+        model_type: Annotated[str, GUIMeta(connectable=False, group="general")] = "cyto3"
+        flow_threshold: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.05, group="advanced")] = 0.4
+        use_gpu: Annotated[bool, GUIMeta(connectable=False, group="gpu")] = True
 
     class Outputs(IOModel):
         mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
@@ -882,9 +885,13 @@ class CellposeSegmenter(ProcessingTool):
 ```
 
 In this example:
-- `input_image` has no `GUIMeta` → defaults to `connectable: True`, no numeric constraints.
-- `diameter` is connectable (default) with a slider range of 0–500 and step 0.5.
-- `model_type` is **not connectable** — the GUI renders it as a text field or dropdown, never as an input port.
+- `input_image` has no `GUIMeta` → defaults to `connectable: True`, no numeric constraints, default group.
+- `diameter` is connectable (default) with a slider range of 0–500, step 0.5, in the **general** tab.
+- `model_type` is **not connectable**, in the **general** tab — rendered as a text field or dropdown, never as an input port.
+- `flow_threshold` is in the **advanced** tab — hidden from the main view, accessible via an "Advanced" tab.
+- `use_gpu` is in the **gpu** tab — grouped with other GPU-related settings.
+
+**Grouping behaviour:** A GUI frontend collects all fields sharing the same `group` value and displays them together (e.g. as tabs, collapsible sections, or accordion panels). Fields with `group=None` belong to an implicit default group. The ordering of groups is determined by first appearance in the `Inputs` declaration.
 
 **Extracting GUIMeta:** Frontends and introspection utilities use `typing.get_args()` to retrieve `GUIMeta` from `Annotated` types:
 

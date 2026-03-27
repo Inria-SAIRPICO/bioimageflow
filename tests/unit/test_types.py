@@ -128,6 +128,7 @@ class TestGUIMeta:
         assert meta.min is None
         assert meta.max is None
         assert meta.step is None
+        assert meta.group is None
 
     def test_custom_values(self):
         meta = GUIMeta(connectable=False, min=0.0, max=100.0, step=0.1)
@@ -135,6 +136,12 @@ class TestGUIMeta:
         assert meta.min == 0.0
         assert meta.max == 100.0
         assert meta.step == 0.1
+        assert meta.group is None
+
+    def test_group(self):
+        meta = GUIMeta(group="advanced")
+        assert meta.group == "advanced"
+        assert meta.connectable is True
 
     def test_frozen(self):
         meta = GUIMeta()

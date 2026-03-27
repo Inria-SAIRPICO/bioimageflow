@@ -58,6 +58,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
     - **connectable**: whether this field accepts an upstream column binding
     - **image_spec**: the :class:`~bioimageflow_core.ImageSpec` if present
     - **min**, **max**, **step**: numeric constraints from :class:`~bioimageflow_core.GUIMeta`
+    - **group**: tab/section group name from :class:`~bioimageflow_core.GUIMeta`
     """
     inputs_cls = tool.Inputs
     annotations = inputs_cls._get_all_annotations()
@@ -89,6 +90,8 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
                 entry["max"] = gui_meta.max
             if gui_meta.step is not None:
                 entry["step"] = gui_meta.step
+            if gui_meta.group is not None:
+                entry["group"] = gui_meta.group
 
         schema[field_name] = entry
 
