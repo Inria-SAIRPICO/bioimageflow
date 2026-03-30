@@ -261,18 +261,29 @@ class Workflow:
 
         for name, node in self._nodes.items():
             if isinstance(node, SubWorkflowNode):
-                pkg, pkg_ver, canonical_module = get_tool_package_info(
-                    node.sub_workflow
-                )
-                node_info: dict[str, Any] = {
-                    "name": name,
-                    "type": "sub_workflow",
-                    "sub_workflow_module": canonical_module,
-                    "sub_workflow_class": type(node.sub_workflow).__name__,
-                    "sub_workflow_package": pkg,
-                    "sub_workflow_package_version": pkg_ver,
-                    "constants": {},
-                }
+                from bioimageflow.sub_workflow import _ConfigDrivenSubWorkflow
+                node_info: dict[str, Any]
+                if isinstance(node.sub_workflow, _ConfigDrivenSubWorkflow):
+                    node_info = {
+                        "name": name,
+                        "type": "sub_workflow",
+                        "sub_workflow_type": "config",
+                        "config": node.sub_workflow._config,
+                        "constants": {},
+                    }
+                else:
+                    pkg, pkg_ver, canonical_module = get_tool_package_info(
+                        node.sub_workflow
+                    )
+                    node_info = {
+                        "name": name,
+                        "type": "sub_workflow",
+                        "sub_workflow_module": canonical_module,
+                        "sub_workflow_class": type(node.sub_workflow).__name__,
+                        "sub_workflow_package": pkg,
+                        "sub_workflow_package_version": pkg_ver,
+                        "constants": {},
+                    }
                 if not node.enabled:
                     node_info["enabled"] = False
                 for field, value in node._input_constant_bindings.items():
@@ -360,20 +371,26 @@ class Workflow:
 
         for node_data in data["nodes"]:
             if node_data.get("type") == "sub_workflow":
-                pkg = node_data.get("sub_workflow_package")
-                pkg_ver = node_data.get("sub_workflow_package_version")
-                if pkg and pkg_ver:
-                    _auto_install_if_missing(pkg, pkg_ver, store)
-                    load_versioned_package(pkg, pkg_ver, store)
-                    sw_class = resolve_tool_class(
-                        pkg, pkg_ver,
-                        node_data["sub_workflow_module"],
-                        node_data["sub_workflow_class"],
+                if node_data.get("sub_workflow_type") == "config":
+                    from bioimageflow.sub_workflow import SubWorkflow as _SW
+                    tool_instances[node_data["name"]] = _SW.from_config(
+                        node_data["config"]
                     )
                 else:
-                    module = importlib.import_module(node_data["sub_workflow_module"])
-                    sw_class = getattr(module, node_data["sub_workflow_class"])
-                tool_instances[node_data["name"]] = sw_class()
+                    pkg = node_data.get("sub_workflow_package")
+                    pkg_ver = node_data.get("sub_workflow_package_version")
+                    if pkg and pkg_ver:
+                        _auto_install_if_missing(pkg, pkg_ver, store)
+                        load_versioned_package(pkg, pkg_ver, store)
+                        sw_class = resolve_tool_class(
+                            pkg, pkg_ver,
+                            node_data["sub_workflow_module"],
+                            node_data["sub_workflow_class"],
+                        )
+                    else:
+                        module = importlib.import_module(node_data["sub_workflow_module"])
+                        sw_class = getattr(module, node_data["sub_workflow_class"])
+                    tool_instances[node_data["name"]] = sw_class()
             else:
                 pkg = node_data.get("tool_package")
                 pkg_ver = node_data.get("tool_package_version")

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import warnings
-from typing import Any
+from pathlib import Path
+from typing import Annotated, Any
 
 from bioimageflow_core.tool import IOModel
+from bioimageflow_core.types import ImageSpec, Layout, Semantic
 
 from bioimageflow.node import (
     Node,
@@ -181,6 +184,17 @@ class SubWorkflow:
             f"{type(self).__name__} must implement build()."
         )
 
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> SubWorkflow:
+        """Create a SubWorkflow from a JSON-serializable config dict.
+
+        This enables GUI servers and external tools to define sub-workflows
+        at runtime without writing Python classes.
+
+        See specs.md section 14.11 for the config schema.
+        """
+        return _ConfigDrivenSubWorkflow(config)
+
     def __call__(self, *, name: str | None = None, **kwargs: Any) -> SubWorkflowNode:
         """Create a SubWorkflowNode by building the internal DAG.
 
@@ -311,3 +325,174 @@ def _collect_internal_nodes(
                 queue.append(arg)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Config-driven sub-workflow helpers
+# ---------------------------------------------------------------------------
+
+_TYPE_MAP: dict[str, type] = {
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
+    "Path": Path,
+}
+
+
+def _build_image_spec(spec_config: dict[str, Any]) -> ImageSpec:
+    """Build an ImageSpec from a config dict."""
+    return ImageSpec(
+        semantics={Semantic(s) for s in spec_config.get("semantics", [])},
+        layouts={Layout(l) for l in spec_config.get("layouts", [])},
+        dtypes=set(spec_config.get("dtypes", [])),
+        formats=set(spec_config.get("formats", [])),
+    )
+
+
+def _build_iomodel(name: str, fields_config: dict[str, Any]) -> type[IOModel]:
+    """Build an IOModel subclass from a config dict.
+
+    Parameters
+    ----------
+    name
+        Class name for the generated IOModel subclass.
+    fields_config
+        Mapping of field names to field definitions. Each definition is a dict
+        with keys: ``"type"`` (required), ``"image_spec"`` (optional),
+        ``"default"`` (optional).
+
+    Returns
+    -------
+    type[IOModel]
+        A dynamically created IOModel subclass.
+    """
+    annotations: dict[str, Any] = {}
+    namespace: dict[str, Any] = {"__annotations__": annotations}
+
+    for field_name, field_def in fields_config.items():
+        base_type = _TYPE_MAP[field_def["type"]]
+        if "image_spec" in field_def:
+            spec = _build_image_spec(field_def["image_spec"])
+            annotations[field_name] = Annotated[base_type, spec]
+        else:
+            annotations[field_name] = base_type
+        if "default" in field_def:
+            namespace[field_name] = field_def["default"]
+
+    return type(name, (IOModel,), namespace)
+
+
+def _resolve_node_input(
+    ref: Any,
+    proxy: SubWorkflowInputProxy,
+    built_nodes: dict[str, Node],
+) -> Any:
+    """Resolve a node input reference from a config dict.
+
+    Parameters
+    ----------
+    ref
+        One of:
+        - ``{"from_input": "field"}`` → proxy[field]
+        - ``{"from_node": "name", "column": "col"}`` → built_nodes[name][col]
+        - Raw value (int, float, str, etc.) → returned as-is
+    proxy
+        The SubWorkflowInputProxy for the sub-workflow being built.
+    built_nodes
+        Map of already-constructed internal node names to Node objects.
+    """
+    if isinstance(ref, dict):
+        if "from_input" in ref:
+            return proxy[ref["from_input"]]
+        if "from_node" in ref:
+            return built_nodes[ref["from_node"]][ref["column"]]
+    return ref
+
+
+# ---------------------------------------------------------------------------
+# Config-driven SubWorkflow
+# ---------------------------------------------------------------------------
+
+class _ConfigDrivenSubWorkflow(SubWorkflow):
+    """A SubWorkflow whose internal DAG is defined by a config dict."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self._config = config
+        self.name = config["name"]
+        self.Inputs = _build_iomodel(
+            f"{self.name}_Inputs", config.get("inputs", {})
+        )
+        outputs_config = config.get("outputs", {})
+        if outputs_config:
+            self.Outputs = _build_iomodel(
+                f"{self.name}_Outputs", outputs_config
+            )
+        else:
+            self.Outputs = None
+
+    def build(self, inputs: SubWorkflowInputProxy) -> dict[str, ColumnRef]:
+        """Build the internal DAG by interpreting the config."""
+        built_nodes: dict[str, Node] = {}
+
+        for node_spec in self._config["nodes"]:
+            node_name = node_spec["name"]
+            node_inputs = node_spec.get("inputs", {})
+
+            # Resolve all input references
+            kwargs: dict[str, Any] = {}
+            for key, ref in node_inputs.items():
+                kwargs[key] = _resolve_node_input(ref, inputs, built_nodes)
+
+            if node_spec.get("type") == "sub_workflow":
+                # Nested sub-workflow node
+                sw = self._resolve_sub_workflow(node_spec)
+                built_nodes[node_name] = sw(name=node_name, **kwargs)
+            else:
+                # Regular tool node
+                tool_cls = self._resolve_tool_class(node_spec)
+                tool = tool_cls()
+                built_nodes[node_name] = tool(**kwargs)
+
+        # Build output mapping
+        output_mapping: dict[str, ColumnRef] = {}
+        for field, ref in self._config["output_mapping"].items():
+            node = built_nodes[ref["from_node"]]
+            output_mapping[field] = node[ref["column"]]
+
+        return output_mapping
+
+    @staticmethod
+    def _resolve_tool_class(node_spec: dict[str, Any]) -> type:
+        """Resolve a tool class from a node spec."""
+        pkg = node_spec.get("tool_package")
+        pkg_ver = node_spec.get("tool_package_version")
+        if pkg and pkg_ver:
+            from bioimageflow.tool_loader import resolve_tool_class
+            return resolve_tool_class(
+                pkg, pkg_ver,
+                node_spec["tool_module"],
+                node_spec["tool_class"],
+            )
+        module = importlib.import_module(node_spec["tool_module"])
+        return getattr(module, node_spec["tool_class"])
+
+    @staticmethod
+    def _resolve_sub_workflow(node_spec: dict[str, Any]) -> SubWorkflow:
+        """Resolve a nested sub-workflow from a node spec."""
+        if "config" in node_spec:
+            return SubWorkflow.from_config(node_spec["config"])
+        # Class-based sub-workflow
+        pkg = node_spec.get("sub_workflow_package")
+        pkg_ver = node_spec.get("sub_workflow_package_version")
+        if pkg and pkg_ver:
+            from bioimageflow.tool_loader import resolve_tool_class
+            sw_cls = resolve_tool_class(
+                pkg, pkg_ver,
+                node_spec["sub_workflow_module"],
+                node_spec["sub_workflow_class"],
+            )
+        else:
+            module = importlib.import_module(node_spec["sub_workflow_module"])
+            sw_cls = getattr(module, node_spec["sub_workflow_class"])
+        return sw_cls()

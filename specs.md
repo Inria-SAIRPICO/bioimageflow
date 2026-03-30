@@ -2199,6 +2199,131 @@ Sub-workflows may contain other sub-workflows. The engine flattens recursively �
 - **Input binding errors:** The same `BindingError` rules as `ProcessingTool` apply — missing required inputs with no default raise `BindingError`.
 - **Cycle detection:** Cycles involving sub-workflow internals are detected during flattening.
 
+### 14.11 Config-Driven Sub-Workflows
+
+*Module: `bioimageflow.sub_workflow`*
+
+Sub-workflows can be defined declaratively from a JSON-serializable config dict, without writing a Python class. This enables GUI servers and external tools to define sub-workflows at runtime.
+
+#### Factory Method
+
+```python
+config = {
+    "name": "spot_detection",
+    "inputs": {
+        "input_image": {"type": "Path", "image_spec": {"semantics": ["intensity"]}},
+        "channel": {"type": "int", "default": 0},
+    },
+    "outputs": {
+        "labeled_spots": {"type": "Path", "image_spec": {"semantics": ["label"]}},
+        "num_spots": {"type": "int"},
+    },
+    "nodes": [
+        {
+            "name": "extract",
+            "tool_class": "ExtractChannel",
+            "tool_module": "bioimageflow_common_tools",
+            "tool_package": "bioimageflow-common-tools",
+            "tool_package_version": "0.1.0",
+            "inputs": {
+                "input_image": {"from_input": "input_image"},
+                "channel": {"from_input": "channel"},
+            },
+        },
+        {
+            "name": "cc",
+            "tool_class": "ConnectedComponents",
+            "tool_module": "bioimageflow_common_tools",
+            "inputs": {
+                "input_image": {"from_node": "extract", "column": "output_image"},
+            },
+        },
+    ],
+    "output_mapping": {
+        "labeled_spots": {"from_node": "cc", "column": "output_image"},
+        "num_spots": {"from_node": "cc", "column": "num_labels"},
+    },
+}
+
+sw = SubWorkflow.from_config(config)
+```
+
+`SubWorkflow.from_config(config)` returns a `_ConfigDrivenSubWorkflow` instance — a `SubWorkflow` subclass that stores the config and implements `build()` by interpreting it declaratively. All existing `SubWorkflow` machinery (`__call__`, `SubWorkflowNode`, flattening, caching, scoped names) is reused without modification.
+
+#### Config Schema
+
+**Top-level keys:**
+
+| Key              | Type   | Required | Description                                    |
+|-----------------|--------|----------|------------------------------------------------|
+| `name`           | `str`  | Yes      | Sub-workflow identifier (used for node naming)  |
+| `inputs`         | `dict` | Yes      | Input field definitions (may be empty `{}`)     |
+| `outputs`        | `dict` | Yes      | Output field definitions                        |
+| `nodes`          | `list` | Yes      | Internal node definitions, in dependency order  |
+| `output_mapping` | `dict` | Yes      | Maps output fields to internal node columns     |
+
+**Field definition** (in `inputs`/`outputs`):
+
+| Key          | Type   | Required | Description                                       |
+|-------------|--------|----------|---------------------------------------------------|
+| `type`       | `str`  | Yes      | One of: `"int"`, `"float"`, `"str"`, `"bool"`, `"Path"` |
+| `image_spec` | `dict` | No       | If present, wraps the type with `Annotated[type, ImageSpec(...)]` |
+| `default`    | any    | No       | Default value for the field                       |
+
+**`image_spec` dict:** `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}`. Values are lists of enum value strings (e.g., `"intensity"`, `"label"`, `"YX"`). All keys are optional; missing keys mean "any" (empty set).
+
+**Node definition:**
+
+| Key                    | Type   | Required | Description                                  |
+|-----------------------|--------|----------|----------------------------------------------|
+| `name`                 | `str`  | Yes      | Internal node name (unique within config)    |
+| `tool_class`           | `str`  | Yes*     | Tool class name                              |
+| `tool_module`          | `str`  | Yes*     | Python module containing the tool            |
+| `tool_package`         | `str`  | No       | Versioned package name (for `resolve_tool_class`) |
+| `tool_package_version` | `str`  | No       | Package version                              |
+| `type`                 | `str`  | No       | `"sub_workflow"` for nested sub-workflow nodes |
+| `config`               | `dict` | No       | Inline config for nested config sub-workflow |
+| `sub_workflow_class`   | `str`  | No       | Class name for nested class-based sub-workflow |
+| `sub_workflow_module`  | `str`  | No       | Module for nested class-based sub-workflow   |
+| `inputs`               | `dict` | Yes      | Input bindings for this node                 |
+
+*Required for tool nodes (when `type` is not `"sub_workflow"`).
+
+**Input reference types** (values in a node's `inputs` dict):
+
+- `{"from_input": "field_name"}` — references a sub-workflow input. Resolves to a `ColumnRef` (if the parent bound a column) or a constant (if default/constant).
+- `{"from_node": "node_name", "column": "col_name"}` — references an output column from a previously defined internal node.
+- Raw value (`int`, `float`, `str`, `bool`, `list`) — constant binding passed directly to the tool.
+
+**Output mapping** values use only `{"from_node": ..., "column": ...}`.
+
+#### Nested Sub-Workflows
+
+A node with `"type": "sub_workflow"` is treated as a nested sub-workflow rather than a regular tool. Two forms are supported:
+
+- **Inline config:** `"config": {...}` — a nested config dict, recursively interpreted via `SubWorkflow.from_config()`.
+- **Class-based reference:** `"sub_workflow_class"` + `"sub_workflow_module"` (and optionally `"sub_workflow_package"` / `"sub_workflow_package_version"`) — imports and instantiates an existing Python `SubWorkflow` subclass.
+
+#### Serialization
+
+When `Workflow.export()` encounters a config-driven sub-workflow, it serializes the config dict directly:
+
+```json
+{
+  "name": "spot_detection_1",
+  "type": "sub_workflow",
+  "sub_workflow_type": "config",
+  "config": { ... },
+  "constants": { ... }
+}
+```
+
+`Workflow.load()` checks `"sub_workflow_type"`: when `"config"`, it calls `SubWorkflow.from_config(node_data["config"])` to reconstruct the sub-workflow.
+
+#### Equivalence
+
+A config-driven sub-workflow is functionally equivalent to a class-based sub-workflow that performs the same wiring. It produces the same `SubWorkflowNode` type, participates in the same flattening/caching/scoping mechanisms, and is indistinguishable to the execution engine.
+
 ---
 
 ## 15. Future Work
