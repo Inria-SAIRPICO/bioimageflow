@@ -17,7 +17,7 @@ measurement --- anything that operates on individual images or arrays.
    from bioimageflow_core import GENERAL_ENV
 
    class MyTool(ProcessingTool):
-       name = "my_tool"
+       display_name = "My Tool"
        environment = GENERAL_ENV  # or a custom EnvironmentSpec for specialized deps
 
        class Inputs:
@@ -55,7 +55,7 @@ results, computing aggregate statistics.
 .. code-block:: python
 
    class MyTransform(DataFrameTool):
-       name = "my_transform"
+       display_name = "My Transform"
 
        class Inputs:
            min_area: float = 100.0

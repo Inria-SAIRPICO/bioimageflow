@@ -40,8 +40,8 @@ class TestNodeStepObject:
                 names.append(step.node_name)
                 step.execute()
 
-        assert "file_loader_1" in names
-        assert "stub_segmenter_1" in names
+        assert "FileLoader_1" in names
+        assert "StubSegmenter_1" in names
 
     def test_step_has_tool(self, tmp_workspace):
         """Each step exposes the tool instance."""
@@ -57,8 +57,8 @@ class TestNodeStepObject:
                 tools[step.node_name] = step.tool
                 step.execute()
 
-        assert isinstance(tools["file_loader_1"], FileLoader)
-        assert isinstance(tools["stub_segmenter_1"], StubSegmenter)
+        assert isinstance(tools["FileLoader_1"], FileLoader)
+        assert isinstance(tools["StubSegmenter_1"], StubSegmenter)
 
     def test_execute_returns_dataframe(self, tmp_workspace):
         """step.execute() returns the node's output DataFrame."""
@@ -74,10 +74,10 @@ class TestNodeStepObject:
                 df = step.execute()
                 results[step.node_name] = df
 
-        assert isinstance(results["file_loader_1"], pd.DataFrame)
-        assert "path" in results["file_loader_1"].columns
-        assert isinstance(results["stub_segmenter_1"], pd.DataFrame)
-        assert "mask" in results["stub_segmenter_1"].columns
+        assert isinstance(results["FileLoader_1"], pd.DataFrame)
+        assert "path" in results["FileLoader_1"].columns
+        assert isinstance(results["StubSegmenter_1"], pd.DataFrame)
+        assert "mask" in results["StubSegmenter_1"].columns
 
     def test_execute_idempotent(self, tmp_workspace):
         """Calling execute() twice returns the same DataFrame."""
@@ -108,7 +108,7 @@ class TestAutoExecute:
             # Only call execute() on the last step
             last_df = None
             for step in wf.compute_steps(results):
-                if step.node_name == "stub_stats_1":
+                if step.node_name == "StubStats_1":
                     last_df = step.execute()
 
         # If intermediate nodes didn't auto-execute, the last would fail
@@ -159,10 +159,10 @@ class TestPrepare:
                 step.execute()
 
         # FileLoader is a DataFrameTool — no environment
-        assert envs["file_loader_1"] is None
+        assert envs["FileLoader_1"] is None
         # StubSegmenter is a ProcessingTool — has an environment
-        assert envs["stub_segmenter_1"] is not None
-        assert envs["stub_segmenter_1"].name == "cellpose"
+        assert envs["StubSegmenter_1"] is not None
+        assert envs["StubSegmenter_1"].name == "cellpose"
 
 
 class TestComputeStepsOrder:
@@ -183,8 +183,8 @@ class TestComputeStepsOrder:
                 names.append(step.node_name)
                 step.execute()
 
-        assert names.index("file_loader_1") < names.index("stub_segmenter_1")
-        assert names.index("stub_segmenter_1") < names.index("stub_stats_1")
+        assert names.index("FileLoader_1") < names.index("StubSegmenter_1")
+        assert names.index("StubSegmenter_1") < names.index("StubStats_1")
 
     def test_all_reachable_nodes_yielded(self, tmp_workspace):
         """Every node in the dependency chain is yielded, not just the target."""
@@ -203,7 +203,7 @@ class TestComputeStepsOrder:
                 step.execute()
 
         assert len(names) == 3
-        assert set(names) == {"file_loader_1", "stub_segmenter_1", "stub_stats_1"}
+        assert set(names) == {"FileLoader_1", "StubSegmenter_1", "StubStats_1"}
 
 
 class TestComputeStepsPartialIteration:
@@ -288,8 +288,8 @@ class TestComputeStepsTerminals:
                 names.append(step.node_name)
                 step.execute()
 
-        assert "file_loader_1" in names
-        assert "stub_segmenter_1" in names
+        assert "FileLoader_1" in names
+        assert "StubSegmenter_1" in names
 
     def test_multiple_terminals(self, tmp_workspace):
         """compute_steps() with multiple targets yields all reachable nodes."""
@@ -307,10 +307,10 @@ class TestComputeStepsTerminals:
                 names.append(step.node_name)
                 step.execute()
 
-        assert "file_loader_1" in names
+        assert "FileLoader_1" in names
         assert "seg_a" in names
         assert "seg_b" in names
-        assert names.count("file_loader_1") == 1
+        assert names.count("FileLoader_1") == 1
 
 
 class TestComputeStepsProgress:

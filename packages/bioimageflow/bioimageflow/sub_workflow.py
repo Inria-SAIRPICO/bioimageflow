@@ -114,7 +114,7 @@ class SubWorkflowNode(Node):
         name: str | None = None,
     ) -> None:
         # Bypass Node.__init__ — we manage our own state
-        self.tool = _ProxyTool(sub_workflow.Outputs, sub_workflow.name)  # type: ignore[assignment]
+        self.tool = _ProxyTool(sub_workflow.Outputs, type(sub_workflow).__name__)  # type: ignore[assignment]
         self.sub_workflow = sub_workflow
         self.internal_nodes = internal_nodes
         self._proxy_node = proxy_node
@@ -136,7 +136,7 @@ class SubWorkflowNode(Node):
         if name is not None:
             self._name = name
         else:
-            self._name = _get_next_name(sub_workflow.name)
+            self._name = _get_next_name(type(sub_workflow).__name__)
 
         # Register with active workflow
         wf = get_active_workflow()
@@ -157,7 +157,7 @@ class SubWorkflowNode(Node):
                 available = list(output_annotations.keys())
                 raise ColumnNotFoundError(
                     f"Column '{column}' not found in SubWorkflow "
-                    f"'{self.sub_workflow.name}' outputs. "
+                    f"'{type(self.sub_workflow).__name__}' outputs. "
                     f"Available: {available}"
                 )
         return ColumnRef(node=self, column=column)
@@ -167,14 +167,14 @@ class SubWorkflow:
     """Base class for reusable sub-workflow definitions.
 
     Subclasses must declare:
-    - ``name``: str — unique identifier
+    - ``display_name``: str — human-readable label for GUI display
     - ``Inputs``: IOModel subclass — declared inputs
     - ``Outputs``: IOModel subclass — declared outputs
     - ``build(self, inputs)``: method returning a dict mapping output names
       to ColumnRefs from internal nodes
     """
 
-    name: str
+    display_name: str = ""
     Inputs: type[IOModel] = IOModel
     Outputs: type[IOModel] | None = None
 
@@ -212,7 +212,7 @@ class SubWorkflow:
                 continue
             if key not in input_annotations:
                 raise BindingError(
-                    f"Unknown input '{key}' for SubWorkflow '{self.name}'. "
+                    f"Unknown input '{key}' for SubWorkflow '{type(self).__name__}'. "
                     f"Available: {list(input_annotations)}"
                 )
             if isinstance(value, ColumnRef):
@@ -233,7 +233,7 @@ class SubWorkflow:
                 continue  # has default
             raise BindingError(
                 f"Missing required input '{field_name}' for SubWorkflow "
-                f"'{self.name}'. No column reference, constant, or default."
+                f"'{type(self).__name__}'. No column reference, constant, or default."
             )
 
         # Create proxy node — temporarily suppress parent workflow registration
@@ -243,10 +243,10 @@ class SubWorkflow:
         try:
             # Create proxy node with Inputs as its "Outputs" so internal
             # nodes can reference proxy["field"]
-            proxy_tool = _ProxyTool(self.Inputs, f"_proxy_{self.name}")
+            proxy_tool = _ProxyTool(self.Inputs, f"_proxy_{type(self).__name__}")
             proxy_node = Node.__new__(Node)
             proxy_node.tool = proxy_tool  # type: ignore[assignment]
-            proxy_node._name = f"_proxy_{self.name}"
+            proxy_node._name = f"_proxy_{type(self).__name__}"
             proxy_node._kwargs = {}
             proxy_node._args = []
             proxy_node.enabled = True
@@ -273,13 +273,13 @@ class SubWorkflow:
             missing = set(output_annotations) - set(output_mapping or {})
             if missing:
                 raise ValueError(
-                    f"SubWorkflow '{self.name}' build() did not return mappings "
+                    f"SubWorkflow '{type(self).__name__}' build() did not return mappings "
                     f"for all Outputs fields. Missing: {sorted(missing)}"
                 )
             extra = set(output_mapping or {}) - set(output_annotations)
             if extra:
                 warnings.warn(
-                    f"SubWorkflow '{self.name}' build() returned extra output "
+                    f"SubWorkflow '{type(self).__name__}' build() returned extra output "
                     f"keys not in Outputs: {sorted(extra)}. They will be ignored.",
                     stacklevel=2,
                 )
@@ -419,14 +419,15 @@ class _ConfigDrivenSubWorkflow(SubWorkflow):
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
-        self.name = config["name"]
+        self.display_name = config.get("display_name", config["name"])
+        config_name = config["name"]
         self.Inputs = _build_iomodel(
-            f"{self.name}_Inputs", config.get("inputs", {})
+            f"{config_name}_Inputs", config.get("inputs", {})
         )
         outputs_config = config.get("outputs", {})
         if outputs_config:
             self.Outputs = _build_iomodel(
-                f"{self.name}_Outputs", outputs_config
+                f"{config_name}_Outputs", outputs_config
             )
         else:
             self.Outputs = None

@@ -30,7 +30,7 @@ class Atlas(ProcessingTool):
     The spot size is automatically selected and the detection threshold
     adapts to the local image dynamics. Wraps the ``atlas`` CLI tool.
     """
-    name = "atlas"
+    display_name = "Atlas"
     documentation = (
         "ATLAS is a spot detection method. The spots size is "
         "automatically selected and the detection threshold adapts to "
@@ -50,15 +50,15 @@ class Atlas(ProcessingTool):
             ),
         ]
         gaussian_std: Annotated[
-            int, GUIMeta(connectable=False, min=0, max=200, step=1)
+            int, GUIMeta(min=0, max=200, step=1)
         ] = 60
         p_value: Annotated[
-            float, GUIMeta(connectable=False, min=0.0, max=1.0, step=0.000001)
+            float, GUIMeta(min=0.0, max=1.0, step=0.000001)
         ] = 0.001
         area_lim: Annotated[
-            float, GUIMeta(connectable=False, min=0.0, max=10000.0, step=0.01)
+            float, GUIMeta(min=0.0, max=10000.0, step=0.01)
         ] = 0.0
-        verbose: Annotated[bool, GUIMeta(connectable=False)] = False
+        verbose: bool = False
 
     class Outputs(IOModel):
         output_image: Annotated[

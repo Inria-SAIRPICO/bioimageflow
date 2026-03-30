@@ -11,7 +11,7 @@ Basic templates
 .. code-block:: python
 
    class Segment(ProcessingTool):
-       name = "segment"
+       display_name = "Segment"
        environment = EnvironmentSpec(name="cellpose", dependencies={})
 
        class Inputs:
@@ -85,7 +85,7 @@ a single input row produces multiple outputs:
 .. code-block:: python
 
    class TileImage(ProcessingTool):
-       name = "tile"
+       display_name = "Tile"
        # ...
 
        class Outputs:

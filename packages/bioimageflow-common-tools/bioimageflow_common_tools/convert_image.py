@@ -7,7 +7,6 @@ from bioimageflow_core import (
     Arguments,
     Category,
     EnvironmentSpec,
-    GUIMeta,
     ImageSpec,
     IOModel,
     ProcessingTool,
@@ -38,7 +37,7 @@ class ConvertImage(ProcessingTool):
     SLDY, TIFF, and Bio-Formats files. The extension of the output file
     specifies the target format.
     """
-    name = "convert_image"
+    display_name = "Convert Image"
     documentation = (
         "Convert image file formats using bioio. The output format is "
         "determined by the output file extension."
@@ -49,11 +48,11 @@ class ConvertImage(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec()]
-        dim_order: Annotated[str, GUIMeta(connectable=False)] = "TCZYX"
-        scene: Annotated[int | None, GUIMeta(connectable=False)] = None
-        channel: Annotated[int | None, GUIMeta(connectable=False)] = None
-        z: Annotated[int | None, GUIMeta(connectable=False)] = None
-        timepoint: Annotated[int | None, GUIMeta(connectable=False)] = None
+        dim_order: str = "TCZYX"
+        scene: int | None = None
+        channel: int | None = None
+        z: int | None = None
+        timepoint: int | None = None
 
     class Outputs(IOModel):
         output_image: Annotated[Path, ImageSpec()] = Path("{input_image.stem}.ome.tiff")

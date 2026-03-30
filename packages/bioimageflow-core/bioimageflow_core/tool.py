@@ -56,7 +56,7 @@ class BaseTool:
     Common base for all tools. Provides identity and Inputs.
     __call__ is NOT defined here — each subclass defines its own.
     """
-    name: ClassVar[str]
+    display_name: ClassVar[str] = ""
     documentation: ClassVar[str] = ""
     category: ClassVar[Category | None] = None
     tags: ClassVar[list[str]] = []
@@ -75,10 +75,9 @@ class ProcessingTool(BaseTool):
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # Only validate leaf concrete classes that define BOTH name and Outputs on themselves
-        has_own_name = 'name' in cls.__dict__ and isinstance(cls.__dict__['name'], str)
+        # Only validate leaf concrete classes that define Outputs on themselves
         has_own_outputs = 'Outputs' in cls.__dict__
-        if not has_own_name or not has_own_outputs:
+        if not has_own_outputs:
             return
         # Check that at least one of process_row or process_batch is overridden
         has_process_row = cls.process_row is not ProcessingTool.process_row

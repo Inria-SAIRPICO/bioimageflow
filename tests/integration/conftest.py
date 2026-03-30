@@ -60,7 +60,7 @@ numpy_env = EnvironmentSpec(
 
 class FileLoader(DataFrameTool):
     """List image files in a directory. Acts as a source node."""
-    name = "file_loader"
+    display_name = "File Loader"
     tags = ["source", "loader"]
 
     class Inputs(IOModel):
@@ -80,7 +80,7 @@ class FileLoader(DataFrameTool):
 
 class CsvLoader(DataFrameTool):
     """Load a CSV file as a DataFrame. Acts as a source node."""
-    name = "csv_loader"
+    display_name = "CSV Loader"
     tags = ["source", "csv"]
 
     class Inputs(IOModel):
@@ -97,7 +97,7 @@ class CsvLoader(DataFrameTool):
 
 class StubSegmenter(ProcessingTool):
     """Simulates cell segmentation. Writes a small file as output."""
-    name = "stub_segmenter"
+    display_name = "Stub Segmenter"
     tags = ["segmentation"]
     environment = cellpose_env
 
@@ -118,7 +118,7 @@ class StubSegmenter(ProcessingTool):
 
 class StubStats(ProcessingTool):
     """Simulates intensity measurement on image + mask."""
-    name = "stub_stats"
+    display_name = "Stub Stats"
     tags = ["measurement"]
     environment = imageio_env
 
@@ -136,7 +136,7 @@ class StubStats(ProcessingTool):
 
 class StubTiler(ProcessingTool):
     """Simulates tiling: 1-to-N output (splits one image into tiles)."""
-    name = "stub_tiler"
+    display_name = "Stub Tiler"
     tags = ["tiling"]
     environment = imageio_env
 
@@ -160,7 +160,7 @@ class StubTiler(ProcessingTool):
 
 class StubBatchProcessor(ProcessingTool):
     """Uses process_batch instead of process_row for GPU-style batching."""
-    name = "stub_batch_processor"
+    display_name = "Stub Batch Processor"
     tags = ["batch", "gpu"]
     environment = numpy_env
     resources = ResourceSpec(gpu=1, max_concurrent=2)
@@ -183,7 +183,7 @@ class StubBatchProcessor(ProcessingTool):
 
 class StubBatchExploder(ProcessingTool):
     """Uses process_batch with 1-to-N outputs."""
-    name = "stub_batch_exploder"
+    display_name = "Stub Batch Exploder"
     tags = ["batch"]
     environment = numpy_env
 
@@ -209,7 +209,7 @@ class StubBatchExploder(ProcessingTool):
 
 class StubSourceProcessingTool(ProcessingTool):
     """A ProcessingTool used as a source node (no upstream, only constants)."""
-    name = "stub_source_processor"
+    display_name = "Stub Source Processor"
     tags = ["source"]
     environment = imageio_env
 
@@ -231,7 +231,7 @@ class StubSourceProcessingTool(ProcessingTool):
 
 class StubRegistration(ProcessingTool):
     """Simulates image registration from two inputs."""
-    name = "stub_registration"
+    display_name = "Stub Registration"
     tags = ["registration"]
     environment = imageio_env
 
@@ -254,7 +254,7 @@ class StubRegistration(ProcessingTool):
 
 class StubSharedMemoryTool(ProcessingTool):
     """Produces shared memory output instead of files."""
-    name = "stub_shm_tool"
+    display_name = "Stub SHM Tool"
     tags = ["shared_memory"]
     environment = numpy_env
 
@@ -275,7 +275,7 @@ class StubSharedMemoryTool(ProcessingTool):
 
 class StubSharedMemoryConsumer(ProcessingTool):
     """Consumes shared memory input."""
-    name = "stub_shm_consumer"
+    display_name = "Stub SHM Consumer"
     tags = ["shared_memory"]
     environment = numpy_env
 
@@ -307,7 +307,7 @@ class CellposeBase(ProcessingTool):
 
 
 class CellposeSegmenter(CellposeBase):
-    name = "cellpose_segmenter"
+    display_name = "Cellpose Segmenter"
     documentation = "Segments cells using the Cellpose algorithm."
 
     class Inputs(IOModel):
@@ -326,7 +326,7 @@ class CellposeSegmenter(CellposeBase):
 
 
 class CellposeTrain(CellposeBase):
-    name = "cellpose_train"
+    display_name = "Cellpose Train"
     documentation = "Trains a custom Cellpose model."
     tags = ["cellpose", "training"]
 
@@ -350,7 +350,7 @@ class CellposeTrain(CellposeBase):
 
 class StardistSegmenter(ProcessingTool):
     """Segmenter using a different environment (stardist)."""
-    name = "stardist_segmenter"
+    display_name = "Stardist Segmenter"
     environment = stardist_env
 
     class Inputs(IOModel):
@@ -372,7 +372,7 @@ class StardistSegmenter(ProcessingTool):
 
 class ColumnRegex(DataFrameTool):
     """Create dynamically named columns from a regex pattern."""
-    name = "column_regex"
+    display_name = "Column Regex"
     tags = ["dataframe", "regex"]
 
     class Inputs(IOModel):
@@ -392,7 +392,7 @@ class ColumnRegex(DataFrameTool):
 
 class FilterRows(DataFrameTool):
     """Filter DataFrame rows by column value constraints."""
-    name = "filter_rows"
+    display_name = "Filter Rows"
     tags = ["dataframe", "filter"]
 
     class Outputs(Passthrough):
@@ -413,7 +413,7 @@ class FilterRows(DataFrameTool):
 
 class AddColumn(DataFrameTool):
     """Add a constant column to the DataFrame."""
-    name = "add_column"
+    display_name = "Add Column"
     tags = ["dataframe"]
 
     class Outputs(Passthrough):
@@ -431,7 +431,7 @@ class AddColumn(DataFrameTool):
 
 class CountLabelOverlaps(DataFrameTool):
     """Count the number of overlapping labels."""
-    name = "count_label_overlaps"
+    display_name = "Count Label Overlaps"
     tags = ["aggregation"]
 
     class Inputs(IOModel):
@@ -460,7 +460,7 @@ class CountLabelOverlaps(DataFrameTool):
 
 class PrepareRegistration(DataFrameTool):
     """Pair each image with its reference for registration."""
-    name = "prepare_registration"
+    display_name = "Prepare Registration"
 
     class Inputs(IOModel):
         reference_index: int = 0

@@ -77,9 +77,9 @@ class TestNodeNaming:
             masks1 = segment(input_image=raw["path"], diameter=30.0)
             masks2 = segment(input_image=raw["path"], diameter=50.0)
             # Auto-names use tool name + counter
-            assert raw.name == "file_loader_1"
-            assert masks1.name == "stub_segmenter_1"
-            assert masks2.name == "stub_segmenter_2"
+            assert raw.name == "FileLoader_1"
+            assert masks1.name == "StubSegmenter_1"
+            assert masks2.name == "StubSegmenter_2"
 
     def test_custom_node_names(self, tmp_workspace):
         load = FileLoader()

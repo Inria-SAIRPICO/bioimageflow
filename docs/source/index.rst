@@ -14,7 +14,7 @@ provenance tracking.
    from bioimageflow import Workflow, DataFrameTool
 
    class Threshold(ProcessingTool):
-       name = "threshold"
+       display_name = "Threshold"
        environment = EnvironmentSpec(name="base", dependencies={})
 
        class Inputs:

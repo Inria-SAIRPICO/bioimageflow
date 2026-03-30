@@ -25,7 +25,7 @@ from .conftest import FileLoader, StubTiler, imageio_env
 
 class StubDefaultTemplate(ProcessingTool):
     """Tool using the default output template."""
-    name = "stub_default_template"
+    display_name = "Stub Default Template"
     environment = imageio_env
 
     class Inputs(IOModel):
@@ -43,7 +43,7 @@ class StubDefaultTemplate(ProcessingTool):
 
 class StubCustomTemplate(ProcessingTool):
     """Tool with a custom output template."""
-    name = "stub_custom_template"
+    display_name = "Stub Custom Template"
     environment = imageio_env
 
     class Inputs(IOModel):
@@ -60,7 +60,7 @@ class StubCustomTemplate(ProcessingTool):
 
 class StubMultiInput(ProcessingTool):
     """Tool with multiple input paths — {ext} resolves to empty."""
-    name = "stub_multi_input"
+    display_name = "Stub Multi Input"
     environment = imageio_env
 
     class Inputs(IOModel):
@@ -160,7 +160,7 @@ class TestColumnTemplate:
         ws = tmp_workspace_with_metadata
 
         class StubColumnTemplate(ProcessingTool):
-            name = "stub_column_template"
+            display_name = "Stub Column Template"
             environment = imageio_env
 
             class Inputs(IOModel):
@@ -202,7 +202,7 @@ class TestTimestampTemplate:
         """Test {timestamp} resolves to the execution timestamp."""
 
         class StubTimestampTemplate(ProcessingTool):
-            name = "stub_timestamp_template"
+            display_name = "Stub Timestamp Template"
             environment = imageio_env
 
             class Inputs(IOModel):
@@ -239,7 +239,7 @@ class TestTemplateErrors:
         """Template referencing a non-existent input field raises at construction."""
 
         class BadTemplate(ProcessingTool):
-            name = "bad_template"
+            display_name = "Bad Template"
             environment = imageio_env
 
             class Inputs(IOModel):

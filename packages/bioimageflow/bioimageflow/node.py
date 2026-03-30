@@ -85,7 +85,7 @@ class Node:
         if name is not None:
             self._name = name
         else:
-            self._name = _get_next_name(tool.name)
+            self._name = _get_next_name(type(tool).__name__)
 
         # Register with active workflow
         wf = get_active_workflow()
@@ -134,7 +134,7 @@ class Node:
             else:
                 raise BindingError(
                     f"Unknown or unexpected keyword argument '{key}' for tool "
-                    f"'{self.tool.name}'. Available input fields: "
+                    f"'{type(self.tool).__name__}'. Available input fields: "
                     f"{list(input_annotations.keys())}"
                 )
 
@@ -147,7 +147,7 @@ class Node:
             if hasattr(self.tool.Inputs, field_name):
                 continue  # Has default
             raise BindingError(
-                f"Missing required input '{field_name}' for tool '{self.tool.name}'. "
+                f"Missing required input '{field_name}' for tool '{type(self.tool).__name__}'. "
                 f"Binding error: no column reference, constant, or default provided."
             )
 
@@ -183,7 +183,7 @@ class Node:
             raise BindingError(
                 f"Type mismatch: upstream '{col_ref.node.name}'.'{col_ref.column}' "
                 f"is not compatible with input '{input_field}' of tool "
-                f"'{self.tool.name}'. Producer semantics: {producer_spec.semantics}, "
+                f"'{type(self.tool).__name__}'. Producer semantics: {producer_spec.semantics}, "
                 f"consumer semantics: {consumer_spec.semantics}."
             )
 
@@ -212,7 +212,7 @@ class Node:
                     close = get_close_matches(column, available, n=3, cutoff=0.4)
                     msg = (
                         f"Column '{column}' not found in outputs of node "
-                        f"'{self.name}' (tool '{tool.name}'). "
+                        f"'{self.name}' (tool '{type(tool).__name__}'). "
                         f"Available columns: {available}."
                     )
                     if close:

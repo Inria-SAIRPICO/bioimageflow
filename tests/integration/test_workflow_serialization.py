@@ -84,7 +84,7 @@ class TestWorkflowImport:
         # Reload and re-execute
         loaded = Workflow.load(tmp_workspace / "workflow.json")
         # Find the terminal node by name
-        terminal = loaded.nodes["stub_segmenter_1"]
+        terminal = loaded.nodes["StubSegmenter_1"]
         results.append(loaded.compute(terminal))
 
         pd.testing.assert_frame_equal(results[0], results[1])

@@ -28,7 +28,7 @@ Producing shared arrays
    from bioimageflow_core.shm import create_shared_output
 
    class Preprocess(ProcessingTool):
-       name = "preprocess"
+       display_name = "Preprocess"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
@@ -59,7 +59,7 @@ Consuming shared arrays
    from bioimageflow_core.io import load_image
 
    class Segment(ProcessingTool):
-       name = "segment"
+       display_name = "Segment"
        environment = EnvironmentSpec(name="cellpose", dependencies={})
 
        class Inputs:

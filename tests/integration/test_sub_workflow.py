@@ -39,7 +39,7 @@ from typing import Annotated
 
 class SegmentAndMeasure(SubWorkflow):
     """A sub-workflow that segments images and measures stats."""
-    name = "segment_and_measure"
+    display_name = "Segment And Measure"
 
     class Inputs(IOModel):
         image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -68,7 +68,7 @@ class SegmentAndMeasure(SubWorkflow):
 
 class SegmentOnly(SubWorkflow):
     """Minimal sub-workflow: just segmentation."""
-    name = "segment_only"
+    display_name = "Segment Only"
 
     class Inputs(IOModel):
         image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -170,8 +170,8 @@ class TestSubWorkflowBasic:
             raw = load(path=str(tmp_workspace / "data"))
             r1 = seg(image=raw["path"])
             r2 = seg(image=raw["path"])
-            assert r1.name == "segment_only_1"
-            assert r2.name == "segment_only_2"
+            assert r1.name == "SegmentOnly_1"
+            assert r2.name == "SegmentOnly_2"
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +190,10 @@ class TestSubWorkflowEncapsulation:
             _results = seg(image=raw["path"])
 
             # Parent workflow should only have the file_loader and the sub-workflow node
-            assert "file_loader_1" in wf.nodes
-            assert "segment_only_1" in wf.nodes
+            assert "FileLoader_1" in wf.nodes
+            assert "SegmentOnly_1" in wf.nodes
             # Internal stub_segmenter should NOT be in parent
-            assert not any("stub_segmenter" in k for k in wf.nodes)
+            assert not any("StubSegmenter" in k for k in wf.nodes)
 
     def test_internal_nodes_accessible_via_attribute(self, tmp_workspace):
         """Internal nodes are accessible for debugging."""
@@ -209,7 +209,7 @@ class TestSubWorkflowEncapsulation:
             assert len(internal) > 0
             # Should contain the stub_segmenter
             internal_names = [n.name for n in internal]
-            assert any("stub_segmenter" in name for name in internal_names)
+            assert any("StubSegmenter" in name for name in internal_names)
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +232,9 @@ class TestSubWorkflowComputeSteps:
                 names.append(step.node_name)
                 step.execute()
 
-        assert "file_loader_1" in names
+        assert "FileLoader_1" in names
         # Internal nodes should have scoped names
-        assert any("segment_only_1/" in name for name in names)
+        assert any("SegmentOnly_1/" in name for name in names)
 
     def test_compute_steps_environment_for_internal_nodes(self, tmp_workspace):
         """Internal ProcessingTool steps expose their environment."""
@@ -251,9 +251,9 @@ class TestSubWorkflowComputeSteps:
                 step.execute()
 
         # File loader (DataFrameTool) has no environment
-        assert envs["file_loader_1"] is None
+        assert envs["FileLoader_1"] is None
         # Internal segmenter should have cellpose env
-        internal_seg_names = [n for n in envs if "stub_segmenter" in n]
+        internal_seg_names = [n for n in envs if "StubSegmenter" in n]
         assert len(internal_seg_names) == 1
         assert envs[internal_seg_names[0]] is not None
         assert envs[internal_seg_names[0]].name == "cellpose"
@@ -273,10 +273,10 @@ class TestSubWorkflowComputeSteps:
                 step.execute()
 
         # file_loader must come first
-        assert names[0] == "file_loader_1"
+        assert names[0] == "FileLoader_1"
         # segmenter must come before stats (within the sub-workflow)
-        seg_idx = next(i for i, n in enumerate(names) if "stub_segmenter" in n)
-        stats_idx = next(i for i, n in enumerate(names) if "stub_stats" in n)
+        seg_idx = next(i for i, n in enumerate(names) if "StubSegmenter" in n)
+        stats_idx = next(i for i, n in enumerate(names) if "StubStats" in n)
         assert seg_idx < stats_idx
 
 
@@ -323,7 +323,7 @@ class TestSubWorkflowMixedTools:
         """Sub-workflow can contain DataFrameTools alongside ProcessingTools."""
 
         class FilterAndSegment(SubWorkflow):
-            name = "filter_and_segment"
+            display_name = "Filter And Segment"
 
             class Inputs(IOModel):
                 image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -369,7 +369,7 @@ class TestNestedSubWorkflows:
         """A sub-workflow can contain another sub-workflow."""
 
         class OuterWorkflow(SubWorkflow):
-            name = "outer_workflow"
+            display_name = "Outer Workflow"
 
             class Inputs(IOModel):
                 image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -406,7 +406,7 @@ class TestNestedSubWorkflows:
         """Nested sub-workflow nodes have double-scoped names."""
 
         class OuterWorkflow(SubWorkflow):
-            name = "outer"
+            display_name = "Outer"
 
             class Inputs(IOModel):
                 image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -435,7 +435,7 @@ class TestNestedSubWorkflows:
                 names.append(step.node_name)
                 step.execute()
 
-        # Should have nested scoping: outer_1/segment_only_1/stub_segmenter_1
+        # Should have nested scoping: OuterWorkflow_1/SegmentOnly_1/StubSegmenter_1
         deep_names = [n for n in names if n.count("/") >= 2]
         assert len(deep_names) > 0
 
@@ -484,7 +484,7 @@ class TestSubWorkflowSerialization:
         # Load and re-execute
         wf2 = Workflow.load(tmp_workspace / "workflow.json")
         # Find the terminal node
-        terminal_names = [n for n in wf2.nodes if "segment_only" in n]
+        terminal_names = [n for n in wf2.nodes if "SegmentOnly" in n]
         assert len(terminal_names) == 1
         df2 = wf2.compute(wf2.nodes[terminal_names[0]])
 
@@ -502,7 +502,7 @@ class TestSubWorkflowErrors:
         """build() that doesn't return all Outputs fields raises ValueError."""
 
         class BadSubWorkflow(SubWorkflow):
-            name = "bad_sub"
+            display_name = "Bad Sub"
 
             class Inputs(IOModel):
                 image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]

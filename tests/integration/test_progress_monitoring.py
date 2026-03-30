@@ -34,8 +34,8 @@ class TestProgressCallback:
 
         # Should have events for both nodes
         node_names = {e.node_name for e in events}
-        assert "file_loader_1" in node_names or any(
-            "file_loader" in n for n in node_names
+        assert "FileLoader_1" in node_names or any(
+            "FileLoader" in n for n in node_names
         )
 
     def test_progress_event_fields(self, tmp_workspace):
@@ -83,7 +83,7 @@ class TestProgressCallback:
             wf.compute(masks)
 
         # For the segmenter node, expect: started → row_complete(s) → completed
-        seg_events = [e for e in events if "segmenter" in e.node_name]
+        seg_events = [e for e in events if "Segmenter" in e.node_name]
         if seg_events:
             statuses = [e.status for e in seg_events]
             assert statuses[0] == "started"

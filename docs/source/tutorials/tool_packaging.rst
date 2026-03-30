@@ -87,7 +87,7 @@ ProcessingTool
    from bioimageflow_core.environment import EnvironmentSpec
 
    class MySegmenter(ProcessingTool):
-       name = "my_segmenter"
+       display_name = "My Segmenter"
 
        environment = EnvironmentSpec(
            name="my_tools",
@@ -123,7 +123,7 @@ relative imports to reference tools from the same package:
    from .loader import ImageLoader          # relative import
 
    class SegmentPipeline(SubWorkflow):
-       name = "segment_pipeline"
+       display_name = "Segment Pipeline"
 
        class Inputs(IOModel):
            image: str

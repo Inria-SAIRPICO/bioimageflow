@@ -58,7 +58,7 @@ def tool_store(tmp_path):
             "from .base import DummyBase\n"
             "from bioimageflow_core import IOModel, Arguments\n\n"
             "class AlphaTool(DummyBase):\n"
-            f"    name = 'alpha'\n"
+            f"    display_name = 'Alpha'\n"
             "    class Inputs(IOModel):\n"
             f"        value: int = 0{extra_field}\n"
             "    class Outputs(IOModel):\n"
@@ -73,7 +73,7 @@ def tool_store(tmp_path):
             "from bioimageflow.dataframe_tool import DataFrameTool\n"
             "from bioimageflow_core import IOModel\n\n"
             "class LoaderTool(DataFrameTool):\n"
-            "    name = 'dummy_loader'\n"
+            "    display_name = 'Dummy Loader'\n"
             "    class Inputs(IOModel):\n"
             "        path: str\n"
             "    class Outputs(IOModel):\n"
@@ -93,7 +93,7 @@ def tool_store(tmp_path):
             "from .alpha import AlphaTool\n"
             "from .loader import LoaderTool\n\n"
             "class AlphaPipeline(SubWorkflow):\n"
-            "    name = 'alpha_pipeline'\n"
+            "    display_name = 'Alpha Pipeline'\n"
             "    class Inputs(IOModel):\n"
             "        path: str\n"
             "    class Outputs(IOModel):\n"
@@ -154,13 +154,13 @@ class TestVersionedNodeCreation:
         v1 = _load_v1(tool_store)
         with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.AlphaTool()(value=5)
-            assert node.tool.name == "alpha"
+            assert node.tool.display_name == "Alpha"
 
     def test_dataframe_tool_creates_node(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         with Workflow(storage_path=data_dir.parent / "results"):
             node = v1.LoaderTool()(path=str(data_dir))
-            assert node.tool.name == "dummy_loader"
+            assert node.tool.display_name == "Dummy Loader"
 
     def test_input_validation(self, tool_store, data_dir):
         from bioimageflow.node import BindingError
@@ -185,8 +185,8 @@ class TestVersionedNodeCreation:
         with Workflow(storage_path=data_dir.parent / "results"):
             n1 = v1.AlphaTool()(value=0)
             n2 = v2.AlphaTool()(value=0)
-            assert n1.name == "alpha_1"
-            assert n2.name == "alpha_2"
+            assert n1.name == "AlphaTool_1"
+            assert n2.name == "AlphaTool_2"
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +219,8 @@ class TestVersionedExecution:
             n2 = v2.AlphaTool()(value=0)
             results = wf.compute(n1, n2)
 
-        assert results["alpha_1"]["result"].iloc[0] == "v1"
-        assert results["alpha_2"]["result"].iloc[0] == "v2"
+        assert results["AlphaTool_1"]["result"].iloc[0] == "v1"
+        assert results["AlphaTool_2"]["result"].iloc[0] == "v2"
 
     def test_dataframe_tool_v2_adds_column(self, tool_store, data_dir):
         v2 = _load_v2(tool_store)
@@ -280,8 +280,8 @@ class TestVersionedSubWorkflow:
             n2 = v2.AlphaPipeline()(path=str(data_dir))
             results = wf.compute(n1, n2)
 
-        assert results["alpha_pipeline_1"]["result"].iloc[0] == "v1"
-        assert results["alpha_pipeline_2"]["result"].iloc[0] == "v2"
+        assert results["AlphaPipeline_1"]["result"].iloc[0] == "v1"
+        assert results["AlphaPipeline_2"]["result"].iloc[0] == "v2"
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ class TestVersionedSerialization:
             wf.export(data_dir.parent / "workflow.json")
 
         data = json.loads((data_dir.parent / "workflow.json").read_text())
-        alpha_node = next(n for n in data["nodes"] if n["name"] == "alpha_1")
+        alpha_node = next(n for n in data["nodes"] if n["name"] == "AlphaTool_1")
         assert alpha_node["tool_package"] == "dummy_tools"
         assert alpha_node["tool_package_version"] == "1.0.0"
         assert alpha_node["tool_module"] == "dummy_tools.alpha"
@@ -326,8 +326,8 @@ class TestVersionedSerialization:
 
         data = json.loads((data_dir.parent / "workflow.json").read_text())
         nodes_by_name = {n["name"]: n for n in data["nodes"]}
-        assert nodes_by_name["alpha_1"]["tool_package_version"] == "1.0.0"
-        assert nodes_by_name["alpha_2"]["tool_package_version"] == "2.0.0"
+        assert nodes_by_name["AlphaTool_1"]["tool_package_version"] == "1.0.0"
+        assert nodes_by_name["AlphaTool_2"]["tool_package_version"] == "2.0.0"
 
     def test_load_versioned_workflow(self, tool_store, data_dir, monkeypatch):
         """Export then load — loaded tools have correct version metadata."""
@@ -343,7 +343,7 @@ class TestVersionedSerialization:
         unload_versioned_package("dummy_tools", "1.0.0")
 
         loaded = Workflow.load(data_dir.parent / "workflow.json")
-        terminal = loaded.nodes["alpha_1"]
+        terminal = loaded.nodes["AlphaTool_1"]
         assert getattr(type(terminal.tool), "_bif_package_version", None) == "1.0.0"
 
         df2 = loaded.compute(terminal)
@@ -364,7 +364,7 @@ class TestVersionedSerialization:
         unload_versioned_package("dummy_tools", "1.0.0")
 
         loaded = Workflow.load(data_dir.parent / "workflow.json")
-        terminal = loaded.nodes["alpha_1"]
+        terminal = loaded.nodes["AlphaTool_1"]
         df2 = loaded.compute(terminal)
         pd.testing.assert_frame_equal(df1, df2)
 

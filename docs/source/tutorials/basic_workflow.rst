@@ -21,7 +21,7 @@ workflow mechanics:
 
    class LoadImages(DataFrameTool):
        """Scan a folder for TIFF files."""
-       name = "load_images"
+       display_name = "Load Images"
 
        class Inputs:
            folder: str
@@ -38,7 +38,7 @@ workflow mechanics:
 
    class Segment(ProcessingTool):
        """Segment cells using Cellpose."""
-       name = "segment"
+       display_name = "Segment"
        environment = cellpose_env
 
        class Inputs:
@@ -60,7 +60,7 @@ workflow mechanics:
 
    class Measure(ProcessingTool):
        """Measure region properties from a label mask."""
-       name = "measure"
+       display_name = "Measure"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:

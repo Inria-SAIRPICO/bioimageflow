@@ -22,7 +22,7 @@ class ExtractChannel(ProcessingTool):
     Reads an image and writes the selected channel as a 2D image.
     Expects the first axis to be the channel axis (CYX or CZYX layout).
     """
-    name = "extract_channel"
+    display_name = "Extract Channel"
     documentation = "Extract a single channel (by index) from a multi-channel image."
     category = Category.IMAGE_PROCESSING
     tags = ["preprocessing", "channel"]
@@ -35,7 +35,7 @@ class ExtractChannel(ProcessingTool):
                 layouts={Layout.PLANAR_CHANNEL, Layout.VOLUMETRIC_CHANNEL},
             ),
         ]
-        channel: Annotated[int, GUIMeta(connectable=False, min=0, max=512, step=1)] = 0
+        channel: Annotated[int, GUIMeta(min=0, max=512, step=1)] = 0
 
     class Outputs(IOModel):
         output_image: Annotated[

@@ -68,7 +68,7 @@ Storage layout
        └── {node_name}/
            └── {signature_hash}/
                ├── dataframe.csv     # output DataFrame
-               ├── metadata.json     # tool name, version, timestamp
+               ├── metadata.json     # tool class name, version, timestamp
                ├── parameters.json   # resolved parameter values
                └── assets/           # output files
 

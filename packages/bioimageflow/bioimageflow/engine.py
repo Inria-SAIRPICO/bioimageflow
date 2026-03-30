@@ -416,10 +416,10 @@ class SequentialEngine:
                         raise EnvironmentMismatchError(
                             f"Environment mismatch for '{env.name}': "
                             f"tool '{existing_tool}' requires {existing_env.dependencies}, "
-                            f"but tool '{node.tool.name}' requires {env.dependencies}."
+                            f"but tool '{type(node.tool).__name__}' requires {env.dependencies}."
                         )
                 else:
-                    env_specs[env.name] = (env, node.tool.name)
+                    env_specs[env.name] = (env, type(node.tool).__name__)
 
     def _topological_sort(self, nodes: set[Node]) -> list[Node]:
         """Topological sort of reachable nodes using graphlib.TopologicalSorter."""
@@ -569,7 +569,7 @@ class SequentialEngine:
 
         self._emit_progress(workflow, node.name, "completed")
         hash_dir = create_hash_dir(node_dir, sig_hash)
-        self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name,
+        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__,
                                workflow, parameters=args_dict, hash_dir=hash_dir)
         return df, sig_hash
 
@@ -622,7 +622,7 @@ class SequentialEngine:
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
-        self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
+        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__, workflow,
                                hash_dir=hash_dir)
         return df, sig_hash
 
@@ -678,7 +678,7 @@ class SequentialEngine:
         self._emit_progress(workflow, node.name, "completed")
 
         df = self._persist_shared_arrays(df, hash_dir)
-        self._save_and_cleanup(node_dir, sig_hash, df, node.tool.name, workflow,
+        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__, workflow,
                                hash_dir=hash_dir)
         return df, sig_hash
 
@@ -848,7 +848,7 @@ class SequentialEngine:
         tool_version = get_tool_version(node.tool)
         source_hash = get_source_hash(type(node.tool)) if workflow._dev_mode else None
         return compute_signature_hash(
-            node.tool.name, tool_version, env_hash, resolved_params,
+            type(node.tool).__name__, tool_version, env_hash, resolved_params,
             upstream_hashes, source_hash=source_hash,
         )
 

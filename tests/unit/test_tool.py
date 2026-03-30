@@ -72,7 +72,7 @@ class TestProcessingToolValidation:
     def test_missing_process_methods_raises(self):
         with pytest.raises(TypeError, match="must implement process_row or process_batch"):
             class Bad(ProcessingTool):
-                name = "bad"
+                display_name = "Bad"
                 environment = EnvironmentSpec(name="test", dependencies={})
 
                 class Outputs(IOModel):
@@ -80,7 +80,7 @@ class TestProcessingToolValidation:
 
     def test_process_row_only_is_valid(self):
         class Good(ProcessingTool):
-            name = "good_row"
+            display_name = "Good Row"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Outputs(IOModel):
@@ -89,11 +89,11 @@ class TestProcessingToolValidation:
             def process_row(self, arguments):
                 return self.Outputs(result="ok")
 
-        assert Good.name == "good_row"
+        assert Good.display_name == "Good Row"
 
     def test_process_batch_only_is_valid(self):
         class Good(ProcessingTool):
-            name = "good_batch"
+            display_name = "Good Batch"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Outputs(IOModel):
@@ -102,7 +102,7 @@ class TestProcessingToolValidation:
             def process_batch(self, arguments_list):
                 return [self.Outputs(result="ok")]
 
-        assert Good.name == "good_batch"
+        assert Good.display_name == "Good Batch"
 
     def test_abstract_intermediate_not_validated(self):
         """A class without name or Outputs should not trigger validation."""
@@ -113,6 +113,6 @@ class TestProcessingToolValidation:
 
     def test_intermediate_with_name_only_not_validated(self):
         class Intermediate(ProcessingTool):
-            name = "intermediate"
+            display_name = "Intermediate"
 
         # Has name but no Outputs — no validation

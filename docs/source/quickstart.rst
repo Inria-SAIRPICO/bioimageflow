@@ -17,7 +17,7 @@ data programmatically:
    from bioimageflow import DataFrameTool
 
    class ImageSource(DataFrameTool):
-       name = "image_source"
+       display_name = "Image Source"
 
        class Inputs:
            folder: str
@@ -43,7 +43,7 @@ Declare its inputs, outputs, and the environment it needs:
    )
 
    class InvertImage(ProcessingTool):
-       name = "invert"
+       display_name = "Invert"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:

@@ -61,7 +61,7 @@ class SpotDetection(SubWorkflow):
         Number of detected spots.
     """
 
-    name = "spot_detection"
+    display_name = "Spot Detection"
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -133,7 +133,7 @@ class SpotAnalysis(SubWorkflow):
         Number of detected spots.
     """
 
-    name = "spot_analysis"
+    display_name = "Spot Analysis"
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]

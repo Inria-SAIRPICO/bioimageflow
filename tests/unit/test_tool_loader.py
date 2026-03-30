@@ -72,7 +72,7 @@ def tool_store(tmp_path):
             "from .utils.helpers import helper_func\n"
             "from bioimageflow_core import IOModel, Arguments\n\n"
             "class AlphaTool(DummyBase):\n"
-            f"    name = 'alpha'\n"
+            f"    display_name = 'Alpha'\n"
             "    class Inputs(IOModel):\n"
             f"        value: int = 0{extra_field}\n"
             "    class Outputs(IOModel):\n"
@@ -87,7 +87,7 @@ def tool_store(tmp_path):
             "from bioimageflow.dataframe_tool import DataFrameTool\n"
             "from bioimageflow_core import IOModel\n\n"
             "class LoaderTool(DataFrameTool):\n"
-            "    name = 'dummy_loader'\n"
+            "    display_name = 'Dummy Loader'\n"
             "    class Inputs(IOModel):\n"
             "        path: str\n"
             "    class Outputs(IOModel):\n"
@@ -256,7 +256,7 @@ class TestGetToolPackageInfo:
         from bioimageflow.tool_loader import get_tool_package_info
 
         class Stub(ProcessingTool):
-            name = "stub"
+            display_name = "Stub"
             environment = EnvironmentSpec(name="x", dependencies={})
             class Inputs(IOModel):
                 pass
@@ -408,7 +408,7 @@ class TestGetToolVersion:
         from bioimageflow.validation import get_tool_version
 
         class Stub(ProcessingTool):
-            name = "stub_ver_test"
+            display_name = "Stub Ver Test"
             environment = EnvironmentSpec(name="x", dependencies={})
             class Inputs(IOModel):
                 pass

@@ -282,7 +282,7 @@ class TestMiniPipeline:
 
         class StubLabeler(ProcessingTool):
             """Passthrough that re-tags an image as LABEL semantic."""
-            name = "stub_labeler"
+            display_name = "Stub Labeler"
             environment = stub_env
 
             class Inputs(IOModel):

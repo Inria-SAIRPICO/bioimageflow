@@ -75,7 +75,7 @@ class TestWorkflowEnableDisable:
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
-            wf.disable("stub_segmenter_1")
+            wf.disable("StubSegmenter_1")
             assert masks.enabled is False
 
     def test_workflow_enable_by_name(self, tmp_workspace):
@@ -85,7 +85,7 @@ class TestWorkflowEnableDisable:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             masks.disable()
-            wf.enable("stub_segmenter_1")
+            wf.enable("StubSegmenter_1")
             assert masks.enabled is True
 
     def test_workflow_disable_multiple(self, tmp_workspace):
@@ -237,7 +237,7 @@ class TestComputeStepsWithDisabled:
                     step.execute()
 
         steps_dict = dict(steps)
-        assert steps_dict["file_loader_1"] is False  # source runs
+        assert steps_dict["FileLoader_1"] is False  # source runs
         assert steps_dict["seg"] is True  # disabled
         assert steps_dict["stats"] is True  # implicitly skipped
 
@@ -274,7 +274,7 @@ class TestSerializationRoundTrip:
         assert seg_node["enabled"] is False
 
         # Enabled nodes should not have the key (or have it True)
-        loader_node = next(n for n in data["nodes"] if n["name"] == "file_loader_1")
+        loader_node = next(n for n in data["nodes"] if n["name"] == "FileLoader_1")
         assert loader_node.get("enabled", True) is True
 
     def test_disabled_flag_restored_on_load(self, tmp_workspace):
@@ -289,7 +289,7 @@ class TestSerializationRoundTrip:
 
         wf2 = Workflow.load(tmp_workspace / "workflow.json")
         assert wf2.nodes["seg"].enabled is False
-        assert wf2.nodes["file_loader_1"].enabled is True
+        assert wf2.nodes["FileLoader_1"].enabled is True
 
 
 class TestAllTargetsDisabled:

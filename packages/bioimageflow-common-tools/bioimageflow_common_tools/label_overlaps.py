@@ -22,7 +22,7 @@ class LabelOverlaps(ProcessingTool):
     label from image 2. Outputs a CSV table with columns:
     reference_label, spot_label, overlap_count.
     """
-    name = "label_overlaps"
+    display_name = "Label Overlaps"
     documentation = (
         "Compute the spatial overlap between two labeled images. "
         "Outputs a CSV table of (reference_label, spot_label, overlap_count) tuples."

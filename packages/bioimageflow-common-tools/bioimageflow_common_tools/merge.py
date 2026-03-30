@@ -10,7 +10,7 @@ from bioimageflow.dataframe_tool import DataFrameTool, Passthrough
 
 class InnerJoin(DataFrameTool):
     """Inner join upstream DataFrames on index (default merge behavior)."""
-    name = "inner_join"
+    display_name = "Inner Join"
     category = Category.UTILITIES
 
     class Inputs(IOModel):
@@ -20,7 +20,7 @@ class InnerJoin(DataFrameTool):
 
 class CrossJoin(DataFrameTool):
     """Cross join for combinatorial expansion."""
-    name = "cross_join"
+    display_name = "Cross Join"
     category = Category.UTILITIES
 
     class Inputs(IOModel):
@@ -42,7 +42,7 @@ class CrossJoin(DataFrameTool):
 
 class JoinOnColumn(DataFrameTool):
     """Join upstream DataFrames on a named column."""
-    name = "join_on_column"
+    display_name = "Join On Column"
     category = Category.UTILITIES
 
     class Inputs(IOModel):
@@ -68,7 +68,7 @@ class JoinOnColumn(DataFrameTool):
 
 class Concat(DataFrameTool):
     """Concatenate DataFrames vertically."""
-    name = "concat"
+    display_name = "Concat"
     category = Category.UTILITIES
 
     class Inputs(IOModel):
@@ -86,7 +86,7 @@ class Concat(DataFrameTool):
 
 class Collect(DataFrameTool):
     """Gather columns from multiple ancestor nodes into one DataFrame."""
-    name = "collect"
+    display_name = "Collect"
     category = Category.UTILITIES
 
     class Outputs(Passthrough):

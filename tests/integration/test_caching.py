@@ -104,7 +104,7 @@ class TestCacheMiss:
             # The segmenter node must have been re-executed (not cached)
             seg_started = [
                 e for e in events
-                if "segmenter" in e.node_name and e.status == "started"
+                if "Segmenter" in e.node_name and e.status == "started"
             ]
             assert len(seg_started) > 0, "Different parameter should cause cache miss"
 
@@ -163,7 +163,7 @@ class TestDevMode:
             wf.compute(masks, dev_mode=True)
             seg_cached = [
                 e for e in events2
-                if "segmenter" in e.node_name and e.status == "cached"
+                if "Segmenter" in e.node_name and e.status == "cached"
             ]
             assert len(seg_cached) > 0, "Second identical run should use cache"
 
@@ -172,7 +172,7 @@ class TestDevMode:
         from bioimageflow_core import Arguments
 
         class ModifiedSegmenter(ProcessingTool):
-            name = "stub_segmenter"
+            display_name = "Stub Segmenter"
             environment = segment.environment
 
             class Inputs(IOModel):
@@ -201,7 +201,7 @@ class TestDevMode:
             wf.compute(masks, dev_mode=True)
             seg_started = [
                 e for e in events3
-                if "segmenter" in e.node_name and e.status == "started"
+                if "Segmenter" in e.node_name and e.status == "started"
             ]
             assert len(seg_started) > 0, "Modified source should cause cache miss in dev mode"
 
@@ -217,7 +217,7 @@ class TestEnvironmentDependencyChange:
         )
 
         class ToolV1(ProcessingTool):
-            name = "versioned_tool"
+            display_name = "Versioned Tool"
             environment = env_v1
 
             class Inputs(IOModel):
@@ -244,7 +244,7 @@ class TestEnvironmentDependencyChange:
         )
 
         class ToolV2(ProcessingTool):
-            name = "versioned_tool"
+            display_name = "Versioned Tool"
             environment = env_v2
 
             class Inputs(IOModel):
@@ -267,7 +267,7 @@ class TestEnvironmentDependencyChange:
             # The tool node must have been re-executed (not cached) due to env change
             started = [
                 e for e in events
-                if "versioned_tool" in e.node_name and e.status == "started"
+                if "ToolV2" in e.node_name and e.status == "started"
             ]
             assert len(started) > 0, "Different env dependencies should cause cache miss"
 
@@ -346,7 +346,7 @@ class TestCacheRetention:
             wf.compute(masks)
 
         # Only the latest execution should be stored
-        node_dir = tmp_workspace / "results" / "data" / "stub_segmenter_1"
+        node_dir = tmp_workspace / "results" / "data" / "StubSegmenter_1"
         if node_dir.exists():
             hash_dirs = [d for d in node_dir.iterdir() if d.is_dir()]
             assert len(hash_dirs) <= 1
@@ -364,7 +364,7 @@ class TestCacheRetention:
                 masks = segment(input_image=raw["path"], diameter=diameter)
                 wf.compute(masks)
 
-        node_dir = tmp_workspace / "results" / "data" / "stub_segmenter_1"
+        node_dir = tmp_workspace / "results" / "data" / "StubSegmenter_1"
         if node_dir.exists():
             hash_dirs = [d for d in node_dir.iterdir() if d.is_dir()]
             assert len(hash_dirs) <= 3

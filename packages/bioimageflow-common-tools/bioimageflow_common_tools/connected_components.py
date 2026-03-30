@@ -27,7 +27,7 @@ class ConnectedComponents(ProcessingTool):
     connected region receives a unique integer identifier.
     Uses SimpleITK for both I/O and processing.
     """
-    name = "connected_components"
+    display_name = "Connected Components"
     documentation = (
         "Convert a binary image into a labeled image by assigning "
         "a unique identifier to each connected component."

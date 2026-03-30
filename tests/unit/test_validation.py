@@ -62,7 +62,7 @@ class TestGetInputsSchema:
 
     def test_basic_schema(self):
         class Tool(ProcessingTool):
-            name = "test_tool"
+            display_name = "Test Tool"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
@@ -88,7 +88,7 @@ class TestGetInputsSchema:
 
     def test_gui_meta_numeric_constraints(self):
         class Tool(ProcessingTool):
-            name = "test_tool_meta"
+            display_name = "Test Tool Meta"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
@@ -111,7 +111,7 @@ class TestGetInputsSchema:
 
     def test_gui_meta_coexists_with_image_spec(self):
         class Tool(ProcessingTool):
-            name = "test_tool_both"
+            display_name = "Test Tool Both"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
@@ -130,7 +130,7 @@ class TestGetInputsSchema:
 
     def test_no_gui_meta_defaults_connectable(self):
         class Tool(ProcessingTool):
-            name = "test_tool_no_meta"
+            display_name = "Test Tool No Meta"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
@@ -151,7 +151,7 @@ class TestGetInputsSchema:
 
     def test_gui_meta_group(self):
         class Tool(ProcessingTool):
-            name = "test_tool_group"
+            display_name = "Test Tool Group"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
@@ -174,7 +174,7 @@ class TestGetInputsSchema:
 
     def test_partial_numeric_constraints(self):
         class Tool(ProcessingTool):
-            name = "test_tool_partial"
+            display_name = "Test Tool Partial"
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):

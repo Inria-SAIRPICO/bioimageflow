@@ -55,7 +55,7 @@ class TestEnvironmentMismatch:
         )
 
         class ToolV1(ProcessingTool):
-            name = "tool_v1"
+            display_name = "Tool V1"
             environment = env_v1
 
             class Inputs(IOModel):
@@ -68,7 +68,7 @@ class TestEnvironmentMismatch:
                 return self.Outputs(result=1.0)
 
         class ToolV2(ProcessingTool):
-            name = "tool_v2"
+            display_name = "Tool V2"
             environment = env_v2
 
             class Inputs(IOModel):

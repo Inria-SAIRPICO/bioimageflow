@@ -241,7 +241,7 @@ class TestFromConfig:
         }
         sw = SubWorkflow.from_config(config)
         assert isinstance(sw, SubWorkflow)
-        assert sw.name == "test_sw"
+        assert sw.display_name == "test_sw"
         assert sw.Inputs._get_all_annotations()["x"] is int
         assert sw.Outputs._get_all_annotations()["y"] is int
 
@@ -331,9 +331,9 @@ class TestConfigSubWorkflowEncapsulation:
             _results = sw(image=raw["path"])
 
             # Internal node "seg" should not appear directly
-            assert not any("stub_segmenter" in k for k in wf.nodes)
+            assert not any("StubSegmenter" in k for k in wf.nodes)
             # But the sub-workflow node itself should
-            assert any("config_segment" in k for k in wf.nodes)
+            assert any("_ConfigDrivenSubWorkflow" in k for k in wf.nodes)
 
 
 # ===========================================================================
@@ -355,7 +355,7 @@ class TestConfigSubWorkflowComputeSteps:
                 names.append(step.node_name)
                 step.execute()
 
-        assert any("config_segment_1/" in n for n in names)
+        assert any("_ConfigDrivenSubWorkflow_1/" in n for n in names)
 
 
 # ===========================================================================
@@ -490,7 +490,7 @@ class TestConfigSubWorkflowSerialization:
             wf.export(tmp_workspace / "workflow.json")
 
         wf2 = Workflow.load(tmp_workspace / "workflow.json")
-        terminal = [n for n in wf2.nodes if "config_seg_measure" in n]
+        terminal = [n for n in wf2.nodes if "_ConfigDrivenSubWorkflow" in n]
         assert len(terminal) == 1
         df2 = wf2.compute(wf2.nodes[terminal[0]])
 

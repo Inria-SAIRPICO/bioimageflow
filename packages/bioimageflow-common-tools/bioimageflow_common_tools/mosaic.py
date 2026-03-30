@@ -22,7 +22,7 @@ class Mosaic(ProcessingTool):
     into a single composite grid.  Each input row receives the same output
     (the mosaic path and total image count).
     """
-    name = "mosaic"
+    display_name = "Mosaic"
     documentation = (
         "Aggregates images into a single mosaic image arranged in a grid. "
         "Each input row receives the mosaic path and the total image count."
@@ -36,8 +36,8 @@ class Mosaic(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}),
         ]
-        columns: Annotated[int, GUIMeta(connectable=False, min=1, max=100, step=1)] = 5
-        tile_size: Annotated[int | None, GUIMeta(connectable=False)] = None
+        columns: Annotated[int, GUIMeta(min=1, max=100, step=1)] = 5
+        tile_size: int | None = None
 
     class Outputs(IOModel):
         mosaic_path: Path = Path("{node_name}_mosaic.png")

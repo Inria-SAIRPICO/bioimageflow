@@ -27,7 +27,7 @@ class CellposeSAM(ProcessingTool):
     Uses the Cellpose deep-learning model for instance segmentation,
     producing a labeled mask where each cell/nucleus has a unique ID.
     """
-    name = "cellpose_sam"
+    display_name = "Cellpose SAM"
     documentation = (
         "Segment cells or nuclei using the Cellpose algorithm. "
         "Produces a labeled mask image."
@@ -45,14 +45,14 @@ class CellposeSAM(ProcessingTool):
             ),
         ]
         diameter: Annotated[
-            float, GUIMeta(connectable=False, min=0.0, max=500.0, step=0.5)
+            float, GUIMeta(min=0.0, max=500.0, step=0.5)
         ] = 0.0
-        model_type: Annotated[str, GUIMeta(connectable=False)] = "cyto3"
+        model_type: str = "cyto3"
         flow_threshold: Annotated[
-            float, GUIMeta(connectable=False, min=0.0, max=1.0, step=0.05)
+            float, GUIMeta(min=0.0, max=1.0, step=0.05)
         ] = 0.4
         cellprob_threshold: Annotated[
-            float, GUIMeta(connectable=False, min=-6.0, max=6.0, step=0.5)
+            float, GUIMeta(min=-6.0, max=6.0, step=0.5)
         ] = 0.0
 
     class Outputs(IOModel):

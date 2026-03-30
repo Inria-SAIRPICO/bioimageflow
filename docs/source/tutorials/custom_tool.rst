@@ -21,7 +21,7 @@ Minimal example
    )
 
    class GaussianBlur(ProcessingTool):
-       name = "gaussian_blur"
+       display_name = "Gaussian Blur"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
@@ -42,7 +42,7 @@ Minimal example
 
 Anatomy:
 
-- **name**: unique identifier used in cache paths and progress events.
+- **display_name**: human-readable name used in cache paths and progress events.
 - **environment**: declares the conda/pip dependencies this tool needs.
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.
@@ -59,7 +59,7 @@ Outputs aren't limited to file paths. Return scalars for measurements:
 .. code-block:: python
 
    class MeasureIntensity(ProcessingTool):
-       name = "measure_intensity"
+       display_name = "Measure Intensity"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
@@ -85,7 +85,7 @@ all rows at once (e.g., for GPU batching):
 .. code-block:: python
 
    class BatchClassifier(ProcessingTool):
-       name = "batch_classifier"
+       display_name = "Batch Classifier"
        environment = EnvironmentSpec(name="torch", dependencies={})
 
        class Inputs:
@@ -111,7 +111,7 @@ single input row. This is useful for tiling or splitting:
 .. code-block:: python
 
    class TileImage(ProcessingTool):
-       name = "tile"
+       display_name = "Tile"
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
@@ -154,7 +154,7 @@ Source tool (no upstream)
    from bioimageflow import DataFrameTool
 
    class CSVSource(DataFrameTool):
-       name = "csv_source"
+       display_name = "Csv Source"
 
        class Inputs:
            path: str
@@ -168,7 +168,7 @@ Transform tool (with upstream)
 .. code-block:: python
 
    class FilterByArea(DataFrameTool):
-       name = "filter_by_area"
+       display_name = "Filter By Area"
 
        class Inputs:
            min_area: float = 100.0
@@ -199,7 +199,7 @@ combined before ``transform`` is called:
 .. code-block:: python
 
    class CombineResults(DataFrameTool):
-       name = "combine"
+       display_name = "Combine"
 
        def merge_dataframes(self, dfs, arguments):
            import pandas as pd
@@ -219,7 +219,7 @@ preserves input columns in its output:
    from bioimageflow import DataFrameTool, Passthrough
 
    class AddColumn(DataFrameTool):
-       name = "add_column"
+       display_name = "Add Column"
 
        class Outputs(Passthrough):
            new_col: str
@@ -276,12 +276,12 @@ Multiple tools can share the same environment:
    )
 
    class ToolA(ProcessingTool):
-       name = "tool_a"
+       display_name = "Tool A"
        environment = skimage_env
        # ...
 
    class ToolB(ProcessingTool):
-       name = "tool_b"
+       display_name = "Tool B"
        environment = skimage_env
        # ...
 

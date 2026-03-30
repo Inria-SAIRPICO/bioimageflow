@@ -9,7 +9,7 @@ How caching works
 
 Each execution produces a **signature hash** computed from:
 
-- Tool name and version
+- Tool class name and version
 - Environment hash (dependencies)
 - Resolved parameter values
 - Upstream node hashes (recursive)

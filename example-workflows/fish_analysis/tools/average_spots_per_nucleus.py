@@ -15,7 +15,7 @@ class AverageSpotsPerNucleus(DataFrameTool):
     their parent nucleus, and computes the mean spot count per nucleus
     for every image in the batch.
     """
-    name = "average_spots_per_nucleus"
+    display_name = "Average Spots Per Nucleus"
     documentation = (
         "Compute the average number of FOLS2 and CSF1R spots per nucleus "
         "from label overlap data."

@@ -9,7 +9,7 @@ from bioimageflow import DataFrameTool
 
 class Files(DataFrameTool):
     """List image files in a directory. Acts as a workflow source node."""
-    name = "files"
+    display_name = "Files"
     documentation = (
         "List files in a directory matching a glob pattern. "
         "Produces a DataFrame with 'path' and 'filename' columns."
