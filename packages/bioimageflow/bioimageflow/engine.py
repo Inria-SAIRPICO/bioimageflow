@@ -1,6 +1,8 @@
-"""Sequential execution engine."""
+"""Execution engines for BioImageFlow workflows."""
 
+import concurrent.futures
 import logging
+import threading
 import time
 from pathlib import Path
 from collections.abc import Generator
@@ -67,10 +69,15 @@ class DisabledNodeError(Exception):
     pass
 
 
+class WorkflowCancelledError(Exception):
+    """Raised when a workflow execution is cancelled via ``Workflow.cancel()``."""
+    pass
+
+
 class NodeStep:
     """Handle for a single node in a stepped workflow execution.
 
-    Yielded by :meth:`SequentialEngine.execute_steps`.  The caller may
+    Yielded by :meth:`DefaultEngine.execute_steps`.  The caller may
     optionally call :meth:`prepare` (to warm up the Wetlands environment
     before execution — useful for attaching a debugger) and **must** call
     :meth:`execute` to run the node (or it will auto-execute when the
@@ -80,7 +87,7 @@ class NodeStep:
     def __init__(
         self,
         node: Node,
-        engine: "SequentialEngine",
+        engine: "DefaultEngine",
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str],
         workflow: Any,
@@ -146,7 +153,14 @@ class NodeStep:
             isinstance(self._node.tool, ProcessingTool)
             and self._engine._env_manager is not None
         ):
-            self._engine._env_manager.get_or_create(self._node.tool.environment)
+            max_workers, worker_env = self._engine._resolve_worker_config(
+                self._node.tool, self._workflow,
+            )
+            self._engine._env_manager.get_or_create(
+                self._node.tool.environment,
+                max_workers=max_workers,
+                worker_env=worker_env,
+            )
 
     def execute(self) -> pd.DataFrame:
         """Execute the node and return its output DataFrame.
@@ -191,16 +205,29 @@ class NodeStep:
             self._sig_hash = sig_hash
 
 
-class SequentialEngine:
-    """Executes workflow nodes sequentially."""
+class DefaultEngine:
+    """Executes workflow nodes with optional parallelism.
+
+    When ``_force_sequential`` is False (default), independent DAG branches
+    can execute concurrently and intra-node rows can run in parallel across
+    Wetlands workers.  When True (set by :class:`SequentialEngine`), execution
+    is strictly sequential — useful for debugging and deterministic reproduction.
+
+    The non-Wetlands ``_dispatch_direct()`` path is a testing/development
+    fallback and does not support sub-row progress reporting (Feature 3) or
+    cooperative cancellation (Feature 4).
+    """
 
     def __init__(
         self,
         use_wetlands: bool = False,
         wetlands_config: dict[str, Any] | None = None,
+        force_sequential: bool = False,
     ) -> None:
         _configure_default_logging()
         self._use_wetlands = use_wetlands
+        self._force_sequential = force_sequential
+        self._progress_lock = threading.Lock()
         self._env_manager = None
         if use_wetlands:
             from bioimageflow.env_manager import WetlandsEnvManager
@@ -242,6 +269,9 @@ class SequentialEngine:
             sig_hashes: dict[Node, str] = {}
 
             for node in order:
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+
                 if node in skipped:
                     logger.info(
                         "Skipping node '%s' (disabled or upstream disabled)", node.name
@@ -331,7 +361,16 @@ class SequentialEngine:
                 inode._name = orig_name
 
     def _execute_impl(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
-        """Internal execution logic."""
+        """Internal execution logic.
+
+        Uses ``TopologicalSorter.get_ready()`` / ``.done()`` to find
+        independent nodes and, when ``_force_sequential`` is ``False``,
+        dispatches independent ``ProcessingTool`` nodes concurrently via
+        ``ThreadPoolExecutor``.  ``DataFrameTool`` nodes always run on
+        the main thread.
+        """
+        from bioimageflow.dataframe_tool import DataFrameTool
+
         reachable: set[Node] = set()
         for target in targets:
             self._collect_reachable(target, reachable)
@@ -349,13 +388,60 @@ class SequentialEngine:
                 f"upstream dependencies: {disabled_names}"
             )
 
+        dep_graph = self._build_dep_graph(executable)
+        ts = TopologicalSorter(dep_graph)
+        ts.prepare()
+
         results: dict[Node, pd.DataFrame] = {}
         sig_hashes: dict[Node, str] = {}
+        lock = threading.Lock()  # protects results and sig_hashes dict writes
 
-        for node in executable:
-            df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
-            results[node] = df
-            sig_hashes[node] = sig_hash
+        while ts.is_active():
+            if workflow.cancel_requested:
+                raise WorkflowCancelledError("Workflow cancelled by user")
+
+            ready = list(ts.get_ready())
+            if not ready:
+                break
+
+            # Separate DataFrameTool nodes (must run on main thread)
+            # from ProcessingTool nodes (can run in threads)
+            df_nodes = [n for n in ready if isinstance(n.tool, DataFrameTool)]
+            pt_nodes = [n for n in ready if n not in set(df_nodes)]
+
+            # Execute DataFrameTool nodes sequentially on main thread
+            for node in df_nodes:
+                df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
+                results[node] = df
+                sig_hashes[node] = sig_hash
+                ts.done(node)
+
+            if len(pt_nodes) <= 1 or self._force_sequential:
+                # Single node or forced sequential — no threading overhead
+                for node in pt_nodes:
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
+                    results[node] = df
+                    sig_hashes[node] = sig_hash
+                    ts.done(node)
+            else:
+                # Multiple independent ProcessingTool nodes — run concurrently.
+                # Cap threads to avoid excessive overhead; each thread mostly
+                # waits on Wetlands IPC, so the cap is generous.
+                pool_size = min(len(pt_nodes), 8)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=pool_size) as pool:
+                    future_to_node = {
+                        pool.submit(self._execute_node, node, results, sig_hashes, workflow): node
+                        for node in pt_nodes
+                    }
+                    for future in concurrent.futures.as_completed(future_to_node):
+                        node = future_to_node[future]
+                        df, sig_hash = future.result()  # raises on failure
+                        with lock:
+                            results[node] = df
+                            sig_hashes[node] = sig_hash
+                        ts.done(node)
 
         # Log skipped targets
         for t in targets:
@@ -423,14 +509,7 @@ class SequentialEngine:
 
     def _topological_sort(self, nodes: set[Node]) -> list[Node]:
         """Topological sort of reachable nodes using graphlib.TopologicalSorter."""
-        dep_graph: dict[Node, set[Node]] = {}
-        for node in nodes:
-            all_upstream: set[Node] = set(node._upstream_nodes)
-            for arg in node._args:
-                if isinstance(arg, Node):
-                    all_upstream.add(arg)
-            dep_graph[node] = {up for up in all_upstream if up in nodes}
-
+        dep_graph = self._build_dep_graph_from_set(nodes)
         try:
             return list(TopologicalSorter(dep_graph).static_order())
         except CycleError as exc:
@@ -438,6 +517,32 @@ class SequentialEngine:
                 f"Cycle detected in the DAG. The workflow graph must be acyclic. "
                 f"Cycle info: {exc.args[1]}"
             ) from exc
+
+    def _build_dep_graph_from_set(self, nodes: set[Node]) -> dict[Node, set[Node]]:
+        """Build dependency graph from a set of nodes (for topological sort)."""
+        dep_graph: dict[Node, set[Node]] = {}
+        for node in nodes:
+            all_upstream: set[Node] = set(node._upstream_nodes)
+            for arg in node._args:
+                if isinstance(arg, Node):
+                    all_upstream.add(arg)
+            dep_graph[node] = {up for up in all_upstream if up in nodes}
+        return dep_graph
+
+    def _build_dep_graph(self, executable: list[Node]) -> dict[Node, set[Node]]:
+        """Build dependency graph for TopologicalSorter from executable nodes."""
+        executable_set = set(executable)
+        dep_graph: dict[Node, set[Node]] = {}
+        for node in executable:
+            deps: set[Node] = set()
+            for up in node._upstream_nodes:
+                if up in executable_set:
+                    deps.add(up)
+            for arg in node._args:
+                if isinstance(arg, Node) and arg in executable_set:
+                    deps.add(arg)
+            dep_graph[node] = deps
+        return dep_graph
 
     # ── Cache pre-check ─────────────────────────────────────────────────
 
@@ -517,17 +622,24 @@ class SequentialEngine:
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.sub_workflow import SubWorkflowNode
 
-        if isinstance(node, SubWorkflowNode):
-            return self._execute_sub_workflow(node, results, sig_hashes, workflow)
-        elif isinstance(node.tool, DataFrameTool):
-            return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
-        elif isinstance(node.tool, ProcessingTool):
-            if not node._column_bindings:
-                return self._execute_source_processing_tool(node, results, sig_hashes, workflow)
+        try:
+            if isinstance(node, SubWorkflowNode):
+                return self._execute_sub_workflow(node, results, sig_hashes, workflow)
+            elif isinstance(node.tool, DataFrameTool):
+                return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
+            elif isinstance(node.tool, ProcessingTool):
+                if not node._column_bindings:
+                    return self._execute_source_processing_tool(node, results, sig_hashes, workflow)
+                else:
+                    return self._execute_processing_tool_with_column_bindings(node, results, sig_hashes, workflow)
             else:
-                return self._execute_processing_tool_with_column_bindings(node, results, sig_hashes, workflow)
-        else:
-            raise RuntimeError(f"Unknown tool type: {type(node.tool)}")
+                raise RuntimeError(f"Unknown tool type: {type(node.tool)}")
+        except WorkflowCancelledError:
+            self._emit_progress(workflow, node.name, "cancelled")
+            raise
+        except Exception:
+            self._emit_progress(workflow, node.name, "failed")
+            raise
 
     # ── DataFrameTool execution ────────────────────────────────────────
 
@@ -947,6 +1059,52 @@ class SequentialEngine:
                                 row=i, total_rows=len(arguments_dicts))
         return raw_results
 
+    def _resolve_worker_config(
+        self, tool: ProcessingTool, workflow: Any,
+    ) -> tuple[int, Any]:
+        """Determine max_workers and worker_env for a tool's environment.
+
+        Resolution order:
+        1. Explicit ``get_environment()`` override takes precedence.
+        2. GPU auto-inference: if any tool in the environment declares
+           ``ResourceSpec(gpu >= 1)`` and no explicit ``worker_env`` was set,
+           auto-generate ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``.
+        3. Fall back to ``Workflow.max_workers``, no ``worker_env``.
+        """
+        env_name = tool.environment.name
+        env_config = workflow._env_configs.get(env_name)
+
+        # max_workers: explicit override > workflow default
+        if env_config and env_config.max_workers > 0:
+            max_workers = env_config.max_workers
+        else:
+            max_workers = workflow.max_workers
+
+        # worker_env: explicit override > GPU auto-inference > None
+        if env_config and env_config.worker_env is not None:
+            worker_env = env_config.worker_env
+        elif self._env_has_gpu_tool(env_name, workflow):
+            worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
+        else:
+            worker_env = None
+
+        return max_workers, worker_env
+
+    def _env_has_gpu_tool(self, env_name: str, workflow: Any) -> bool:
+        """Check if any tool in this workflow sharing this env declares gpu >= 1."""
+        for node in workflow._nodes.values():
+            tool = node.tool
+            if (
+                isinstance(tool, ProcessingTool)
+                and hasattr(tool, 'environment')
+                and tool.environment.name == env_name
+                and hasattr(tool, 'resources')
+                and tool.resources is not None
+                and tool.resources.gpu >= 1
+            ):
+                return True
+        return False
+
     def _dispatch_via_wetlands(
         self,
         tool: ProcessingTool,
@@ -955,30 +1113,81 @@ class SequentialEngine:
         node_name: str,
         has_batch: bool,
     ) -> list[list[Any]]:
-        """Dispatch through Wetlands — tool runs in an isolated environment."""
+        """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from bioimageflow.env_manager import _find_tool_file
+        from wetlands.task import TaskStatus, TaskEventType
 
         assert self._env_manager is not None
         env_spec = tool.environment
         tool_file_path = _find_tool_file(type(tool))
         tool_class_name = type(tool).__name__
+        max_workers, worker_env = self._resolve_worker_config(tool, workflow)
 
         if has_batch:
-            result_dicts = self._env_manager.dispatch_process_batch(
+            task = self._env_manager.submit_process_batch(
                 env_spec, tool_file_path, tool_class_name, arguments_dicts,
+                max_workers=max_workers, worker_env=worker_env,
             )
+            task.wait_for()
+            if task.status == TaskStatus.FAILED:
+                raise task.exception
+            if task.status == TaskStatus.CANCELED:
+                raise WorkflowCancelledError("Workflow cancelled during batch execution")
+            result_dicts = task.result
             assert tool.Outputs is not None
             return [[tool.Outputs(**d) for d in row] for row in result_dicts]
 
+        tasks = self._env_manager.map_process_rows(
+            env_spec, tool_file_path, tool_class_name, arguments_dicts,
+            max_workers=max_workers, worker_env=worker_env,
+        )
+
+        # Attach progress listeners for sub-row progress reporting
+        for i, task in enumerate(tasks):
+            def _make_listener(row_idx):
+                def on_event(event):
+                    if event.type == TaskEventType.UPDATE:
+                        self._emit_progress(
+                            workflow, node_name, "row_progress",
+                            row=row_idx, total_rows=len(tasks),
+                            message=event.task.message,
+                            current=event.task.current,
+                            maximum=event.task.maximum,
+                        )
+                return on_event
+            task.listen(_make_listener(i))
+
+        # Wait and collect results — fail-fast on first error or cancel
+        try:
+            for task in tasks:
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+                task.wait_for()
+                if task.status == TaskStatus.FAILED:
+                    raise task.exception
+        except (WorkflowCancelledError, Exception):
+            # Cancel all remaining in-flight tasks
+            for t in tasks:
+                if not t.status.is_finished():
+                    t.cancel()
+            for t in tasks:
+                if not t.status.is_finished():
+                    try:
+                        t.wait_for(timeout=10)
+                    except Exception:
+                        pass
+            raise
+
+        # Collect results in submission order — skip cancelled tasks
         raw_results: list[list[Any]] = []
         assert tool.Outputs is not None
-        for i, args_dict in enumerate(arguments_dicts):
-            result_dicts = self._env_manager.dispatch_process_row(
-                env_spec, tool_file_path, tool_class_name, args_dict,
-            )
+        for i, task in enumerate(tasks):
+            if task.status == TaskStatus.CANCELED:
+                continue
+            result_dicts = task.result
             raw_results.append([tool.Outputs(**d) for d in result_dicts])
             self._emit_progress(workflow, node_name, "row_complete",
-                                row=i, total_rows=len(arguments_dicts))
+                                row=i, total_rows=len(tasks))
         return raw_results
 
     def _build_output_dataframe(
@@ -1366,8 +1575,11 @@ class SequentialEngine:
         status: str,
         row: int = 0,
         total_rows: int = 0,
+        message: str | None = None,
+        current: int | None = None,
+        maximum: int | None = None,
     ) -> None:
-        """Emit a progress event."""
+        """Emit a progress event, serialized via ``_progress_lock``."""
         if workflow.on_progress is not None:
             from bioimageflow.workflow import ProgressEvent
             event = ProgressEvent(
@@ -1375,6 +1587,27 @@ class SequentialEngine:
                 status=status,
                 row=row,
                 total_rows=total_rows,
+                message=message,
+                current=current,
+                maximum=maximum,
                 timestamp=time.time(),
             )
-            workflow.on_progress(event)
+            with self._progress_lock:
+                workflow.on_progress(event)
+
+
+class SequentialEngine(DefaultEngine):
+    """Forces sequential execution — useful for debugging and deterministic reproduction.
+
+    Inherits from :class:`DefaultEngine` but forces ``_force_sequential=True``
+    and overrides worker resolution to always use a single worker with no
+    ``worker_env``.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs["force_sequential"] = True
+        super().__init__(**kwargs)
+
+    def _resolve_worker_config(self, tool: ProcessingTool, workflow: Any) -> tuple[int, Any]:
+        """Always single-worker, no worker_env — truly sequential."""
+        return 1, None

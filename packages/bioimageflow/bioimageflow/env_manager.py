@@ -115,7 +115,7 @@ class WetlandsEnvManager:
         self._manager = get_shared_environment_manager(**kwargs)
         self._envs: dict[str, Any] = {}            # name -> wetlands env
         self._env_hashes: dict[str, str] = {}       # name -> dep hash
-        self._worker_proxies: dict[str, Any] = {}   # name -> proxy to worker module
+        self._launch_configs: dict[str, tuple[int, Any]] = {}  # name -> (max_workers, worker_env)
         self._worker_file = _find_worker_file()
         self._lock = threading.RLock()
 
@@ -128,8 +128,18 @@ class WetlandsEnvManager:
         deps["pip"] = pip_deps
         return deps
 
-    def get_or_create(self, env_spec: EnvironmentSpec) -> Any:
+    def get_or_create(
+        self,
+        env_spec: EnvironmentSpec,
+        max_workers: int = 1,
+        worker_env: Any = None,
+    ) -> Any:
         """Get or create a Wetlands environment, validating dependency consistency.
+
+        On first creation, ``env.launch(max_workers=..., worker_env=...)`` is
+        called.  Subsequent calls with a different ``max_workers`` log a warning
+        but do **not** re-launch (Wetlands' ``launch()`` is a no-op when already
+        launched).
 
         This method is thread-safe and may be called concurrently.
         """
@@ -141,6 +151,13 @@ class WetlandsEnvManager:
             if self._env_hashes[env_spec.name] != dep_hash:
                 raise EnvironmentMismatchError(
                     f"Environment '{env_spec.name}' already created with different deps."
+                )
+            prev_workers, _ = self._launch_configs.get(env_spec.name, (1, None))
+            if prev_workers != max_workers:
+                logger.warning(
+                    "Environment '%s' already launched with max_workers=%d; "
+                    "ignoring new max_workers=%d",
+                    env_spec.name, prev_workers, max_workers,
                 )
             return self._envs[env_spec.name]
 
@@ -154,41 +171,51 @@ class WetlandsEnvManager:
                     )
                 return self._envs[env_spec.name]
 
-            logger.info("Creating Wetlands environment '%s'", env_spec.name)
+            logger.info(
+                "Creating Wetlands environment '%s' (max_workers=%d)",
+                env_spec.name, max_workers,
+            )
             env = self._manager.create(env_spec.name, augmented_deps)
-            env.launch()
+            launch_kwargs: dict[str, Any] = {}
+            if max_workers > 1:
+                launch_kwargs["max_workers"] = max_workers
+            if worker_env is not None:
+                launch_kwargs["worker_env"] = worker_env
+            env.launch(**launch_kwargs)
             self._envs[env_spec.name] = env
             self._env_hashes[env_spec.name] = dep_hash
+            self._launch_configs[env_spec.name] = (max_workers, worker_env)
             return env
 
-    def _get_worker_proxy(self, env_spec: EnvironmentSpec) -> Any:
-        """Get a proxy to bioimageflow_core.worker in the given environment."""
-        if env_spec.name not in self._worker_proxies:
-            env = self.get_or_create(env_spec)
-            self._worker_proxies[env_spec.name] = env.import_module(self._worker_file)
-        return self._worker_proxies[env_spec.name]
-
-    def dispatch_process_row(
-        self,
-        env_spec: EnvironmentSpec,
-        tool_file_path: str,
-        tool_class_name: str,
-        arguments_dict: dict,
-    ) -> list[dict]:
-        """Dispatch a single-row call through Wetlands."""
-        worker = self._get_worker_proxy(env_spec)
-        return worker.run_process_row(tool_file_path, tool_class_name, arguments_dict)
-
-    def dispatch_process_batch(
+    def submit_process_batch(
         self,
         env_spec: EnvironmentSpec,
         tool_file_path: str,
         tool_class_name: str,
         arguments_dicts: list[dict],
-    ) -> list[list[dict]]:
-        """Dispatch a batch call through Wetlands."""
-        worker = self._get_worker_proxy(env_spec)
-        return worker.run_process_batch(tool_file_path, tool_class_name, arguments_dicts)
+        max_workers: int = 1,
+        worker_env: Any = None,
+    ) -> Any:
+        """Submit a batch call via ``env.submit()``.  Returns a ``Task``."""
+        env = self.get_or_create(env_spec, max_workers=max_workers, worker_env=worker_env)
+        return env.submit(
+            self._worker_file, "run_process_batch",
+            args=(tool_file_path, tool_class_name, arguments_dicts),
+        )
+
+    def map_process_rows(
+        self,
+        env_spec: EnvironmentSpec,
+        tool_file_path: str,
+        tool_class_name: str,
+        arguments_dicts: list[dict],
+        max_workers: int = 1,
+        worker_env: Any = None,
+    ) -> list:
+        """Submit per-row calls via ``env.map_tasks()``.  Returns ``list[Task]``."""
+        env = self.get_or_create(env_spec, max_workers=max_workers, worker_env=worker_env)
+        row_args = [(tool_file_path, tool_class_name, d) for d in arguments_dicts]
+        return env.map_tasks(self._worker_file, "run_process_row", row_args)
 
     def shutdown_all(self) -> None:
         """Shut down all managed Wetlands environments."""
@@ -198,5 +225,5 @@ class WetlandsEnvManager:
             except Exception:
                 logger.warning("Failed to shut down environment '%s'", name, exc_info=True)
         self._envs.clear()
-        self._worker_proxies.clear()
         self._env_hashes.clear()
+        self._launch_configs.clear()

@@ -1,11 +1,16 @@
 """Worker-side dispatcher for Wetlands environments.
 
-This module is loaded by the orchestrator via env.import_module()
-inside isolated Conda environments. It discovers tool classes in a
-given module file and dispatches process_row/process_batch calls.
+This module is executed by Wetlands workers via ``env.submit()`` and
+``env.map_tasks()``.  It discovers tool classes in a given module file
+and dispatches ``process_row`` / ``process_batch`` calls.
 
 All functions accept and return only picklable types (dicts, lists,
 strings, numbers) to cross the Wetlands serialization boundary.
+
+Functions that declare a ``task`` keyword parameter receive a
+``RemoteTaskHandle`` injected by Wetlands' module executor, which is
+forwarded to the tool if its ``process_row`` / ``process_batch``
+method also declares ``task``.
 """
 
 import importlib.util
@@ -22,6 +27,10 @@ from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
 _tool_registries: dict[str, dict[str, type]] = {}
 # Per-file instances: file_path -> {class_name -> instance}
 _instances: dict[str, dict[str, ProcessingTool]] = {}
+# Cache: tool_class -> bool (whether process_row accepts 'task')
+_accepts_task: dict[type, bool] = {}
+# Cache: tool_class -> bool (whether process_batch accepts 'task')
+_batch_accepts_task_cache: dict[type, bool] = {}
 
 
 def _discover_tools(module: object) -> dict[str, type]:
@@ -77,28 +86,58 @@ def _outputs_to_dict(outputs: IOModel) -> dict[str, Any]:
     return {k: str(v) if isinstance(v, Path) else v for k, v in vars(outputs).items()}
 
 
-def run_process_row(tool_file_path: str, tool_class_name: str, arguments_dict: dict) -> list[dict]:
+def _tool_accepts_task(tool: ProcessingTool) -> bool:
+    """Check (once per class) whether process_row accepts a 'task' kwarg."""
+    cls = type(tool)
+    if cls not in _accepts_task:
+        sig = inspect.signature(tool.process_row)
+        _accepts_task[cls] = 'task' in sig.parameters
+    return _accepts_task[cls]
+
+
+def _batch_accepts_task(tool: ProcessingTool) -> bool:
+    """Check (once per class) whether process_batch accepts a 'task' kwarg."""
+    cls = type(tool)
+    if cls not in _batch_accepts_task_cache:
+        sig = inspect.signature(tool.process_batch)
+        _batch_accepts_task_cache[cls] = 'task' in sig.parameters
+    return _batch_accepts_task_cache[cls]
+
+
+def run_process_row(args_tuple, *, task=None):
     """Dispatch a single-row call to a tool's process_row method.
+
+    ``args_tuple``: ``(tool_file_path, tool_class_name, arguments_dict)``
+    ``task``: ``RemoteTaskHandle`` injected by Wetlands via module_executor (optional).
 
     Returns a list of output dicts (one per output row, usually one).
     """
+    tool_file_path, tool_class_name, arguments_dict = args_tuple
     tool = _get_instance(tool_file_path, tool_class_name)
     args = Arguments(**arguments_dict)
-    result = tool.process_row(args)
+    if task is not None and _tool_accepts_task(tool):
+        result = tool.process_row(args, task=task)
+    else:
+        result = tool.process_row(args)
     outputs = result if isinstance(result, list) else [result]
     return [_outputs_to_dict(out) for out in outputs]
 
 
 def run_process_batch(
-    tool_file_path: str, tool_class_name: str, arguments_dicts: list[dict],
+    tool_file_path: str, tool_class_name: str,
+    arguments_dicts: list[dict], *, task=None,
 ) -> list[list[dict]]:
     """Dispatch a batch call to a tool's process_batch method.
 
+    Signature unchanged for ``submit()`` — receives three positional args.
     Returns a list of lists of output dicts (one inner list per input row).
     """
     tool = _get_instance(tool_file_path, tool_class_name)
     args_list = [Arguments(**d) for d in arguments_dicts]
-    results = tool.process_batch(args_list)
+    if task is not None and _batch_accepts_task(tool):
+        results = tool.process_batch(args_list, task=task)
+    else:
+        results = tool.process_batch(args_list)
     # Auto-wrap list[Outputs] -> list[list[Outputs]] for 1-to-1 batch tools
     if results and not isinstance(results[0], list):
         results = [[r] for r in results]

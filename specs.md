@@ -19,6 +19,8 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - Wetlands environments are created lazily (on first use) and kept alive for the duration of the workflow execution.
 - Communication between the main process and worker environments uses Python's `multiprocessing.connection`, so all transferred objects must be picklable.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
+- When `max_workers > 1` is passed to `env.launch()`, Wetlands starts multiple worker processes sharing the same Conda environment on disk. Tasks are dispatched to idle workers automatically; when all workers are busy, tasks queue internally. This enables `process_row` calls within a single node to run in parallel.
+- BioImageFlow uses Wetlands' `env.map_tasks()` for row-level dispatch and `env.submit()` for batch dispatch, replacing the proxy-based `import_module()` pattern.
 
 For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-api).
 
@@ -413,6 +415,22 @@ class ProcessingTool(BaseTool):
 ```
 
 Concrete `ProcessingTool` subclasses must override at least one of `process_row` or `process_batch`. The framework validates this via `__init_subclass__` and raises `TypeError` at class definition time if neither is overridden.
+
+**Progress reporting:** `process_row` may declare an optional keyword parameter `task` to receive a `RemoteTaskHandle` for sub-row progress reporting. When present, Wetlands injects the handle automatically. Tools that don't declare `task` are unaffected.
+
+```python
+class MySegmenter(ProcessingTool):
+    def process_row(self, arguments: Arguments, *, task=None) -> Outputs:
+        tiles = split_tiles(arguments.input_image, n=20)
+        for i, tile in enumerate(tiles):
+            if task:
+                task.update(f"Processing tile {i+1}/{len(tiles)}",
+                            current=i, maximum=len(tiles))
+            result = self.model.predict(tile)
+        return self.Outputs(...)
+```
+
+The `task` parameter also provides cooperative cancellation via `task.cancel_requested` (see [Cancellation](#cancellation)).
 
 **Direct tool definition:**
 ```python
@@ -1445,17 +1463,43 @@ results.compute()
 
 `ProgressEvent` reports:
 
-| Field         | Type   | Description                                            |
-|--------------|--------|--------------------------------------------------------|
-| `node_name`   | `str`  | Name of the node being executed                        |
-| `status`      | `str`  | One of: `"started"`, `"row_complete"`, `"completed"`, `"cached"`, `"failed"` |
-| `row`         | `int`  | Current row index (for `row_complete`)                 |
-| `total_rows`  | `int`  | Total number of rows for this node                     |
-| `timestamp`   | `float`| Unix timestamp                                         |
+| Field         | Type            | Description                                            |
+|--------------|-----------------|--------------------------------------------------------|
+| `node_name`   | `str`           | Name of the node being executed                        |
+| `status`      | `str`           | One of: `"started"`, `"row_progress"`, `"row_complete"`, `"completed"`, `"cached"`, `"failed"`, `"cancelled"` |
+| `row`         | `int`           | Current row index (for `row_complete` and `row_progress`) |
+| `total_rows`  | `int`           | Total number of rows for this node                     |
+| `message`     | `str \| None`   | Sub-row progress message from `RemoteTaskHandle.update()` |
+| `current`     | `int \| None`   | Sub-row progress current value                         |
+| `maximum`     | `int \| None`   | Sub-row progress maximum value                         |
+| `timestamp`   | `float`         | Unix timestamp                                         |
 
-The callback is invoked from the main process. For the parallel engine, events from concurrent nodes may interleave. The callback must be thread-safe if using the Parsl engine.
+When using branch-level parallelism, progress events from concurrent nodes may interleave. The engine serializes all `on_progress` callback invocations via an internal lock, so the callback does not need to be thread-safe.
 
-### 4.5 Input Binding Logic (Graph Construction)
+### 4.5 Environment Configuration
+
+`Workflow.get_environment()` provides access to per-environment launch configuration. It accepts a tool instance, an `EnvironmentSpec`, or an environment name string.
+
+```python
+wf = Workflow(max_workers=4)
+
+segmenter = CellposeSegmenter()
+wf.get_environment(segmenter).max_workers = 2
+wf.get_environment(segmenter).worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
+```
+
+Multiple calls with tools sharing the same environment return the same `WorkflowEnvironment` object. Configuration set via one tool applies to all tools in that environment.
+
+**`WorkflowEnvironment`:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | — | Environment name (read-only) |
+| `spec` | `EnvironmentSpec` | — | The environment specification (read-only) |
+| `max_workers` | `int` | `0` | Number of worker processes. `0` = use `Workflow.max_workers`. |
+| `worker_env` | `Callable[[int], dict] \| None` | `None` | Per-worker environment variables. `None` = auto-infer from `ResourceSpec`. |
+
+### 4.6 Input Binding Logic (Graph Construction)
 
 At graph construction time, the engine builds an **input binding plan** for each tool call. The binding rules differ by tool type, reflecting their different relationships with upstream data.
 
@@ -1600,40 +1644,41 @@ When `node.compute()` is called:
    4. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 9.
    5. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths).
    6. **Environment Launch:** If not already running, create/reuse the Wetlands environment. If an environment with the same name already exists but its dependency hash differs, raise `EnvironmentMismatchError`.
-   7. **Dispatch:** If `process_batch` was overridden, call it with the full arguments list. Otherwise, call `process_row` for each row individually (potentially in parallel).
+   7. **Dispatch:** If `process_batch` was overridden, submit a single batch call via `env.submit()`. Otherwise, submit all `process_row` calls via `env.map_tasks()`. When `max_workers > 1`, rows execute in parallel across worker processes. When `max_workers == 1` (default), rows execute sequentially in a single worker (equivalent to the previous behavior). Results are always collected in submission order to preserve deterministic DataFrame construction.
    7b. **Output Validation (worker-side):** After `process_row`/`process_batch` returns, the worker performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., `ImagePath`-typed fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised immediately in the worker with clear stack traces pointing to the tool code.
    8. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3).
    9. **Caching:** Save the result DataFrame and metadata to the [storage structure](#72-directory-structure).
 
 #### Orchestrator-Worker Interaction (ProcessingTool Steps 6-9)
 
-The orchestrator drives all calls into the environment using Wetlands' proxy API. The tool's **module path** (`tool.__module__`) tells the orchestrator which Python module to load in the worker. The orchestrator imports this module in the worker via `env.import_module()`, then calls a dispatcher function that instantiates the tool class by name.
+The orchestrator drives all calls into the environment using Wetlands' Task API (`env.submit()` and `env.map_tasks()`). The tool's file path and class name are passed so the worker can instantiate the tool.
 
 ```python
 # === Orchestrator (main process) ===
 
 # 6. Environment Launch
-env = environment_manager.create(tool.environment.name, tool.environment.dependencies)
-env.launch()
+env = env_manager.get_or_create(tool.environment)
+# env.launch() was already called with configured max_workers
 
-# The orchestrator loads the module that defines the tool class.
-# tool.__module__ is the standard Python attribute (e.g., "my_tools.cellpose_tools").
-worker_module = env.import_module(tool.__module__)
-
-# 7. Check if process_batch was overridden
-has_batch = type(tool).process_batch is not ProcessingTool.process_batch
-
-# 8. Dispatch: batch or per-row
-# The orchestrator passes the tool class name so the worker can instantiate it.
+# 7-8. Dispatch
+worker_file = "bioimageflow_core/worker.py"  # absolute path resolved at runtime
 tool_class_name = type(tool).__name__
+tool_file_path = _find_tool_file(type(tool))  # resolved via env_manager
 
 if has_batch:
-    results = worker_module.run_process_batch(tool_class_name, arguments_dicts)
+    # Single task for the whole batch
+    task = env.submit(worker_file, "run_process_batch",
+                      args=(tool_file_path, tool_class_name, arguments_dicts))
+    task.wait_for()
+    results = task.result
 else:
-    results = []
-    for args_dict in arguments_dicts:
-        row_result = worker_module.run_process_row(tool_class_name, args_dict)
-        results.append(row_result)
+    # One task per row — parallel when max_workers > 1
+    row_args = [(tool_file_path, tool_class_name, d) for d in arguments_dicts]
+    tasks = env.map_tasks(worker_file, "run_process_row", row_args)
+    for task in tasks:
+        task.wait_for()
+    # task.result is already list[dict] (one dict per output row)
+    results = [task.result for task in tasks]
 
 # 9. DataFrame Construction (outputs only — no upstream column carry-forward)
 # Deterministic row-expansion algorithm:
@@ -1946,11 +1991,28 @@ class MyGPUTool(ProcessingTool):
     ...
 ```
 
-- The **simple engine** ignores resource declarations (everything runs sequentially).
+- `ResourceSpec.max_concurrent` is reserved for the Parsl parallel engine and is not used by the DefaultEngine.
 - The **parallel engine (Parsl)** maps resource specs to its executor model — e.g., `gpu=1` routes to a GPU executor pool, `max_concurrent=4` limits concurrent task submissions.
 - Tools without `resources` have no constraints (unlimited concurrency, CPU-only).
 
 `ResourceSpec` lives in `bioimageflow_core.environment` alongside `EnvironmentSpec`.
+
+**DefaultEngine worker resolution:** The DefaultEngine determines `max_workers` per environment using a three-level approach:
+
+1. **Explicit override:** `wf.get_environment(tool).max_workers = M` takes precedence.
+2. **GPU auto-inference:** If any tool in the environment declares `ResourceSpec(gpu >= 1)` and no explicit `worker_env` was set, the engine auto-generates `worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`.
+3. **Workflow default:** `Workflow(max_workers=N)` provides the baseline for all environments.
+
+**GPU assignment:** When `ResourceSpec.gpu >= 1`, the DefaultEngine automatically assigns `CUDA_VISIBLE_DEVICES` per worker process: worker `i` gets `CUDA_VISIBLE_DEVICES=str(i)`. This default can be overridden by providing an explicit `worker_env` via `get_environment()`.
+
+**Explicit override:**
+```python
+wf = Workflow(max_workers=4)
+wf.get_environment(my_gpu_tool).worker_env = lambda i: {
+    "CUDA_VISIBLE_DEVICES": str(i),
+    "OMP_NUM_THREADS": "4",
+}
+```
 
 ---
 
@@ -1977,15 +2039,63 @@ node_logger = logging.getLogger(f"bioimageflow.node.{node_name}")
 
 ## 12. Parallelism
 
-- **Simple engine:** Executes nodes and rows sequentially. Suitable for debugging and small workflows.
-- **Parallel engine (Parsl):** Executes independent workflow branches in parallel and dispatches `process_row` calls concurrently. Parsl handles task scheduling and resource management. The parallel engine uses `ResourceSpec` declarations (see [Section 10](#10-resource-constraints)) to route tasks to appropriate executors.
-- **DataFrameTool nodes** always execute sequentially in the main thread (serialized via a lock). This avoids thread-safety requirements on tool authors. Independent DataFrameTool nodes on different branches still benefit from parallel scheduling of their upstream ProcessingTool dependencies.
+- **Default engine (`DefaultEngine`):** Executes nodes in topological order. Independent nodes (nodes on different DAG branches whose dependencies are all satisfied) execute concurrently using threads. `ProcessingTool` nodes are dispatched to Wetlands workers (which run in separate processes), so the GIL is not a bottleneck. `DataFrameTool` nodes always execute in the main thread with a lock, since they operate on DataFrames in the main process and may not be thread-safe. Within each node, `process_row` calls are dispatched via `env.map_tasks()`. When the effective `max_workers > 1`, rows run in parallel across Wetlands worker processes. When `max_workers == 1` (default), rows run sequentially.
+- **Sequential engine (`SequentialEngine`):** Subclass of `DefaultEngine` that forces single-worker, single-node-at-a-time execution. Useful for debugging and deterministic reproduction.
+- **Parallel engine (Parsl):** For distributed execution across clusters. Will be implemented later. Uses `ResourceSpec` declarations (see [Section 10](#10-resource-constraints)) to route tasks to appropriate executors.
 
 The choice of engine is transparent to tool authors — the same tool code works with both.
 
 ---
 
-## 13. Import Cheat Sheet
+## 13. Cancellation
+
+Workflow execution can be cancelled cooperatively from another thread.
+
+```python
+import threading
+
+wf = Workflow(on_progress=my_callback)
+# ... build graph ...
+
+thread = threading.Thread(target=lambda: wf.compute(target_node))
+thread.start()
+
+# Later, from the main thread or a GUI button:
+wf.cancel()
+thread.join()
+```
+
+**Cancellation semantics:**
+
+1. `Workflow.cancel()` sets an internal flag checked by the engine.
+2. The engine checks the flag before dispatching each node. If set, it raises `WorkflowCancelledError`.
+3. For in-flight Wetlands tasks (rows currently being processed), the engine calls `task.cancel()` on each. The remote function can check `task.cancel_requested` to exit early.
+4. Cancellation is cooperative: tools that don't check `task.cancel_requested` will finish their current row, but no new rows are dispatched.
+5. After cancellation, `compute()` raises `WorkflowCancelledError`. Environments are still shut down properly.
+6. `DataFrameTool` nodes run in the main thread and cannot be interrupted mid-execution. The cancel flag is checked before dispatching each node (including DataFrameTool nodes), so a long-running `transform()` will complete but no further nodes are dispatched.
+
+**Tool-side cooperative cancellation:**
+
+```python
+class MyTool(ProcessingTool):
+    def process_row(self, arguments: Arguments, *, task=None) -> Outputs:
+        for i in range(1000):
+            if task and task.cancel_requested:
+                task.cancel()  # acknowledge — return value is irrelevant
+                return
+            do_work(i)
+        return self.Outputs(...)
+```
+
+Tools that don't check `task.cancel_requested` are unaffected — they complete normally and the engine simply stops dispatching further rows/nodes.
+
+**Cancelled task handling:** The engine relies solely on `task.status == CANCELED` to detect cancellation and never accesses `task.result` for cancelled tasks. The return value of a cancelled tool is irrelevant — the engine skips result collection for that row.
+
+**Cancellation scoping:** `cancel()` is scoped to the current `compute()` execution. The cancel flag is cleared at the start of each `compute()` call. Calling `cancel()` when no execution is running has no effect.
+
+---
+
+## 14. Import Cheat Sheet
 
 ```python
 # === bioimageflow-core (available in all environments) ===
@@ -2349,58 +2459,109 @@ The signature hash includes file *paths*, not file *contents*. If an input file 
 
 ## Appendix A: Wetlands API
 
-Wetlands is a lightweight Python library for managing Conda environments. It can create environments on demand, install dependencies, and execute arbitrary code within them. Each environment remains isolated, enabling tools with conflicting dependencies (e.g., Stardist and Cellpose) to coexist in the same workflow.
+Wetlands is a lightweight Python library for managing Conda environments. It creates environments on demand, installs dependencies, and runs Python code inside them as isolated subprocess workers. Each environment is fully isolated, enabling tools with conflicting dependencies to coexist in the same workflow.
 
 ### A.1 Environment Manager
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
 
-environment_manager = EnvironmentManager(
-    wetlands_instance_path="wetlands/",        # Logs and debug info (default: "wetlands/")
-    conda_path="path/to/pixi/",                # Pixi/Micromamba location (default: inside instance path)
-    main_conda_environment_path=None            # Optional: if set, Wetlands checks if dependencies
-                                                # are already satisfied in this environment first
+manager = EnvironmentManager(
+    wetlands_instance_path="wetlands/",
+    conda_path="path/to/pixi/",
+    main_conda_environment_path=None,
 )
 ```
-
-> **Note:** On Windows, spaces are not allowed in `conda_path`.
 
 ### A.2 Create an Environment
 
 ```python
-env = environment_manager.create(
-    "cellpose_env",                            # Environment name
-    {"conda": ["cellpose==3.1.0"]},            # Dependencies
-    use_existing=False                         # If True, reuse any env satisfying the deps
+env = manager.create("cellpose_env", {"conda": ["cellpose==3.1.0"]})
+```
+
+- If an environment with this name already exists, Wetlands reuses it.
+- `create_from_config()` accepts `requirements.txt`, `environment.yml`, `pyproject.toml`, or `pixi.toml`.
+
+### A.3 Launch Workers
+
+```python
+# Single worker (default)
+env.launch()
+
+# Multiple workers sharing the same conda environment on disk
+env.launch(max_workers=4)
+
+# With per-worker environment variables (e.g., GPU assignment)
+env.launch(
+    max_workers=4,
+    worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)},
 )
 ```
 
-- If an environment with this name already exists, Wetlands reuses it (**ignoring the provided dependencies**). BioImageFlow therefore compares dependency hashes before reuse and raises `EnvironmentMismatchError` if they differ.
-- If `main_conda_environment_path` was provided and the main environment satisfies the dependencies, it is returned directly.
-- Wetlands supports PEP 440 version specifiers (e.g., `"numpy>=1.20,<2.0"`).
-- `create_from_config()` accepts `requirements.txt`, `environment.yml`, `pyproject.toml`, or `pixi.toml`.
-- `load()` loads an existing environment by path.
+When `max_workers > 1`, tasks are dispatched to idle workers automatically. When all workers are busy, tasks queue internally and are dispatched as workers become available.
 
-### A.3 Launch and Execute
+### A.4 Task-Based Execution
 
 ```python
-# Start the communication server in the isolated environment
-env.launch()
+# Non-blocking: returns a Task[T]
+task = env.submit("module.py", "function_name", args=(arg1, arg2))
+task.wait_for()
+result = task.result
 
-# Option 1: Proxy-based execution (accepts file path or dotted module path)
-module = env.import_module("my_tools/cellpose_tools.py")
-result = module.segment(str(image_path), str(output_path))
+# Blocking (convenience)
+result = env.execute("module.py", "function_name", (arg1, arg2))
 
-# Option 2: Direct execution
-result = env.execute("my_tools/cellpose_tools.py", "segment", (str(image_path), str(output_path)))
+# Batch parallel execution — yields results in order
+results = list(env.map("module.py", "process", items))
+
+# Batch with per-item Task control
+tasks = env.map_tasks("module.py", "process", items)
+for task in tasks:
+    task.listen(my_callback)
+for task in tasks:
+    task.wait_for()
 ```
 
-- `env.import_module()` returns a proxy object. Calling methods on it sends the call to the worker, executes the real function there, and returns the result.
-- All function arguments and return values must be picklable.
+**Task lifecycle:** `PENDING` → `RUNNING` → `COMPLETED` | `FAILED` | `CANCELED`
 
-### A.4 Cleanup
+**Task API:**
+- `task.status` — current `TaskStatus` (has `.is_finished()` for terminal state check)
+- `task.result` — return value (only when `COMPLETED`, raises `InvalidStateError` otherwise)
+- `task.error` — error message string (only when `FAILED`)
+- `task.exception` — `ExecutionException` wrapping error + traceback (only when `FAILED`)
+- `task.traceback` — traceback lines (only when `FAILED`)
+- `task.progress` — float in [0, 1] or None (computed from `current / maximum`)
+- `task.message` — last progress message from `update()`
+- `task.current` — current progress counter from `update()`
+- `task.maximum` — maximum progress counter from `update()`
+- `task.outputs` — dict of named intermediate outputs from `set_output()`
+- `task.listen(callback)` — register event listener
+- `task.wait_for(timeout=)` — block until terminal state
+- `task.cancel()` — request cooperative cancellation
+- `task.future` — `concurrent.futures.Future[T]` for interop
+
+### A.5 Progress Reporting and Cancellation (Worker Side)
+
+Remote functions can declare an optional `task` parameter to receive a `RemoteTaskHandle`:
 
 ```python
-env.exit()  # Shuts down the communication server and releases resources
+# runs inside the isolated environment
+def my_function(data, *, task=None):
+    for i, item in enumerate(data):
+        if task and task.cancel_requested:
+            task.cancel()
+            return None
+        if task:
+            task.update(f"Processing {i+1}/{len(data)}",
+                        current=i, maximum=len(data))
+        process(item)
+    return result
+```
+
+Functions without a `task` parameter work exactly as before.
+
+### A.6 Cleanup
+
+```python
+env.exit()  # Shuts down all workers and releases resources
 ```

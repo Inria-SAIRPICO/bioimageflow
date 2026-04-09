@@ -2,6 +2,7 @@
 
 import json
 import importlib
+import threading
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,19 @@ from typing import TYPE_CHECKING
 from bioimageflow.node import set_active_workflow, get_active_workflow, _reset_name_counters, Node
 
 if TYPE_CHECKING:
-    from bioimageflow.engine import SequentialEngine, NodeStep
+    from bioimageflow.engine import DefaultEngine, SequentialEngine, NodeStep
+
+from bioimageflow_core.environment import EnvironmentSpec
+from bioimageflow_core.tool import ProcessingTool
+
+
+@dataclass
+class WorkflowEnvironment:
+    """Mutable launch configuration for a Wetlands environment."""
+    name: str
+    spec: EnvironmentSpec | None = None
+    max_workers: int = 0
+    worker_env: Callable[[int], dict[str, str]] | None = None
 
 
 def _serialize_constant(value: Any) -> dict[str, Any]:
@@ -67,9 +80,12 @@ def _deserialize_constant(data: Any) -> Any:
 class ProgressEvent:
     """Progress event reported by the engine."""
     node_name: str
-    status: str
+    status: str  # "started", "row_progress", "row_complete", "completed", "cached", "failed", "cancelled"
     row: int = 0
     total_rows: int = 0
+    message: str | None = None
+    current: int | None = None
+    maximum: int | None = None
     timestamp: float = 0.0
 
 
@@ -85,6 +101,7 @@ class Workflow:
         on_progress: Callable[[ProgressEvent], None] | None = None,
         use_wetlands: bool = True,
         wetlands_config: dict[str, Any] | None = None,
+        max_workers: int = 1,
     ) -> None:
         self.storage_path = Path(storage_path)
         self.engine_type = engine
@@ -93,6 +110,9 @@ class Workflow:
         self.on_progress = on_progress
         self.use_wetlands = use_wetlands
         self.wetlands_config = wetlands_config
+        self.max_workers = max_workers
+        self._env_configs: dict[str, WorkflowEnvironment] = {}
+        self._cancel_event = threading.Event()
         self._nodes: dict[str, Node] = {}
         self._prev_workflow: Any = None
         self._dev_mode: bool = False
@@ -138,12 +158,51 @@ class Workflow:
             return self._nodes[item]
         return item
 
-    def compute(self, *targets: Node, dev_mode: bool = False, engine: "SequentialEngine | None" = None) -> Any:
+    def cancel(self) -> None:
+        """Request cancellation of the running workflow."""
+        self._cancel_event.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        """Whether cancellation has been requested."""
+        return self._cancel_event.is_set()
+
+    def get_environment(self, target: "ProcessingTool | EnvironmentSpec | str") -> WorkflowEnvironment:
+        """Get the launch configuration proxy for an environment.
+
+        Args:
+            target: A ProcessingTool instance, an EnvironmentSpec, or an env name string.
+
+        Returns:
+            A shared WorkflowEnvironment proxy. Multiple calls with tools sharing
+            the same environment return the same object.
+        """
+        if isinstance(target, str):
+            name = target
+            spec = None
+        elif isinstance(target, EnvironmentSpec):
+            name = target.name
+            spec = target
+        elif isinstance(target, ProcessingTool):
+            name = target.environment.name
+            spec = target.environment
+        else:
+            raise TypeError(
+                f"Expected a ProcessingTool, EnvironmentSpec, or str, got {type(target).__name__}"
+            )
+        if name not in self._env_configs:
+            self._env_configs[name] = WorkflowEnvironment(name=name, spec=spec)
+        elif spec is not None and self._env_configs[name].spec is None:
+            self._env_configs[name].spec = spec
+        return self._env_configs[name]
+
+    def compute(self, *targets: Node, dev_mode: bool = False, engine: "DefaultEngine | None" = None) -> Any:
         """Execute the workflow and return results.
 
         Parameters:
             dev_mode: Development mode flag
-            engine: Optional pre-configured engine to use. If None, a default SequentialEngine is created using this workflow's use_wetlands and wetlands_config. Providing an engine allows post-execution inspection and testing."""
+            engine: Optional pre-configured engine to use. If None, a default DefaultEngine is created using this workflow's use_wetlands and wetlands_config. Providing an engine allows post-execution inspection and testing."""
+        self._cancel_event.clear()
         self._dev_mode = dev_mode
 
         if not targets:
@@ -169,8 +228,8 @@ class Workflow:
         self._discover_graph(target_list)
 
         if engine is None:
-            from bioimageflow.engine import SequentialEngine
-            engine = SequentialEngine(
+            from bioimageflow.engine import DefaultEngine
+            engine = DefaultEngine(
                 use_wetlands=self.use_wetlands,
                 wetlands_config=self.wetlands_config,
             )
@@ -181,14 +240,14 @@ class Workflow:
         return results
 
     def compute_steps(
-        self, *targets: Node, dev_mode: bool = False, engine: "SequentialEngine | None" = None
+        self, *targets: Node, dev_mode: bool = False, engine: "DefaultEngine | None" = None
     ) -> "Generator[NodeStep, None, None]":
         """Execute the workflow step by step, yielding a :class:`NodeStep`
         for each node in topological (dependency) order.
 
         Parameters:
             dev_mode: Development mode flag
-            engine: Optional pre-configured engine to use. If None, a default SequentialEngine is created.
+            engine: Optional pre-configured engine to use. If None, a default DefaultEngine is created.
 
         The engine stays alive between yields so Wetlands environments
         remain warm — ideal for interactive debugging.
@@ -226,8 +285,8 @@ class Workflow:
         self._discover_graph(target_list)
 
         if engine is None:
-            from bioimageflow.engine import SequentialEngine
-            engine = SequentialEngine(
+            from bioimageflow.engine import DefaultEngine
+            engine = DefaultEngine(
                 use_wetlands=self.use_wetlands,
                 wetlands_config=self.wetlands_config,
             )
