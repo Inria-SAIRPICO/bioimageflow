@@ -20,7 +20,7 @@ Sub-workflows defined here:
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core import IOModel, ImageSpec, Semantic
+from bioimageflow_core import Connectable, GUIMeta, IOModel, ImageSpec, Semantic
 from bioimageflow.sub_workflow import SubWorkflow
 
 from bioimageflow_common_tools import (
@@ -65,9 +65,9 @@ class SpotDetection(SubWorkflow):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        channel: int = 0
-        gaussian_std: int = 60
-        p_value: float = 0.001
+        channel: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0
+        gaussian_std: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 60
+        p_value: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0.001
 
     class Outputs(IOModel):
         labeled_spots: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
@@ -138,9 +138,9 @@ class SpotAnalysis(SubWorkflow):
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         reference_image: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        channel: int = 0
-        gaussian_std: int = 60
-        p_value: float = 0.001
+        channel: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0
+        gaussian_std: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 60
+        p_value: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0.001
 
     class Outputs(IOModel):
         overlaps: Path

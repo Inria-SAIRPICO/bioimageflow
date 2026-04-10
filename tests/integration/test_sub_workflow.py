@@ -101,12 +101,12 @@ class TestSubWorkflowBasic:
             results = seg_measure(image=raw["path"], diameter=25.0)
             df = wf.compute(results)
 
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 3
-        assert "mask" in df.columns
-        assert "cell_count" in df.columns
-        assert "mean_intensity" in df.columns
-        assert "area" in df.columns
+            assert isinstance(df, pd.DataFrame)
+            assert len(df) == 3
+            assert "mask" in df.columns
+            assert "cell_count" in df.columns
+            assert "mean_intensity" in df.columns
+            assert "area" in df.columns
 
     def test_sub_workflow_output_columns_match_outputs_declaration(self, tmp_workspace):
         """Output DataFrame has exactly the columns declared in Outputs."""
@@ -118,7 +118,7 @@ class TestSubWorkflowBasic:
             results = seg_measure(image=raw["path"])
             df = wf.compute(results)
 
-        assert set(df.columns) == {"mask", "cell_count", "mean_intensity", "area"}
+            assert set(df.columns) == {"mask", "cell_count", "mean_intensity", "area"}
 
     def test_sub_workflow_output_used_by_downstream(self, tmp_workspace):
         """Downstream nodes can reference sub-workflow outputs."""
@@ -133,9 +133,9 @@ class TestSubWorkflowBasic:
             stats2 = measure2(image=raw["path"], mask=results["mask"])
             df = wf.compute(stats2)
 
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 3
-        assert "mean_intensity" in df.columns
+            assert isinstance(df, pd.DataFrame)
+            assert len(df) == 3
+            assert "mean_intensity" in df.columns
 
     def test_sub_workflow_with_constant_only(self, tmp_workspace):
         """Sub-workflow where all inputs are constants (no column refs)."""
@@ -149,8 +149,8 @@ class TestSubWorkflowBasic:
             results = seg(image=raw["path"])
             df = wf.compute(results)
 
-        assert len(df) == 3
-        assert "mask" in df.columns
+            assert len(df) == 3
+            assert "mask" in df.columns
 
     def test_sub_workflow_custom_name(self, tmp_workspace):
         """Custom node names work for sub-workflow nodes."""
@@ -232,9 +232,9 @@ class TestSubWorkflowComputeSteps:
                 names.append(step.node_name)
                 step.execute()
 
-        assert "FileLoader_1" in names
-        # Internal nodes should have scoped names
-        assert any("SegmentOnly_1/" in name for name in names)
+            assert "FileLoader_1" in names
+            # Internal nodes should have scoped names
+            assert any("SegmentOnly_1/" in name for name in names)
 
     def test_compute_steps_environment_for_internal_nodes(self, tmp_workspace):
         """Internal ProcessingTool steps expose their environment."""
@@ -250,13 +250,13 @@ class TestSubWorkflowComputeSteps:
                 envs[step.node_name] = step.environment
                 step.execute()
 
-        # File loader (DataFrameTool) has no environment
-        assert envs["FileLoader_1"] is None
-        # Internal segmenter should have cellpose env
-        internal_seg_names = [n for n in envs if "StubSegmenter" in n]
-        assert len(internal_seg_names) == 1
-        assert envs[internal_seg_names[0]] is not None
-        assert envs[internal_seg_names[0]].name == "cellpose"
+            # File loader (DataFrameTool) has no environment
+            assert envs["FileLoader_1"] is None
+            # Internal segmenter should have cellpose env
+            internal_seg_names = [n for n in envs if "StubSegmenter" in n]
+            assert len(internal_seg_names) == 1
+            assert envs[internal_seg_names[0]] is not None
+            assert envs[internal_seg_names[0]].name == "cellpose"
 
     def test_compute_steps_topological_order(self, tmp_workspace):
         """Internal nodes respect topological order."""
@@ -272,12 +272,12 @@ class TestSubWorkflowComputeSteps:
                 names.append(step.node_name)
                 step.execute()
 
-        # file_loader must come first
-        assert names[0] == "FileLoader_1"
-        # segmenter must come before stats (within the sub-workflow)
-        seg_idx = next(i for i, n in enumerate(names) if "StubSegmenter" in n)
-        stats_idx = next(i for i, n in enumerate(names) if "StubStats" in n)
-        assert seg_idx < stats_idx
+            # file_loader must come first
+            assert names[0] == "FileLoader_1"
+            # segmenter must come before stats (within the sub-workflow)
+            seg_idx = next(i for i, n in enumerate(names) if "StubSegmenter" in n)
+            stats_idx = next(i for i, n in enumerate(names) if "StubStats" in n)
+            assert seg_idx < stats_idx
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +292,7 @@ class TestSubWorkflowCaching:
         seg = SegmentOnly()
 
         # First run
+        df1 = pd.DataFrame()
         with Workflow(storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
@@ -307,10 +308,10 @@ class TestSubWorkflowCaching:
             results = seg(image=raw["path"])
             df2 = wf.compute(results)
 
-        pd.testing.assert_frame_equal(df1, df2)
-        # At least some nodes should be cached
-        cached_events = [e for e in events if e.status == "cached"]
-        assert len(cached_events) > 0
+            pd.testing.assert_frame_equal(df1, df2)
+            # At least some nodes should be cached
+            cached_events = [e for e in events if e.status == "cached"]
+            assert len(cached_events) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -355,8 +356,8 @@ class TestSubWorkflowMixedTools:
             results = pipeline(image=raw["path"], filename=raw["filename"])
             df = wf.compute(results)
 
-        assert len(df) == 3
-        assert "mask" in df.columns
+            assert len(df) == 3
+            assert "mask" in df.columns
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +399,9 @@ class TestNestedSubWorkflows:
             results = outer(image=raw["path"])
             df = wf.compute(results)
 
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 3
-        assert set(df.columns) == {"mask", "cell_count", "mean_intensity", "area"}
+            assert isinstance(df, pd.DataFrame)
+            assert len(df) == 3
+            assert set(df.columns) == {"mask", "cell_count", "mean_intensity", "area"}
 
     def test_nested_scoped_names_in_compute_steps(self, tmp_workspace):
         """Nested sub-workflow nodes have double-scoped names."""
@@ -435,9 +436,9 @@ class TestNestedSubWorkflows:
                 names.append(step.node_name)
                 step.execute()
 
-        # Should have nested scoping: OuterWorkflow_1/SegmentOnly_1/StubSegmenter_1
-        deep_names = [n for n in names if n.count("/") >= 2]
-        assert len(deep_names) > 0
+            # Should have nested scoping: OuterWorkflow_1/SegmentOnly_1/StubSegmenter_1
+            deep_names = [n for n in names if n.count("/") >= 2]
+            assert len(deep_names) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -481,15 +482,15 @@ class TestSubWorkflowSerialization:
             df1 = wf.compute(results)
             wf.export(tmp_workspace / "workflow.json")
 
-        # Load and re-execute
-        wf2 = Workflow.load(tmp_workspace / "workflow.json")
-        # Find the terminal node
-        terminal_names = [n for n in wf2.nodes if "SegmentOnly" in n]
-        assert len(terminal_names) == 1
-        df2 = wf2.compute(wf2.nodes[terminal_names[0]])
+            # Load and re-execute
+            wf2 = Workflow.load(tmp_workspace / "workflow.json")
+            # Find the terminal node
+            terminal_names = [n for n in wf2.nodes if "SegmentOnly" in n]
+            assert len(terminal_names) == 1
+            df2 = wf2.compute(wf2.nodes[terminal_names[0]])
 
-        assert set(df1.columns) == set(df2.columns)
-        assert len(df1) == len(df2)
+            assert set(df1.columns) == set(df2.columns)
+            assert len(df1) == len(df2)
 
 
 # ---------------------------------------------------------------------------
@@ -569,11 +570,11 @@ class TestMultipleSubWorkflowInstances:
             r2 = seg2(image=raw["path"], diameter=50.0)
             out = wf.compute(r1, r2)
 
-        assert isinstance(out, dict)
-        assert len(out) == 2
-        for df in out.values():
-            assert len(df) == 3
-            assert "mask" in df.columns
+            assert isinstance(out, dict)
+            assert len(out) == 2
+            for df in out.values():
+                assert len(df) == 3
+                assert "mask" in df.columns
 
     def test_sub_workflow_reused_across_branches(self, tmp_workspace):
         """Sub-workflow output used by multiple downstream nodes."""
@@ -589,4 +590,4 @@ class TestMultipleSubWorkflowInstances:
             r2 = stats2(image=raw["path"], mask=masks["mask"], name="stats_b")
             out = wf.compute(r1, r2)
 
-        assert len(out) == 2
+            assert len(out) == 2

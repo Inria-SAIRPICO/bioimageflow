@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     EnvironmentSpec,
     GUIMeta,
     ImageSpec,
@@ -50,15 +51,15 @@ class Atlas(ProcessingTool):
             ),
         ]
         gaussian_std: Annotated[
-            int, GUIMeta(min=0, max=200, step=1)
+            int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0, max=200, step=1)
         ] = 60
         p_value: Annotated[
-            float, GUIMeta(min=0.0, max=1.0, step=0.000001)
+            float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=1.0, step=0.000001)
         ] = 0.001
         area_lim: Annotated[
-            float, GUIMeta(min=0.0, max=10000.0, step=0.01)
+            float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=10000.0, step=0.01)
         ] = 0.0
-        verbose: bool = False
+        verbose: Annotated[bool, GUIMeta(connectable=Connectable.NEVER)] = False
 
     class Outputs(IOModel):
         output_image: Annotated[

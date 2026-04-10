@@ -1,12 +1,14 @@
 """DownloadImages — download images from URLs."""
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     EnvironmentSpec,
+    GUIMeta,
     IOModel,
     ProcessingTool,
 )
@@ -30,8 +32,8 @@ class DownloadImages(ProcessingTool):
     environment = download_env
 
     class Inputs(IOModel):
-        urls: str
-        output_dir: str = "./data"
+        urls: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
+        output_dir: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "./data"
 
     class Outputs(IOModel):
         path: Path

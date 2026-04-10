@@ -1,8 +1,8 @@
 """AverageSpotsPerNucleus — aggregate overlap DataFrames into per-image statistics."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from bioimageflow_core import Category, IOModel
+from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -24,8 +24,8 @@ class AverageSpotsPerNucleus(DataFrameTool):
     tags = ["statistics", "aggregation", "fish"]
 
     class Inputs(IOModel):
-        fols2_column: str = "overlaps"
-        csfr1_column: str = "overlaps_1"
+        fols2_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "overlaps"
+        csfr1_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "overlaps_1"
 
     class Outputs(IOModel):
         image_index: str

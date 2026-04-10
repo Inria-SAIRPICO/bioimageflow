@@ -1,9 +1,9 @@
 """Files — source DataFrameTool that lists image files in a directory."""
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from bioimageflow_core import Category, IOModel
+from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -18,8 +18,8 @@ class Files(DataFrameTool):
     tags = ["source", "loader"]
 
     class Inputs(IOModel):
-        path: str
-        pattern: str = "*"
+        path: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)]
+        pattern: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = "*"
 
     class Outputs(IOModel):
         path: Path

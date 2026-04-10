@@ -6,7 +6,7 @@ import inspect
 import os
 from typing import Annotated, Any, get_args, get_origin
 
-from bioimageflow_core.types import ImageSpec, extract_gui_meta
+from bioimageflow_core.types import Connectable, ImageSpec, extract_gui_meta
 from bioimageflow_core.tool import IOModel, BaseTool
 
 
@@ -79,7 +79,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
             "type": base_type,
             "default": default,
             "required": not has_default,
-            "connectable": gui_meta.connectable if gui_meta else True,
+            "connectable": gui_meta.connectable if gui_meta else Connectable.BY_DEFAULT,
             "image_spec": image_spec,
         }
 

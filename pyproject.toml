@@ -30,3 +30,6 @@ members = ["packages/*"]
 bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
+
+[tool.pytest.ini_options]
+filterwarnings = []

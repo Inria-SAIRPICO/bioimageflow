@@ -1,4 +1,5 @@
 from bioimageflow_core.types import (
+    Connectable as Connectable,
     GUIMeta as GUIMeta,
     ImagePath as ImagePath,
     ImageShared as ImageShared,

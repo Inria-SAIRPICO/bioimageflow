@@ -17,7 +17,7 @@ Minimal example
 
    from typing import Annotated
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, GUIMeta, ImagePath, Arguments,
+       ProcessingTool, EnvironmentSpec, GUIMeta, Connectable, ImagePath, Arguments,
    )
 
    class GaussianBlur(ProcessingTool):
@@ -26,7 +26,7 @@ Minimal example
 
        class Inputs:
            image: ImagePath()
-           sigma: Annotated[float, GUIMeta(connectable=False, min=0.1, max=50.0, step=0.1)] = 1.0
+           sigma: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.1, max=50.0, step=0.1)] = 1.0
 
        class Outputs:
            blurred: ImagePath() = "{image.stem}_blur.tif"
@@ -236,22 +236,28 @@ GUI metadata
 
 Use :class:`~bioimageflow_core.GUIMeta` to attach rendering hints that a GUI
 can introspect. This is opt-in --- fields without ``GUIMeta`` default to
-``connectable=True``.
+``connectable=Connectable.BY_DEFAULT``.
+
+The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
+
+- ``Connectable.NEVER`` --- no pin, no toggle. For source/structural config.
+- ``Connectable.NOT_BY_DEFAULT`` --- pin hidden, checkbox reveals it. For algorithm parameters.
+- ``Connectable.BY_DEFAULT`` --- pin visible. For data inputs.
 
 .. code-block:: python
 
    from typing import Annotated
-   from bioimageflow_core import GUIMeta, IOModel
+   from bioimageflow_core import GUIMeta, Connectable, IOModel
 
    class Inputs(IOModel):
-       # This field appears as a connectable port (default)
+       # This field appears as a connectable port (default: BY_DEFAULT)
        image: ImagePath()
 
-       # This field appears as a slider, not a connectable port
-       sigma: Annotated[float, GUIMeta(connectable=False, min=0.1, max=50.0, step=0.1)] = 1.0
+       # This field has a hidden pin, revealed via checkbox
+       sigma: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.1, max=50.0, step=0.1)] = 1.0
 
-       # This field has min-only constraint
-       iterations: Annotated[int, GUIMeta(connectable=False, min=1)] = 3
+       # This field can never be connected
+       iterations: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1)] = 3
 
 To introspect a tool's schema programmatically:
 

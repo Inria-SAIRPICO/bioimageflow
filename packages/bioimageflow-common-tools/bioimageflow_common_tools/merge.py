@@ -1,10 +1,11 @@
 """Built-in merge DataFrameTools."""
 
-from typing import Any
+from typing import Annotated, Any
 
 import pandas as pd
 
 from bioimageflow_core.tool import Category, IOModel
+from bioimageflow_core.types import Connectable, GUIMeta
 from bioimageflow.dataframe_tool import DataFrameTool, Passthrough
 
 
@@ -24,7 +25,7 @@ class CrossJoin(DataFrameTool):
     category = Category.UTILITIES
 
     class Inputs(IOModel):
-        suffixes: tuple[str, str] = ("_left", "_right")
+        suffixes: Annotated[tuple[str, str], GUIMeta(connectable=Connectable.NEVER)] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         if not dfs:
@@ -46,9 +47,9 @@ class JoinOnColumn(DataFrameTool):
     category = Category.UTILITIES
 
     class Inputs(IOModel):
-        join_column: str
-        how: str = "inner"
-        suffixes: tuple[str, str] = ("_left", "_right")
+        join_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
+        how: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "inner"
+        suffixes: Annotated[tuple[str, str], GUIMeta(connectable=Connectable.NEVER)] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         if not dfs:

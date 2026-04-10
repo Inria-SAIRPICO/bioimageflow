@@ -92,6 +92,18 @@ def ImageShared(
     return Annotated[SharedArray, spec]
 
 
+class Connectable(Enum):
+    """Whether a tool input field can be bound to an upstream dataframe column.
+
+    - ``NEVER``: No input pin, no toggle — the field can never be wired.
+    - ``NOT_BY_DEFAULT``: Pin hidden by default; a GUI checkbox reveals it.
+    - ``BY_DEFAULT``: Pin visible by default; a GUI checkbox can hide it.
+    """
+    NEVER = "never"
+    NOT_BY_DEFAULT = "not_by_default"
+    BY_DEFAULT = "by_default"
+
+
 @dataclass(frozen=True)
 class GUIMeta:
     """Declarative GUI hints for a tool input field.
@@ -101,10 +113,9 @@ class GUIMeta:
 
     Parameters
     ----------
-    connectable : bool
-        Whether this input can be bound to an upstream column.  Defaults to
-        ``True``.  Set to ``False`` for pure user-parameters (e.g. a
-        threshold slider).
+    connectable : Connectable
+        Controls whether and how this input can be bound to an upstream
+        column.  Defaults to ``Connectable.BY_DEFAULT``.
     min : float | None
         Minimum allowed value (numeric fields only).
     max : float | None
@@ -116,7 +127,7 @@ class GUIMeta:
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
     """
-    connectable: bool = True
+    connectable: Connectable = Connectable.BY_DEFAULT
     min: float | None = None
     max: float | None = None
     step: float | None = None

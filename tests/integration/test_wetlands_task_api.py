@@ -82,12 +82,12 @@ class TestRowParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
-        assert "output_path" in df.columns
-        assert "value" in df.columns
-        for _, row in df.iterrows():
-            assert Path(row["output_path"]).exists()
-            assert row["value"] == 42.0
+            assert len(df) == 3
+            assert "output_path" in df.columns
+            assert "value" in df.columns
+            for _, row in df.iterrows():
+                assert Path(row["output_path"]).exists()
+                assert row["value"] == 42.0
 
     def test_multi_worker_same_results(self, workspace):
         """max_workers=4 produces the same results as max_workers=1."""
@@ -103,11 +103,11 @@ class TestRowParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
-        assert "output_path" in df.columns
-        for _, row in df.iterrows():
-            assert Path(row["output_path"]).exists()
-            assert row["value"] == 42.0
+            assert len(df) == 3
+            assert "output_path" in df.columns
+            for _, row in df.iterrows():
+                assert Path(row["output_path"]).exists()
+                assert row["value"] == 42.0
 
     def test_row_ordering_preserved(self, workspace):
         """Output rows correspond to input rows in order."""
@@ -123,11 +123,11 @@ class TestRowParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
-        # Each output file should contain its input path
-        for _, row in df.iterrows():
-            content = Path(row["output_path"]).read_text()
-            assert "processed:" in content
+            assert len(df) == 3
+            # Each output file should contain its input path
+            for _, row in df.iterrows():
+                content = Path(row["output_path"]).read_text()
+                assert "processed:" in content
 
     def test_error_propagation_with_cleanup(self, workspace):
         """Worker errors propagate correctly and don't hang."""
@@ -157,9 +157,9 @@ class TestRowParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
-        for _, row in df.iterrows():
-            assert Path(row["output_path"]).exists()
+            assert len(df) == 3
+            for _, row in df.iterrows():
+                assert Path(row["output_path"]).exists()
 
 
 # =====================================================================
@@ -184,9 +184,9 @@ class TestGpuWorkerAssignment:
             out = tool(input_path=raw["path"])
             df = wf.compute(out, engine=engine)
 
-        assert len(df) == 3
-        # The engine should have detected GPU and auto-set worker_env
-        assert engine._env_has_gpu_tool(gpu_env.name, wf)
+            assert len(df) == 3
+            # The engine should have detected GPU and auto-set worker_env
+            assert engine._env_has_gpu_tool(gpu_env.name, wf)
 
     def test_get_environment_override(self, workspace):
         """Explicit get_environment() max_workers override takes precedence."""
@@ -204,7 +204,7 @@ class TestGpuWorkerAssignment:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
+            assert len(df) == 3
 
     def test_workflow_level_max_workers_default(self, workspace):
         """Workflow.max_workers is used when no explicit override exists."""
@@ -222,7 +222,7 @@ class TestGpuWorkerAssignment:
             out = tool(input_path=raw["path"])
             df = wf.compute(out, engine=engine)
 
-        assert len(df) == 3
+            assert len(df) == 3
 
     def test_worker_env_override(self, workspace):
         """get_environment().worker_env overrides GPU auto-inference."""
@@ -241,7 +241,7 @@ class TestGpuWorkerAssignment:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        assert len(df) == 3
+            assert len(df) == 3
 
 
 # =====================================================================
@@ -406,18 +406,18 @@ class TestBranchParallelism:
             branch_b = tool(input_path=raw["path"], name="branch_b")
             out = wf.compute(branch_a, branch_b)
 
-        elapsed = time.monotonic() - t0
+            elapsed = time.monotonic() - t0
 
-        assert "branch_a" in out
-        assert "branch_b" in out
-        assert len(out["branch_a"]) == 6
-        assert len(out["branch_b"]) == 6
+            assert "branch_a" in out
+            assert "branch_b" in out
+            assert len(out["branch_a"]) == 6
+            assert len(out["branch_b"]) == 6
 
-        # With 6 rows * 0.3s each, sequential would take ~3.6s (2 branches = ~7.2s).
-        # With branch parallelism + 2 workers, it should be much faster.
-        # We just check it's below the fully-sequential time.
-        # Note: this is a soft check — CI variability may affect it.
-        assert elapsed < 7.0, f"Expected faster than sequential, took {elapsed:.1f}s"
+            # With 6 rows * 0.3s each, sequential would take ~3.6s (2 branches = ~7.2s).
+            # With branch parallelism + 2 workers, it should be much faster.
+            # We just check it's below the fully-sequential time.
+            # Note: this is a soft check — CI variability may affect it.
+            assert elapsed < 7.0, f"Expected faster than sequential, took {elapsed:.1f}s"
 
     def test_results_identical_to_sequential(self, workspace):
         """Parallel execution produces the same results as sequential."""
@@ -425,6 +425,7 @@ class TestBranchParallelism:
         tool = SimpleRowTool()
 
         # Sequential
+        df_seq = pd.DataFrame()
         seq_engine = SequentialEngine(use_wetlands=True)
         with Workflow(
             storage_path=workspace / "seq_results",
@@ -444,10 +445,10 @@ class TestBranchParallelism:
             out = tool(input_path=raw["path"])
             df_par = wf.compute(out)
 
-        # Same shape and values (ignoring output paths which differ)
-        assert len(df_seq) == len(df_par)
-        assert set(df_seq.columns) == set(df_par.columns)
-        assert list(df_seq["value"]) == list(df_par["value"])
+            # Same shape and values (ignoring output paths which differ)
+            assert len(df_seq) == len(df_par)
+            assert set(df_seq.columns) == set(df_par.columns)
+            assert list(df_seq["value"]) == list(df_par["value"])
 
     def test_dataframe_tool_never_concurrent(self, workspace):
         """DataFrameTool nodes always run on the main thread."""
@@ -466,8 +467,8 @@ class TestBranchParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 
-        # If it completes without deadlock/error, DataFrameTool ran correctly
-        assert len(df) == 3
+            # If it completes without deadlock/error, DataFrameTool ran correctly
+            assert len(df) == 3
 
     def test_sequential_engine_deterministic(self, workspace):
         """SequentialEngine forces single-threaded, single-worker execution."""
@@ -485,8 +486,8 @@ class TestBranchParallelism:
             out = tool(input_path=raw["path"])
             df = wf.compute(out, engine=engine)
 
-        assert len(df) == 3
-        # SequentialEngine._resolve_worker_config always returns (1, None)
-        mw, we = engine._resolve_worker_config(tool, wf)
-        assert mw == 1
-        assert we is None
+            assert len(df) == 3
+            # SequentialEngine._resolve_worker_config always returns (1, None)
+            mw, we = engine._resolve_worker_config(tool, wf)
+            assert mw == 1
+            assert we is None

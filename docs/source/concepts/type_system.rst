@@ -135,28 +135,29 @@ introspect these hints to render appropriate widgets.
 .. code-block:: python
 
    from typing import Annotated
-   from bioimageflow_core import GUIMeta, ImageSpec, Semantic
+   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic
 
    class Inputs(IOModel):
        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-       diameter: Annotated[float, GUIMeta(connectable=False, min=1.0, max=500.0, step=0.5)] = 30.0
+       diameter: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=1.0, max=500.0, step=0.5)] = 30.0
 
 Parameters:
 
-- **connectable** (``bool``, default ``True``): whether the input can be bound
-  to an upstream column. Set to ``False`` for pure user-parameters that should
-  only appear as widgets (sliders, spinboxes), not as connectable ports.
+- **connectable** (:class:`~bioimageflow_core.Connectable`, default
+  ``Connectable.BY_DEFAULT``): controls pin visibility. ``NEVER`` hides the
+  pin entirely, ``NOT_BY_DEFAULT`` shows it only when toggled via checkbox,
+  ``BY_DEFAULT`` shows it out of the box.
 - **min** / **max** (``float | None``): numeric bounds for the widget.
 - **step** (``float | None``): step increment for spinbox or slider widgets.
 
-Fields without ``GUIMeta`` default to ``connectable=True`` --- existing tools
-work unchanged.
+Fields without ``GUIMeta`` default to ``Connectable.BY_DEFAULT`` --- existing
+tools work unchanged.
 
 ``GUIMeta`` and ``ImageSpec`` can coexist on the same field:
 
 .. code-block:: python
 
-   image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=True)]
+   image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
 Introspection
 ~~~~~~~~~~~~~
@@ -174,7 +175,7 @@ GUI-friendly schema for a tool:
    #         "type": float,
    #         "default": 30.0,
    #         "required": False,
-   #         "connectable": False,
+   #         "connectable": Connectable.NOT_BY_DEFAULT,
    #         "image_spec": None,
    #         "min": 1.0,
    #         "max": 500.0,

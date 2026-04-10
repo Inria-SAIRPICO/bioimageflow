@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core.types import GUIMeta, ImageSpec, Semantic, SharedArray
+from bioimageflow_core.types import Connectable, GUIMeta, ImageSpec, Semantic, SharedArray
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow.validation import (
@@ -79,12 +79,12 @@ class TestGetInputsSchema:
         assert "image" in schema
         assert "sigma" in schema
         assert schema["image"]["required"] is True
-        assert schema["image"]["connectable"] is True
+        assert schema["image"]["connectable"] is Connectable.BY_DEFAULT
         assert schema["image"]["type"] is Path
         assert schema["image"]["image_spec"] is not None
         assert schema["sigma"]["required"] is False
         assert schema["sigma"]["default"] == 1.0
-        assert schema["sigma"]["connectable"] is True
+        assert schema["sigma"]["connectable"] is Connectable.BY_DEFAULT
 
     def test_gui_meta_numeric_constraints(self):
         class Tool(ProcessingTool):
@@ -92,7 +92,7 @@ class TestGetInputsSchema:
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
-                diameter: Annotated[float, GUIMeta(connectable=False, min=1.0, max=500.0, step=0.5)] = 30.0
+                diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
             class Outputs(IOModel):
                 result: float
@@ -102,7 +102,7 @@ class TestGetInputsSchema:
 
         schema = get_inputs_schema(Tool())
         d = schema["diameter"]
-        assert d["connectable"] is False
+        assert d["connectable"] is Connectable.NEVER
         assert d["min"] == 1.0
         assert d["max"] == 500.0
         assert d["step"] == 0.5
@@ -115,7 +115,7 @@ class TestGetInputsSchema:
             environment = EnvironmentSpec(name="test", dependencies={})
 
             class Inputs(IOModel):
-                image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=True)]
+                image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
             class Outputs(IOModel):
                 result: float
@@ -124,7 +124,7 @@ class TestGetInputsSchema:
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
-        assert schema["image"]["connectable"] is True
+        assert schema["image"]["connectable"] is Connectable.BY_DEFAULT
         assert schema["image"]["image_spec"] is not None
         assert schema["image"]["type"] is Path
 
@@ -143,7 +143,7 @@ class TestGetInputsSchema:
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
-        assert schema["threshold"]["connectable"] is True
+        assert schema["threshold"]["connectable"] is Connectable.BY_DEFAULT
         assert "min" not in schema["threshold"]
         assert "max" not in schema["threshold"]
         assert "step" not in schema["threshold"]
@@ -156,7 +156,7 @@ class TestGetInputsSchema:
 
             class Inputs(IOModel):
                 sigma: Annotated[float, GUIMeta(group="general")] = 1.0
-                use_gpu: Annotated[bool, GUIMeta(connectable=False, group="gpu")] = False
+                use_gpu: Annotated[bool, GUIMeta(connectable=Connectable.NEVER, group="gpu")] = False
                 iterations: Annotated[int, GUIMeta(min=1, max=100, group="advanced")] = 10
 
             class Outputs(IOModel):
@@ -168,7 +168,7 @@ class TestGetInputsSchema:
         schema = get_inputs_schema(Tool())
         assert schema["sigma"]["group"] == "general"
         assert schema["use_gpu"]["group"] == "gpu"
-        assert schema["use_gpu"]["connectable"] is False
+        assert schema["use_gpu"]["connectable"] is Connectable.NEVER
         assert schema["iterations"]["group"] == "advanced"
         assert schema["iterations"]["min"] == 1
 

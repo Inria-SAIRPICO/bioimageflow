@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -35,7 +36,7 @@ class ExtractChannel(ProcessingTool):
                 layouts={Layout.PLANAR_CHANNEL, Layout.VOLUMETRIC_CHANNEL},
             ),
         ]
-        channel: Annotated[int, GUIMeta(min=0, max=512, step=1)] = 0
+        channel: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0, max=512, step=1)] = 0
 
     class Outputs(IOModel):
         output_image: Annotated[

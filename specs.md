@@ -862,26 +862,37 @@ def build_pydantic_model(tool_model_cls):
 `Inputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`.
 
 ```python
+class Connectable(Enum):
+    """Whether a tool input field can be bound to an upstream dataframe column."""
+    NEVER = "never"            # No input pin, no toggle — impossible to connect
+    NOT_BY_DEFAULT = "not_by_default"  # Pin hidden by default; checkbox reveals it
+    BY_DEFAULT = "by_default"  # Pin visible by default; checkbox can hide it
+
 @dataclass(frozen=True)
 class GUIMeta:
     """
     GUI hints for an Inputs field.
     Attached via Annotated — invisible to runtime logic, read by frontends.
     """
-    connectable: bool = True   # Can this field be wired to an upstream column?
+    connectable: Connectable = Connectable.BY_DEFAULT  # Pin visibility / connectability
     min: float | int | None = None   # Minimum value (numeric fields)
     max: float | int | None = None   # Maximum value (numeric fields)
     step: float | int | None = None  # Step increment (numeric fields)
     group: str | None = None   # Logical group for tab/section display (e.g. "general", "advanced", "gpu")
 ```
 
-**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: True` with no numeric constraints and no group. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable with no min/max/step and belongs to the default (unnamed) group.
+**Connectable states:**
+- `Connectable.NEVER` — the field can never be wired to an upstream column. No pin, no toggle. Use for source configuration fields (e.g. file path, glob pattern) or structural settings that never vary per-row.
+- `Connectable.NOT_BY_DEFAULT` — the field is connectable, but the pin is hidden until the user enables it via a checkbox. Use for algorithm parameters (thresholds, model names) that are rarely column-bound but occasionally need to be.
+- `Connectable.BY_DEFAULT` — the pin is visible out of the box. Use for data inputs (image paths, required columns) that almost always come from a dataframe column.
+
+**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: Connectable.BY_DEFAULT` with no numeric constraints and no group. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable by default with no min/max/step and belongs to the default (unnamed) group.
 
 **Usage:**
 
 ```python
 from typing import Annotated
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta
+from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta, Connectable
 
 class CellposeSegmenter(ProcessingTool):
     name = "cellpose_segmenter"
@@ -889,10 +900,10 @@ class CellposeSegmenter(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: ImagePath(semantics=Semantic.INTENSITY)
-        diameter: Annotated[float, GUIMeta(min=0.0, max=500.0, step=0.5, group="general")] = 30.0
-        model_type: Annotated[str, GUIMeta(connectable=False, group="general")] = "cyto3"
-        flow_threshold: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.05, group="advanced")] = 0.4
-        use_gpu: Annotated[bool, GUIMeta(connectable=False, group="gpu")] = True
+        diameter: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=500.0, step=0.5, group="general")] = 30.0
+        model_type: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, group="general")] = "cyto3"
+        flow_threshold: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=1.0, step=0.05, group="advanced")] = 0.4
+        use_gpu: Annotated[bool, GUIMeta(connectable=Connectable.NEVER, group="gpu")] = True
 
     class Outputs(IOModel):
         mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
@@ -903,11 +914,11 @@ class CellposeSegmenter(ProcessingTool):
 ```
 
 In this example:
-- `input_image` has no `GUIMeta` → defaults to `connectable: True`, no numeric constraints, default group.
-- `diameter` is connectable (default) with a slider range of 0–500, step 0.5, in the **general** tab.
-- `model_type` is **not connectable**, in the **general** tab — rendered as a text field or dropdown, never as an input port.
+- `input_image` has no `GUIMeta` → defaults to `Connectable.BY_DEFAULT`, no numeric constraints, default group.
+- `diameter` is connectable but hidden by default (`NOT_BY_DEFAULT`) with a slider range of 0–500, step 0.5, in the **general** tab.
+- `model_type` is connectable but hidden by default (`NOT_BY_DEFAULT`), in the **general** tab — rendered as a text field or dropdown, pin available via checkbox.
 - `flow_threshold` is in the **advanced** tab — hidden from the main view, accessible via an "Advanced" tab.
-- `use_gpu` is in the **gpu** tab — grouped with other GPU-related settings.
+- `use_gpu` is **never connectable** (`NEVER`), in the **gpu** tab — grouped with other GPU-related settings.
 
 **Grouping behaviour:** A GUI frontend collects all fields sharing the same `group` value and displays them together (e.g. as tabs, collapsible sections, or accordion panels). Fields with `group=None` belong to an implicit default group. The ordering of groups is determined by first appearance in the `Inputs` declaration.
 
@@ -925,7 +936,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
     return None
 ```
 
-**Compatibility with ImagePath/ImageShared:** Since `ImagePath(...)` already returns `Annotated[Path, ImageSpec(...)]`, a field can carry both `ImageSpec` and `GUIMeta` by nesting: `Annotated[ImagePath(...), GUIMeta(connectable=True)]`. In practice, image fields are almost always connectable, so `GUIMeta` is rarely needed on them.
+**Compatibility with ImagePath/ImageShared:** Since `ImagePath(...)` already returns `Annotated[Path, ImageSpec(...)]`, a field can carry both `ImageSpec` and `GUIMeta` by nesting: `Annotated[ImagePath(...), GUIMeta(connectable=Connectable.BY_DEFAULT)]`. In practice, image fields are almost always connectable by default, so `GUIMeta` is rarely needed on them.
 
 **Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets and port visibility.
 

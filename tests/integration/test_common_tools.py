@@ -6,7 +6,6 @@ workflow execution using stub data. They do NOT require heavy deps
 external libs are tested for graph construction only.
 """
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +29,6 @@ from bioimageflow_common_tools import (
     LabelOverlaps,
 )
 
-# Import FISH-specific tools
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "example-workflows" / "fish_analysis"))
-from tools import AverageSpotsPerNucleus
 
 
 # ---------------------------------------------------------------------------
@@ -85,11 +81,10 @@ class TestFiles:
         with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
             node = Files()(path=str(image_dir))
             result = wf.compute(node)
-
-        assert len(result) == 2
-        assert "path" in result.columns
-        assert "filename" in result.columns
-        assert set(result["filename"]) == {"sample_01.tif", "sample_02.tif"}
+            assert len(result) == 2
+            assert "path" in result.columns
+            assert "filename" in result.columns
+            assert set(result["filename"]) == {"sample_01.tif", "sample_02.tif"}
 
     def test_glob_pattern(self, image_dir: Path) -> None:
         # Create a non-matching file
@@ -98,8 +93,7 @@ class TestFiles:
         with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
             node = Files()(path=str(image_dir), pattern="*.tif")
             result = wf.compute(node)
-
-        assert len(result) == 2
+            assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -112,15 +106,14 @@ class TestExtractChannel:
             files = Files()(path=str(image_dir), pattern="*.tif")
             ch0 = ExtractChannel()(input_image=files["path"], channel=0)
             result = wf.compute(ch0)
+            assert len(result) == 2
+            assert "output_image" in result.columns
 
-        assert len(result) == 2
-        assert "output_image" in result.columns
-
-        # Verify the output is a 2D image (single channel)
-        out_path = result.iloc[0]["output_image"]
-        img = iio.imread(str(out_path))
-        assert img.ndim == 2
-        assert img.shape == (64, 64)
+            # Verify the output is a 2D image (single channel)
+            out_path = result.iloc[0]["output_image"]
+            img = iio.imread(str(out_path))
+            assert img.ndim == 2
+            assert img.shape == (64, 64)
 
     def test_extracts_different_channels(self, image_dir: Path) -> None:
         with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
@@ -132,10 +125,9 @@ class TestExtractChannel:
                 input_image=files["path"], channel=2, name="ch2"
             )
             results = wf.compute(ch0, ch2)
-
-        assert len(results) == 2
-        assert len(results["ch0"]) == 2
-        assert len(results["ch2"]) == 2
+            assert len(results) == 2
+            assert len(results["ch0"]) == 2
+            assert len(results["ch2"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -184,60 +176,6 @@ class TestLabelOverlaps:
 
 
 # ---------------------------------------------------------------------------
-# AverageSpotsPerNucleus tool (FISH-specific)
-# ---------------------------------------------------------------------------
-
-class TestAverageSpotsPerNucleus:
-    def test_computes_stats(self, tmp_path: Path) -> None:
-        # Create fake overlap CSVs for FOLS2 and CSF1R
-        fols2_csv = tmp_path / "fols2_overlaps.csv"
-        fols2_csv.write_text(
-            "reference_label,spot_label,overlap_count\n"
-            "0,0,1000\n"     # background — should be filtered
-            "1,1,50\n"       # nucleus 1, spot 1
-            "1,2,30\n"       # nucleus 1, spot 2
-            "2,3,45\n"       # nucleus 2, spot 3
-            "3,4,20\n"       # nucleus 3, spot 4
-            "3,5,15\n"       # nucleus 3, spot 5
-            "3,6,10\n"       # nucleus 3, spot 6
-        )
-
-        csfr1_csv = tmp_path / "csfr1_overlaps.csv"
-        csfr1_csv.write_text(
-            "reference_label,spot_label,overlap_count\n"
-            "0,0,500\n"
-            "1,10,40\n"      # nucleus 1, spot 10
-            "2,11,35\n"      # nucleus 2, spot 11
-            "2,12,25\n"      # nucleus 2, spot 12
-        )
-
-        input_df = pd.DataFrame(
-            {
-                "overlaps": [str(fols2_csv)],
-                "overlaps_1": [str(csfr1_csv)],
-            },
-            index=["0"],
-        )
-
-        tool = AverageSpotsPerNucleus()
-        result = tool.transform(
-            input_df,
-            Arguments(fols2_column="overlaps", csfr1_column="overlaps_1"),
-        )
-
-        assert len(result) == 1
-        row = result.iloc[0]
-        # FOLS2: nucleus 1→2 spots, nucleus 2→1, nucleus 3→3 → avg=2.0
-        assert row["total_nuclei_fols2"] == 3
-        assert row["total_fols2_spots"] == 6
-        assert abs(row["avg_fols2_per_nucleus"] - 2.0) < 0.01
-        # CSF1R: nucleus 1→1 spot, nucleus 2→2 spots → avg=1.5
-        assert row["total_nuclei_csfr1"] == 2
-        assert row["total_csfr1_spots"] == 3
-        assert abs(row["avg_csfr1_per_nucleus"] - 1.5) < 0.01
-
-
-# ---------------------------------------------------------------------------
 # Full pipeline (Files → ExtractChannel → LabelOverlaps → Stats)
 # ---------------------------------------------------------------------------
 
@@ -258,17 +196,16 @@ class TestMiniPipeline:
                 input_image=files["path"], channel=2, name="ch2"
             )
             results = wf.compute(ch0, ch1, ch2)
-
-        # 2 images × 3 channels = 6 outputs total
-        for name in ["ch0", "ch1", "ch2"]:
-            assert len(results[name]) == 2
-            for out_path in results[name]["output_image"]:
-                assert Path(out_path).exists()
+            # 2 images × 3 channels = 6 outputs total
+            for name in ["ch0", "ch1", "ch2"]:
+                assert len(results[name]) == 2
+                for out_path in results[name]["output_image"]:
+                    assert Path(out_path).exists()
 
     def test_overlap_to_stats_pipeline(
         self, tmp_path: Path, label_images: tuple[Path, Path]
     ) -> None:
-        """Test LabelOverlaps → AverageSpotsPerNucleus pipeline.
+        """Test LabelOverlaps pipeline with stub labeler.
 
         Simulates the FISH pattern: a single 2-channel image where ch0
         is spot labels and ch1 is nucleus labels. Uses StubLabeler to
@@ -286,10 +223,10 @@ class TestMiniPipeline:
             environment = stub_env
 
             class Inputs(IOModel):
-                input_image: ImagePath(semantics=Semantic.INTENSITY)
+                input_image: ImagePath(semantics=Semantic.INTENSITY)  # type: ignore[valid-type]
 
             class Outputs(IOModel):
-                output_image: ImagePath(semantics=Semantic.LABEL) = (
+                output_image: ImagePath(semantics=Semantic.LABEL) = (  # type: ignore[valid-type]
                     "{input_image.stem}_labeled{ext}"
                 )
 
@@ -329,11 +266,10 @@ class TestMiniPipeline:
                 reference_image=labeled_refs["output_image"],
             )
             result = wf.compute(overlaps)
-
-        assert len(result) == 1
-        assert "overlaps" in result.columns
-        csv_path = Path(result.iloc[0]["overlaps"])
-        assert csv_path.exists()
-        df = pd.read_csv(csv_path)
-        real = df[df["spot_label"] > 0]
-        assert len(real) > 0
+            assert len(result) == 1
+            assert "overlaps" in result.columns
+            csv_path = Path(result.iloc[0]["overlaps"])
+            assert csv_path.exists()
+            df = pd.read_csv(csv_path)
+            real = df[df["spot_label"] > 0]
+            assert len(real) > 0

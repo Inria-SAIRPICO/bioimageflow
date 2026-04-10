@@ -13,6 +13,7 @@ import pytest
 
 from bioimageflow_core import (
     Arguments,
+    Connectable,
     EnvironmentSpec,
     GUIMeta,
     IOModel,
@@ -103,7 +104,7 @@ class StubSegmenter(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        diameter: Annotated[float, GUIMeta(connectable=False, min=1.0, max=500.0, step=0.5)] = 30.0
+        diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
         mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_mask_{row_index}.png"  # type: ignore[assignment]
@@ -142,7 +143,7 @@ class StubTiler(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        tile_count: Annotated[int, GUIMeta(connectable=False, min=1, max=64, step=1)] = 4
+        tile_count: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=64, step=1)] = 4
 
     class Outputs(IOModel):
         tile: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = "{input_image.stem}_tile_{row_index}.png"  # type: ignore[assignment]
@@ -312,7 +313,7 @@ class CellposeSegmenter(CellposeBase):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        diameter: Annotated[float, GUIMeta(connectable=False, min=1.0, max=500.0, step=0.5)] = 30.0
+        diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
         mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_mask_{row_index}.png"  # type: ignore[assignment]
@@ -333,7 +334,7 @@ class CellposeTrain(CellposeBase):
     class Inputs(IOModel):
         training_images: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         training_masks: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        epochs: Annotated[int, GUIMeta(connectable=False, min=1, max=10000, step=10)] = 100
+        epochs: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=10000, step=10)] = 100
 
     class Outputs(IOModel):
         model_path: Path = "{node_name}_model"  # type: ignore[assignment]

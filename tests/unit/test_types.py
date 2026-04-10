@@ -7,6 +7,7 @@ from typing import Annotated, get_args
 import pytest
 
 from bioimageflow_core.types import (
+    Connectable,
     GUIMeta,
     ImageSpec,
     Layout,
@@ -124,33 +125,37 @@ class TestGUIMeta:
 
     def test_defaults(self):
         meta = GUIMeta()
-        assert meta.connectable is True
+        assert meta.connectable is Connectable.BY_DEFAULT
         assert meta.min is None
         assert meta.max is None
         assert meta.step is None
         assert meta.group is None
 
     def test_custom_values(self):
-        meta = GUIMeta(connectable=False, min=0.0, max=100.0, step=0.1)
-        assert meta.connectable is False
+        meta = GUIMeta(connectable=Connectable.NEVER, min=0.0, max=100.0, step=0.1)
+        assert meta.connectable is Connectable.NEVER
         assert meta.min == 0.0
         assert meta.max == 100.0
         assert meta.step == 0.1
         assert meta.group is None
 
+    def test_not_by_default(self):
+        meta = GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=1.0, max=10.0)
+        assert meta.connectable is Connectable.NOT_BY_DEFAULT
+
     def test_group(self):
         meta = GUIMeta(group="advanced")
         assert meta.group == "advanced"
-        assert meta.connectable is True
+        assert meta.connectable is Connectable.BY_DEFAULT
 
     def test_frozen(self):
         meta = GUIMeta()
         with pytest.raises(AttributeError):
-            meta.connectable = False  # type: ignore[reportAttributeAccessIssue]
+            meta.connectable = Connectable.NEVER  # type: ignore[reportAttributeAccessIssue]
 
     def test_hashable(self):
-        m1 = GUIMeta(connectable=False, min=1.0)
-        m2 = GUIMeta(connectable=False, min=1.0)
+        m1 = GUIMeta(connectable=Connectable.NEVER, min=1.0)
+        m2 = GUIMeta(connectable=Connectable.NEVER, min=1.0)
         assert hash(m1) == hash(m2)
         assert m1 == m2
 
@@ -161,7 +166,7 @@ class TestGUIMeta:
 class TestExtractGUIMeta:
 
     def test_returns_gui_meta(self):
-        meta = GUIMeta(connectable=False, min=0.0, max=10.0, step=0.5)
+        meta = GUIMeta(connectable=Connectable.NEVER, min=0.0, max=10.0, step=0.5)
         ann = Annotated[float, meta]
         assert extract_gui_meta(ann) is meta
 
@@ -175,7 +180,7 @@ class TestExtractGUIMeta:
 
     def test_coexists_with_image_spec(self):
         spec = ImageSpec(semantics={Semantic.INTENSITY})
-        meta = GUIMeta(connectable=True)
+        meta = GUIMeta(connectable=Connectable.BY_DEFAULT)
         ann = Annotated[Path, spec, meta]
         assert extract_gui_meta(ann) is meta
         # ImageSpec is still extractable via its own function

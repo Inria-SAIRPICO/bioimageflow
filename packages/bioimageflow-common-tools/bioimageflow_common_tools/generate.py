@@ -1,8 +1,8 @@
 """Generate — create a DataFrame from a list of values."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from bioimageflow_core import Category, IOModel
+from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -17,8 +17,8 @@ class Generate(DataFrameTool):
     tags = ["dataframe", "generator"]
 
     class Inputs(IOModel):
-        column_name: str
-        values: list[Any]
+        column_name: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
+        values: Annotated[list[Any], GUIMeta(connectable=Connectable.NEVER)]
 
     def transform(self, df, arguments):
         import pandas as pd

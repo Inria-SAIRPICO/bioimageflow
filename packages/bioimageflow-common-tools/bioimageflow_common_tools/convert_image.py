@@ -6,7 +6,9 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     EnvironmentSpec,
+    GUIMeta,
     ImageSpec,
     IOModel,
     ProcessingTool,
@@ -48,11 +50,11 @@ class ConvertImage(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec()]
-        dim_order: str = "TCZYX"
-        scene: int | None = None
-        channel: int | None = None
-        z: int | None = None
-        timepoint: int | None = None
+        dim_order: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = "TCZYX"
+        scene: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
+        channel: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
+        z: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
+        timepoint: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
 
     class Outputs(IOModel):
         output_image: Annotated[Path, ImageSpec()] = Path("{input_image.stem}.ome.tiff")

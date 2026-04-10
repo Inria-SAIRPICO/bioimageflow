@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -36,8 +37,8 @@ class Mosaic(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}),
         ]
-        columns: Annotated[int, GUIMeta(min=1, max=100, step=1)] = 5
-        tile_size: int | None = None
+        columns: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=1, max=100, step=1)] = 5
+        tile_size: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
 
     class Outputs(IOModel):
         mosaic_path: Path = Path("{node_name}_mosaic.png")
