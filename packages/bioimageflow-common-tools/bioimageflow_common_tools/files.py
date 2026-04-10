@@ -18,8 +18,8 @@ class Files(DataFrameTool):
     tags = ["source", "loader"]
 
     class Inputs(IOModel):
-        path: Annotated[str, GUIMeta()]
-        pattern: Annotated[str, GUIMeta()] = "*"
+        path: str
+        pattern: str = "*"
 
     class Outputs(IOModel):
         path: Path

@@ -39,7 +39,7 @@ class Mosaic(ProcessingTool):
             GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
         columns: Annotated[int, GUIMeta(min=1, max=100, step=1)] = 5
-        tile_size: Annotated[int | None, GUIMeta()] = None
+        tile_size: int | None = None
 
     class Outputs(IOModel):
         mosaic_path: Path = Path("{node_name}_mosaic.png")

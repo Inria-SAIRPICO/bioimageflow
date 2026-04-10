@@ -50,11 +50,11 @@ class ConvertImage(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(connectable=Connectable.BY_DEFAULT)]
-        dim_order: Annotated[str, GUIMeta()] = "TCZYX"
-        scene: Annotated[int | None, GUIMeta()] = None
-        channel: Annotated[int | None, GUIMeta()] = None
-        z: Annotated[int | None, GUIMeta()] = None
-        timepoint: Annotated[int | None, GUIMeta()] = None
+        dim_order = "TCZYX"
+        scene: int | None = None
+        channel:int | None = None
+        z: int | None = None
+        timepoint: int | None = None
 
     class Outputs(IOModel):
         output_image: Annotated[Path, ImageSpec()] = Path("{input_image.stem}.ome.tiff")

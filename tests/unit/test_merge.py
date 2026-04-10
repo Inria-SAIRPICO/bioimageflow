@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow_core.arguments import Arguments
-from bioimageflow.merge import InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect
+from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect
 
 
 @pytest.fixture

@@ -49,7 +49,7 @@ class CellposeSAM(ProcessingTool):
         diameter: Annotated[
             float, GUIMeta(min=0.0, max=500.0, step=0.5)
         ] = 0.0
-        model_type: Annotated[str, GUIMeta()] = "cyto3"
+        model_type = "cyto3"
         flow_threshold: Annotated[
             float, GUIMeta(min=0.0, max=1.0, step=0.05)
         ] = 0.4
