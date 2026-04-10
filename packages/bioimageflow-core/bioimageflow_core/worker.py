@@ -37,7 +37,7 @@ def _discover_tools(module: object) -> dict[str, type]:
     """Build a name->class registry from all BaseTool subclasses in the module."""
     registry: dict[str, type] = {}
     for name, obj in inspect.getmembers(module, inspect.isclass):
-        if issubclass(obj, BaseTool) and obj is not BaseTool and hasattr(obj, 'name'):
+        if issubclass(obj, BaseTool) and obj is not BaseTool:
             registry[obj.__name__] = obj
     return registry
 

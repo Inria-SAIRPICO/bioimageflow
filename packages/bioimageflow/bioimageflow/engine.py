@@ -330,6 +330,9 @@ class DefaultEngine:
                 if inode is proxy_node:
                     continue
 
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+
                 if isinstance(inode, SubWorkflowNode):
                     yield from self._execute_sub_workflow_steps(
                         inode, results, sig_hashes, workflow,
@@ -1254,6 +1257,8 @@ class DefaultEngine:
             for inode in order:
                 if inode is proxy_node:
                     continue  # Already have proxy data
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
                 df, sig_hash = self._execute_node(inode, results, sig_hashes, workflow)
                 results[inode] = df
                 sig_hashes[inode] = sig_hash

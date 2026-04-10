@@ -15,7 +15,8 @@ Covers:
 
 import pytest
 
-from bioimageflow import CrossJoin, Workflow
+from bioimageflow import Workflow
+from bioimageflow_common_tools import CrossJoin
 from typing import Annotated
 from pathlib import Path
 

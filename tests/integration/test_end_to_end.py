@@ -8,7 +8,8 @@ from typing import Any
 
 import pandas as pd
 
-from bioimageflow import Collect, Concat, JoinOnColumn, Workflow
+from bioimageflow_common_tools import Collect, Concat, JoinOnColumn
+from bioimageflow import Workflow
 
 from .conftest import (
     CellposeSegmenter,

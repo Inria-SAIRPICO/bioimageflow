@@ -11,7 +11,8 @@ Covers:
 """
 
 
-from bioimageflow import Collect, Concat, CrossJoin, InnerJoin, JoinOnColumn, Workflow
+from bioimageflow import Workflow
+from bioimageflow_common_tools import Collect, Concat, CrossJoin, InnerJoin, JoinOnColumn
 
 from .conftest import (
     ColumnRegex,

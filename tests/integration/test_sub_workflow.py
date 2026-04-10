@@ -334,7 +334,7 @@ class TestSubWorkflowMixedTools:
                 cell_count: int
 
             def build(self, inputs):
-                from bioimageflow import Collect
+                from bioimageflow_common_tools import Collect
                 # Use a Collect to gather columns, then segment
                 collect = Collect()
                 _gathered = collect(inputs._proxy_node)
