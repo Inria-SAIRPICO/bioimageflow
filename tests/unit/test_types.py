@@ -125,7 +125,7 @@ class TestGUIMeta:
 
     def test_defaults(self):
         meta = GUIMeta()
-        assert meta.connectable is Connectable.BY_DEFAULT
+        assert meta.connectable is Connectable.NOT_BY_DEFAULT
         assert meta.min is None
         assert meta.max is None
         assert meta.step is None
@@ -146,7 +146,7 @@ class TestGUIMeta:
     def test_group(self):
         meta = GUIMeta(group="advanced")
         assert meta.group == "advanced"
-        assert meta.connectable is Connectable.BY_DEFAULT
+        assert meta.connectable is Connectable.NOT_BY_DEFAULT
 
     def test_frozen(self):
         meta = GUIMeta()

@@ -115,7 +115,7 @@ class GUIMeta:
     ----------
     connectable : Connectable
         Controls whether and how this input can be bound to an upstream
-        column.  Defaults to ``Connectable.BY_DEFAULT``.
+        column.  Defaults to ``Connectable.NOT_BY_DEFAULT``.
     min : float | None
         Minimum allowed value (numeric fields only).
     max : float | None
@@ -127,7 +127,7 @@ class GUIMeta:
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
     """
-    connectable: Connectable = Connectable.BY_DEFAULT
+    connectable: Connectable = Connectable.NOT_BY_DEFAULT
     min: float | None = None
     max: float | None = None
     step: float | None = None

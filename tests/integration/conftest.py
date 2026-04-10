@@ -103,7 +103,7 @@ class StubSegmenter(ProcessingTool):
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
         diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
@@ -124,8 +124,8 @@ class StubStats(ProcessingTool):
     environment = imageio_env
 
     class Inputs(IOModel):
-        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         mean_intensity: float
@@ -142,7 +142,7 @@ class StubTiler(ProcessingTool):
     environment = imageio_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
         tile_count: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=64, step=1)] = 4
 
     class Outputs(IOModel):
@@ -167,7 +167,7 @@ class StubBatchProcessor(ProcessingTool):
     resources = ResourceSpec(gpu=1, max_concurrent=2)
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         embedding: Path = "{input_image.stem}_embed_{row_index}.npy"  # type: ignore[assignment]
@@ -189,7 +189,7 @@ class StubBatchExploder(ProcessingTool):
     environment = numpy_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         crop: Path = "{input_image.stem}_crop_{row_index}.png"  # type: ignore[assignment]
@@ -237,8 +237,8 @@ class StubRegistration(ProcessingTool):
     environment = imageio_env
 
     class Inputs(IOModel):
-        fixed: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        moving: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        fixed: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        moving: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         registered: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = "{fixed.stem}_registered_{row_index}.tif"  # type: ignore[assignment]
@@ -260,7 +260,7 @@ class StubSharedMemoryTool(ProcessingTool):
     environment = numpy_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
@@ -281,7 +281,7 @@ class StubSharedMemoryConsumer(ProcessingTool):
     environment = numpy_env
 
     class Inputs(IOModel):
-        label_map: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
+        label_map: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         num_labels: int
@@ -312,7 +312,7 @@ class CellposeSegmenter(CellposeBase):
     documentation = "Segments cells using the Cellpose algorithm."
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
         diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
@@ -332,8 +332,8 @@ class CellposeTrain(CellposeBase):
     tags = ["cellpose", "training"]
 
     class Inputs(IOModel):
-        training_images: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        training_masks: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+        training_images: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        training_masks: Annotated[Path, ImageSpec(semantics={Semantic.LABEL}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
         epochs: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=10000, step=10)] = 100
 
     class Outputs(IOModel):
@@ -355,7 +355,7 @@ class StardistSegmenter(ProcessingTool):
     environment = stardist_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
         mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_stardist_{row_index}.png"  # type: ignore[assignment]

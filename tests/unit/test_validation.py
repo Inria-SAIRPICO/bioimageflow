@@ -79,12 +79,12 @@ class TestGetInputsSchema:
         assert "image" in schema
         assert "sigma" in schema
         assert schema["image"]["required"] is True
-        assert schema["image"]["connectable"] is Connectable.BY_DEFAULT
+        assert schema["image"]["connectable"] is Connectable.NOT_BY_DEFAULT
         assert schema["image"]["type"] is Path
         assert schema["image"]["image_spec"] is not None
         assert schema["sigma"]["required"] is False
         assert schema["sigma"]["default"] == 1.0
-        assert schema["sigma"]["connectable"] is Connectable.BY_DEFAULT
+        assert schema["sigma"]["connectable"] is Connectable.NOT_BY_DEFAULT
 
     def test_gui_meta_numeric_constraints(self):
         class Tool(ProcessingTool):
@@ -143,7 +143,7 @@ class TestGetInputsSchema:
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
-        assert schema["threshold"]["connectable"] is Connectable.BY_DEFAULT
+        assert schema["threshold"]["connectable"] is Connectable.NOT_BY_DEFAULT
         assert "min" not in schema["threshold"]
         assert "max" not in schema["threshold"]
         assert "step" not in schema["threshold"]

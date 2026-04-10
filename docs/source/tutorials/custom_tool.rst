@@ -26,7 +26,7 @@ Minimal example
 
        class Inputs:
            image: ImagePath()
-           sigma: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.1, max=50.0, step=0.1)] = 1.0
+           sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
 
        class Outputs:
            blurred: ImagePath() = "{image.stem}_blur.tif"
@@ -236,7 +236,7 @@ GUI metadata
 
 Use :class:`~bioimageflow_core.GUIMeta` to attach rendering hints that a GUI
 can introspect. This is opt-in --- fields without ``GUIMeta`` default to
-``connectable=Connectable.BY_DEFAULT``.
+``connectable=Connectable.NOT_BY_DEFAULT``.
 
 The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
 
@@ -250,11 +250,11 @@ The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
    from bioimageflow_core import GUIMeta, Connectable, IOModel
 
    class Inputs(IOModel):
-       # This field appears as a connectable port (default: BY_DEFAULT)
+       # Data input: explicit BY_DEFAULT to show the pin
        image: ImagePath()
 
-       # This field has a hidden pin, revealed via checkbox
-       sigma: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.1, max=50.0, step=0.1)] = 1.0
+       # Algorithm parameter: uses the default (NOT_BY_DEFAULT)
+       sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
 
        # This field can never be connected
        iterations: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1)] = 3

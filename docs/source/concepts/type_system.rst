@@ -138,20 +138,21 @@ introspect these hints to render appropriate widgets.
    from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic
 
    class Inputs(IOModel):
-       image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-       diameter: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=1.0, max=500.0, step=0.5)] = 30.0
+       image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+       diameter: Annotated[float, GUIMeta(min=1.0, max=500.0, step=0.5)] = 30.0
 
 Parameters:
 
 - **connectable** (:class:`~bioimageflow_core.Connectable`, default
-  ``Connectable.BY_DEFAULT``): controls pin visibility. ``NEVER`` hides the
+  ``Connectable.NOT_BY_DEFAULT``): controls pin visibility. ``NEVER`` hides the
   pin entirely, ``NOT_BY_DEFAULT`` shows it only when toggled via checkbox,
   ``BY_DEFAULT`` shows it out of the box.
 - **min** / **max** (``float | None``): numeric bounds for the widget.
 - **step** (``float | None``): step increment for spinbox or slider widgets.
 
-Fields without ``GUIMeta`` default to ``Connectable.BY_DEFAULT`` --- existing
-tools work unchanged.
+Fields without ``GUIMeta`` default to ``Connectable.NOT_BY_DEFAULT``. Data
+input fields (image paths) should use explicit
+``GUIMeta(connectable=Connectable.BY_DEFAULT)`` to show their pins.
 
 ``GUIMeta`` and ``ImageSpec`` can coexist on the same field:
 

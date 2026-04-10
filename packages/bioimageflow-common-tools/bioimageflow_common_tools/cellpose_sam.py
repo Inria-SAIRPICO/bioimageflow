@@ -44,16 +44,17 @@ class CellposeSAM(ProcessingTool):
                 semantics={Semantic.INTENSITY},
                 layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
             ),
+            GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
         diameter: Annotated[
-            float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=500.0, step=0.5)
+            float, GUIMeta(min=0.0, max=500.0, step=0.5)
         ] = 0.0
-        model_type: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = "cyto3"
+        model_type: Annotated[str, GUIMeta()] = "cyto3"
         flow_threshold: Annotated[
-            float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=0.0, max=1.0, step=0.05)
+            float, GUIMeta(min=0.0, max=1.0, step=0.05)
         ] = 0.4
         cellprob_threshold: Annotated[
-            float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=-6.0, max=6.0, step=0.5)
+            float, GUIMeta(min=-6.0, max=6.0, step=0.5)
         ] = 0.0
 
     class Outputs(IOModel):

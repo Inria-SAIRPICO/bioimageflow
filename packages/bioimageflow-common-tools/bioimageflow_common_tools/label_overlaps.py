@@ -6,7 +6,9 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     GENERAL_ENV,
+    GUIMeta,
     ImageSpec,
     IOModel,
     Layout,
@@ -38,6 +40,7 @@ class LabelOverlaps(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR},
             ),
+            GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
         reference_image: Annotated[
             Path,
@@ -45,6 +48,7 @@ class LabelOverlaps(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR},
             ),
+            GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
 
     class Outputs(IOModel):

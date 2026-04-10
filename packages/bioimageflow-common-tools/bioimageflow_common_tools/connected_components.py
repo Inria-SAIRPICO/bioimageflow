@@ -6,7 +6,9 @@ from typing import Annotated, Any
 from bioimageflow_core import (
     Arguments,
     Category,
+    Connectable,
     EnvironmentSpec,
+    GUIMeta,
     ImageSpec,
     IOModel,
     Layout,
@@ -43,6 +45,7 @@ class ConnectedComponents(ProcessingTool):
                 semantics={Semantic.BINARY},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
+            GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
 
     class Outputs(IOModel):

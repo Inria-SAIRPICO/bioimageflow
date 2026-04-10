@@ -64,10 +64,10 @@ class SpotDetection(SubWorkflow):
     display_name = "Spot Detection"
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        channel: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0
-        gaussian_std: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 60
-        p_value: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0.001
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        channel: Annotated[int, GUIMeta()] = 0
+        gaussian_std: Annotated[int, GUIMeta()] = 60
+        p_value: Annotated[float, GUIMeta()] = 0.001
 
     class Outputs(IOModel):
         labeled_spots: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
@@ -136,11 +136,11 @@ class SpotAnalysis(SubWorkflow):
     display_name = "Spot Analysis"
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        reference_image: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        channel: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0
-        gaussian_std: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 60
-        p_value: Annotated[float, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = 0.001
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        reference_image: Annotated[Path, ImageSpec(semantics={Semantic.LABEL}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+        channel: Annotated[int, GUIMeta()] = 0
+        gaussian_std: Annotated[int, GUIMeta()] = 60
+        p_value: Annotated[float, GUIMeta()] = 0.001
 
     class Outputs(IOModel):
         overlaps: Path

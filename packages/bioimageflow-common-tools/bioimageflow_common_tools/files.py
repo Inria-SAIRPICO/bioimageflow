@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated, Any
 
-from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
+from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -18,8 +18,8 @@ class Files(DataFrameTool):
     tags = ["source", "loader"]
 
     class Inputs(IOModel):
-        path: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)]
-        pattern: Annotated[str, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = "*"
+        path: Annotated[str, GUIMeta()]
+        pattern: Annotated[str, GUIMeta()] = "*"
 
     class Outputs(IOModel):
         path: Path

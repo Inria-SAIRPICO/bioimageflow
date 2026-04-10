@@ -36,9 +36,10 @@ class Mosaic(ProcessingTool):
         input_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}),
+            GUIMeta(connectable=Connectable.BY_DEFAULT),
         ]
-        columns: Annotated[int, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT, min=1, max=100, step=1)] = 5
-        tile_size: Annotated[int | None, GUIMeta(connectable=Connectable.NOT_BY_DEFAULT)] = None
+        columns: Annotated[int, GUIMeta(min=1, max=100, step=1)] = 5
+        tile_size: Annotated[int | None, GUIMeta()] = None
 
     class Outputs(IOModel):
         mosaic_path: Path = Path("{node_name}_mosaic.png")
