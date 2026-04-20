@@ -49,18 +49,32 @@ class Atlas(ProcessingTool):
                 layouts={Layout.PLANAR},
                 formats={"tiff"},
             ),
-            GUIMeta(connectable=Connectable.BY_DEFAULT),
+            GUIMeta(
+                display_text="Input image",
+                description="2D intensity TIFF image on which to detect spots.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
         ]
-        gaussian_std: Annotated[
-            int, GUIMeta(min=0, max=200, step=1)
-        ] = 60
-        p_value: Annotated[
-            float, GUIMeta(min=0.0, max=1.0, step=0.000001)
-        ] = 0.001
-        area_lim: Annotated[
-            float, GUIMeta(min=0.0, max=10000.0, step=0.01)
-        ] = 0.0
-        verbose: Annotated[bool, GUIMeta(connectable=Connectable.NEVER)] = False
+        gaussian_std: Annotated[int, GUIMeta(
+            display_text="Gaussian std",
+            description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size.",
+            min=0, max=200, step=1,
+        )] = 60
+        p_value: Annotated[float, GUIMeta(
+            display_text="P-value",
+            description="Detection significance threshold. Lower values yield fewer, more confident detections.",
+            min=0.0, max=1.0, step=0.000001,
+        )] = 0.001
+        area_lim: Annotated[float, GUIMeta(
+            display_text="Area limit",
+            description="Remove detections smaller than this area (in pixels). Set to 0 to keep all detections.",
+            min=0.0, max=10000.0, step=0.01,
+        )] = 0.0
+        verbose: Annotated[bool, GUIMeta(
+            display_text="Verbose",
+            description="Print detailed progress information from the Atlas CLI.",
+            connectable=Connectable.NEVER,
+        )] = False
 
     class Outputs(IOModel):
         output_image: Annotated[
@@ -69,6 +83,10 @@ class Atlas(ProcessingTool):
                 semantics={Semantic.BINARY},
                 layouts={Layout.PLANAR},
                 formats={"tiff"},
+            ),
+            GUIMeta(
+                display_text="Detections",
+                description="Binary mask of detected spots (non-zero pixels mark spot locations).",
             ),
         ] = Path("{input_image.stem}_detections{ext}")
 
@@ -92,6 +110,7 @@ class Atlas(ProcessingTool):
             "-o", str(output_path),
             "-rad", str(arguments.gaussian_std),
             "-pval", str(arguments.p_value),
+            "-arealim", str(arguments.area_lim),
         ]
         if arguments.verbose:
             command.append("-v")

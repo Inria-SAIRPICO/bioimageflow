@@ -17,8 +17,16 @@ class Generate(DataFrameTool):
     tags = ["dataframe", "generator"]
 
     class Inputs(IOModel):
-        column_name: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
-        values: Annotated[list[Any], GUIMeta(connectable=Connectable.NEVER)]
+        column_name: Annotated[str, GUIMeta(
+            display_text="Column name",
+            description="Name of the single column produced in the output DataFrame.",
+            connectable=Connectable.NEVER,
+        )]
+        values: Annotated[list[Any], GUIMeta(
+            display_text="Values",
+            description="List of values that become the rows of the generated column.",
+            connectable=Connectable.NEVER,
+        )]
 
     def transform(self, df, arguments):
         import pandas as pd

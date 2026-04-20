@@ -32,13 +32,30 @@ class DownloadImages(ProcessingTool):
     environment = download_env
 
     class Inputs(IOModel):
-        urls: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
-        output_dir: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "./data"
+        urls: Annotated[str, GUIMeta(
+            display_text="URLs",
+            description="Newline-separated list of image URLs to download.",
+            connectable=Connectable.NEVER,
+        )]
+        output_dir: Annotated[str, GUIMeta(
+            display_text="Output directory",
+            description="Local directory where downloaded files are written. Created if it does not exist.",
+            connectable=Connectable.NEVER,
+        )] = "./data"
 
     class Outputs(IOModel):
-        path: Path
-        filename: str
-        url: str
+        path: Annotated[Path, GUIMeta(
+            display_text="Path",
+            description="Local path of the downloaded file.",
+        )]
+        filename: Annotated[str, GUIMeta(
+            display_text="Filename",
+            description="Base name of the downloaded file.",
+        )]
+        url: Annotated[str, GUIMeta(
+            display_text="Source URL",
+            description="URL from which the file was downloaded.",
+        )]
 
     def process_row(self, arguments: Arguments) -> Any:
         import requests

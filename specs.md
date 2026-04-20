@@ -859,7 +859,7 @@ def build_pydantic_model(tool_model_cls):
 
 *Module: `bioimageflow_core.tool`*
 
-`Inputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`.
+`Inputs` and `Outputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`.
 
 ```python
 class Connectable(Enum):
@@ -871,22 +871,32 @@ class Connectable(Enum):
 @dataclass(frozen=True)
 class GUIMeta:
     """
-    GUI hints for an Inputs field.
+    GUI hints for an Inputs or Outputs field.
     Attached via Annotated — invisible to runtime logic, read by frontends.
     """
-    connectable: Connectable = Connectable.NOT_BY_DEFAULT  # Pin visibility / connectability
+    display_text: str | None = None   # Human-readable label shown next to the field
+    description: str | None = None    # Longer help text / tooltip
+    connectable: Connectable = Connectable.NOT_BY_DEFAULT  # Pin visibility / connectability (Inputs only)
     min: float | int | None = None   # Minimum value (numeric fields)
     max: float | int | None = None   # Maximum value (numeric fields)
     step: float | int | None = None  # Step increment (numeric fields)
     group: str | None = None   # Logical group for tab/section display (e.g. "general", "advanced", "gpu")
 ```
 
-**Connectable states:**
+**Display text and description:**
+- `display_text` — the short, human-readable label a GUI shows next to the widget (e.g. `"Cell diameter"` instead of the raw field name `diameter`). If `None`, frontends should fall back to the field name, typically prettified (snake-case → Title Case).
+- `description` — a longer explanation intended for tooltips or inline help panels. Use it to describe *what* the field means, *why* a user would change it, and any units or valid ranges that are not obvious from `min` / `max` / `step`.
+
+Both fields are purely cosmetic hints — the runtime never reads them.
+
+**Connectable states (Inputs only):**
 - `Connectable.NEVER` — the field can never be wired to an upstream column. No pin, no toggle. Use for source configuration fields (e.g. file path, glob pattern) or structural settings that never vary per-row.
 - `Connectable.NOT_BY_DEFAULT` — the field is connectable, but the pin is hidden until the user enables it via a checkbox. Use for algorithm parameters (thresholds, model names) that are rarely column-bound but occasionally need to be.
 - `Connectable.BY_DEFAULT` — the pin is visible out of the box. Use for data inputs (image paths, required columns) that almost always come from a dataframe column.
 
-**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: Connectable.NOT_BY_DEFAULT` with no numeric constraints and no group. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable but with the pin hidden by default, no min/max/step, and belongs to the default (unnamed) group. Data input fields (image paths) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible.
+For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
+
+**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: Connectable.NOT_BY_DEFAULT` with no numeric constraints, no group, and no display text or description. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable but with the pin hidden by default, uses the field name as a fallback label, and provides no tooltip. Data input fields (image paths) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible.
 
 **Usage:**
 
@@ -899,26 +909,57 @@ class CellposeSegmenter(ProcessingTool):
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(semantics=Semantic.INTENSITY)
-        diameter: Annotated[float, GUIMeta(min=0.0, max=500.0, step=0.5, group="general")] = 30.0
-        model_type: Annotated[str, GUIMeta(group="general")] = "cyto3"
-        flow_threshold: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.05, group="advanced")] = 0.4
-        use_gpu: Annotated[bool, GUIMeta(connectable=Connectable.NEVER, group="gpu")] = True
+        input_image: Annotated[
+            ImagePath(semantics=Semantic.INTENSITY),
+            GUIMeta(
+                display_text="Input image",
+                description="Fluorescence or brightfield image to segment.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
+        ]
+        diameter: Annotated[float, GUIMeta(
+            display_text="Cell diameter",
+            description="Approximate diameter of cells in pixels. Set to 0 for auto-detection.",
+            min=0.0, max=500.0, step=0.5, group="general",
+        )] = 30.0
+        model_type: Annotated[str, GUIMeta(
+            display_text="Model",
+            description="Cellpose pretrained model — e.g. 'cyto3', 'nuclei'.",
+            group="general",
+        )] = "cyto3"
+        flow_threshold: Annotated[float, GUIMeta(
+            display_text="Flow threshold",
+            description="Maximum allowed flow error. Lower values reject more masks.",
+            min=0.0, max=1.0, step=0.05, group="advanced",
+        )] = 0.4
+        use_gpu: Annotated[bool, GUIMeta(
+            display_text="Use GPU",
+            description="Run inference on GPU when available.",
+            connectable=Connectable.NEVER, group="gpu",
+        )] = True
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
-        cell_count: int
+        mask: Annotated[
+            ImagePath(semantics=Semantic.LABEL),
+            GUIMeta(display_text="Segmentation mask",
+                    description="Label image where each cell has a unique integer ID."),
+        ] = "{input_image.stem}_mask_{row_index}.png"
+        cell_count: Annotated[int, GUIMeta(
+            display_text="Cell count",
+            description="Number of cells detected in the image.",
+        )]
 
     def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
         ...
 ```
 
 In this example:
-- `input_image` has no `GUIMeta` → defaults to `Connectable.NOT_BY_DEFAULT`, no numeric constraints, default group. Data inputs like this typically need explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to show their pins.
+- `input_image` has `Connectable.BY_DEFAULT` with `display_text="Input image"` — the pin is visible and the GUI shows a friendly label and tooltip.
 - `diameter` uses the default `NOT_BY_DEFAULT` with a slider range of 0–500, step 0.5, in the **general** tab.
 - `model_type` uses the default `NOT_BY_DEFAULT`, in the **general** tab — rendered as a text field or dropdown, pin available via checkbox.
 - `flow_threshold` is in the **advanced** tab — hidden from the main view, accessible via an "Advanced" tab.
 - `use_gpu` is **never connectable** (`NEVER`), in the **gpu** tab — grouped with other GPU-related settings.
+- Outputs (`mask`, `cell_count`) carry `display_text` and `description` so the GUI can label output pins and provide tooltips.
 
 **Grouping behaviour:** A GUI frontend collects all fields sharing the same `group` value and displays them together (e.g. as tabs, collapsible sections, or accordion panels). Fields with `group=None` belong to an implicit default group. The ordering of groups is determined by first appearance in the `Inputs` declaration.
 
@@ -938,7 +979,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
 
 **Compatibility with ImagePath/ImageShared:** Since `ImagePath(...)` already returns `Annotated[Path, ImageSpec(...)]`, a field can carry both `ImageSpec` and `GUIMeta` by nesting: `Annotated[ImagePath(...), GUIMeta(connectable=Connectable.BY_DEFAULT)]`. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
 
-**Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets and port visibility.
+**Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets, labels, tooltips, and port visibility.
 
 ### 3.6 Arguments and Column References
 

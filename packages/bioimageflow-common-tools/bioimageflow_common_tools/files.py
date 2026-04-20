@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated, Any
 
-from bioimageflow_core import Category, GUIMeta, IOModel
+from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
@@ -18,12 +18,26 @@ class Files(DataFrameTool):
     tags = ["source", "loader"]
 
     class Inputs(IOModel):
-        path: str
-        pattern: str = "*"
+        path: Annotated[str, GUIMeta(
+            display_text="Directory",
+            description="Path to the directory to scan for files.",
+            connectable=Connectable.NEVER,
+        )]
+        pattern: Annotated[str, GUIMeta(
+            display_text="Glob pattern",
+            description="Glob pattern used to filter files (e.g. '*.tif', '*.png'). Defaults to '*' (all files).",
+            connectable=Connectable.NEVER,
+        )] = "*"
 
     class Outputs(IOModel):
-        path: Path
-        filename: str
+        path: Annotated[Path, GUIMeta(
+            display_text="Path",
+            description="Absolute path of a matching file.",
+        )]
+        filename: Annotated[str, GUIMeta(
+            display_text="Filename",
+            description="Base name of the file (without directory).",
+        )]
 
     def transform(self, df: Any, arguments: Any) -> Any:
         import pandas as pd

@@ -24,17 +24,46 @@ class AverageSpotsPerNucleus(DataFrameTool):
     tags = ["statistics", "aggregation", "fish"]
 
     class Inputs(IOModel):
-        fols2_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "overlaps"
-        csfr1_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "overlaps_1"
+        fols2_column: Annotated[str, GUIMeta(
+            display_text="FOLS2 overlaps column",
+            description="Name of the column holding the FOLS2.",
+            connectable=Connectable.NEVER,
+        )] = "overlaps"
+        csfr1_column: Annotated[str, GUIMeta(
+            display_text="CSF1R overlaps column",
+            description="Name of the column holding the CSF1R.",
+            connectable=Connectable.NEVER,
+        )] = "overlaps_1"
 
     class Outputs(IOModel):
-        image_index: str
-        avg_fols2_per_nucleus: float
-        avg_csfr1_per_nucleus: float
-        total_nuclei_fols2: int
-        total_nuclei_csfr1: int
-        total_fols2_spots: int
-        total_csfr1_spots: int
+        image_index: Annotated[str, GUIMeta(
+            display_text="Image index",
+            description="Identifier of the source image (copied from the DataFrame index).",
+        )]
+        avg_fols2_per_nucleus: Annotated[float, GUIMeta(
+            display_text="Avg FOLS2 spots / nucleus",
+            description="Average number of distinct FOLS2 spots overlapping each nucleus.",
+        )]
+        avg_csfr1_per_nucleus: Annotated[float, GUIMeta(
+            display_text="Avg CSF1R spots / nucleus",
+            description="Average number of distinct CSF1R spots overlapping each nucleus.",
+        )]
+        total_nuclei_fols2: Annotated[int, GUIMeta(
+            display_text="Nuclei with FOLS2",
+            description="Number of nuclei that overlap at least one FOLS2 spot.",
+        )]
+        total_nuclei_csfr1: Annotated[int, GUIMeta(
+            display_text="Nuclei with CSF1R",
+            description="Number of nuclei that overlap at least one CSF1R spot.",
+        )]
+        total_fols2_spots: Annotated[int, GUIMeta(
+            display_text="Total FOLS2 spots",
+            description="Total number of FOLS2 spot-nucleus associations across the image.",
+        )]
+        total_csfr1_spots: Annotated[int, GUIMeta(
+            display_text="Total CSF1R spots",
+            description="Total number of CSF1R spot-nucleus associations across the image.",
+        )]
 
     def transform(self, df: Any, arguments: Any) -> Any:
         import pandas as pd

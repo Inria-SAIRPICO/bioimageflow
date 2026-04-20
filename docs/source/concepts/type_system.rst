@@ -128,9 +128,10 @@ input --- you don't need to call it manually.
 GUIMeta
 -------
 
-:class:`~bioimageflow_core.GUIMeta` attaches GUI hints to input fields using
-the same ``Annotated`` mechanism as ``ImageSpec``. A separate GUI can
-introspect these hints to render appropriate widgets.
+:class:`~bioimageflow_core.GUIMeta` attaches GUI hints to ``Inputs`` and
+``Outputs`` fields using the same ``Annotated`` mechanism as ``ImageSpec``.
+A separate GUI can introspect these hints to render appropriate widgets,
+labels, and tooltips.
 
 .. code-block:: python
 
@@ -138,21 +139,58 @@ introspect these hints to render appropriate widgets.
    from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic
 
    class Inputs(IOModel):
-       image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
-       diameter: Annotated[float, GUIMeta(min=1.0, max=500.0, step=0.5)] = 30.0
+       image: Annotated[
+           Path,
+           ImageSpec(semantics={Semantic.INTENSITY}),
+           GUIMeta(
+               display_text="Input image",
+               description="Fluorescence image to segment.",
+               connectable=Connectable.BY_DEFAULT,
+           ),
+       ]
+       diameter: Annotated[float, GUIMeta(
+           display_text="Cell diameter",
+           description="Approximate cell diameter, in pixels.",
+           min=1.0, max=500.0, step=0.5,
+       )] = 30.0
 
 Parameters:
 
+- **display_text** (``str | None``): human-readable label shown in the GUI.
+  When ``None``, frontends fall back to the field name.
+- **description** (``str | None``): longer help text for tooltips / inline
+  help, describing what the field means and when to change it.
 - **connectable** (:class:`~bioimageflow_core.Connectable`, default
-  ``Connectable.NOT_BY_DEFAULT``): controls pin visibility. ``NEVER`` hides the
-  pin entirely, ``NOT_BY_DEFAULT`` shows it only when toggled via checkbox,
-  ``BY_DEFAULT`` shows it out of the box.
+  ``Connectable.NOT_BY_DEFAULT``): controls pin visibility for ``Inputs``
+  fields. ``NEVER`` hides the pin entirely, ``NOT_BY_DEFAULT`` shows it only
+  when toggled via checkbox, ``BY_DEFAULT`` shows it out of the box. Ignored
+  for ``Outputs`` fields, which always expose a pin.
 - **min** / **max** (``float | None``): numeric bounds for the widget.
 - **step** (``float | None``): step increment for spinbox or slider widgets.
+- **group** (``str | None``): logical group name for tabs or sections
+  (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).
 
-Fields without ``GUIMeta`` default to ``Connectable.NOT_BY_DEFAULT``. Data
-input fields (image paths) should use explicit
-``GUIMeta(connectable=Connectable.BY_DEFAULT)`` to show their pins.
+Fields without ``GUIMeta`` default to ``Connectable.NOT_BY_DEFAULT`` with no
+label, description, numeric bounds, or group. Data input fields (image paths)
+should use explicit ``GUIMeta(connectable=Connectable.BY_DEFAULT)`` to show
+their pins.
+
+Output fields can also carry ``GUIMeta`` so the GUI can label output pins and
+show tooltips:
+
+.. code-block:: python
+
+   class Outputs(IOModel):
+       mask: Annotated[
+           Path,
+           ImageSpec(semantics={Semantic.LABEL}),
+           GUIMeta(display_text="Segmentation mask",
+                   description="Label image; each cell gets a unique ID."),
+       ] = Path("{input_image.stem}_mask{ext}")
+       cell_count: Annotated[int, GUIMeta(
+           display_text="Cell count",
+           description="Number of cells detected.",
+       )]
 
 ``GUIMeta`` and ``ImageSpec`` can coexist on the same field:
 
@@ -178,6 +216,8 @@ GUI-friendly schema for a tool:
    #         "required": False,
    #         "connectable": Connectable.NOT_BY_DEFAULT,
    #         "image_spec": None,
+   #         "display_text": "Cell diameter",
+   #         "description": "Approximate cell diameter, in pixels.",
    #         "min": 1.0,
    #         "max": 500.0,
    #         "step": 0.5,

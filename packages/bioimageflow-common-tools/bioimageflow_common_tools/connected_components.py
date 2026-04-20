@@ -45,7 +45,11 @@ class ConnectedComponents(ProcessingTool):
                 semantics={Semantic.BINARY},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
-            GUIMeta(connectable=Connectable.BY_DEFAULT),
+            GUIMeta(
+                display_text="Input image",
+                description="Binary image (non-zero pixels are foreground) whose connected components are labelled.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
         ]
 
     class Outputs(IOModel):
@@ -55,8 +59,15 @@ class ConnectedComponents(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
+            GUIMeta(
+                display_text="Label image",
+                description="Label image where each connected component has a unique integer ID.",
+            ),
         ] = Path("{input_image.stem}_labels{ext}")
-        num_labels: int
+        num_labels: Annotated[int, GUIMeta(
+            display_text="Label count",
+            description="Number of connected components labelled in the image.",
+        )]
 
     def process_row(self, arguments: Arguments) -> Any:
         import SimpleITK as sitk    # type: ignore

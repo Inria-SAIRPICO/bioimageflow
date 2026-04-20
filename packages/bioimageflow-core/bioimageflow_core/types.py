@@ -106,16 +106,25 @@ class Connectable(Enum):
 
 @dataclass(frozen=True)
 class GUIMeta:
-    """Declarative GUI hints for a tool input field.
+    """Declarative GUI hints for a tool ``Inputs`` / ``Outputs`` field.
 
-    Attach to an ``Inputs`` annotation via ``Annotated`` to control how a
-    GUI renders the field.
+    Attach to an ``Inputs`` or ``Outputs`` annotation via ``Annotated`` to
+    control how a GUI renders the field (label, tooltip, widget range, pin
+    visibility, tab grouping, ...).
 
     Parameters
     ----------
+    display_text : str | None
+        Human-readable label shown next to the field in the GUI.  If
+        ``None``, frontends should fall back to the field name
+        (optionally prettified).
+    description : str | None
+        Longer help text (tooltip / inline help) explaining what the
+        field means and how it is used.
     connectable : Connectable
-        Controls whether and how this input can be bound to an upstream
-        column.  Defaults to ``Connectable.NOT_BY_DEFAULT``.
+        Controls whether and how an ``Inputs`` field can be bound to an
+        upstream column.  Ignored for ``Outputs`` fields.  Defaults to
+        ``Connectable.NOT_BY_DEFAULT``.
     min : float | None
         Minimum allowed value (numeric fields only).
     max : float | None
@@ -127,6 +136,8 @@ class GUIMeta:
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
     """
+    display_text: str | None = None
+    description: str | None = None
     connectable: Connectable = Connectable.NOT_BY_DEFAULT
     min: float | None = None
     max: float | None = None

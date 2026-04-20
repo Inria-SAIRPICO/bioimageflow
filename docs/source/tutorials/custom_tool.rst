@@ -236,7 +236,16 @@ GUI metadata
 
 Use :class:`~bioimageflow_core.GUIMeta` to attach rendering hints that a GUI
 can introspect. This is opt-in --- fields without ``GUIMeta`` default to
-``connectable=Connectable.NOT_BY_DEFAULT``.
+``connectable=Connectable.NOT_BY_DEFAULT`` with no display text or description.
+
+``GUIMeta`` is supported on both ``Inputs`` and ``Outputs`` fields. Common
+hints:
+
+- ``display_text`` --- short human-readable label shown in the GUI.
+- ``description`` --- longer tooltip / help text.
+- ``connectable`` --- pin visibility for inputs (ignored on outputs).
+- ``min`` / ``max`` / ``step`` --- numeric widget bounds.
+- ``group`` --- tab / section name to organise related fields.
 
 The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
 
@@ -250,14 +259,32 @@ The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
    from bioimageflow_core import GUIMeta, Connectable, IOModel
 
    class Inputs(IOModel):
-       # Data input: explicit BY_DEFAULT to show the pin
-       image: ImagePath()
+       # Data input: BY_DEFAULT shows the pin; label + tooltip for the GUI
+       image: Annotated[Path, GUIMeta(
+           display_text="Input image",
+           description="Raw intensity image to blur.",
+           connectable=Connectable.BY_DEFAULT,
+       )]
 
        # Algorithm parameter: uses the default (NOT_BY_DEFAULT)
-       sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
+       sigma: Annotated[float, GUIMeta(
+           display_text="Sigma",
+           description="Gaussian kernel standard deviation, in pixels.",
+           min=0.1, max=50.0, step=0.1,
+       )] = 1.0
 
        # This field can never be connected
-       iterations: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1)] = 3
+       iterations: Annotated[int, GUIMeta(
+           display_text="Iterations",
+           description="Number of times to apply the blur.",
+           connectable=Connectable.NEVER, min=1,
+       )] = 3
+
+   class Outputs(IOModel):
+       blurred: Annotated[Path, GUIMeta(
+           display_text="Blurred image",
+           description="Gaussian-blurred output image.",
+       )] = Path("{image.stem}_blur.tif")
 
 To introspect a tool's schema programmatically:
 

@@ -49,15 +49,41 @@ class ConvertImage(ProcessingTool):
     environment = bioio_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(), GUIMeta(connectable=Connectable.BY_DEFAULT)]
-        dim_order = "TCZYX"
-        scene: int | None = None
-        channel:int | None = None
-        z: int | None = None
-        timepoint: int | None = None
+        input_image: Annotated[Path, ImageSpec(), GUIMeta(
+            display_text="Input image",
+            description="Source image file to convert. Format is detected automatically by bioio.",
+            connectable=Connectable.BY_DEFAULT,
+        )]
+        dim_order: Annotated[str, GUIMeta(
+            display_text="Dimension order",
+            description="Target dimension order used when reading the image (subset of TCZYX).",
+        )] = "TCZYX"
+        scene: Annotated[int | None, GUIMeta(
+            display_text="Scene",
+            description="Optional scene index for multi-scene files. Leave empty to keep the default scene.",
+            min=0, step=1,
+        )] = None
+        channel: Annotated[int | None, GUIMeta(
+            display_text="Channel",
+            description="Optional channel index to select (0-based). Leave empty to keep all channels.",
+            min=0, step=1,
+        )] = None
+        z: Annotated[int | None, GUIMeta(
+            display_text="Z slice",
+            description="Optional Z-slice index to select (0-based). Leave empty to keep all Z slices.",
+            min=0, step=1,
+        )] = None
+        timepoint: Annotated[int | None, GUIMeta(
+            display_text="Timepoint",
+            description="Optional timepoint index to select (0-based). Leave empty to keep all timepoints.",
+            min=0, step=1,
+        )] = None
 
     class Outputs(IOModel):
-        output_image: Annotated[Path, ImageSpec()] = Path("{input_image.stem}.ome.tiff")
+        output_image: Annotated[Path, ImageSpec(), GUIMeta(
+            display_text="Output image",
+            description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
+        )] = Path("{input_image.stem}.ome.tiff")
 
     def process_row(self, arguments: Arguments) -> Any:
         from bioio import BioImage                          #type: ignore

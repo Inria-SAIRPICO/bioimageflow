@@ -40,7 +40,11 @@ class LabelOverlaps(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR},
             ),
-            GUIMeta(connectable=Connectable.BY_DEFAULT),
+            GUIMeta(
+                display_text="Label image",
+                description="Label image whose regions will be matched against the reference.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
         ]
         reference_image: Annotated[
             Path,
@@ -48,11 +52,18 @@ class LabelOverlaps(ProcessingTool):
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR},
             ),
-            GUIMeta(connectable=Connectable.BY_DEFAULT),
+            GUIMeta(
+                display_text="Reference label image",
+                description="Reference label image. Each pixel of the label image is paired with the reference label at the same location.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
         ]
 
     class Outputs(IOModel):
-        overlaps: Path = Path("{label_image.stem}_overlaps.csv")
+        overlaps: Annotated[Path, GUIMeta(
+            display_text="Overlaps CSV",
+            description="CSV table with columns (reference_label, spot_label, overlap_count) giving the pixel count for each pair.",
+        )] = Path("{label_image.stem}_overlaps.csv")
 
     def process_row(self, arguments: Arguments) -> Any:
         import numpy as np

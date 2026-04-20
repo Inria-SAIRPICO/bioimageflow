@@ -36,14 +36,37 @@ class Mosaic(ProcessingTool):
         input_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}),
-            GUIMeta(connectable=Connectable.BY_DEFAULT),
+            GUIMeta(
+                display_text="Input image",
+                description="Image tile to include in the mosaic. One row per tile.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
         ]
-        columns: Annotated[int, GUIMeta(min=1, max=100, step=1)] = 5
-        tile_size: int | None = None
+        columns: Annotated[int, GUIMeta(
+            display_text="Columns",
+            description="Number of tiles per row in the output grid.",
+            min=1, max=100, step=1,
+        )] = 5
+        tile_width: Annotated[int | None, GUIMeta(
+            display_text="Tile width",
+            description="Resize each tile to this width in pixels. Leave empty to keep the original width.",
+            min=1, step=1,
+        )] = None
+        tile_height: Annotated[int | None, GUIMeta(
+            display_text="Tile height",
+            description="Resize each tile to this height in pixels. Leave empty to keep the original height.",
+            min=1, step=1,
+        )] = None
 
     class Outputs(IOModel):
-        mosaic_path: Path = Path("{node_name}_mosaic.png")
-        image_count: int
+        mosaic_path: Annotated[Path, GUIMeta(
+            display_text="Mosaic image",
+            description="Composite mosaic image (grid of all input tiles).",
+        )] = Path("{node_name}_mosaic.png")
+        image_count: Annotated[int, GUIMeta(
+            display_text="Image count",
+            description="Number of input tiles assembled in the mosaic.",
+        )]
 
     def process_batch(self, arguments_list: list[Arguments]) -> Any:
         from PIL import Image
@@ -51,8 +74,10 @@ class Mosaic(ProcessingTool):
         images = []
         for args in arguments_list:
             img = Image.open(str(args.input_image))
-            if args.tile_size is not None:
-                img = img.resize((args.tile_size, args.tile_size))
+            if args.tile_width is not None or args.tile_height is not None:
+                width = args.tile_width if args.tile_width is not None else img.size[0]
+                height = args.tile_height if args.tile_height is not None else img.size[1]
+                img = img.resize((width, height))
             images.append(img)
 
         # Use the output path from the first row (all rows share the same

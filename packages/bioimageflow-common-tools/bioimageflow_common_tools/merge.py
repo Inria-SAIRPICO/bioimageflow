@@ -25,7 +25,11 @@ class CrossJoin(DataFrameTool):
     category = Category.UTILITIES
 
     class Inputs(IOModel):
-        suffixes: Annotated[tuple[str, str], GUIMeta(connectable=Connectable.NEVER)] = ("_left", "_right")
+        suffixes: Annotated[tuple[str, str], GUIMeta(
+            display_text="Column suffixes",
+            description="Suffixes added to duplicate column names coming from the left and right DataFrames.",
+            connectable=Connectable.NEVER,
+        )] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         if not dfs:
@@ -47,9 +51,21 @@ class JoinOnColumn(DataFrameTool):
     category = Category.UTILITIES
 
     class Inputs(IOModel):
-        join_column: Annotated[str, GUIMeta(connectable=Connectable.NEVER)]
-        how: Annotated[str, GUIMeta(connectable=Connectable.NEVER)] = "inner"
-        suffixes: Annotated[tuple[str, str], GUIMeta(connectable=Connectable.NEVER)] = ("_left", "_right")
+        join_column: Annotated[str, GUIMeta(
+            display_text="Join column",
+            description="Name of the column present in both upstream DataFrames to join on.",
+            connectable=Connectable.NEVER,
+        )]
+        how: Annotated[str, GUIMeta(
+            display_text="Join type",
+            description="Join strategy: 'inner', 'left', 'right', or 'outer'.",
+            connectable=Connectable.NEVER,
+        )] = "inner"
+        suffixes: Annotated[tuple[str, str], GUIMeta(
+            display_text="Column suffixes",
+            description="Suffixes added to duplicate column names coming from the left and right DataFrames.",
+            connectable=Connectable.NEVER,
+        )] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         if not dfs:
