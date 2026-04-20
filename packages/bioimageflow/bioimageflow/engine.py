@@ -64,6 +64,18 @@ def _to_python(val: Any) -> Any:
     return val.item() if hasattr(val, "item") else val
 
 
+def _compute_engine_timeout(worker_timeout: float | None) -> float | None:
+    """Compute the engine-side safety timeout from the Wetlands worker timeout.
+
+    The multiplier ensures the Wetlands health monitor fires first. The
+    engine-side timeout is a last resort when the health monitor fails to
+    catch a dead or hung worker (e.g., replacement worker itself is stuck).
+    """
+    if worker_timeout is None:
+        return None
+    return max(worker_timeout * 1.5, worker_timeout + 60.0)
+
+
 class DisabledNodeError(Exception):
     """Raised when all requested target nodes are disabled or unreachable."""
     pass
@@ -71,6 +83,18 @@ class DisabledNodeError(Exception):
 
 class WorkflowCancelledError(Exception):
     """Raised when a workflow execution is cancelled via ``Workflow.cancel()``."""
+    pass
+
+
+class WorkerTimeoutError(RuntimeError):
+    """Raised when the engine-side safety timeout fires on a Wetlands task.
+
+    This is a last-resort timeout that wraps ``task.wait_for()`` in
+    ``_dispatch_via_wetlands``.  It only fires when the Wetlands-side
+    health monitor fails to catch a dead or hung worker within
+    ``worker_timeout * 1.5`` (or ``worker_timeout + 60``, whichever is
+    larger).
+    """
     pass
 
 
@@ -153,13 +177,14 @@ class NodeStep:
             isinstance(self._node.tool, ProcessingTool)
             and self._engine._env_manager is not None
         ):
-            max_workers, worker_env = self._engine._resolve_worker_config(
+            max_workers, worker_env, worker_timeout = self._engine._resolve_worker_config(
                 self._node.tool, self._workflow,
             )
             self._engine._env_manager.get_or_create(
                 self._node.tool.environment,
                 max_workers=max_workers,
                 worker_env=worker_env,
+                worker_timeout=worker_timeout,
             )
 
     def execute(self) -> pd.DataFrame:
@@ -1064,15 +1089,15 @@ class DefaultEngine:
 
     def _resolve_worker_config(
         self, tool: ProcessingTool, workflow: Any,
-    ) -> tuple[int, Any]:
-        """Determine max_workers and worker_env for a tool's environment.
+    ) -> tuple[int, Any, float | None]:
+        """Determine max_workers, worker_env, and worker_timeout for a tool's environment.
 
         Resolution order:
         1. Explicit ``get_environment()`` override takes precedence.
         2. GPU auto-inference: if any tool in the environment declares
            ``ResourceSpec(gpu >= 1)`` and no explicit ``worker_env`` was set,
            auto-generate ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``.
-        3. Fall back to ``Workflow.max_workers``, no ``worker_env``.
+        3. Fall back to ``Workflow.max_workers``, no ``worker_env``, no ``worker_timeout``.
         """
         env_name = tool.environment.name
         env_config = workflow._env_configs.get(env_name)
@@ -1091,7 +1116,9 @@ class DefaultEngine:
         else:
             worker_env = None
 
-        return max_workers, worker_env
+        worker_timeout = env_config.worker_timeout if env_config else None
+
+        return max_workers, worker_env, worker_timeout
 
     def _env_has_gpu_tool(self, env_name: str, workflow: Any) -> bool:
         """Check if any tool in this workflow sharing this env declares gpu >= 1."""
@@ -1124,14 +1151,25 @@ class DefaultEngine:
         env_spec = tool.environment
         tool_file_path = _find_tool_file(type(tool))
         tool_class_name = type(tool).__name__
-        max_workers, worker_env = self._resolve_worker_config(tool, workflow)
+        max_workers, worker_env, worker_timeout = self._resolve_worker_config(tool, workflow)
+        engine_timeout = _compute_engine_timeout(worker_timeout)
 
         if has_batch:
             task = self._env_manager.submit_process_batch(
                 env_spec, tool_file_path, tool_class_name, arguments_dicts,
                 max_workers=max_workers, worker_env=worker_env,
+                worker_timeout=worker_timeout,
             )
-            task.wait_for()
+            try:
+                task.wait_for(timeout=engine_timeout)
+            except TimeoutError:
+                self._emit_progress(workflow, node_name, "failed")
+                task.cancel()
+                raise WorkerTimeoutError(
+                    f"Batch task for node '{node_name}' exceeded engine-side "
+                    f"timeout ({engine_timeout:.0f}s; "
+                    f"worker_timeout={worker_timeout}s)"
+                )
             if task.status == TaskStatus.FAILED:
                 raise task.exception
             if task.status == TaskStatus.CANCELED:
@@ -1143,6 +1181,7 @@ class DefaultEngine:
         tasks = self._env_manager.map_process_rows(
             env_spec, tool_file_path, tool_class_name, arguments_dicts,
             max_workers=max_workers, worker_env=worker_env,
+            worker_timeout=worker_timeout,
         )
 
         # Attach progress listeners for sub-row progress reporting
@@ -1160,12 +1199,21 @@ class DefaultEngine:
                 return on_event
             task.listen(_make_listener(i))
 
-        # Wait and collect results — fail-fast on first error or cancel
+        # Wait and collect results — fail-fast on first error, cancel, or timeout
         try:
-            for task in tasks:
+            for i, task in enumerate(tasks):
                 if workflow.cancel_requested:
                     raise WorkflowCancelledError("Workflow cancelled by user")
-                task.wait_for()
+                try:
+                    task.wait_for(timeout=engine_timeout)
+                except TimeoutError:
+                    self._emit_progress(workflow, node_name, "failed",
+                                        row=i, total_rows=len(tasks))
+                    raise WorkerTimeoutError(
+                        f"Task for node '{node_name}' row {i} exceeded "
+                        f"engine-side timeout ({engine_timeout:.0f}s; "
+                        f"worker_timeout={worker_timeout}s)"
+                    )
                 if task.status == TaskStatus.FAILED:
                     raise task.exception
         except (WorkflowCancelledError, Exception):
@@ -1613,6 +1661,14 @@ class SequentialEngine(DefaultEngine):
         kwargs["force_sequential"] = True
         super().__init__(**kwargs)
 
-    def _resolve_worker_config(self, tool: ProcessingTool, workflow: Any) -> tuple[int, Any]:
-        """Always single-worker, no worker_env — truly sequential."""
-        return 1, None
+    def _resolve_worker_config(
+        self, tool: ProcessingTool, workflow: Any,
+    ) -> tuple[int, Any, float | None]:
+        """Always single-worker, no worker_env — truly sequential.
+
+        ``worker_timeout`` is still honored from ``get_environment()`` so a
+        hung tool doesn't block the sequential engine indefinitely.
+        """
+        env_config = workflow._env_configs.get(tool.environment.name)
+        worker_timeout = env_config.worker_timeout if env_config else None
+        return 1, None, worker_timeout

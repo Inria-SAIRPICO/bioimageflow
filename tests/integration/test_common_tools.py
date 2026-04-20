@@ -19,6 +19,7 @@ from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
     ImagePath,
+    Layout,
     ProcessingTool,
     Semantic,
 )
@@ -43,7 +44,7 @@ def image_dir(tmp_path: Path) -> Path:
     for name in ["sample_01.tif", "sample_02.tif"]:
         # 3-channel image (CYX): 3 x 64 x 64
         img = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
-        iio.imwrite(str(data_dir / name), img)
+        iio.imwrite(str(data_dir / name), img, photometric="minisblack")
     return data_dir
 
 
@@ -226,7 +227,7 @@ class TestMiniPipeline:
                 input_image: ImagePath(semantics=Semantic.INTENSITY)  # type: ignore[valid-type]
 
             class Outputs(IOModel):
-                output_image: ImagePath(semantics=Semantic.LABEL) = (  # type: ignore[valid-type]
+                output_image: ImagePath(semantics=Semantic.LABEL, layouts=Layout.PLANAR) = (  # type: ignore[valid-type]
                     "{input_image.stem}_labeled{ext}"
                 )
 

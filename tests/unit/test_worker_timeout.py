@@ -1,0 +1,344 @@
+"""Unit tests for the ``worker_timeout`` feature (Limitation 2).
+
+The Wetlands side is covered in ``wetlands-lib/tests`` — here we only
+verify that BioImageFlow plumbs the value through correctly and that the
+engine-side safety timeout fires when ``task.wait_for()`` hangs.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from bioimageflow.engine import (
+    DefaultEngine,
+    SequentialEngine,
+    WorkerTimeoutError,
+    _compute_engine_timeout,
+)
+from bioimageflow.workflow import Workflow, WorkflowEnvironment
+from bioimageflow_core import EnvironmentSpec, IOModel, ProcessingTool
+
+
+# ── `WorkflowEnvironment.worker_timeout` ─────────────────────────────
+
+class TestWorkflowEnvironmentField:
+
+    def test_default_is_none(self):
+        env = WorkflowEnvironment(name="test")
+        assert env.worker_timeout is None
+
+    def test_assignment(self):
+        env = WorkflowEnvironment(name="test")
+        env.worker_timeout = 120.0
+        assert env.worker_timeout == 120.0
+
+    def test_explicit_none(self):
+        env = WorkflowEnvironment(name="test", worker_timeout=None)
+        assert env.worker_timeout is None
+
+    def test_via_get_environment(self):
+        spec = EnvironmentSpec(name="test_env", dependencies={})
+        wf = Workflow(use_wetlands=False)
+        cfg = wf.get_environment(spec)
+        assert cfg.worker_timeout is None
+        cfg.worker_timeout = 30.0
+        assert wf.get_environment(spec).worker_timeout == 30.0
+
+
+# ── `_compute_engine_timeout` ───────────────────────────────────────
+
+class TestComputeEngineTimeout:
+
+    def test_none_returns_none(self):
+        assert _compute_engine_timeout(None) is None
+
+    def test_small_timeout_uses_additive_margin(self):
+        # 10s * 1.5 = 15s; 10 + 60 = 70s → max is 70
+        assert _compute_engine_timeout(10.0) == 70.0
+
+    def test_large_timeout_uses_multiplicative_margin(self):
+        # 200 * 1.5 = 300; 200 + 60 = 260 → max is 300
+        assert _compute_engine_timeout(200.0) == 300.0
+
+    def test_boundary(self):
+        # 120 * 1.5 = 180; 120 + 60 = 180 → equal
+        assert _compute_engine_timeout(120.0) == 180.0
+
+
+# ── `_resolve_worker_config` returns worker_timeout ─────────────────
+
+class _StubTool(ProcessingTool):
+    display_name = "Stub"
+    environment = EnvironmentSpec(name="stub_wt_env", dependencies={})
+
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(IOModel):
+        value: float = 0.0
+
+    def process_row(self, arguments):
+        return self.Outputs()
+
+
+class TestResolveWorkerConfig:
+
+    def test_default_engine_returns_none_when_not_configured(self):
+        engine = DefaultEngine(use_wetlands=False)
+        tool = _StubTool()
+        wf = Workflow(use_wetlands=False)
+        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        assert wt is None
+
+    def test_default_engine_returns_configured_timeout(self):
+        engine = DefaultEngine(use_wetlands=False)
+        tool = _StubTool()
+        wf = Workflow(use_wetlands=False)
+        wf.get_environment(tool).worker_timeout = 45.0
+        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        assert wt == 45.0
+
+    def test_sequential_engine_respects_timeout(self):
+        engine = SequentialEngine(use_wetlands=False)
+        tool = _StubTool()
+        wf = Workflow(use_wetlands=False)
+        wf.get_environment(tool).worker_timeout = 15.0
+        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        assert mw == 1
+        assert we is None
+        assert wt == 15.0
+
+
+# ── Engine-side safety timeout raises `WorkerTimeoutError` ─────────
+
+class _HangingTask:
+    """Fake wetlands Task that never reaches a terminal state."""
+
+    def __init__(self) -> None:
+        from wetlands.task import TaskStatus
+        self.status = TaskStatus.RUNNING
+        self.cancel_called = False
+
+    def wait_for(self, timeout: float | None = None) -> None:
+        raise TimeoutError(f"Task did not finish within {timeout}s")
+
+    def cancel(self) -> None:
+        self.cancel_called = True
+
+    def listen(self, cb: Any) -> None:
+        pass
+
+
+class _StubEnvManager:
+    """Fake WetlandsEnvManager that returns hanging tasks."""
+
+    def __init__(self) -> None:
+        self.submitted_batch: list[dict] = []
+        self.submitted_rows: list[dict] = []
+        self.last_worker_timeout: float | None = None
+        self.hanging_tasks: list[_HangingTask] = []
+
+    def submit_process_batch(self, env_spec, tool_file_path, tool_class_name,
+                             arguments_dicts, max_workers=1, worker_env=None,
+                             worker_timeout=None):
+        self.last_worker_timeout = worker_timeout
+        t = _HangingTask()
+        self.hanging_tasks.append(t)
+        return t
+
+    def map_process_rows(self, env_spec, tool_file_path, tool_class_name,
+                         arguments_dicts, max_workers=1, worker_env=None,
+                         worker_timeout=None):
+        self.last_worker_timeout = worker_timeout
+        tasks = [_HangingTask() for _ in arguments_dicts]
+        self.hanging_tasks.extend(tasks)
+        return tasks
+
+    def shutdown_all(self) -> None:
+        pass
+
+
+class TestWorkerTimeoutErrorRaised:
+
+    def _make_engine_with_stub(self):
+        engine = DefaultEngine(use_wetlands=False)
+        engine._use_wetlands = True
+        engine._env_manager = _StubEnvManager()
+        return engine
+
+    def test_row_path_raises_worker_timeout_error(self):
+        engine = self._make_engine_with_stub()
+        tool = _StubTool()
+        wf = Workflow(use_wetlands=False)
+        wf.get_environment(tool).worker_timeout = 10.0
+        # Engine will call _resolve_worker_config → (1, None, 10.0)
+        # Then map_process_rows → hanging tasks → TimeoutError → WorkerTimeoutError
+
+        with pytest.raises(WorkerTimeoutError, match="row 0"):
+            engine._dispatch_via_wetlands(
+                tool,
+                arguments_dicts=[{"a": 1}, {"a": 2}],
+                workflow=wf,
+                node_name="my_node",
+                has_batch=False,
+            )
+
+        # All tasks should have been asked to cancel after timeout
+        stub = engine._env_manager
+        assert all(t.cancel_called for t in stub.hanging_tasks)
+        # worker_timeout should have been passed through
+        assert stub.last_worker_timeout == 10.0
+
+    def test_batch_path_raises_worker_timeout_error(self):
+        engine = self._make_engine_with_stub()
+
+        class _BatchTool(_StubTool):
+            def process_batch(self, arguments_list):
+                return []
+
+        tool = _BatchTool()
+        wf = Workflow(use_wetlands=False)
+        wf.get_environment(tool).worker_timeout = 5.0
+
+        with pytest.raises(WorkerTimeoutError, match="Batch"):
+            engine._dispatch_via_wetlands(
+                tool,
+                arguments_dicts=[{"a": 1}],
+                workflow=wf,
+                node_name="my_batch_node",
+                has_batch=True,
+            )
+
+        stub = engine._env_manager
+        assert stub.hanging_tasks[0].cancel_called
+        assert stub.last_worker_timeout == 5.0
+
+    def test_no_timeout_when_worker_timeout_none(self):
+        """When worker_timeout is None, engine passes timeout=None.
+
+        _HangingTask.wait_for still raises TimeoutError for any timeout,
+        so we use a different fake that honors the None case.
+        """
+
+        class _PassThroughTask:
+            def __init__(self):
+                from wetlands.task import TaskStatus
+                self.status = TaskStatus.COMPLETED
+                self.result = [{"value": 1.0}]
+                self.timeouts_seen: list[float | None] = []
+
+            def wait_for(self, timeout=None):
+                self.timeouts_seen.append(timeout)
+                return self
+
+            def cancel(self):
+                pass
+
+            def listen(self, cb):
+                pass
+
+        class _Env:
+            def __init__(self):
+                self.last_worker_timeout = "sentinel"
+                self.tasks: list[_PassThroughTask] = []
+
+            def submit_process_batch(self, *args, worker_timeout=None, **kwargs):
+                self.last_worker_timeout = worker_timeout
+                t = _PassThroughTask()
+                self.tasks.append(t)
+                return t
+
+            def map_process_rows(self, *args, worker_timeout=None, **kwargs):
+                self.last_worker_timeout = worker_timeout
+                t = _PassThroughTask()
+                self.tasks.append(t)
+                return [t]
+
+            def shutdown_all(self):
+                pass
+
+        engine = DefaultEngine(use_wetlands=False)
+        engine._use_wetlands = True
+        engine._env_manager = _Env()
+
+        tool = _StubTool()
+        wf = Workflow(use_wetlands=False)
+        # No worker_timeout configured → None flows through
+
+        engine._dispatch_via_wetlands(
+            tool,
+            arguments_dicts=[{"a": 1}],
+            workflow=wf,
+            node_name="n",
+            has_batch=False,
+        )
+        stub = engine._env_manager
+        assert stub.last_worker_timeout is None
+        assert stub.tasks[0].timeouts_seen == [None]
+
+
+# ── End-to-end plumbing through Workflow and WetlandsEnvManager ─────
+
+class TestWorkerTimeoutPlumbing:
+    """Verify the value flows from user code → env_manager.launch()."""
+
+    def test_env_manager_forwards_worker_timeout_to_launch(self, monkeypatch):
+        """``WetlandsEnvManager.get_or_create`` passes ``worker_timeout`` to
+        ``env.launch(...)``."""
+        from bioimageflow.env_manager import WetlandsEnvManager
+
+        # Patch the shared environment manager so get_or_create doesn't try
+        # to actually create a conda env.
+        launch_calls: list[dict] = []
+
+        class _FakeEnv:
+            def launch(self, **kwargs):
+                launch_calls.append(kwargs)
+
+        class _FakeManager:
+            def create(self, name, deps):
+                return _FakeEnv()
+
+        monkeypatch.setattr(
+            "bioimageflow.env_manager.get_shared_environment_manager",
+            lambda **kw: _FakeManager(),
+        )
+
+        mgr = WetlandsEnvManager()
+        spec = EnvironmentSpec(name="wt_plumb", dependencies={"pip": []})
+        mgr.get_or_create(spec, max_workers=1, worker_timeout=17.0)
+
+        assert len(launch_calls) == 1
+        assert launch_calls[0].get("worker_timeout") == 17.0
+
+    def test_env_manager_omits_worker_timeout_when_none(self, monkeypatch):
+        """When ``worker_timeout=None``, do not pass the kwarg at all.
+
+        This keeps forward compatibility if an older wetlands is installed.
+        """
+        from bioimageflow.env_manager import WetlandsEnvManager
+
+        launch_calls: list[dict] = []
+
+        class _FakeEnv:
+            def launch(self, **kwargs):
+                launch_calls.append(kwargs)
+
+        class _FakeManager:
+            def create(self, name, deps):
+                return _FakeEnv()
+
+        monkeypatch.setattr(
+            "bioimageflow.env_manager.get_shared_environment_manager",
+            lambda **kw: _FakeManager(),
+        )
+
+        mgr = WetlandsEnvManager()
+        spec = EnvironmentSpec(name="wt_plumb_none", dependencies={"pip": []})
+        mgr.get_or_create(spec, max_workers=1, worker_timeout=None)
+
+        assert len(launch_calls) == 1
+        assert "worker_timeout" not in launch_calls[0]

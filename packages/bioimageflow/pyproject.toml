@@ -8,7 +8,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "pydantic",
-    "wetlands>=1.0.0",
+    "wetlands>=1.0.1",
 ]
 
 [tool.uv.sources]

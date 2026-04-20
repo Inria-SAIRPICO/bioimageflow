@@ -487,7 +487,8 @@ class TestBranchParallelism:
             df = wf.compute(out, engine=engine)
 
             assert len(df) == 3
-            # SequentialEngine._resolve_worker_config always returns (1, None)
-            mw, we = engine._resolve_worker_config(tool, wf)
+            # SequentialEngine._resolve_worker_config always returns (1, None, None)
+            mw, we, wt = engine._resolve_worker_config(tool, wf)
             assert mw == 1
             assert we is None
+            assert wt is None

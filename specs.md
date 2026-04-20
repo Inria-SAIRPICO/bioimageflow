@@ -1509,6 +1509,7 @@ Multiple calls with tools sharing the same environment return the same `Workflow
 | `spec` | `EnvironmentSpec` | — | The environment specification (read-only) |
 | `max_workers` | `int` | `0` | Number of worker processes. `0` = use `Workflow.max_workers`. |
 | `worker_env` | `Callable[[int], dict] \| None` | `None` | Per-worker environment variables. `None` = auto-infer from `ResourceSpec`. |
+| `worker_timeout` | `float \| None` | `None` | Inactivity timeout in seconds. When set, Wetlands' health monitor marks the active task as `FAILED` and replaces the worker if it sends no IPC message within this duration — useful for catching native-code deadlocks or segfaults that don't close the pipe. The engine adds its own safety timeout of `max(worker_timeout * 1.5, worker_timeout + 60)` to `task.wait_for()`; if that fires, `WorkerTimeoutError` is raised. `None` = no timeout. |
 
 ### 4.6 Input Binding Logic (Graph Construction)
 

@@ -116,7 +116,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "wetlands", specifier = ">=1.0.0" },
+    { name = "wetlands", editable = "wetlands-lib" },
 ]
 
 [[package]]
@@ -2183,8 +2183,8 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+version = "1.0.1"
+source = { editable = "wetlands-lib" }
 dependencies = [
     { name = "json5" },
     { name = "packaging" },
@@ -2194,7 +2194,35 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/db/6b10c2459b66b7e36a22aa9d2a340a1c3f009dd00e332618ab993a82a8e1/wetlands-1.0.0.tar.gz", hash = "sha256:bb77062a6c59d8f90112b260fff1ec4e33d0cc86e88dd4dbd8bc103a0595ad0e", size = 293775, upload-time = "2026-04-10T09:06:46.261Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/6d/858281b5c17146034c7736d4452a88a5b240fd09c6f0d3eb05789bc252c5/wetlands-1.0.0-py3-none-any.whl", hash = "sha256:e1245379affd181fbc237a7a46cdb686249150737c019db590f695d807aee1cd", size = 61900, upload-time = "2026-04-10T09:06:47.529Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "debugpy", marker = "extra == 'debug'", specifier = ">=1.8.17" },
+    { name = "json5", specifier = ">=0.12.1" },
+    { name = "json5", marker = "extra == 'debug'", specifier = ">=0.12.1" },
+    { name = "mike", marker = "extra == 'docs'", specifier = ">=2.1.3" },
+    { name = "mkdocs-gen-files", marker = "extra == 'docs'", specifier = ">=0.5.0" },
+    { name = "mkdocs-include-markdown-plugin", marker = "extra == 'docs'", specifier = ">=7.1.5" },
+    { name = "mkdocs-literate-nav", marker = "extra == 'docs'", specifier = ">=0.6.2" },
+    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6.11" },
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.29.1" },
+    { name = "numpy", marker = "extra == 'shared-memory'", specifier = ">=1.26" },
+    { name = "packaging", specifier = ">=24.2" },
+    { name = "psutil", specifier = ">=6.1.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "send2trash", specifier = ">=1.8.3" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.0" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'", specifier = ">=4.0" },
+]
+provides-extras = ["docs", "shared-memory", "debug"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ipdb", specifier = ">=0.13.13" },
+    { name = "mypy", specifier = ">=1.15.0" },
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-mock", specifier = ">=3.14.0" },
+    { name = "ruff", specifier = ">=0.9.6" },
+    { name = "types-psutil", specifier = ">=6.1.0.20241221" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20241230" },
 ]

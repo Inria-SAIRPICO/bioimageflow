@@ -1,4 +1,5 @@
 .DS_Store
+.claude/worktrees/
 bif_data/
 data/
 .pytest_cache/

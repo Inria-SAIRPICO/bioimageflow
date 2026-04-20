@@ -115,7 +115,8 @@ class WetlandsEnvManager:
         self._manager = get_shared_environment_manager(**kwargs)
         self._envs: dict[str, Any] = {}            # name -> wetlands env
         self._env_hashes: dict[str, str] = {}       # name -> dep hash
-        self._launch_configs: dict[str, tuple[int, Any]] = {}  # name -> (max_workers, worker_env)
+        self._launch_configs: dict[str, tuple[int, Any, float | None]] = {}
+        # name -> (max_workers, worker_env, worker_timeout)
         self._worker_file = _find_worker_file()
         self._lock = threading.RLock()
 
@@ -133,13 +134,14 @@ class WetlandsEnvManager:
         env_spec: EnvironmentSpec,
         max_workers: int = 1,
         worker_env: Any = None,
+        worker_timeout: float | None = None,
     ) -> Any:
         """Get or create a Wetlands environment, validating dependency consistency.
 
-        On first creation, ``env.launch(max_workers=..., worker_env=...)`` is
-        called.  Subsequent calls with a different ``max_workers`` log a warning
-        but do **not** re-launch (Wetlands' ``launch()`` is a no-op when already
-        launched).
+        On first creation, ``env.launch(max_workers=..., worker_env=..., worker_timeout=...)``
+        is called.  Subsequent calls with a different ``max_workers`` or
+        ``worker_timeout`` log a warning but do **not** re-launch (Wetlands'
+        ``launch()`` is a no-op when already launched).
 
         This method is thread-safe and may be called concurrently.
         """
@@ -152,12 +154,20 @@ class WetlandsEnvManager:
                 raise EnvironmentMismatchError(
                     f"Environment '{env_spec.name}' already created with different deps."
                 )
-            prev_workers, _ = self._launch_configs.get(env_spec.name, (1, None))
+            prev_workers, _, prev_timeout = self._launch_configs.get(
+                env_spec.name, (1, None, None)
+            )
             if prev_workers != max_workers:
                 logger.warning(
                     "Environment '%s' already launched with max_workers=%d; "
                     "ignoring new max_workers=%d",
                     env_spec.name, prev_workers, max_workers,
+                )
+            if prev_timeout != worker_timeout:
+                logger.warning(
+                    "Environment '%s' already launched with worker_timeout=%s; "
+                    "ignoring new worker_timeout=%s",
+                    env_spec.name, prev_timeout, worker_timeout,
                 )
             return self._envs[env_spec.name]
 
@@ -172,8 +182,8 @@ class WetlandsEnvManager:
                 return self._envs[env_spec.name]
 
             logger.info(
-                "Creating Wetlands environment '%s' (max_workers=%d)",
-                env_spec.name, max_workers,
+                "Creating Wetlands environment '%s' (max_workers=%d, worker_timeout=%s)",
+                env_spec.name, max_workers, worker_timeout,
             )
             env = self._manager.create(env_spec.name, augmented_deps)
             launch_kwargs: dict[str, Any] = {}
@@ -181,10 +191,12 @@ class WetlandsEnvManager:
                 launch_kwargs["max_workers"] = max_workers
             if worker_env is not None:
                 launch_kwargs["worker_env"] = worker_env
+            if worker_timeout is not None:
+                launch_kwargs["worker_timeout"] = worker_timeout
             env.launch(**launch_kwargs)
             self._envs[env_spec.name] = env
             self._env_hashes[env_spec.name] = dep_hash
-            self._launch_configs[env_spec.name] = (max_workers, worker_env)
+            self._launch_configs[env_spec.name] = (max_workers, worker_env, worker_timeout)
             return env
 
     def submit_process_batch(
@@ -195,9 +207,13 @@ class WetlandsEnvManager:
         arguments_dicts: list[dict],
         max_workers: int = 1,
         worker_env: Any = None,
+        worker_timeout: float | None = None,
     ) -> Any:
         """Submit a batch call via ``env.submit()``.  Returns a ``Task``."""
-        env = self.get_or_create(env_spec, max_workers=max_workers, worker_env=worker_env)
+        env = self.get_or_create(
+            env_spec, max_workers=max_workers, worker_env=worker_env,
+            worker_timeout=worker_timeout,
+        )
         return env.submit(
             self._worker_file, "run_process_batch",
             args=(tool_file_path, tool_class_name, arguments_dicts),
@@ -211,9 +227,13 @@ class WetlandsEnvManager:
         arguments_dicts: list[dict],
         max_workers: int = 1,
         worker_env: Any = None,
+        worker_timeout: float | None = None,
     ) -> list:
         """Submit per-row calls via ``env.map_tasks()``.  Returns ``list[Task]``."""
-        env = self.get_or_create(env_spec, max_workers=max_workers, worker_env=worker_env)
+        env = self.get_or_create(
+            env_spec, max_workers=max_workers, worker_env=worker_env,
+            worker_timeout=worker_timeout,
+        )
         row_args = [(tool_file_path, tool_class_name, d) for d in arguments_dicts]
         return env.map_tasks(self._worker_file, "run_process_row", row_args)
 

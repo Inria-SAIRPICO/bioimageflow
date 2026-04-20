@@ -25,6 +25,7 @@ class WorkflowEnvironment:
     spec: EnvironmentSpec | None = None
     max_workers: int = 0
     worker_env: Callable[[int], dict[str, str]] | None = None
+    worker_timeout: float | None = None
 
 
 def _serialize_constant(value: Any) -> dict[str, Any]:
