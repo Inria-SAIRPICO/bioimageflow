@@ -33,27 +33,27 @@ class DownloadImages(ProcessingTool):
 
     class Inputs(IOModel):
         urls: Annotated[str, GUIMeta(
-            display_text="URLs",
+            display_name="URLs",
             description="Newline-separated list of image URLs to download.",
             connectable=Connectable.NEVER,
         )]
         output_dir: Annotated[str, GUIMeta(
-            display_text="Output directory",
+            display_name="Output directory",
             description="Local directory where downloaded files are written. Created if it does not exist.",
             connectable=Connectable.NEVER,
         )] = "./data"
 
     class Outputs(IOModel):
         path: Annotated[Path, GUIMeta(
-            display_text="Path",
+            display_name="Path",
             description="Local path of the downloaded file.",
         )]
         filename: Annotated[str, GUIMeta(
-            display_text="Filename",
+            display_name="Filename",
             description="Base name of the downloaded file.",
         )]
         url: Annotated[str, GUIMeta(
-            display_text="Source URL",
+            display_name="Source URL",
             description="URL from which the file was downloaded.",
         )]
 

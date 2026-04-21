@@ -26,7 +26,7 @@ class CrossJoin(DataFrameTool):
 
     class Inputs(IOModel):
         suffixes: Annotated[tuple[str, str], GUIMeta(
-            display_text="Column suffixes",
+            display_name="Column suffixes",
             description="Suffixes added to duplicate column names coming from the left and right DataFrames.",
             connectable=Connectable.NEVER,
         )] = ("_left", "_right")
@@ -52,17 +52,17 @@ class JoinOnColumn(DataFrameTool):
 
     class Inputs(IOModel):
         join_column: Annotated[str, GUIMeta(
-            display_text="Join column",
+            display_name="Join column",
             description="Name of the column present in both upstream DataFrames to join on.",
             connectable=Connectable.NEVER,
         )]
         how: Annotated[str, GUIMeta(
-            display_text="Join type",
+            display_name="Join type",
             description="Join strategy: 'inner', 'left', 'right', or 'outer'.",
             connectable=Connectable.NEVER,
         )] = "inner"
         suffixes: Annotated[tuple[str, str], GUIMeta(
-            display_text="Column suffixes",
+            display_name="Column suffixes",
             description="Suffixes added to duplicate column names coming from the left and right DataFrames.",
             connectable=Connectable.NEVER,
         )] = ("_left", "_right")

@@ -46,7 +46,7 @@ class ConnectedComponents(ProcessingTool):
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
             GUIMeta(
-                display_text="Input image",
+                display_name="Input image",
                 description="Binary image (non-zero pixels are foreground) whose connected components are labelled.",
                 connectable=Connectable.BY_DEFAULT,
             ),
@@ -60,12 +60,12 @@ class ConnectedComponents(ProcessingTool):
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
             ),
             GUIMeta(
-                display_text="Label image",
+                display_name="Label image",
                 description="Label image where each connected component has a unique integer ID.",
             ),
         ] = Path("{input_image.stem}_labels{ext}")
         num_labels: Annotated[int, GUIMeta(
-            display_text="Label count",
+            display_name="Label count",
             description="Number of connected components labelled in the image.",
         )]
 

@@ -18,12 +18,12 @@ class Generate(DataFrameTool):
 
     class Inputs(IOModel):
         column_name: Annotated[str, GUIMeta(
-            display_text="Column name",
+            display_name="Column name",
             description="Name of the single column produced in the output DataFrame.",
             connectable=Connectable.NEVER,
         )]
         values: Annotated[list[Any], GUIMeta(
-            display_text="Values",
+            display_name="Values",
             description="List of values that become the rows of the generated column.",
             connectable=Connectable.NEVER,
         )]

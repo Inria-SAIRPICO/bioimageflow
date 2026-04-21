@@ -41,7 +41,7 @@ class LabelOverlaps(ProcessingTool):
                 layouts={Layout.PLANAR},
             ),
             GUIMeta(
-                display_text="Label image",
+                display_name="Label image",
                 description="Label image whose regions will be matched against the reference.",
                 connectable=Connectable.BY_DEFAULT,
             ),
@@ -53,7 +53,7 @@ class LabelOverlaps(ProcessingTool):
                 layouts={Layout.PLANAR},
             ),
             GUIMeta(
-                display_text="Reference label image",
+                display_name="Reference label image",
                 description="Reference label image. Each pixel of the label image is paired with the reference label at the same location.",
                 connectable=Connectable.BY_DEFAULT,
             ),
@@ -61,7 +61,7 @@ class LabelOverlaps(ProcessingTool):
 
     class Outputs(IOModel):
         overlaps: Annotated[Path, GUIMeta(
-            display_text="Overlaps CSV",
+            display_name="Overlaps CSV",
             description="CSV table with columns (reference_label, spot_label, overlap_count) giving the pixel count for each pair.",
         )] = Path("{label_image.stem}_overlaps.csv")
 

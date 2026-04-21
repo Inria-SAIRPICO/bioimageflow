@@ -57,7 +57,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
     - **required**: whether the field has no default
     - **connectable**: whether this field accepts an upstream column binding
     - **image_spec**: the :class:`~bioimageflow_core.ImageSpec` if present
-    - **display_text**, **description**: human-readable label / tooltip from
+    - **display_name**, **description**: human-readable label / tooltip from
       :class:`~bioimageflow_core.GUIMeta`
     - **min**, **max**, **step**: numeric constraints from :class:`~bioimageflow_core.GUIMeta`
     - **group**: tab/section group name from :class:`~bioimageflow_core.GUIMeta`
@@ -86,8 +86,8 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
         }
 
         if gui_meta is not None:
-            if gui_meta.display_text is not None:
-                entry["display_text"] = gui_meta.display_text
+            if gui_meta.display_name is not None:
+                entry["display_name"] = gui_meta.display_name
             if gui_meta.description is not None:
                 entry["description"] = gui_meta.description
             if gui_meta.min is not None:

@@ -143,20 +143,20 @@ labels, and tooltips.
            Path,
            ImageSpec(semantics={Semantic.INTENSITY}),
            GUIMeta(
-               display_text="Input image",
+               display_name="Input image",
                description="Fluorescence image to segment.",
                connectable=Connectable.BY_DEFAULT,
            ),
        ]
        diameter: Annotated[float, GUIMeta(
-           display_text="Cell diameter",
+           display_name="Cell diameter",
            description="Approximate cell diameter, in pixels.",
            min=1.0, max=500.0, step=0.5,
        )] = 30.0
 
 Parameters:
 
-- **display_text** (``str | None``): human-readable label shown in the GUI.
+- **display_name** (``str | None``): human-readable label shown in the GUI.
   When ``None``, frontends fall back to the field name.
 - **description** (``str | None``): longer help text for tooltips / inline
   help, describing what the field means and when to change it.
@@ -184,11 +184,11 @@ show tooltips:
        mask: Annotated[
            Path,
            ImageSpec(semantics={Semantic.LABEL}),
-           GUIMeta(display_text="Segmentation mask",
+           GUIMeta(display_name="Segmentation mask",
                    description="Label image; each cell gets a unique ID."),
        ] = Path("{input_image.stem}_mask{ext}")
        cell_count: Annotated[int, GUIMeta(
-           display_text="Cell count",
+           display_name="Cell count",
            description="Number of cells detected.",
        )]
 
@@ -216,7 +216,7 @@ GUI-friendly schema for a tool:
    #         "required": False,
    #         "connectable": Connectable.NOT_BY_DEFAULT,
    #         "image_spec": None,
-   #         "display_text": "Cell diameter",
+   #         "display_name": "Cell diameter",
    #         "description": "Approximate cell diameter, in pixels.",
    #         "min": 1.0,
    #         "max": 500.0,

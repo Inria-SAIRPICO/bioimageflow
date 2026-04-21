@@ -50,38 +50,38 @@ class ConvertImage(ProcessingTool):
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(
-            display_text="Input image",
+            display_name="Input image",
             description="Source image file to convert. Format is detected automatically by bioio.",
             connectable=Connectable.BY_DEFAULT,
         )]
         dim_order: Annotated[str, GUIMeta(
-            display_text="Dimension order",
+            display_name="Dimension order",
             description="Target dimension order used when reading the image (subset of TCZYX).",
         )] = "TCZYX"
         scene: Annotated[int | None, GUIMeta(
-            display_text="Scene",
+            display_name="Scene",
             description="Optional scene index for multi-scene files. Leave empty to keep the default scene.",
             min=0, step=1,
         )] = None
         channel: Annotated[int | None, GUIMeta(
-            display_text="Channel",
+            display_name="Channel",
             description="Optional channel index to select (0-based). Leave empty to keep all channels.",
             min=0, step=1,
         )] = None
         z: Annotated[int | None, GUIMeta(
-            display_text="Z slice",
+            display_name="Z slice",
             description="Optional Z-slice index to select (0-based). Leave empty to keep all Z slices.",
             min=0, step=1,
         )] = None
         timepoint: Annotated[int | None, GUIMeta(
-            display_text="Timepoint",
+            display_name="Timepoint",
             description="Optional timepoint index to select (0-based). Leave empty to keep all timepoints.",
             min=0, step=1,
         )] = None
 
     class Outputs(IOModel):
         output_image: Annotated[Path, ImageSpec(), GUIMeta(
-            display_text="Output image",
+            display_name="Output image",
             description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
         )] = Path("{input_image.stem}.ome.tiff")
 

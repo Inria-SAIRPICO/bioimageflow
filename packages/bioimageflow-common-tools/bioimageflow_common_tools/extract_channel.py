@@ -36,13 +36,13 @@ class ExtractChannel(ProcessingTool):
                 layouts={Layout.PLANAR_CHANNEL, Layout.VOLUMETRIC_CHANNEL},
             ),
             GUIMeta(
-                display_text="Input image",
+                display_name="Input image",
                 description="Multi-channel image (CYX or CZYX). The first axis is treated as the channel axis.",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
         channel: Annotated[int, GUIMeta(
-            display_text="Channel",
+            display_name="Channel",
             description="Index of the channel to extract (0-based).",
             min=0, max=512, step=1,
         )] = 0
@@ -55,7 +55,7 @@ class ExtractChannel(ProcessingTool):
                 layouts={Layout.PLANAR},
             ),
             GUIMeta(
-                display_text="Channel image",
+                display_name="Channel image",
                 description="Single-channel image containing the extracted channel.",
             ),
         ] = Path("{input_image.stem}_ch{channel}{ext}")

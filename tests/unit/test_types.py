@@ -130,7 +130,7 @@ class TestGUIMeta:
         assert meta.max is None
         assert meta.step is None
         assert meta.group is None
-        assert meta.display_text is None
+        assert meta.display_name is None
         assert meta.description is None
 
     def test_custom_values(self):
@@ -150,12 +150,12 @@ class TestGUIMeta:
         assert meta.group == "advanced"
         assert meta.connectable is Connectable.NOT_BY_DEFAULT
 
-    def test_display_text_and_description(self):
+    def test_display_name_and_description(self):
         meta = GUIMeta(
-            display_text="Cell diameter",
+            display_name="Cell diameter",
             description="Approximate cell diameter in pixels.",
         )
-        assert meta.display_text == "Cell diameter"
+        assert meta.display_name == "Cell diameter"
         assert meta.description == "Approximate cell diameter in pixels."
         assert meta.connectable is Connectable.NOT_BY_DEFAULT
 

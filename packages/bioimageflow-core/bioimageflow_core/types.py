@@ -114,7 +114,7 @@ class GUIMeta:
 
     Parameters
     ----------
-    display_text : str | None
+    display_name : str | None
         Human-readable label shown next to the field in the GUI.  If
         ``None``, frontends should fall back to the field name
         (optionally prettified).
@@ -136,7 +136,7 @@ class GUIMeta:
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
     """
-    display_text: str | None = None
+    display_name: str | None = None
     description: str | None = None
     connectable: Connectable = Connectable.NOT_BY_DEFAULT
     min: float | None = None

@@ -37,34 +37,34 @@ class Mosaic(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}),
             GUIMeta(
-                display_text="Input image",
+                display_name="Input image",
                 description="Image tile to include in the mosaic. One row per tile.",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
         columns: Annotated[int, GUIMeta(
-            display_text="Columns",
+            display_name="Columns",
             description="Number of tiles per row in the output grid.",
             min=1, max=100, step=1,
         )] = 5
         tile_width: Annotated[int | None, GUIMeta(
-            display_text="Tile width",
+            display_name="Tile width",
             description="Resize each tile to this width in pixels. Leave empty to keep the original width.",
             min=1, step=1,
         )] = None
         tile_height: Annotated[int | None, GUIMeta(
-            display_text="Tile height",
+            display_name="Tile height",
             description="Resize each tile to this height in pixels. Leave empty to keep the original height.",
             min=1, step=1,
         )] = None
 
     class Outputs(IOModel):
         mosaic_path: Annotated[Path, GUIMeta(
-            display_text="Mosaic image",
+            display_name="Mosaic image",
             description="Composite mosaic image (grid of all input tiles).",
         )] = Path("{node_name}_mosaic.png")
         image_count: Annotated[int, GUIMeta(
-            display_text="Image count",
+            display_name="Image count",
             description="Number of input tiles assembled in the mosaic.",
         )]
 

@@ -874,7 +874,7 @@ class GUIMeta:
     GUI hints for an Inputs or Outputs field.
     Attached via Annotated — invisible to runtime logic, read by frontends.
     """
-    display_text: str | None = None   # Human-readable label shown next to the field
+    display_name: str | None = None   # Human-readable label shown next to the field
     description: str | None = None    # Longer help text / tooltip
     connectable: Connectable = Connectable.NOT_BY_DEFAULT  # Pin visibility / connectability (Inputs only)
     min: float | int | None = None   # Minimum value (numeric fields)
@@ -884,7 +884,7 @@ class GUIMeta:
 ```
 
 **Display text and description:**
-- `display_text` — the short, human-readable label a GUI shows next to the widget (e.g. `"Cell diameter"` instead of the raw field name `diameter`). If `None`, frontends should fall back to the field name, typically prettified (snake-case → Title Case).
+- `display_name` — the short, human-readable label a GUI shows next to the widget (e.g. `"Cell diameter"` instead of the raw field name `diameter`). If `None`, frontends should fall back to the field name, typically prettified (snake-case → Title Case).
 - `description` — a longer explanation intended for tooltips or inline help panels. Use it to describe *what* the field means, *why* a user would change it, and any units or valid ranges that are not obvious from `min` / `max` / `step`.
 
 Both fields are purely cosmetic hints — the runtime never reads them.
@@ -912,28 +912,28 @@ class CellposeSegmenter(ProcessingTool):
         input_image: Annotated[
             ImagePath(semantics=Semantic.INTENSITY),
             GUIMeta(
-                display_text="Input image",
+                display_name="Input image",
                 description="Fluorescence or brightfield image to segment.",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
         diameter: Annotated[float, GUIMeta(
-            display_text="Cell diameter",
+            display_name="Cell diameter",
             description="Approximate diameter of cells in pixels. Set to 0 for auto-detection.",
             min=0.0, max=500.0, step=0.5, group="general",
         )] = 30.0
         model_type: Annotated[str, GUIMeta(
-            display_text="Model",
+            display_name="Model",
             description="Cellpose pretrained model — e.g. 'cyto3', 'nuclei'.",
             group="general",
         )] = "cyto3"
         flow_threshold: Annotated[float, GUIMeta(
-            display_text="Flow threshold",
+            display_name="Flow threshold",
             description="Maximum allowed flow error. Lower values reject more masks.",
             min=0.0, max=1.0, step=0.05, group="advanced",
         )] = 0.4
         use_gpu: Annotated[bool, GUIMeta(
-            display_text="Use GPU",
+            display_name="Use GPU",
             description="Run inference on GPU when available.",
             connectable=Connectable.NEVER, group="gpu",
         )] = True
@@ -941,11 +941,11 @@ class CellposeSegmenter(ProcessingTool):
     class Outputs(IOModel):
         mask: Annotated[
             ImagePath(semantics=Semantic.LABEL),
-            GUIMeta(display_text="Segmentation mask",
+            GUIMeta(display_name="Segmentation mask",
                     description="Label image where each cell has a unique integer ID."),
         ] = "{input_image.stem}_mask_{row_index}.png"
         cell_count: Annotated[int, GUIMeta(
-            display_text="Cell count",
+            display_name="Cell count",
             description="Number of cells detected in the image.",
         )]
 
@@ -954,12 +954,12 @@ class CellposeSegmenter(ProcessingTool):
 ```
 
 In this example:
-- `input_image` has `Connectable.BY_DEFAULT` with `display_text="Input image"` — the pin is visible and the GUI shows a friendly label and tooltip.
+- `input_image` has `Connectable.BY_DEFAULT` with `display_name="Input image"` — the pin is visible and the GUI shows a friendly label and tooltip.
 - `diameter` uses the default `NOT_BY_DEFAULT` with a slider range of 0–500, step 0.5, in the **general** tab.
 - `model_type` uses the default `NOT_BY_DEFAULT`, in the **general** tab — rendered as a text field or dropdown, pin available via checkbox.
 - `flow_threshold` is in the **advanced** tab — hidden from the main view, accessible via an "Advanced" tab.
 - `use_gpu` is **never connectable** (`NEVER`), in the **gpu** tab — grouped with other GPU-related settings.
-- Outputs (`mask`, `cell_count`) carry `display_text` and `description` so the GUI can label output pins and provide tooltips.
+- Outputs (`mask`, `cell_count`) carry `display_name` and `description` so the GUI can label output pins and provide tooltips.
 
 **Grouping behaviour:** A GUI frontend collects all fields sharing the same `group` value and displays them together (e.g. as tabs, collapsible sections, or accordion panels). Fields with `group=None` belong to an implicit default group. The ordering of groups is determined by first appearance in the `Inputs` declaration.
 

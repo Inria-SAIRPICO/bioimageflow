@@ -45,22 +45,22 @@ class CellposeSAM(ProcessingTool):
                 layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
             ),
             GUIMeta(
-                display_text="Input image",
+                display_name="Input image",
                 description="Fluorescence or brightfield image to segment (2D intensity, optionally multi-channel).",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
         diameter: Annotated[float, GUIMeta(
-            display_text="Cell diameter",
+            display_name="Cell diameter",
             description="Approximate cell diameter in pixels. Set to 0 for automatic estimation.",
             min=0.0, max=500.0, step=0.5,
         )] = 0.0
         model_type: Annotated[str, GUIMeta(
-            display_text="Model",
+            display_name="Model",
             description="Cellpose pretrained model name (e.g. 'cyto3', 'nuclei').",
         )] = "cyto3"
         flow_threshold: Annotated[float, GUIMeta(
-            display_text="Flow threshold",
+            display_name="Flow threshold",
             description=(
                 "Maximum allowed mean squared error between the flows recomputed "
                 "from predicted ROIs and the flows predicted by the network. "
@@ -71,7 +71,7 @@ class CellposeSAM(ProcessingTool):
             min=0.0, max=1.0, step=0.05,
         )] = 0.4
         cellprob_threshold: Annotated[float, GUIMeta(
-            display_text="Cell probability threshold",
+            display_name="Cell probability threshold",
             description=(
                 "Threshold on the network's cell-probability output (sigmoid "
                 "input, typically in the range -6 to +6). Pixels above this "
@@ -91,12 +91,12 @@ class CellposeSAM(ProcessingTool):
                 layouts={Layout.PLANAR},
             ),
             GUIMeta(
-                display_text="Segmentation mask",
+                display_name="Segmentation mask",
                 description="Label image; each detected cell/nucleus has a unique integer ID.",
             ),
         ] = Path("{input_image.stem}_mask{ext}")
         cell_count: Annotated[int, GUIMeta(
-            display_text="Cell count",
+            display_name="Cell count",
             description="Number of cells (non-zero labels) detected in the image.",
         )]
 
