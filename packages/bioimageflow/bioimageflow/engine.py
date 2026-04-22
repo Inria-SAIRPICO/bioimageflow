@@ -1112,7 +1112,9 @@ class DefaultEngine:
         if env_config and env_config.worker_env is not None:
             worker_env = env_config.worker_env
         elif self._env_has_gpu_tool(env_name, workflow):
-            worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
+            def wef(i):
+                return {"CUDA_VISIBLE_DEVICES": str(i)}
+            worker_env = wef
         else:
             worker_env = None
 

@@ -121,7 +121,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-common-tools"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/bioimageflow-common-tools" }
 dependencies = [
     { name = "bioimageflow" },

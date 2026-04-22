@@ -344,7 +344,7 @@ def _build_image_spec(spec_config: dict[str, Any]) -> ImageSpec:
     """Build an ImageSpec from a config dict."""
     return ImageSpec(
         semantics={Semantic(s) for s in spec_config.get("semantics", [])},
-        layouts={Layout(l) for l in spec_config.get("layouts", [])},
+        layouts={Layout(layout) for layout in spec_config.get("layouts", [])},
         dtypes=set(spec_config.get("dtypes", [])),
         formats=set(spec_config.get("formats", [])),
     )

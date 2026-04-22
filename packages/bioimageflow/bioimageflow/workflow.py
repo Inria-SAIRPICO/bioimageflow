@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from bioimageflow.node import set_active_workflow, get_active_workflow, _reset_name_counters, Node
 
 if TYPE_CHECKING:
-    from bioimageflow.engine import DefaultEngine, SequentialEngine, NodeStep
+    from bioimageflow.engine import DefaultEngine, NodeStep
 
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow_core.tool import ProcessingTool
