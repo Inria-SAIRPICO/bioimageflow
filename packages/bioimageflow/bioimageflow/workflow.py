@@ -540,7 +540,7 @@ def _auto_install_if_missing(pkg: str, pkg_ver: str, store: Path) -> None:
     pkg_dir = store / pkg / pkg_ver / pkg
     if pkg_dir.exists():
         return
-    from bioimageflow.tool_loader import _ensure_installed
+    from bioimageflow.tool_loader import ensure_installed
     # Use the module name as the PyPI name (hyphens for underscores)
     pypi_name = pkg.replace("_", "-")
-    _ensure_installed(pkg, pkg_ver, pypi_name, store)
+    ensure_installed(pkg, pkg_ver, pypi_name, store)

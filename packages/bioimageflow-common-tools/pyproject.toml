@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow-common-tools"
-version = "0.1.0"
+version = "0.1.2"
 description = "Common bioimage analysis tools for BioImageFlow"
 requires-python = ">=3.10"
 dependencies = ["bioimageflow-core", "bioimageflow"]

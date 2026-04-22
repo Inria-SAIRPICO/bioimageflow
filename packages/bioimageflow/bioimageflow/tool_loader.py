@@ -355,7 +355,7 @@ def _normalize_package_name(pypi_name: str) -> str:
 
 # ── Auto-install ─────────────────────────────────────────────────────
 
-def _ensure_installed(
+def ensure_installed(
     pkg_name: str,
     version: str,
     pypi_name: str,
@@ -386,8 +386,8 @@ def _ensure_installed(
 
     commands = generator.get_activate_conda_commands()
     commands += [
-        f"{conda_bin} run pip install --target {target} "
-        f"{pypi_name}=={version}"
+        f'{conda_bin} exec --spec "pip" -- '
+        f'pip install --target "{target}" "{pypi_name}=={version}"'
     ]
 
     try:
@@ -454,7 +454,7 @@ def require_tool_packages(
         pkg_name = _normalize_package_name(pypi_name)
 
         if auto_install:
-            _ensure_installed(pkg_name, version, pypi_name, store_path)
+            ensure_installed(pkg_name, version, pypi_name, store_path)
 
         load_versioned_package(pkg_name, version, store_path)
         _register_canonical_names(pkg_name, version)
