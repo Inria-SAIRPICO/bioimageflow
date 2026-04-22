@@ -6,6 +6,7 @@ orchestrator process.  Supports PEP 723 inline script metadata for
 self-contained shareable workflow scripts.
 """
 
+import importlib.machinery
 import importlib.util
 import logging
 import re
@@ -171,21 +172,22 @@ class _ScopedImporter:
 
     When code inside a versioned package does ``from .alpha import X``,
     Python looks for ``<scoped_name>.alpha``. This finder intercepts that
-    request and loads the module from the versioned directory.
+    request and returns a ``ModuleSpec`` pointing at the versioned directory.
     """
 
     def __init__(self, scoped_prefix: str, pkg_dir: Path) -> None:
         self._prefix = scoped_prefix
         self._pkg_dir = pkg_dir
 
-    def find_module(self, fullname: str, path: Any = None) -> Any:
-        if fullname.startswith(self._prefix + "."):
-            return self
-        return None
-
-    def load_module(self, fullname: str) -> ModuleType:
-        if fullname in sys.modules:
-            return sys.modules[fullname]
+    def find_spec(
+        self,
+        fullname: str,
+        path: Any = None,
+        target: Any = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        del path, target
+        if not fullname.startswith(self._prefix + "."):
+            return None
 
         # "dummy_tools__1_0_0.alpha" -> relative = "alpha"
         relative = fullname[len(self._prefix) + 1:]
@@ -194,37 +196,20 @@ class _ScopedImporter:
         for part in parts:
             file_path = file_path / part
 
-        # Check if it's a package (directory with __init__.py)
+        # Package (directory with __init__.py)
         if file_path.is_dir() and (file_path / "__init__.py").exists():
-            init_file = file_path / "__init__.py"
-            spec = importlib.util.spec_from_file_location(
+            return importlib.util.spec_from_file_location(
                 fullname,
-                init_file,
+                file_path / "__init__.py",
                 submodule_search_locations=[str(file_path)],
             )
-            assert spec is not None
-            mod = importlib.util.module_from_spec(spec)
-            mod.__package__ = fullname
-            sys.modules[fullname] = mod
-            assert spec.loader is not None
-            spec.loader.exec_module(mod)
-            return mod
 
-        # Otherwise it's a regular module
+        # Regular module
         py_file = file_path.with_suffix(".py")
         if py_file.exists():
-            spec = importlib.util.spec_from_file_location(fullname, py_file)
-            assert spec is not None
-            mod = importlib.util.module_from_spec(spec)
-            # Set __package__ to the parent package
-            parent = fullname.rsplit(".", 1)[0] if "." in fullname else ""
-            mod.__package__ = parent
-            sys.modules[fullname] = mod
-            assert spec.loader is not None
-            spec.loader.exec_module(mod)
-            return mod
+            return importlib.util.spec_from_file_location(fullname, py_file)
 
-        raise ImportError(f"No module named '{fullname}' (looked in {file_path})")
+        return None
 
 
 def _stamp_tool_classes(package: str, version: str) -> None:
@@ -259,10 +244,10 @@ def _stamp_tool_classes(package: str, version: str) -> None:
             if not obj_module.startswith(scoped_prefix):
                 continue
 
-            obj._bif_package = package
-            obj._bif_package_version = version
             canonical = package + obj_module[len(scoped_prefix):]
-            obj._bif_canonical_module = canonical
+            setattr(obj, "_bif_package", package)
+            setattr(obj, "_bif_package_version", version)
+            setattr(obj, "_bif_canonical_module", canonical)
 
 
 # ── Canonical name registration ──────────────────────────────────────
