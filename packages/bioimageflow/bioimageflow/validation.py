@@ -4,10 +4,42 @@ import hashlib
 import importlib.metadata
 import inspect
 import os
-from typing import Annotated, Any, get_args, get_origin
+from dataclasses import dataclass
+from typing import Annotated, Any, Literal, get_args, get_origin
 
 from bioimageflow_core.types import Connectable, ImageSpec, extract_gui_meta
 from bioimageflow_core.tool import IOModel, BaseTool
+
+
+ValidationErrorKind = Literal[
+    "cycle",
+    "type_mismatch",
+    "missing_input",
+    "unknown_input",
+    "column_not_found",
+    "parameter_invalid",
+    "unknown_tool",
+    "duplicate_name",
+    "construction_failed",
+]
+
+
+@dataclass(frozen=True)
+class ValidationError:
+    """A single problem found during graph construction or validation.
+
+    Instances are produced by the error-collector (:meth:`Workflow.collect_errors`),
+    ``Workflow.from_dict(..., collect_errors=True)``, and
+    ``Workflow.validate()``. Consumers (GUIs, linters) map these to their own
+    display formats. The library never raises ``ValidationError``; it raises
+    the existing exceptions unless an error-collector is active.
+    """
+    kind: ValidationErrorKind
+    message: str
+    node: str | None = None
+    field: str | None = None
+    edge: tuple[str, str, str] | None = None
+    path: tuple[str, ...] = ()
 
 
 def build_pydantic_model(tool_model_cls: type[IOModel]) -> Any:
@@ -47,6 +79,30 @@ def is_image_type(annotation: Any) -> bool:
     return extract_image_spec(annotation) is not None
 
 
+def serialize_image_spec(spec: ImageSpec | None) -> dict[str, list[str]] | None:
+    """Return a JSON-friendly representation of an :class:`ImageSpec`.
+
+    Shape: ``{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}``
+    where each list contains enum value strings. Returns ``None`` when
+    ``spec`` is ``None``. Used by GUIs that expose type information in
+    their widgets.
+    """
+    if spec is None:
+        return None
+
+    def _as_str(v: Any) -> str:
+        # Enum → value, otherwise str().
+        val = getattr(v, "value", v)
+        return str(val)
+
+    return {
+        "semantics": sorted(_as_str(s) for s in spec.semantics),
+        "layouts": sorted(_as_str(layout) for layout in spec.layouts),
+        "dtypes": sorted(_as_str(d) for d in spec.dtypes),
+        "formats": sorted(_as_str(f) for f in spec.formats),
+    }
+
+
 def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
     """Return a GUI-friendly schema for all input fields of a tool.
 
@@ -83,6 +139,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
             "required": not has_default,
             "connectable": gui_meta.connectable if gui_meta else Connectable.NOT_BY_DEFAULT,
             "image_spec": image_spec,
+            "image_spec_serialized": serialize_image_spec(image_spec),
         }
 
         if gui_meta is not None:
@@ -102,6 +159,99 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
         schema[field_name] = entry
 
     return schema
+
+
+def check_type_compat(
+    node: Any,
+    field: str,
+    col_ref: Any,
+) -> ValidationError | None:
+    """Return a ``ValidationError`` if ``col_ref`` is incompatible with ``node.<field>``.
+
+    Pure function — does not raise; returns None on success. Used by
+    :meth:`Workflow.validate`. Mirrors the (internal) logic in
+    ``Node._check_type_compat`` but reports errors instead of raising.
+    """
+    from bioimageflow_core.types import check_compatibility
+
+    input_annotations = node.tool.Inputs._get_all_annotations()
+    consumer_spec = extract_image_spec(input_annotations.get(field))
+    if consumer_spec is None:
+        return None
+
+    upstream_outputs = col_ref.node.tool.Outputs
+    if upstream_outputs is None:
+        return None
+
+    output_annotations = upstream_outputs._get_all_annotations()
+    if col_ref.column not in output_annotations:
+        return None  # reported elsewhere (column_not_found)
+
+    producer_spec = extract_image_spec(output_annotations[col_ref.column])
+    if producer_spec is None:
+        return None
+
+    if not check_compatibility(producer_spec, consumer_spec):
+        return ValidationError(
+            kind="type_mismatch",
+            message=(
+                f"Type mismatch: upstream '{col_ref.node.name}'.'{col_ref.column}' "
+                f"is not compatible with input '{field}' of tool "
+                f"'{type(node.tool).__name__}'. "
+                f"Producer semantics: {producer_spec.semantics}, "
+                f"consumer semantics: {consumer_spec.semantics}."
+            ),
+            node=node.name,
+            field=field,
+            edge=(col_ref.node.name, node.name, field),
+        )
+    return None
+
+
+def validate_parameters(
+    tool_class: type,
+    parameters: dict[str, Any],
+    *,
+    node: str | None = None,
+) -> list[ValidationError]:
+    """Validate a dict of constants against a tool class's ``Inputs``.
+
+    Only the supplied parameters are checked — missing required fields
+    are not reported here (that is ``missing_input`` in
+    :meth:`Workflow.validate`). Each Pydantic error is mapped to a
+    ``parameter_invalid`` entry.
+    """
+    import pydantic
+
+    inputs_cls = tool_class.Inputs  # type: ignore[attr-defined]
+    annotations = inputs_cls._get_all_annotations()
+    # Only validate fields that are declared on Inputs AND supplied.
+    known = {k: v for k, v in parameters.items() if k in annotations}
+    if not known:
+        return []
+
+    # Build a pydantic model containing just the supplied fields, keeping
+    # their original annotations. This lets us surface range/type errors
+    # without raising on fields the caller didn't supply.
+    from pydantic import create_model
+
+    fields: dict[str, Any] = {name: (annotations[name], ...) for name in known}
+    model = create_model(f"{tool_class.__name__}_Params", **fields)
+
+    errors: list[ValidationError] = []
+    try:
+        model(**known)
+    except pydantic.ValidationError as exc:
+        for err in exc.errors():
+            loc = err.get("loc", ())
+            field_name = str(loc[0]) if loc else None
+            errors.append(ValidationError(
+                kind="parameter_invalid",
+                message=err.get("msg", "invalid parameter"),
+                node=node,
+                field=field_name,
+            ))
+    return errors
 
 
 def get_tool_version(tool: BaseTool) -> str:

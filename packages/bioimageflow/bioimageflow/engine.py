@@ -4,6 +4,7 @@ import concurrent.futures
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
@@ -33,6 +34,26 @@ if TYPE_CHECKING:
     from bioimageflow.sub_workflow import SubWorkflowNode
 
 logger = logging.getLogger("bioimageflow")
+
+
+def topological_order(workflow: Any) -> list[str]:
+    """Return the names of the nodes in ``workflow`` in dependency order.
+
+    Uses ``graphlib.TopologicalSorter`` over all registered nodes. Raises
+    ``CycleError`` if the graph contains a cycle; callers that want to
+    tolerate cycles should catch that or use :meth:`Workflow.validate`.
+    """
+    dep_graph: dict[str, set[str]] = {}
+    for name, node in workflow._nodes.items():
+        deps: set[str] = set()
+        for up in node._upstream_nodes:
+            if up.name in workflow._nodes:
+                deps.add(up.name)
+        for arg in node._args:
+            if isinstance(arg, Node) and arg.name in workflow._nodes:
+                deps.add(arg.name)
+        dep_graph[name] = deps
+    return list(TopologicalSorter(dep_graph).static_order())
 
 
 def _configure_default_logging() -> None:
@@ -84,6 +105,32 @@ class DisabledNodeError(Exception):
 class WorkflowCancelledError(Exception):
     """Raised when a workflow execution is cancelled via ``Workflow.cancel()``."""
     pass
+
+
+@dataclass(frozen=True)
+class NodePlan:
+    """A single node's pre-execution plan entry, returned by :meth:`DefaultEngine.plan`.
+
+    Attributes
+    ----------
+    node_name
+        Scoped node name (``"subworkflow/internal"`` for sub-workflow
+        internals, plain name otherwise).
+    sig_hash
+        Signature hash — byte-identical to what ``compute()`` produces.
+        Empty string for ``skipped`` nodes.
+    cached
+        True if the node's result is already in the cache.
+    upstream
+        Scoped names of this node's direct upstreams.
+    skipped
+        True if the node is disabled or has a disabled upstream.
+    """
+    node_name: str
+    sig_hash: str
+    cached: bool
+    upstream: tuple[str, ...]
+    skipped: bool
 
 
 class WorkerTimeoutError(RuntimeError):
@@ -1649,6 +1696,155 @@ class DefaultEngine:
             )
             with self._progress_lock:
                 workflow.on_progress(event)
+
+
+    # ── Pre-execution planning ─────────────────────────────────────────
+
+    def plan(self, workflow: Any) -> dict[str, NodePlan]:
+        """Return the cache status and signature hash of every node.
+
+        Walks the graph in topological order and reuses the same
+        sig-hash helpers as :meth:`execute` (``_compute_sig_hash`` /
+        ``_compute_processing_sig_hash``), so the hashes are
+        byte-identical to what ``compute()`` would produce. No tool code
+        runs, and no Wetlands environment is launched.
+
+        Sub-workflow internal nodes appear under scoped names
+        (``"subworkflow_name/internal_name"``), matching
+        :meth:`execute_steps`.
+
+        Disabled nodes and nodes downstream of disabled nodes are
+        returned with ``skipped=True`` and ``sig_hash=""``.
+        """
+        reachable = set(workflow._nodes.values())
+        try:
+            order = self._topological_sort(reachable)
+        except Exception:
+            # On cycle, return empty-plan entries so callers still see every
+            # node — validate() is the right tool for cycle reporting.
+            return {
+                name: NodePlan(name, "", False, (), True)
+                for name in workflow._nodes
+            }
+        _executable, skipped = self._filter_executable(order)
+
+        plan: dict[str, NodePlan] = {}
+        results: dict[Node, Any] = {}
+        sig_hashes: dict[Node, str] = {}
+
+        for node in order:
+            if node in skipped:
+                plan[node.name] = NodePlan(
+                    node.name, "", False,
+                    tuple(self._plan_upstream_names(node)), True,
+                )
+                continue
+            self._plan_node(node, results, sig_hashes, workflow, plan)
+
+        # Include any nodes not reachable from terminals (shouldn't happen
+        # in practice, but plan is expected to cover every registered node).
+        for name, node in workflow._nodes.items():
+            plan.setdefault(name, NodePlan(name, "", False, (), True))
+        return plan
+
+    def _plan_node(
+        self,
+        node: Node,
+        results: dict[Node, Any],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+        plan: dict[str, NodePlan],
+    ) -> None:
+        """Compute a NodePlan for a single node, recursing into sub-workflows."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
+        if isinstance(node, SubWorkflowNode):
+            self._plan_sub_workflow(node, results, sig_hashes, workflow, plan)
+            return
+
+        cached_df, sig_hash = self._check_node_cache(
+            node, results, sig_hashes, workflow,
+        )
+        if sig_hash is None:
+            # Non-cacheable top-level node (shouldn't happen outside SubWorkflowNode)
+            plan[node.name] = NodePlan(
+                node.name, "", False,
+                tuple(self._plan_upstream_names(node)), False,
+            )
+            return
+        sig_hashes[node] = sig_hash
+        plan[node.name] = NodePlan(
+            node.name,
+            sig_hash,
+            cached_df is not None,
+            tuple(self._plan_upstream_names(node)),
+            False,
+        )
+
+    def _plan_sub_workflow(
+        self,
+        node: Any,
+        results: dict[Node, Any],
+        sig_hashes: dict[Node, str],
+        workflow: Any,
+        plan: dict[str, NodePlan],
+    ) -> None:
+        """Recursively plan a SubWorkflowNode's internal nodes."""
+        from bioimageflow.sub_workflow import SubWorkflowNode
+
+        # Proxy node stands in for the sub-workflow's external inputs.
+        proxy_node = node._proxy_node
+        sig_hashes[proxy_node] = "proxy"
+
+        internal_nodes = set(node.internal_nodes)
+        internal_nodes.add(proxy_node)
+        internal_order = self._topological_sort(internal_nodes)
+
+        # Scope names during planning so cache lookups match execute().
+        original_names: dict[Node, str] = {}
+        for inode in node.internal_nodes:
+            original_names[inode] = inode._name
+            inode._name = f"{node.name}/{inode._name}"
+
+        try:
+            for inode in internal_order:
+                if inode is proxy_node:
+                    continue
+                if isinstance(inode, SubWorkflowNode):
+                    self._plan_sub_workflow(inode, results, sig_hashes, workflow, plan)
+                    continue
+                self._plan_node(inode, results, sig_hashes, workflow, plan)
+
+            # Combined hash — same shape as _execute_sub_workflow.
+            import hashlib
+            import json
+            terminal_hashes = {}
+            for field, col_ref in node._output_mapping.items():
+                if col_ref.node in sig_hashes:
+                    terminal_hashes[field] = sig_hashes[col_ref.node]
+            combined = hashlib.sha256(
+                json.dumps(terminal_hashes, sort_keys=True).encode()
+            ).hexdigest()
+            sig_hashes[node] = combined
+            plan[node.name] = NodePlan(
+                node.name,
+                combined,
+                False,  # SubWorkflowNode itself isn't cached at this level.
+                tuple(self._plan_upstream_names(node)),
+                False,
+            )
+        finally:
+            for inode, orig_name in original_names.items():
+                inode._name = orig_name
+
+    def _plan_upstream_names(self, node: Node) -> list[str]:
+        names: list[str] = []
+        for up in node._upstream_nodes:
+            names.append(up.name)
+        for arg in node._args:
+            if isinstance(arg, Node):
+                names.append(arg.name)
+        return names
 
 
 class SequentialEngine(DefaultEngine):

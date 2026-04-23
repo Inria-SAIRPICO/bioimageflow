@@ -2,9 +2,21 @@
 
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
 from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent
-from bioimageflow.engine import NodeStep as NodeStep, DisabledNodeError as DisabledNodeError
+from bioimageflow.engine import (
+    NodeStep as NodeStep,
+    NodePlan as NodePlan,
+    DisabledNodeError as DisabledNodeError,
+)
 from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError
-from bioimageflow.validation import get_inputs_schema as get_inputs_schema
+from bioimageflow.validation import (
+    get_inputs_schema as get_inputs_schema,
+    serialize_image_spec as serialize_image_spec,
+    ValidationError as ValidationError,
+    ValidationErrorKind as ValidationErrorKind,
+    check_type_compat as check_type_compat,
+    validate_parameters as validate_parameters,
+)
+from bioimageflow.engine import topological_order as topological_order
 from bioimageflow.sub_workflow import SubWorkflow as SubWorkflow, SubWorkflowNode as SubWorkflowNode
 from bioimageflow.tool_loader import (
     load_versioned_package as load_versioned_package,

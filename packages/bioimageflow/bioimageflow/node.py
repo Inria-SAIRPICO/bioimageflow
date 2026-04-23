@@ -1,28 +1,79 @@
 """Node and ColumnRef — graph construction primitives."""
 
+import contextvars
 import threading
 from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Any
 
 from bioimageflow_core.tool import ProcessingTool, BaseTool
-from bioimageflow.validation import extract_image_spec
+from bioimageflow.validation import (
+    ValidationError,
+    ValidationErrorKind,
+    extract_image_spec,
+)
 from bioimageflow_core.types import check_compatibility
 
 
 class ColumnNotFoundError(Exception):
     """Raised when a column reference targets a non-existent column."""
-    pass
+
+    def to_validation_error(
+        self,
+        node: str,
+        field: str | None = None,
+    ) -> ValidationError:
+        return ValidationError(
+            kind="column_not_found",
+            message=str(self),
+            node=node,
+            field=field,
+        )
 
 
 class BindingError(Exception):
     """Raised when a required input field has no source."""
-    pass
+
+    def to_validation_error(
+        self,
+        node: str,
+        field: str | None = None,
+        kind: ValidationErrorKind = "missing_input",
+    ) -> ValidationError:
+        return ValidationError(
+            kind=kind,
+            message=str(self),
+            node=node,
+            field=field,
+        )
 
 
 class IndexAlignmentError(Exception):
     """Raised when upstream indices are incompatible."""
-    pass
+
+    def to_validation_error(
+        self,
+        node: str,
+        field: str | None = None,
+    ) -> ValidationError:
+        return ValidationError(
+            kind="construction_failed",
+            message=str(self),
+            node=node,
+            field=field,
+        )
+
+
+# ── Error-collector ContextVar ──────────────────────────────────────────
+# When set to a list, node-construction errors are appended to it instead
+# of being raised. See Workflow.collect_errors() for the public API.
+_error_collector: contextvars.ContextVar[list[ValidationError] | None] = (
+    contextvars.ContextVar("_bif_error_collector", default=None)
+)
+
+
+def _get_error_collector() -> list[ValidationError] | None:
+    return _error_collector.get()
 
 
 @dataclass(frozen=True)
@@ -89,8 +140,20 @@ class Node:
 
         # Register with active workflow
         wf = get_active_workflow()
+        collector = _get_error_collector()
         if wf is not None:
             if name is not None and name in wf._nodes:
+                if collector is not None:
+                    collector.append(ValidationError(
+                        kind="duplicate_name",
+                        message=(
+                            f"Node name '{name}' is not unique. Each node in "
+                            f"a Workflow must have a unique name."
+                        ),
+                        node=name,
+                    ))
+                    # Skip registration to keep the existing node addressable.
+                    return
                 raise ValueError(
                     f"Node name '{name}' is not unique. Each node in a Workflow "
                     f"must have a unique name."
@@ -102,41 +165,72 @@ class Node:
             if isinstance(arg, Node):
                 self._upstream_nodes.add(arg)
 
-        # Process keyword arguments — unregister on failure
-        try:
+        # Process keyword arguments. When a collector is active we keep the
+        # node registered and best-effort wire what we can; otherwise we
+        # unregister on failure so the workflow stays clean.
+        if collector is not None:
             self._process_kwargs()
-        except Exception:
-            if wf is not None:
-                wf._nodes.pop(self._name, None)
-            raise
+        else:
+            try:
+                self._process_kwargs()
+            except Exception:
+                if wf is not None:
+                    wf._nodes.pop(self._name, None)
+                raise
 
     def _process_kwargs(self) -> None:
-        """Validate and categorize keyword arguments."""
+        """Validate and categorize keyword arguments.
+
+        When an error-collector is active (via ``Workflow.collect_errors``),
+        per-kwarg exceptions are appended as :class:`ValidationError` and
+        processing continues so the GUI can surface every problem in one
+        pass. Without a collector, the first error is raised (existing
+        behavior).
+        """
         from bioimageflow.template import validate_template, get_output_templates
 
         input_annotations = self.tool.Inputs._get_all_annotations()
+        collector = _get_error_collector()
 
         for key, value in self._kwargs.items():
-            if key in input_annotations:
-                if isinstance(value, ColumnRef):
-                    self._column_bindings[key] = value
-                    self._upstream_nodes.add(value.node)
-                    # Type compatibility check
-                    self._check_type_compat(key, value)
-                elif isinstance(value, Node):
-                    # Node shorthand: field=node -> field=node["field"]
-                    col_ref = value[key]  # This will raise ColumnNotFoundError if missing
-                    self._column_bindings[key] = col_ref
-                    self._upstream_nodes.add(value)
-                    self._check_type_compat(key, col_ref)
+            try:
+                if key in input_annotations:
+                    if isinstance(value, ColumnRef):
+                        self._column_bindings[key] = value
+                        self._upstream_nodes.add(value.node)
+                        # Type compatibility check
+                        self._check_type_compat(key, value)
+                    elif isinstance(value, Node):
+                        # Node shorthand: field=node -> field=node["field"]
+                        col_ref = value[key]  # This will raise ColumnNotFoundError if missing
+                        self._column_bindings[key] = col_ref
+                        self._upstream_nodes.add(value)
+                        self._check_type_compat(key, col_ref)
+                    else:
+                        self._constant_bindings[key] = value
                 else:
-                    self._constant_bindings[key] = value
-            else:
-                raise BindingError(
-                    f"Unknown or unexpected keyword argument '{key}' for tool "
-                    f"'{type(self.tool).__name__}'. Available input fields: "
-                    f"{list(input_annotations.keys())}"
-                )
+                    raise BindingError(
+                        f"Unknown or unexpected keyword argument '{key}' for tool "
+                        f"'{type(self.tool).__name__}'. Available input fields: "
+                        f"{list(input_annotations.keys())}"
+                    )
+            except BindingError as exc:
+                if collector is None:
+                    raise
+                # Distinguish "unknown kwarg" from type-mismatch/missing by
+                # checking whether the key is a declared input.
+                if key not in input_annotations:
+                    collector.append(exc.to_validation_error(
+                        self._name, field=key, kind="unknown_input",
+                    ))
+                else:
+                    collector.append(exc.to_validation_error(
+                        self._name, field=key, kind="type_mismatch",
+                    ))
+            except ColumnNotFoundError as exc:
+                if collector is None:
+                    raise
+                collector.append(exc.to_validation_error(self._name, field=key))
 
         # Check for missing required fields (no default, no binding)
         for field_name, annotation in input_annotations.items():
@@ -146,10 +240,13 @@ class Node:
                 continue
             if hasattr(self.tool.Inputs, field_name):
                 continue  # Has default
-            raise BindingError(
+            exc = BindingError(
                 f"Missing required input '{field_name}' for tool '{type(self.tool).__name__}'. "
                 f"Binding error: no column reference, constant, or default provided."
             )
+            if collector is None:
+                raise exc
+            collector.append(exc.to_validation_error(self._name, field=field_name))
 
         # Validate output templates for ProcessingTool
         if isinstance(self.tool, ProcessingTool) and self.tool.Outputs is not None:
@@ -157,7 +254,17 @@ class Node:
             if hasattr(outputs_cls, '_get_all_annotations'):
                 templates = get_output_templates(outputs_cls, self.tool.Inputs)
                 for field_name, template in templates.items():
-                    validate_template(template, input_annotations)
+                    try:
+                        validate_template(template, input_annotations)
+                    except Exception as exc:
+                        if collector is None:
+                            raise
+                        collector.append(ValidationError(
+                            kind="construction_failed",
+                            message=str(exc),
+                            node=self._name,
+                            field=field_name,
+                        ))
 
     def _check_type_compat(self, input_field: str, col_ref: ColumnRef) -> None:
         """Check type compatibility between upstream output and this input."""
@@ -217,7 +324,13 @@ class Node:
                     )
                     if close:
                         msg += f" Did you mean: {', '.join(close)}?"
-                    raise ColumnNotFoundError(msg)
+                    exc = ColumnNotFoundError(msg)
+                    collector = _get_error_collector()
+                    if collector is None:
+                        raise exc
+                    collector.append(exc.to_validation_error(self._name))
+                    # Fall through — return a best-effort ColumnRef so
+                    # downstream construction can continue collecting.
 
         return ColumnRef(node=self, column=column)
 
