@@ -11,6 +11,9 @@ from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as Col
 from bioimageflow.validation import (
     get_inputs_schema as get_inputs_schema,
     serialize_image_spec as serialize_image_spec,
+    serialize_input_schema as serialize_input_schema,
+    serialize_output_schema as serialize_output_schema,
+    SchemaSerializationError as SchemaSerializationError,
     ValidationError as ValidationError,
     ValidationErrorKind as ValidationErrorKind,
     check_type_compat as check_type_compat,

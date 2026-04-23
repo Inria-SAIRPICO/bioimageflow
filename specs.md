@@ -181,6 +181,37 @@ This check is used during [input binding](#45-input-binding-logic-graph-construc
 
 **Wire-shape serialization:** `bioimageflow.validation.serialize_image_spec(spec) -> dict | None` returns a JSON-friendly representation of an `ImageSpec` — `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}` with enum value strings (e.g. `"intensity"`, `"YX"`). This is the canonical shape for callers (GUIs, linters, documentation generators) that need to expose type information over the wire. `get_inputs_schema(tool)` includes it alongside the raw `ImageSpec` object under `image_spec_serialized`.
 
+**Tool-level wire-shape serialization:** For a full per-field wire-format schema, callers should use `bioimageflow.validation.serialize_input_schema(tool_class) -> dict[str, dict]` and `serialize_output_schema(tool_class) -> dict[str, dict]`. Both accept the tool *class* (no instantiation is required) and return a fully JSON-serializable dict; both return `{}` when the tool has no `Inputs` / `Outputs` class attribute.
+
+For inputs, each field entry has exactly these keys:
+
+```python
+{
+    "type": "float",                 # display-name string (see rules below)
+    "required": True,                # bool; True iff no class-level default
+    "connectable": "not_by_default", # "never" | "not_by_default" | "by_default"
+    "default": 1.0,                  # JSON-safe default, or None
+    "display_name": "Blur sigma",    # GUIMeta.display_name or None
+    "description": "…",              # GUIMeta.description or None
+    "group": "advanced",             # GUIMeta.group or None
+    "min": 0.1,                      # GUIMeta.min or None
+    "max": 50.0,                     # GUIMeta.max or None
+    "step": 0.1,                     # GUIMeta.step or None
+    "choices": ["fast", "accurate"], # from Literal[...] / Enum, or None
+    "image_spec": {...},             # serialize_image_spec(...) or None
+}
+```
+
+The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `ImagePath(...)` / `ImageShared(...)` are recognized specially and emit `"ImagePath"` / `"ImageShared"`.
+
+The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
+
+`required` is determined solely by presence of a class-level default on `Inputs`: a field with no default is `required=True`, even when its type is `Optional[X]` or `X | None`. These are orthogonal concerns — a caller of a tool whose field is typed `Optional[int]` with no default must pass `None` explicitly.
+
+Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None}`. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
+
+Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
+
 ### 2.5 Interface Type Constraints
 
 `Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` types (`ImagePath`, `ImageShared`). Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.4](#34-dataframetool)).
@@ -352,6 +383,8 @@ class BaseTool(ABC):
 ```
 
 `__call__` is defined on each subclass (`ProcessingTool`, `DataFrameTool`) rather than on `BaseTool`, because the calling conventions differ: `ProcessingTool` accepts only keyword arguments (column references, node shorthand, or constants); `DataFrameTool` accepts positional arguments (upstream nodes) and keyword arguments (`Inputs` parameters). Both use a lazy import guard so that the method exists in worker environments but raises a clear error if accidentally invoked there (see below).
+
+GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` — the canonical, JSON-safe representation (see §2.4).
 
 ### 3.4 ProcessingTool
 
@@ -542,6 +575,8 @@ class MyTool(ProcessingTool):
 `DataFrameTool` is the base class for tools that transform DataFrames in the main process (no isolated environment). It provides two methods: `merge_dataframes` for combining upstream DataFrames, and `transform` for operating on the merged result. It lives in the `bioimageflow` package.
 
 DataFrameTool calls use **positional arguments** for upstream nodes (whose output DataFrames are passed to `merge_dataframes`) and **keyword arguments** for `Inputs` parameters (constants).
+
+GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` — the canonical, JSON-safe representation (see §2.4). Tools that declare `class Outputs(Passthrough): pass` are serialized as the marker `{"_passthrough": True}`, signalling to the UI that the tool inherits upstream columns.
 
 ```python
 from bioimageflow import DataFrameTool
@@ -2034,6 +2069,8 @@ Helpers are provided on each domain exception — `.to_validation_error(node, fi
 
 The module-level helper `bioimageflow.validate_parameters(tool_class, parameters)` returns `list[ValidationError]` for a single node's constants without needing a Workflow. The module-level helper `bioimageflow.check_type_compat(node, field, col_ref)` returns `ValidationError | None` for a single column binding. `bioimageflow.serialize_image_spec(spec)` returns a JSON-friendly dict representation of an `ImageSpec` (`{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}` with enum value strings) — exposed in `get_inputs_schema(tool)[field]["image_spec_serialized"]` for GUI use.
 
+**Tool-level wire-format schema.** GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` — the canonical, JSON-safe representation. Both accept the tool class (no instantiation), return `{}` for tools without `Inputs` / `Outputs`, and serialize `connectable` as one of `"never" | "not_by_default" | "by_default"`. `Outputs` that subclass `Passthrough` are serialized as the marker `{"_passthrough": True}`. `required` is determined by presence of a class-level default — it is orthogonal to whether the field's type is `Optional[X]`. See §2.4 for the full field shape.
+
 ---
 
 ## 7. File Management
@@ -2770,3 +2807,4 @@ env.exit()  # Shuts down all workers and releases resources
 ## Changelog
 
 - GUI Validation and Planning API: `Workflow.from_dict` / `to_dict`, `Workflow.validate`, `Workflow.plan`, `Workflow.collect_errors`, `Workflow.topological_order`, `Workflow.downstream_of`, `ValidationError` dataclass, `NodePlan` dataclass, and helpers `validate_parameters` / `check_type_compat` / `serialize_image_spec`. Additive; `Workflow.load` / `export` / `compute` are unchanged. Note: `Workflow.validate()` runs Pydantic validation on supplied constants (`parameter_invalid`) that was previously deferred to execution — callers relying on engine coercion may need explicit defaults or broader `Inputs` types.
+- Wire-format schema serializers: `bioimageflow.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` return JSON-safe per-field schemas (including `choices` from `Literal` / `Enum`, three-state `connectable`, `image_spec`) for tool classes without requiring instantiation. `Passthrough` outputs serialize to `{"_passthrough": True}`. `SchemaSerializationError` is the accompanying exception. Recommended for any GUI or external consumer that needs tool metadata over the wire; `get_inputs_schema(tool)` is still available for Python-object introspection. Additive; no existing API changed.

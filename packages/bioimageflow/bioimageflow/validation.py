@@ -5,10 +5,20 @@ import importlib.metadata
 import inspect
 import os
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, get_args, get_origin
+from enum import Enum
+from pathlib import Path
+from types import UnionType
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from bioimageflow_core.types import Connectable, ImageSpec, extract_gui_meta
 from bioimageflow_core.tool import IOModel, BaseTool
+
+
+class SchemaSerializationError(Exception):
+    """Raised when :func:`serialize_input_schema` / :func:`serialize_output_schema`
+    cannot produce a wire-format schema for a tool class — typically because
+    the tool class could not be instantiated for introspection.
+    """
 
 
 ValidationErrorKind = Literal[
@@ -283,3 +293,238 @@ def get_source_hash(tool_class: type[Any]) -> str:
         return hashlib.sha256(source.encode()).hexdigest()
     except (OSError, TypeError):
         return "nosource"
+
+
+# ---------------------------------------------------------------------------
+# Wire-format serialization (serialize_input_schema / serialize_output_schema)
+# ---------------------------------------------------------------------------
+
+
+def _unwrap_annotated(annotation: Any) -> Any:
+    """Return the first argument of ``Annotated[...]``; pass through otherwise."""
+    if get_origin(annotation) is Annotated:
+        return get_args(annotation)[0]
+    return annotation
+
+
+def _unwrap_optional(annotation: Any) -> Any:
+    """If ``annotation`` is ``Optional[X]`` or ``X | None``, return ``X``; otherwise pass through.
+
+    Only unwraps when exactly one non-``None`` argument remains.
+    """
+    origin = get_origin(annotation)
+    if origin is Union or origin is UnionType:
+        args = [a for a in get_args(annotation) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return annotation
+
+
+def _jsonify_default(value: Any) -> Any:
+    """Convert a default value to a JSON-safe representation (§4.3).
+
+    Rules:
+    - ``None``, ``bool``, ``int``, ``float``, ``str`` → returned as-is.
+    - :class:`pathlib.Path` → ``str(path)``.
+    - :class:`~enum.Enum` member → ``str(member.value)``.
+    - ``list`` / ``tuple`` → list of recursively-serialized elements.
+    - ``dict`` → dict with string keys and recursively-serialized values.
+    - Anything else → ``str(value)`` fallback.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, (list, tuple)):
+        return [_jsonify_default(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonify_default(v) for k, v in value.items()}
+    return str(value)
+
+
+def _display_type_name(annotation: Any) -> str:
+    """Return the display-name string for ``annotation`` (§4.2).
+
+    The string is the type label GUIs use for widget selection. It is not a
+    runtime type — enumeration of values goes through :func:`_extract_choices`
+    and ``None``-ability is expressed via ``required``.
+    """
+    # ``ImagePath(...)`` / ``ImageShared(...)`` are factory functions that
+    # return ``Annotated[Path | SharedArray, ImageSpec(...)]``. Platform code
+    # special-cases these names for widget selection, so we recognize them
+    # before generic Annotated-unwrapping collapses them to the base type.
+    if get_origin(annotation) is Annotated and extract_image_spec(annotation) is not None:
+        base = get_args(annotation)[0]
+        if base is Path:
+            return "ImagePath"
+        base_name = getattr(base, "__name__", None)
+        if base_name == "SharedArray":
+            return "ImageShared"
+
+    inner = _unwrap_annotated(annotation)
+    inner = _unwrap_optional(inner)
+    # Optional may have wrapped an Annotated in turn (e.g. Optional[Annotated[int, ...]]).
+    inner = _unwrap_annotated(inner)
+
+    if inner is Path:
+        return "Path"
+
+    origin = get_origin(inner)
+    if origin is Literal:
+        args = get_args(inner)
+        if not args:
+            return "str"
+        return type(args[0]).__name__
+
+    if isinstance(inner, type) and issubclass(inner, Enum):
+        return "str"
+
+    if origin is list or inner is list:
+        return "list"
+    if origin is dict or inner is dict:
+        return "dict"
+    if origin is tuple or inner is tuple:
+        return "tuple"
+
+    if isinstance(inner, type):
+        return inner.__name__
+
+    return str(inner)
+
+
+def _extract_choices(annotation: Any) -> list[str] | None:
+    """Return the list of string choices for ``annotation`` (§4.6), or ``None``.
+
+    Supports ``Literal[...]`` and :class:`~enum.Enum` subclasses, unwrapping
+    ``Annotated[...]`` and ``Optional[...]`` first.
+    """
+    inner = _unwrap_annotated(annotation)
+    inner = _unwrap_optional(inner)
+    inner = _unwrap_annotated(inner)
+
+    if get_origin(inner) is Literal:
+        return [str(arg) for arg in get_args(inner)]
+
+    if isinstance(inner, type) and issubclass(inner, Enum):
+        return [str(member.value) for member in inner]
+
+    return None
+
+
+def _serialize_connectable(c: Connectable | None) -> str:
+    """Return the lowercase string form of a :class:`Connectable` (§4.4).
+
+    ``None`` is mapped to ``"not_by_default"``, matching the default value
+    of :attr:`GUIMeta.connectable`.
+    """
+    if c is None:
+        return Connectable.NOT_BY_DEFAULT.value
+    return c.value
+
+
+def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, Any]]:
+    """Return a JSON-serializable input schema for a tool.
+
+    For each field declared on ``tool_class.Inputs`` (respecting MRO),
+    returns a dict with the following keys:
+
+    - ``type``: display-name string (e.g. ``"float"``, ``"Path"``,
+      ``"ImagePath"``) — see :func:`_display_type_name`.
+    - ``required``: ``True`` when no class-level default is set on
+      ``Inputs`` for the field. Orthogonal to ``Optional[X]``.
+    - ``connectable``: one of ``"never" | "not_by_default" | "by_default"``
+      (from :class:`Connectable`).
+    - ``default``: JSON-safe representation of the class-level default, or
+      ``None`` when the field is required.
+    - ``display_name``, ``description``, ``group``, ``min``, ``max``,
+      ``step``: values from :class:`GUIMeta` (or ``None`` when absent).
+    - ``choices``: list of strings for ``Literal[...]`` / :class:`Enum`
+      fields, or ``None``.
+    - ``image_spec``: dict produced by :func:`serialize_image_spec`, or
+      ``None`` when the field has no :class:`ImageSpec`.
+
+    Returns ``{}`` when ``tool_class`` has no ``Inputs`` class attribute.
+
+    This is the canonical wire format consumed by GUIs (see the
+    ``bioimageflow-platform`` ``GET /tools`` endpoint). Callers that want
+    Python objects (raw ``type``, raw :class:`Connectable`) should use
+    :func:`get_inputs_schema` instead.
+    """
+    inputs_cls = getattr(tool_class, "Inputs", None)
+    if inputs_cls is None:
+        return {}
+    annotations = inputs_cls._get_all_annotations()
+    schema: dict[str, dict[str, Any]] = {}
+
+    for field_name, annotation in annotations.items():
+        image_spec = extract_image_spec(annotation)
+        gui_meta = extract_gui_meta(annotation)
+
+        has_default = hasattr(inputs_cls, field_name)
+        raw_default = getattr(inputs_cls, field_name, None) if has_default else None
+
+        entry: dict[str, Any] = {
+            "type": _display_type_name(annotation),
+            "required": not has_default,
+            "connectable": _serialize_connectable(
+                gui_meta.connectable if gui_meta is not None else None
+            ),
+            "default": _jsonify_default(raw_default) if has_default else None,
+            "display_name": gui_meta.display_name if gui_meta is not None else None,
+            "description": gui_meta.description if gui_meta is not None else None,
+            "group": gui_meta.group if gui_meta is not None else None,
+            "min": gui_meta.min if gui_meta is not None else None,
+            "max": gui_meta.max if gui_meta is not None else None,
+            "step": gui_meta.step if gui_meta is not None else None,
+            "choices": _extract_choices(annotation),
+            "image_spec": serialize_image_spec(image_spec),
+        }
+        schema[field_name] = entry
+
+    return schema
+
+
+def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
+    """Return a JSON-serializable output schema for a tool.
+
+    Per-field shape::
+
+        {"type": str, "default": Any | None, "image_spec": dict | None}
+
+    Returns ``{}`` when ``tool_class`` has no ``Outputs`` class attribute.
+
+    When ``Outputs`` is (or subclasses) :class:`bioimageflow.Passthrough`,
+    the returned dict is the marker ``{"_passthrough": True}`` — GUIs
+    should render this as "inherits upstream columns".
+    """
+    outputs_cls = getattr(tool_class, "Outputs", None)
+    if outputs_cls is None:
+        return {}
+
+    # Passthrough marker (DataFrameTool): avoid importing bioimageflow.dataframe_tool
+    # at module import time by resolving lazily.
+    try:
+        from bioimageflow.dataframe_tool import Passthrough
+    except ImportError:  # pragma: no cover - defensive
+        Passthrough = None  # type: ignore[assignment]
+
+    if Passthrough is not None and isinstance(outputs_cls, type) and issubclass(outputs_cls, Passthrough):
+        return {"_passthrough": True}
+
+    annotations = outputs_cls._get_all_annotations()
+    schema: dict[str, dict[str, Any]] = {}
+
+    for field_name, annotation in annotations.items():
+        image_spec = extract_image_spec(annotation)
+        has_default = hasattr(outputs_cls, field_name)
+        raw_default = getattr(outputs_cls, field_name, None) if has_default else None
+
+        schema[field_name] = {
+            "type": _display_type_name(annotation),
+            "default": _jsonify_default(raw_default) if has_default else None,
+            "image_spec": serialize_image_spec(image_spec),
+        }
+
+    return schema

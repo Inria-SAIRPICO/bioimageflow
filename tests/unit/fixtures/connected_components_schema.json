@@ -1,0 +1,40 @@
+{
+  "inputs": {
+    "input_image": {
+      "choices": null,
+      "connectable": "by_default",
+      "default": null,
+      "description": "Binary image (non-zero pixels are foreground) whose connected components are labelled.",
+      "display_name": "Input image",
+      "group": null,
+      "image_spec": {
+        "dtypes": [],
+        "formats": [],
+        "layouts": ["YX", "ZYX"],
+        "semantics": ["binary"]
+      },
+      "max": null,
+      "min": null,
+      "required": true,
+      "step": null,
+      "type": "ImagePath"
+    }
+  },
+  "outputs": {
+    "num_labels": {
+      "default": null,
+      "image_spec": null,
+      "type": "int"
+    },
+    "output_image": {
+      "default": "{input_image.stem}_labels{ext}",
+      "image_spec": {
+        "dtypes": [],
+        "formats": [],
+        "layouts": ["YX", "ZYX"],
+        "semantics": ["label"]
+      },
+      "type": "ImagePath"
+    }
+  }
+}
