@@ -31,6 +31,7 @@ ValidationErrorKind = Literal[
     "unknown_tool",
     "duplicate_name",
     "construction_failed",
+    "source_tool_upstream",
 ]
 
 
@@ -552,6 +553,90 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
         schema[field_name] = entry
 
     return schema
+
+
+def _overrides_classmethod(cls: type, base: type, method_name: str) -> bool:
+    """Return True if ``cls`` overrides ``base.<method_name>`` (a classmethod).
+
+    Compares unwrapped function objects (``__func__``) so that inheritance
+    of the same classmethod returns False, and a real override returns True.
+    """
+    own = getattr(cls, method_name, None)
+    inherited = getattr(base, method_name, None)
+    own_func = getattr(own, "__func__", None)
+    base_func = getattr(inherited, "__func__", None)
+    return own_func is not None and base_func is not None and own_func is not base_func
+
+
+def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
+    """Return per-tool wire-format metadata for ``tool_class``. JSON-safe.
+
+    Keys:
+
+    - ``tool_type`` — ``"DataFrameTool"`` if ``tool_class`` is a subclass of
+      :class:`bioimageflow.DataFrameTool`, otherwise ``"ProcessingTool"``.
+    - ``accepts_upstream`` — ``True`` if the tool accepts positional upstream
+      :class:`Node` arguments. Always ``True`` for ``ProcessingTool`` (whose
+      column-bound inputs are upstream-equivalent for the GUI). For
+      ``DataFrameTool`` it reflects ``tool_class.accepts_upstream``.
+    - ``dynamic_outputs`` — ``True`` if the tool's output schema depends on
+      its inputs (i.e. it overrides :meth:`DataFrameTool.resolve_outputs`).
+
+    Companion to :func:`serialize_input_schema` / :func:`serialize_output_schema`,
+    which describe per-field schemas. This helper exists so platform code does
+    not have to perform ``issubclass`` checks against library types itself.
+    """
+    # Lazy import to keep validation.py independent of the orchestrator
+    # subpackage at module load time.
+    try:
+        from bioimageflow.dataframe_tool import DataFrameTool
+    except ImportError:  # pragma: no cover - defensive
+        DataFrameTool = None  # type: ignore[assignment]
+
+    if DataFrameTool is not None and isinstance(tool_class, type) and issubclass(tool_class, DataFrameTool):
+        tool_type = "DataFrameTool"
+        accepts_upstream = bool(getattr(tool_class, "accepts_upstream", True))
+        # ``dynamic_outputs`` is True when the tool's resolved schema can
+        # differ from a static ``serialize_output_schema(cls)`` — i.e. it
+        # overrides either ``resolve_outputs`` (input-driven schema like
+        # ``Generate``) or ``resolve_merge_schema`` (upstream-driven schema
+        # on built-in merge tools).
+        dynamic_outputs = (
+            _overrides_classmethod(tool_class, DataFrameTool, "resolve_outputs")
+            or _overrides_classmethod(tool_class, DataFrameTool, "resolve_merge_schema")
+        )
+    else:
+        tool_type = "ProcessingTool"
+        accepts_upstream = True
+        dynamic_outputs = False
+
+    return {
+        "tool_type": tool_type,
+        "accepts_upstream": accepts_upstream,
+        "dynamic_outputs": dynamic_outputs,
+    }
+
+
+def serialize_resolved_outputs(node: Any) -> dict[str, Any]:
+    """Resolve a configured node's output schema for the wire format. JSON-safe.
+
+    Returns ``{"resolved": True, "columns": <schema>}`` when
+    :meth:`bioimageflow.node.Node.get_output_schema` resolves; otherwise
+    ``{"resolved": False, "columns": {}}``.
+
+    GUIs use this to render per-column output pins on configured nodes
+    (``Generate(column_name="x")`` or fully-configured merge tools). When
+    ``resolved`` is ``False`` the GUI should render a placeholder pin and
+    re-call after the user supplies more inputs.
+
+    The ``columns`` dict has the same shape as
+    :func:`serialize_output_schema` — either per-field entries or the
+    ``{"_passthrough": True, ...}`` marker.
+    """
+    schema = node.get_output_schema()
+    if schema is None:
+        return {"resolved": False, "columns": {}}
+    return {"resolved": True, "columns": schema}
 
 
 def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:

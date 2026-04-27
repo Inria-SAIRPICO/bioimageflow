@@ -8,10 +8,13 @@ Covers:
 - CountLabelOverlaps: aggregation with explicit Outputs
 - DataFrameTool as source node (no positional args)
 - Chaining DataFrameTools before ProcessingTools (compound pattern)
+- resolve_outputs / Node.get_output_schema (dynamic output schema)
 """
 
 
-from bioimageflow import Workflow
+import pytest
+
+from bioimageflow import ColumnNotFoundError, Workflow
 
 from .conftest import (
     ColumnRegex,
@@ -141,3 +144,97 @@ class TestDataFrameIndexAsString:
             df = wf.compute(raw)
             for idx in df.index:
                 assert isinstance(idx, str), f"Index {idx!r} should be a string, got {type(idx).__name__}"
+
+
+class TestGenerateResolveOutputs:
+    """Generate.resolve_outputs returns a column schema derived from inputs."""
+
+    def test_resolve_with_column_name(self):
+        from bioimageflow_common_tools import Generate
+
+        out = Generate.resolve_outputs({"column_name": "sensitivity"})
+        assert out is not None
+        assert "sensitivity" in out
+        assert out["sensitivity"]["type"] == "any"
+
+    def test_resolve_with_empty_inputs(self):
+        from bioimageflow_common_tools import Generate
+
+        assert Generate.resolve_outputs({}) is None
+
+    def test_resolve_with_none_inputs(self):
+        from bioimageflow_common_tools import Generate
+
+        assert Generate.resolve_outputs(None) is None
+
+    def test_construction_time_columnref_validates(self):
+        """Generate(column_name="x")["x"] succeeds with no deferral."""
+        from bioimageflow_common_tools import Generate
+
+        with Workflow():
+            g = Generate()(column_name="sensitivity", values=[1, 2])
+            ref = g["sensitivity"]
+            assert ref.column == "sensitivity"
+
+    def test_construction_time_unknown_column_raises(self):
+        """Generate(column_name="x")["y"] raises ColumnNotFoundError."""
+        from bioimageflow_common_tools import Generate
+
+        with Workflow():
+            g = Generate()(column_name="x", values=[1])
+            with pytest.raises(ColumnNotFoundError):
+                _ = g["nope"]
+
+    def test_unconfigured_generate_defers(self, tmp_workspace):
+        """Generate() with no column_name → schema is None → ColumnRef
+        is allowed to be created (deferred to runtime).
+
+        We can't *construct* a Generate node without column_name (it's a
+        required Inputs field), so this test covers the case where
+        column_name is in the binding context but we ask about a column
+        not declared.
+        """
+        # No way to create Generate without column_name; just ensure that
+        # if get_output_schema returns None, __getitem__ does not raise.
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow_core import IOModel
+
+        class DynamicNoSchema(DataFrameTool):
+            display_name = "Dynamic"
+
+            class Inputs(IOModel):
+                pass
+
+            @classmethod
+            def resolve_outputs(cls, inputs=None):
+                return None
+
+        with Workflow():
+            n = DynamicNoSchema()()
+            # No schema → no construction-time validation → succeeds.
+            ref = n["any_column"]
+            assert ref.column == "any_column"
+
+
+class TestNodeGetOutputSchema:
+    """Node.get_output_schema for non-merge tools."""
+
+    def test_files_node_schema(self, tmp_workspace):
+        from bioimageflow_common_tools import Files
+
+        with Workflow():
+            f = Files()(path=str(tmp_workspace / "data"))
+            schema = f.get_output_schema()
+            assert schema is not None
+            assert set(schema.keys()) == {"path", "filename"}
+
+    def test_processing_tool_static_schema(self):
+        with Workflow():
+            from .conftest import StubSegmenter, FileLoader
+
+            load = FileLoader()(path="/tmp/x")
+            seg = StubSegmenter()(input_image=load["path"])
+            schema = seg.get_output_schema()
+            assert schema is not None
+            assert "mask" in schema
+            assert "cell_count" in schema

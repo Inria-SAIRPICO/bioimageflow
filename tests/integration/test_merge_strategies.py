@@ -11,6 +11,8 @@ Covers:
 """
 
 
+import pytest
+
 from bioimageflow import Workflow
 from bioimageflow_common_tools import Collect, Concat, CrossJoin, InnerJoin, JoinOnColumn
 
@@ -188,3 +190,130 @@ class TestCollect:
             assert "mask" in df.columns       # from masks
             assert "mean_intensity" in df.columns  # from stats
             assert len(df) == 3
+
+
+class TestMergeSchemaPropagation:
+    """Node.get_output_schema propagates through merge tools."""
+
+    def test_inner_join_schema(self, tmp_workspace):
+        from bioimageflow_common_tools import Files
+
+        with Workflow():
+            files = Files()(path=str(tmp_workspace / "data"))
+            seg = StubSegmenter()(input_image=files["path"])
+            joined = InnerJoin()(files, seg)
+            schema = joined.get_output_schema()
+            assert schema is not None
+            # Files (path, filename) ∪ StubSegmenter (mask, cell_count); first
+            # wins on duplicate keys.
+            assert set(schema.keys()) >= {"path", "filename", "mask", "cell_count"}
+
+    def test_cross_join_schema_parameter_space_pattern(self):
+        """The exact pattern from example-workflows/parameter_space_exploration."""
+        from bioimageflow_common_tools import Files, Generate
+
+        with Workflow():
+            files = Files()(path="/tmp")
+            sens = Generate()(column_name="sensitivity", values=[1, 2])
+            size = Generate()(column_name="size", values=[10, 20])
+            grid = CrossJoin()(files, sens, size)
+            schema = grid.get_output_schema()
+            assert schema is not None
+            assert set(schema.keys()) == {"path", "filename", "sensitivity", "size"}
+
+    def test_join_on_column_schema(self):
+        from bioimageflow_common_tools import Files
+
+        with Workflow():
+            mri = Files()(path="/tmp/mri", name="mri")
+            ct = Files()(path="/tmp/ct", name="ct")
+            joined = JoinOnColumn()(
+                mri, ct, join_column="filename", suffixes=("_mri", "_ct"),
+            )
+            schema = joined.get_output_schema()
+            assert schema is not None
+            # filename kept once; path appears in both → suffixed.
+            assert "filename" in schema
+            assert "path_mri" in schema
+            assert "path_ct" in schema
+
+    def test_concat_schema(self):
+        from bioimageflow_common_tools import Files
+
+        with Workflow():
+            mri = Files()(path="/tmp/mri", name="mri")
+            ct = Files()(path="/tmp/ct", name="ct")
+            stacked = Concat()(mri, ct)
+            schema = stacked.get_output_schema()
+            assert schema is not None
+            assert set(schema.keys()) == {"path", "filename"}
+
+    def test_concat_type_conflict_falls_back_to_any(self):
+        """Concat with mismatched column types yields the 'any' fallback."""
+        a = {"shared": {"type": "int", "default": None, "image_spec": None}}
+        b = {"shared": {"type": "str", "default": None, "image_spec": None}}
+        merged = Concat.resolve_merge_schema([a, b])
+        assert merged is not None
+        assert merged["shared"]["type"] == "any"
+        assert merged["shared"]["image_spec"] is None
+
+    def test_concat_same_type_keeps_first(self):
+        """Concat with matching column types keeps the first entry verbatim."""
+        a = {"shared": {"type": "int", "default": 1, "image_spec": None}}
+        b = {"shared": {"type": "int", "default": 2, "image_spec": None}}
+        merged = Concat.resolve_merge_schema([a, b])
+        assert merged is not None
+        assert merged["shared"] == a["shared"]
+
+    def test_collect_schema_renames_duplicates(self):
+        from bioimageflow_common_tools import Files
+
+        with Workflow():
+            a = Files()(path="/tmp/a", name="a")
+            b = Files()(path="/tmp/b", name="b")
+            collected = Collect()(a, b)
+            schema = collected.get_output_schema()
+            assert schema is not None
+            # Both have path/filename → second's get _1 suffix.
+            assert "path" in schema
+            assert "path_1" in schema
+            assert "filename" in schema
+            assert "filename_1" in schema
+
+    def test_merge_unresolvable_when_upstream_unresolvable(self):
+        """If any upstream returns None, merge propagates None."""
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow_common_tools import Files
+        from bioimageflow_core import IOModel
+
+        class Unknown(DataFrameTool):
+            display_name = "Unknown"
+
+            class Inputs(IOModel):
+                pass
+
+            @classmethod
+            def resolve_outputs(cls, inputs=None):
+                return None  # always unresolvable
+
+        with Workflow():
+            files = Files()(path="/tmp")
+            unk = Unknown()()
+            joined = InnerJoin()(files, unk)
+            assert joined.get_output_schema() is None
+
+    def test_construction_time_columnref_after_merge(self):
+        """node['col'] validates against the merged schema."""
+        from bioimageflow_common_tools import Files, Generate
+
+        with Workflow():
+            files = Files()(path="/tmp")
+            sens = Generate()(column_name="sensitivity", values=[1, 2])
+            grid = CrossJoin()(files, sens)
+            # Existing column → OK.
+            ref = grid["sensitivity"]
+            assert ref.column == "sensitivity"
+            # Missing column → raises.
+            from bioimageflow import ColumnNotFoundError
+            with pytest.raises(ColumnNotFoundError):
+                _ = grid["nonexistent"]

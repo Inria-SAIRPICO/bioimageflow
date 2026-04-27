@@ -183,6 +183,10 @@ This check is used during [input binding](#45-input-binding-logic-graph-construc
 
 **Tool-level wire-shape serialization:** For a full per-field wire-format schema, callers should use `bioimageflow.validation.serialize_input_schema(tool_class) -> dict[str, dict]` and `serialize_output_schema(tool_class) -> dict[str, dict]`. Both accept the tool *class* (no instantiation is required) and return a fully JSON-serializable dict; both return `{}` when the tool has no `Inputs` / `Outputs` class attribute.
 
+For per-tool (not per-field) facts, callers use `bioimageflow.validation.serialize_tool_metadata(tool_class) -> dict[str, Any]`. Returned keys: `tool_type` (`"ProcessingTool"` | `"DataFrameTool"`), `accepts_upstream` (bool — `True` for `ProcessingTool`; for `DataFrameTool` reflects the class attribute), and `dynamic_outputs` (bool — `True` when the tool overrides `DataFrameTool.resolve_outputs`). GUIs use this to suppress the upstream pin on source DataFrameTools and to know whether to call `serialize_resolved_outputs(node)` for per-column output pins.
+
+For *configured-node* output resolution, callers use `bioimageflow.validation.serialize_resolved_outputs(node) -> dict[str, Any]`. Returns `{"resolved": True, "columns": <schema>}` when the node's `get_output_schema()` resolves; otherwise `{"resolved": False, "columns": {}}`. The `columns` payload has the same shape as `serialize_output_schema` — either per-field entries or the `{"_passthrough": True, ...}` marker. GUIs use this to render per-column output pins on configured nodes (e.g. `Generate(column_name="x")` or fully-configured merge tools) and to know when to fall back to a placeholder pin.
+
 For inputs, each field entry has exactly these keys:
 
 ```python
@@ -202,7 +206,7 @@ For inputs, each field entry has exactly these keys:
 }
 ```
 
-The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `ImagePath(...)` / `ImageShared(...)` are recognized specially and emit `"ImagePath"` / `"ImageShared"`.
+The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `ImagePath(...)` / `ImageShared(...)` are recognized specially and emit `"ImagePath"` / `"ImageShared"`. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
 
@@ -679,7 +683,41 @@ A merge-only tool overrides `merge_dataframes` and keeps the default `transform`
 | `documentation` | `str`                                   | Human-readable description                     |
 | `category`      | `Category \| None`                      | High-level functional category (optional)      |
 | `tags`          | `list[str]`                             | Searchable tags                                |
+| `accepts_upstream` | `bool` (default `True`)              | Whether the tool accepts positional upstream `Node`s. Set to `False` on source tools (`Files`, `Generate`). |
 | `Outputs`       | `IOModel subclass \| Passthrough subclass \| —` | Optional output schema for construction-time validation (see above) |
+
+Source DataFrameTools (`accepts_upstream = False`) do not accept positional arguments. Construction with positional arguments raises `SourceToolUpstreamError`. `Files` and `Generate` are the canonical source tools.
+
+**Dynamic output schema.** Tools whose output column names depend on their inputs (e.g. `Generate`, where `column_name` is a runtime parameter) override the `resolve_outputs(cls, inputs)` classmethod:
+
+```python
+class Generate(DataFrameTool):
+    accepts_upstream = False
+
+    class Inputs(IOModel):
+        column_name: str
+        values: list[Any]
+
+    @classmethod
+    def resolve_outputs(cls, inputs=None):
+        name = (inputs or {}).get("column_name")
+        if not name:
+            return None
+        return {name: {"type": "any", "default": None, "image_spec": None}}
+```
+
+`resolve_outputs` returns a dict whose values match the per-field shape produced by `serialize_output_schema` (`{"type": str, "default": Any | None, "image_spec": dict | None}`), or `None` when the schema is unresolvable from the supplied inputs. The default implementation delegates to `serialize_output_schema(cls)` for tools that declare a static `Outputs` class. Implementations must be pure (no I/O, no side effects).
+
+Built-in merge tools (`InnerJoin`, `CrossJoin`, `JoinOnColumn`, `Concat`, `Collect`) instead override `resolve_merge_schema(cls, upstream_schemas, inputs)` because their output columns depend on the *upstream* schemas, not just on their own inputs. The `Node.get_output_schema()` algorithm (next paragraph) prefers `resolve_merge_schema` over `resolve_outputs` when a merge tool overrides it.
+
+**`Node.get_output_schema()`.** Public method on `Node` that resolves the node's output schema as currently configured. Algorithm:
+
+1. If the tool overrides `resolve_merge_schema` (i.e. is a built-in merge tool), collect upstream schemas via each positional arg's `get_output_schema()` and call `tool.resolve_merge_schema(upstream_schemas, kwargs)`. Return whatever it returns.
+2. Otherwise, on a `DataFrameTool`, call `tool.resolve_outputs(kwargs)`.
+3. On a `ProcessingTool`, return `serialize_output_schema(type(tool))`.
+4. Returns `None` when the schema is unresolvable (any required upstream returns `None`).
+
+`get_output_schema` is idempotent and side-effect free; safe to call repeatedly. Construction-time `ColumnRef` validation (`node["col"]`) consults `get_output_schema` so that dynamic-but-resolvable schemas (e.g. `Generate(column_name="x")["x"]`, or a fully-configured `CrossJoin`) validate without runtime deferral.
 
 **DataFrameTool examples:**
 
@@ -1486,7 +1524,7 @@ registered = register(
 
 - **Nodes** wrap a tool instance and its configuration (explicit arguments). Each node has a unique **node name** — either user-provided via `name=` in `__call__` or auto-generated from the tool's `name` attribute and a counter (e.g., `cellpose_segmenter_1`, `cellpose_segmenter_2`). Node names must be unique within a Workflow; the tool's `name` (class-level) may repeat across multiple nodes.
 - **Edges** represent data dependency: an edge from Node A to Node B means Node B references columns from Node A (via `ColumnRef`) or receives Node A's output DataFrame (via positional argument to a DataFrameTool).
-- **`ColumnRef`** is created by subscripting a Node: `node["col"]`. It records the upstream node and column name. The engine validates column existence at construction time for upstream nodes with known output schemas (i.e., nodes whose tool declares `Outputs`). For DataFrameTool nodes without `Outputs` — whose schema is dynamic — validation is deferred to execution time.
+- **`ColumnRef`** is created by subscripting a Node: `node["col"]`. It records the upstream node and column name. The engine validates column existence at construction time using `Node.get_output_schema()` (see §3.5), which covers both static `Outputs` and dynamic-but-resolvable schemas — `Generate(column_name="x")["x"]` validates immediately, and a fully-configured merge tool (e.g. `CrossJoin(Files(...), Generate(column_name="sensitivity", ...))`) validates the union of upstream column names. Validation is deferred to execution time only when the schema cannot be resolved (e.g. an upstream merge whose own upstream is unresolvable).
 - The graph must remain a DAG. Cycles are detected synchronously inside `__call__()` when the edge is created, providing instant feedback in scripts and notebooks.
 - **Source nodes** are simply nodes with no upstream data dependencies — they are not a separate tool type or code path. Both tool types can act as source nodes:
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
@@ -2183,7 +2221,7 @@ class ValidationError:
 
 `edge_id` carries the optional `id` value that GUIs attach to edges in the wire format (see [§4.2 / Wire format](#42-nodes-and-edges)). When an error is raised against an edge that has an `id`, the library copies that id onto the `ValidationError`. This is the disambiguator for cases like positional args, where multiple edges share the same `(from, to, field)` triple by construction. `edge_id` is also part of the deduplication key inside `validate()` — two errors that differ only by their `edge_id` are reported as distinct.
 
-**The library never raises `ValidationError`.** It raises the existing domain exceptions (`BindingError`, `ColumnNotFoundError`, `IndexAlignmentError`, `ValueError` for duplicate names, `CycleInWorkflowError` for cycles in `plan()`) unless an error-collector is active.
+**The library never raises `ValidationError`.** It raises the existing domain exceptions (`BindingError`, `ColumnNotFoundError`, `IndexAlignmentError`, `SourceToolUpstreamError`, `ValueError` for duplicate names, `CycleInWorkflowError` for cycles in `plan()`) unless an error-collector is active.
 
 **`ValidationErrorKind` values and origins:**
 
@@ -2198,12 +2236,14 @@ class ValidationError:
 | `unknown_tool` | `from_dict` could not resolve the tool module / class / versioned package. |
 | `duplicate_name` | Two nodes in the workflow share the same name. |
 | `construction_failed` | Catch-all for unexpected failures during node construction (e.g., the tool class's `__init__` raised). |
+| `source_tool_upstream` | A source `DataFrameTool` (`accepts_upstream = False`) was constructed with positional upstream arguments. |
 
 Mapping to existing exceptions:
 
 - `BindingError` → `missing_input` (default), `type_mismatch`, or `unknown_input`, depending on the failure context.
 - `ColumnNotFoundError` → `column_not_found`.
 - `IndexAlignmentError` → `construction_failed`.
+- `SourceToolUpstreamError` → `source_tool_upstream`.
 
 Helpers are provided on each domain exception — `.to_validation_error(node, field=..., kind=...)` — for callers who want to convert an exception they caught into a `ValidationError` with the appropriate kind.
 

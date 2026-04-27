@@ -15,6 +15,7 @@ class Generate(DataFrameTool):
     )
     category = Category.UTILITIES
     tags = ["dataframe", "generator"]
+    accepts_upstream = False
 
     class Inputs(IOModel):
         column_name: Annotated[str, GUIMeta(
@@ -27,6 +28,13 @@ class Generate(DataFrameTool):
             description="List of values that become the rows of the generated column.",
             connectable=Connectable.NEVER,
         )]
+
+    @classmethod
+    def resolve_outputs(cls, inputs=None):
+        name = (inputs or {}).get("column_name")
+        if not name:
+            return None
+        return {name: {"type": "any", "default": None, "image_spec": None}}
 
     def transform(self, df, arguments):
         import pandas as pd

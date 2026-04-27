@@ -70,6 +70,18 @@ Key properties:
   upstream DataFrames are combined.
 - **Passthrough**: use :class:`~bioimageflow.Passthrough` outputs to signal
   that input columns are preserved.
+- **Source tools**: set ``accepts_upstream = False`` on tools that produce a
+  DataFrame from constants alone (e.g. ``Files``, ``Generate``). Constructing
+  a source tool with positional upstream arguments raises
+  :class:`~bioimageflow.SourceToolUpstreamError`.
+- **Dynamic output schema**: tools whose output column names depend on their
+  inputs override the ``resolve_outputs(cls, inputs)`` classmethod (e.g.
+  ``Generate``, where ``column_name`` is a runtime parameter). Built-in
+  merge tools (``InnerJoin``, ``CrossJoin``, ``JoinOnColumn``, ``Concat``,
+  ``Collect``) override ``resolve_merge_schema(cls, upstream_schemas, inputs)``
+  instead — their output columns depend on the *upstream* schemas. A node's
+  effective schema is available via :meth:`Node.get_output_schema`, and is
+  also what ``node["col"]`` consults for construction-time validation.
 
 IOModel
 -------

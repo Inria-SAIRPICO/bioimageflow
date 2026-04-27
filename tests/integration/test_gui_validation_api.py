@@ -19,10 +19,13 @@ from bioimageflow_core import (
 )
 from bioimageflow import (
     NodePlan,
+    SourceToolUpstreamError,
     ValidationError,
     Workflow,
     get_inputs_schema,
     serialize_image_spec,
+    serialize_resolved_outputs,
+    serialize_tool_metadata,
     topological_order,
     validate_parameters,
 )
@@ -517,6 +520,114 @@ class TestIntrospectionHelpers:
         entry = schema["input_image"]
         assert "image_spec_serialized" in entry
         assert entry["image_spec_serialized"]["semantics"] == ["intensity"]
+
+    def test_serialize_tool_metadata_files(self) -> None:
+        """Wire-format parity test for the platform-consumed tool metadata."""
+        from bioimageflow_common_tools import Files
+
+        meta = serialize_tool_metadata(Files)
+        assert meta["tool_type"] == "DataFrameTool"
+        assert meta["accepts_upstream"] is False
+        json.dumps(meta)  # JSON-safe
+
+    def test_serialize_tool_metadata_processing_tool(self) -> None:
+        meta = serialize_tool_metadata(StubSegmenter)
+        assert meta["tool_type"] == "ProcessingTool"
+        assert meta["accepts_upstream"] is True
+
+    def test_serialize_tool_metadata_merge_tool(self) -> None:
+        from bioimageflow_common_tools import CrossJoin
+
+        meta = serialize_tool_metadata(CrossJoin)
+        assert meta["tool_type"] == "DataFrameTool"
+        assert meta["accepts_upstream"] is True
+        # Merge tool — resolved schema depends on upstreams, so the GUI
+        # must call serialize_resolved_outputs to render per-column pins.
+        assert meta["dynamic_outputs"] is True
+
+
+# ---------------------------------------------------------------------------
+# Source-tool enforcement (accepts_upstream)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceToolUpstream:
+    def test_source_tool_with_upstream_raises(self, tmp_path: Path) -> None:
+        from bioimageflow_common_tools import Files
+
+        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        with wf:
+            other = Files()(path=str(tmp_path))
+            with pytest.raises(SourceToolUpstreamError):
+                Files()(other, path=str(tmp_path))
+
+    def test_source_tool_kwargs_only_works(self, tmp_path: Path) -> None:
+        from bioimageflow_common_tools import Files
+
+        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        with wf:
+            Files()(path=str(tmp_path))
+        # No exception → the workflow built fine.
+        assert "Files_1" in wf._nodes
+
+
+# ---------------------------------------------------------------------------
+# Dynamic output schema (resolve_outputs / serialize_resolved_outputs)
+# ---------------------------------------------------------------------------
+
+
+class TestSerializeResolvedOutputsWireFormat:
+    """Parity tests for the wire-format the platform consumes for resolved
+    output pins on configured nodes.
+    """
+
+    def test_unconfigured_generate_has_no_columns(self, tmp_path: Path) -> None:
+        # Generate without column_name can't even be constructed (required
+        # field). Cover the unresolved path with a custom DataFrameTool below.
+        from bioimageflow.dataframe_tool import DataFrameTool
+
+        class Dyn(DataFrameTool):
+            display_name = "Dyn"
+
+            class Inputs(IOModel):
+                pass
+
+            @classmethod
+            def resolve_outputs(cls, inputs=None):
+                return None
+
+        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        with wf:
+            n = Dyn()()
+            out = serialize_resolved_outputs(n)
+            assert out == {"resolved": False, "columns": {}}
+            json.dumps(out)
+
+    def test_generate_resolved_after_column_name(self, tmp_path: Path) -> None:
+        from bioimageflow_common_tools import Generate
+
+        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        with wf:
+            g = Generate()(column_name="sensitivity", values=[1, 2, 3])
+            out = serialize_resolved_outputs(g)
+            assert out["resolved"] is True
+            assert set(out["columns"].keys()) == {"sensitivity"}
+            json.dumps(out)
+
+    def test_cross_join_resolved_schema_for_parameter_space(self, tmp_path: Path) -> None:
+        """parameter_space_exploration's exact wiring resolves at construction."""
+        from bioimageflow_common_tools import CrossJoin, Files, Generate
+
+        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        with wf:
+            files = Files()(path=str(tmp_path))
+            sens = Generate()(column_name="sensitivity", values=[0.1, 0.2])
+            size = Generate()(column_name="size", values=[1, 2])
+            grid = CrossJoin()(files, sens, size)
+            out = serialize_resolved_outputs(grid)
+            assert out["resolved"] is True
+            assert set(out["columns"].keys()) == {"path", "filename", "sensitivity", "size"}
+            json.dumps(out)
 
 
 # ---------------------------------------------------------------------------

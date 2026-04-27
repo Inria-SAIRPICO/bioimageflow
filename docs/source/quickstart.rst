@@ -18,6 +18,7 @@ data programmatically:
 
    class ImageSource(DataFrameTool):
        display_name = "Image Source"
+       accepts_upstream = False  # produces its own DataFrame; no upstream
 
        class Inputs:
            folder: str

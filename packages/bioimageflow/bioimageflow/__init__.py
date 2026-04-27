@@ -9,12 +9,14 @@ from bioimageflow.engine import (
     DisabledNodeError as DisabledNodeError,
     CycleInWorkflowError as CycleInWorkflowError,
 )
-from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError
+from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError, SourceToolUpstreamError as SourceToolUpstreamError
 from bioimageflow.validation import (
     get_inputs_schema as get_inputs_schema,
     serialize_image_spec as serialize_image_spec,
     serialize_input_schema as serialize_input_schema,
     serialize_output_schema as serialize_output_schema,
+    serialize_resolved_outputs as serialize_resolved_outputs,
+    serialize_tool_metadata as serialize_tool_metadata,
     serialize_constant as serialize_constant,
     deserialize_constant as deserialize_constant,
     SchemaSerializationError as SchemaSerializationError,

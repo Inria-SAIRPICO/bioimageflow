@@ -127,3 +127,26 @@ JoinOnColumn  Match rows by a shared column value (e.g., sample ID)
 Concat        Stack independent batches vertically
 Collect       Gather columns from multiple points in the DAG
 ============  =================================================================
+
+Construction-time column validation
+-----------------------------------
+
+When both upstream nodes have a known schema, the merged schema is also known
+at construction time, and ``node["col"]`` validates immediately. For example,
+:class:`~bioimageflow.CrossJoin` of two :class:`~bioimageflow_common_tools.Generate`
+nodes resolves to the union of their declared column names:
+
+.. code-block:: python
+
+   from bioimageflow_common_tools import CrossJoin, Files, Generate
+
+   with Workflow():
+       files = Files()(path="./data")
+       sens = Generate()(column_name="sensitivity", values=[0.1, 0.2])
+       size = Generate()(column_name="size", values=[1, 2])
+       grid = CrossJoin()(files, sens, size)
+       # The merged schema {"path", "filename", "sensitivity", "size"} is
+       # resolved at construction time, so this raises immediately if you
+       # mistype the column name:
+       ref = grid["sensitivity"]   # OK
+       # ref = grid["sensitvity"]  # ColumnNotFoundError

@@ -40,3 +40,7 @@ python example-workflows/parameter_space_exploration/workflow.py ./data ./result
 ## Customization
 
 You can modify the parameter values, image pattern, mosaic columns, and tile size by editing `workflow.py`.
+
+## GUI editing
+
+The dynamic-output schema added by `Generate.resolve_outputs` and the merge-tool `resolve_merge_schema` overrides means that this workflow is also buildable in the BioImageFlow platform GUI: per-column output pins for `Generate` and the downstream `CrossJoin` are resolved as soon as `column_name` is set, so dragging `param_grid["sensitivity"]` into `Atlas.p_value` works without any Python.

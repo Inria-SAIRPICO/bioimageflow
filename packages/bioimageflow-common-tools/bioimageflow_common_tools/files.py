@@ -16,6 +16,7 @@ class Files(DataFrameTool):
     )
     category = Category.UTILITIES
     tags = ["source", "loader"]
+    accepts_upstream = False
 
     class Inputs(IOModel):
         path: Annotated[Path, GUIMeta(

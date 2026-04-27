@@ -64,6 +64,24 @@ class IndexAlignmentError(Exception):
         )
 
 
+class SourceToolUpstreamError(Exception):
+    """Raised when a source DataFrameTool (``accepts_upstream = False``)
+    is constructed with positional upstream arguments.
+    """
+
+    def to_validation_error(
+        self,
+        node: str | None = None,
+        field: str | None = None,
+    ) -> ValidationError:
+        return ValidationError(
+            kind="source_tool_upstream",
+            message=str(self),
+            node=node,
+            field=field,
+        )
+
+
 # ── Error-capture ContextVar ────────────────────────────────────────────
 # When set to a list, node-construction errors are appended to it instead
 # of being raised. See Workflow.capture_errors() for the public API.
@@ -303,22 +321,71 @@ class Node:
     def name(self) -> str:
         return self._name
 
+    def get_output_schema(self) -> dict[str, dict[str, Any]] | None:
+        """Resolve this node's output column schema as currently configured.
+
+        Algorithm:
+
+        1. ``DataFrameTool`` with a ``resolve_merge_schema`` override
+           (built-in merge tools): collect upstream schemas via each
+           positional arg's ``get_output_schema()`` and call
+           ``tool.resolve_merge_schema(upstream_schemas, kwargs)``.
+        2. ``DataFrameTool`` (or subclass) with ``resolve_outputs`` →
+           ``tool.resolve_outputs(kwargs)``.
+        3. ``ProcessingTool`` → static
+           ``serialize_output_schema(type(tool))``.
+
+        Returns ``None`` when the schema is unresolvable (any required
+        upstream returns ``None``, or the tool has no ``Outputs`` and no
+        override). Idempotent and side-effect free.
+        """
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.validation import (
+            _overrides_classmethod,
+            serialize_output_schema,
+        )
+
+        def _overrides_resolve_merge_schema(cls: type) -> bool:
+            return _overrides_classmethod(cls, DataFrameTool, "resolve_merge_schema")
+
+        tool_cls = type(self.tool)
+
+        if isinstance(self.tool, DataFrameTool):
+            # _constant_bindings holds exactly the kwargs that aren't
+            # ColumnRefs/Nodes (see Node._process_kwargs); it's the right
+            # input dict for resolve_outputs / resolve_merge_schema.
+            if _overrides_resolve_merge_schema(tool_cls):
+                upstream_schemas = [
+                    arg.get_output_schema() if isinstance(arg, Node) else None
+                    for arg in self._args
+                ]
+                return tool_cls.resolve_merge_schema(
+                    upstream_schemas, self._constant_bindings,
+                )
+            return tool_cls.resolve_outputs(self._constant_bindings)
+
+        # ProcessingTool: static schema.
+        if getattr(tool_cls, "Outputs", None) is None:
+            return None
+        return serialize_output_schema(tool_cls)
+
     def __getitem__(self, column: str) -> ColumnRef:
         """Create a ColumnRef: node['column_name']."""
         from bioimageflow.dataframe_tool import Passthrough
 
-        # Validate column exists if tool has known Outputs
         tool = self.tool
         has_own_outputs = tool.Outputs is not None
+        validated_via_static = False
 
         if has_own_outputs:
             outputs_cls = tool.Outputs
-            assert outputs_cls is not None  # guarded by has_own_outputs
+            assert outputs_cls is not None
             output_annotations = outputs_cls._get_all_annotations()
 
             # For Passthrough, we can't validate columns at construction time
-            # (they depend on upstream)
+            # via the static Outputs class (they depend on upstream).
             if not issubclass(outputs_cls, Passthrough):
+                validated_via_static = True
                 if column not in output_annotations:
                     available = list(output_annotations.keys())
                     close = get_close_matches(column, available, n=3, cutoff=0.4)
@@ -336,6 +403,27 @@ class Node:
                     capture.append(exc.to_validation_error(self._name))
                     # Fall through — return a best-effort ColumnRef so
                     # downstream construction can keep going.
+
+        # If static validation didn't fire (no Outputs, or Passthrough), try
+        # the dynamic schema (Generate, fully-configured merge tools, etc.).
+        if not validated_via_static:
+            schema = self.get_output_schema()
+            if schema is not None and "_passthrough" not in schema:
+                if column not in schema:
+                    available = list(schema.keys())
+                    close = get_close_matches(column, available, n=3, cutoff=0.4)
+                    msg = (
+                        f"Column '{column}' not found in outputs of node "
+                        f"'{self.name}' (tool '{type(tool).__name__}'). "
+                        f"Available columns: {available}."
+                    )
+                    if close:
+                        msg += f" Did you mean: {', '.join(close)}?"
+                    exc = ColumnNotFoundError(msg)
+                    capture = _get_error_capture()
+                    if capture is None:
+                        raise exc
+                    capture.append(exc.to_validation_error(self._name))
 
         return ColumnRef(node=self, column=column)
 
