@@ -32,9 +32,9 @@ from bioimageflow.sub_workflow import (
     _build_iomodel,
     _resolve_node_input,
 )
-from bioimageflow_core import IOModel, ImageSpec, Semantic
+from bioimageflow_core import ImageSpec, Semantic
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from .conftest import FileLoader
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,6 @@ class TestConfigSubWorkflowNested:
 
     def test_class_based_nested_in_config(self, tmp_workspace):
         """A config node can reference a class-based SubWorkflow."""
-        from .test_sub_workflow import SegmentOnly
 
         outer_config = {
             "name": "outer_with_class",

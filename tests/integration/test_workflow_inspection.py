@@ -5,8 +5,6 @@ plan-platform-boundary-refactor.md: ``failed_nodes``, ``is_partial``,
 
 from pathlib import Path
 
-import pytest
-
 from bioimageflow import Workflow
 
 

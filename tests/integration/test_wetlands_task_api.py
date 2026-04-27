@@ -12,7 +12,6 @@ They cover the 5 features from the Task API integration plan:
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest
@@ -29,7 +28,6 @@ from .wetlands_test_tools import (
     ProgressReportingTool,
     SimpleRowTool,
     SlowRowTool,
-    stub_env,
     gpu_env,
 )
 
@@ -229,7 +227,8 @@ class TestGpuWorkerAssignment:
         load = FileLoader()
         tool = GpuTool()
 
-        custom_env = lambda i: {"MY_DEVICE": str(i)}
+        def custom_env(i):
+            return {"MY_DEVICE": str(i)}
 
         with Workflow(
             storage_path=workspace / "results",

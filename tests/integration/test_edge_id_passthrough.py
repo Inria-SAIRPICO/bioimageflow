@@ -15,8 +15,6 @@ from pathlib import Path
 
 from bioimageflow import Workflow
 
-from .conftest import FileLoader, StubSegmenter
-
 
 def _wf_data(tmp_path: Path) -> dict:
     """A minimal valid workflow with one edge that we can attach an ID to."""
@@ -68,7 +66,6 @@ class TestEdgeIdRoundTrip:
     def test_positional_edges_with_distinct_ids(self, tmp_path: Path) -> None:
         # Two positional edges from same upstream into same downstream;
         # (from, to, field) is identical — only the ID disambiguates.
-        from .conftest import FilterRows
 
         data = {
             "nodes": [

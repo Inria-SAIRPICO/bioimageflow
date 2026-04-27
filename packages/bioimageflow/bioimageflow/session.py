@@ -19,12 +19,11 @@ and matches what GUIs actually want to send over the wire.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any
 
 from bioimageflow.engine import NodePlan
-from bioimageflow.validation import ValidationError, deserialize_constant, serialize_constant
+from bioimageflow.validation import ValidationError, serialize_constant
 from bioimageflow.workflow import Workflow
 
 

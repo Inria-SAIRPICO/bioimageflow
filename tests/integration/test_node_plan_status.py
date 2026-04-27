@@ -7,9 +7,7 @@ The status enum lets external callers distinguish ``cached`` from
 
 from pathlib import Path
 
-import pytest
-
-from bioimageflow import NodePlan, NodePlanStatus, Workflow
+from bioimageflow import NodePlanStatus, Workflow
 
 from .conftest import FileLoader, StubSegmenter
 
