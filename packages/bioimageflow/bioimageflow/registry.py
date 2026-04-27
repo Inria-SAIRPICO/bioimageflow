@@ -1,0 +1,203 @@
+"""Public tool-registry abstraction.
+
+A :class:`ToolRegistry` wraps :func:`load_versioned_package`,
+:func:`resolve_tool_class`, and :func:`serialize_input_schema` /
+:func:`serialize_output_schema` behind a single object that GUIs and
+other consumers can use without rebuilding metadata serialization or
+package-resolution layers themselves.
+
+The registry deliberately separates **install** (a slow, network-bound
+side effect) from **register** (a fast, in-process index lookup):
+
+- :meth:`ToolRegistry.install_package` installs a package into the
+  tool store, doing the network work.
+- :meth:`ToolRegistry.register_package` only loads what is already
+  installed and indexes its tools — never installs.
+
+GUIs that validate on every keystroke must call ``register_package``
+on hot paths and ``install_package`` only from a user-initiated
+action.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from bioimageflow.paths import get_tool_store_path
+from bioimageflow.tool_loader import (
+    ensure_installed,
+    load_versioned_package,
+    resolve_tool_class,
+)
+from bioimageflow.validation import (
+    serialize_input_schema,
+    serialize_output_schema,
+)
+
+
+@dataclass(frozen=True)
+class ToolMetadata:
+    """Public, serialized description of a tool class.
+
+    Produced by :meth:`ToolRegistry.register_package` for every
+    BaseTool / SubWorkflow subclass found in the loaded package.
+
+    Attributes
+    ----------
+    package
+        The tool's package name (e.g. ``"my_tools"``).
+    version
+        Pinned package version (e.g. ``"1.2.3"``).
+    module
+        Canonical module path (e.g. ``"my_tools.alpha"``).
+    class_name
+        The class name as written in the source.
+    inputs_schema
+        Output of :func:`serialize_input_schema` for this class.
+    outputs_schema
+        Output of :func:`serialize_output_schema` for this class.
+    display_name
+        Human-readable label declared on the class, or the class name.
+    tags
+        Free-form tags declared on the class (empty list if none).
+    """
+    package: str
+    version: str
+    module: str
+    class_name: str
+    inputs_schema: dict[str, Any]
+    outputs_schema: dict[str, Any]
+    display_name: str
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+
+class ToolRegistry:
+    """Stateful index of tool classes loaded from versioned packages."""
+
+    def __init__(self, *, store_path: Path | None = None) -> None:
+        self._store_path: Path = (
+            store_path if store_path is not None else get_tool_store_path()
+        )
+        self._classes: dict[str, type] = {}
+        self._metadata: dict[str, ToolMetadata] = {}
+
+    # -- install vs register ------------------------------------------------
+
+    def install_package(self, name: str, version: str) -> None:
+        """Install a versioned package into the tool store.
+
+        This is the slow, network-bound side effect — it does not load
+        or index anything. Call :meth:`register_package` separately
+        once the install completes.
+
+        ``name`` is the import name (the module a workflow expects to
+        import). ``ensure_installed`` infers the PyPI name from this
+        by replacing underscores with hyphens, matching the convention
+        used by :meth:`Workflow.from_dict`'s auto-installer.
+        """
+        pypi_name = name.replace("_", "-")
+        ensure_installed(name, version, pypi_name, self._store_path)
+
+    def register_package(self, name: str, version: str) -> list[ToolMetadata]:
+        """Load an *already installed* package and index its tools.
+
+        Returns the metadata for every BaseTool / SubWorkflow subclass
+        discovered in the package. Raises :class:`FileNotFoundError`
+        if the package is not present in the store — the caller must
+        install it first via :meth:`install_package` (or skip
+        registration on the hot path).
+        """
+        from bioimageflow_core.tool import BaseTool
+        from bioimageflow.sub_workflow import SubWorkflow
+
+        # load_versioned_package raises FileNotFoundError if the package
+        # is not installed — we deliberately propagate that error rather
+        # than auto-installing.
+        mod = load_versioned_package(name, version, self._store_path)
+
+        discovered: list[ToolMetadata] = []
+        seen: set[type] = set()
+
+        # Walk the loaded module and any submodules registered under its
+        # scoped name. Tool classes stamped by _stamp_tool_classes carry
+        # _bif_canonical_module pointing at the original module path.
+        import sys
+        scoped_prefix = mod.__name__
+        for sys_name, sys_mod in list(sys.modules.items()):
+            if sys_mod is None:
+                continue
+            if sys_name != scoped_prefix and not sys_name.startswith(
+                scoped_prefix + "."
+            ):
+                continue
+            for attr_name in dir(sys_mod):
+                try:
+                    obj = getattr(sys_mod, attr_name)
+                except Exception:
+                    continue
+                if not isinstance(obj, type):
+                    continue
+                if obj in seen:
+                    continue
+                if not issubclass(obj, (BaseTool, SubWorkflow)):
+                    continue
+                if obj is BaseTool or obj is SubWorkflow:
+                    continue
+                if getattr(obj, "_bif_package", None) != name:
+                    continue
+                seen.add(obj)
+
+                meta = self._build_metadata(obj)
+                self._classes[meta.class_name] = obj
+                self._metadata[meta.class_name] = meta
+                discovered.append(meta)
+
+        return discovered
+
+    def _build_metadata(self, cls: type) -> ToolMetadata:
+        canonical = getattr(cls, "_bif_canonical_module", cls.__module__)
+        package = getattr(cls, "_bif_package", "")
+        version = getattr(cls, "_bif_package_version", "")
+        try:
+            inputs_schema = serialize_input_schema(cls)
+        except Exception:
+            inputs_schema = {}
+        try:
+            outputs_schema = serialize_output_schema(cls)
+        except Exception:
+            outputs_schema = {}
+        display_name = (
+            getattr(cls, "display_name", None) or cls.__name__
+        )
+        tags = tuple(getattr(cls, "tags", ()) or ())
+        return ToolMetadata(
+            package=package,
+            version=version,
+            module=canonical,
+            class_name=cls.__name__,
+            inputs_schema=inputs_schema,
+            outputs_schema=outputs_schema,
+            display_name=display_name,
+            tags=tags,
+        )
+
+    # -- lookups ------------------------------------------------------------
+
+    def get_class(self, class_name: str) -> type | None:
+        """Return the registered class, or ``None`` if not registered."""
+        return self._classes.get(class_name)
+
+    def get_metadata(self, class_name: str) -> ToolMetadata | None:
+        """Return the registered :class:`ToolMetadata`, or ``None``."""
+        return self._metadata.get(class_name)
+
+    def list_tools(self) -> list[ToolMetadata]:
+        """Return all registered tool metadata, in insertion order."""
+        return list(self._metadata.values())
+
+    def forget(self, class_name: str) -> None:
+        """Drop a class from the registry. No-op if it is not present."""
+        self._classes.pop(class_name, None)
+        self._metadata.pop(class_name, None)

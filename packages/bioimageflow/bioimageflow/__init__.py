@@ -5,7 +5,9 @@ from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as Progres
 from bioimageflow.engine import (
     NodeStep as NodeStep,
     NodePlan as NodePlan,
+    NodePlanStatus as NodePlanStatus,
     DisabledNodeError as DisabledNodeError,
+    CycleInWorkflowError as CycleInWorkflowError,
 )
 from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError
 from bioimageflow.validation import (
@@ -13,6 +15,8 @@ from bioimageflow.validation import (
     serialize_image_spec as serialize_image_spec,
     serialize_input_schema as serialize_input_schema,
     serialize_output_schema as serialize_output_schema,
+    serialize_constant as serialize_constant,
+    deserialize_constant as deserialize_constant,
     SchemaSerializationError as SchemaSerializationError,
     ValidationError as ValidationError,
     ValidationErrorKind as ValidationErrorKind,
@@ -27,5 +31,10 @@ from bioimageflow.tool_loader import (
     get_tool_package_info as get_tool_package_info,
     require_tool_packages as require_tool_packages,
 )
+from bioimageflow.registry import (
+    ToolRegistry as ToolRegistry,
+    ToolMetadata as ToolMetadata,
+)
+from bioimageflow.session import WorkflowSession as WorkflowSession
 from bioimageflow.env_manager import configure_wetlands as configure_wetlands
 from bioimageflow.paths import get_home as get_home, get_tool_store_path as get_tool_store_path, get_wetlands_path as get_wetlands_path

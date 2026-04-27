@@ -64,16 +64,16 @@ class IndexAlignmentError(Exception):
         )
 
 
-# ── Error-collector ContextVar ──────────────────────────────────────────
+# ── Error-capture ContextVar ────────────────────────────────────────────
 # When set to a list, node-construction errors are appended to it instead
-# of being raised. See Workflow.collect_errors() for the public API.
-_error_collector: contextvars.ContextVar[list[ValidationError] | None] = (
-    contextvars.ContextVar("_bif_error_collector", default=None)
+# of being raised. See Workflow.capture_errors() for the public API.
+_error_capture: contextvars.ContextVar[list[ValidationError] | None] = (
+    contextvars.ContextVar("_bif_error_capture", default=None)
 )
 
 
-def _get_error_collector() -> list[ValidationError] | None:
-    return _error_collector.get()
+def _get_error_capture() -> list[ValidationError] | None:
+    return _error_capture.get()
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,12 @@ class Node:
         self._upstream_nodes: set[Node] = set()
         self._column_bindings: dict[str, ColumnRef] = {}
         self._constant_bindings: dict[str, Any] = {}
+        # Optional opaque edge identifiers, parallel to _column_bindings
+        # and _args. Populated by Workflow._reconstruct_from_dict from
+        # the ``id`` key of edge dicts; ``None`` for programmatic
+        # construction. See plan-platform-boundary-refactor.md Task 1.
+        self._column_binding_edge_ids: dict[str, str | None] = {}
+        self._arg_edge_ids: list[str | None] = [None] * len(self._args)
 
         # Determine name
         if name is not None:
@@ -140,11 +146,11 @@ class Node:
 
         # Register with active workflow
         wf = get_active_workflow()
-        collector = _get_error_collector()
+        capture = _get_error_capture()
         if wf is not None:
             if name is not None and name in wf._nodes:
-                if collector is not None:
-                    collector.append(ValidationError(
+                if capture is not None:
+                    capture.append(ValidationError(
                         kind="duplicate_name",
                         message=(
                             f"Node name '{name}' is not unique. Each node in "
@@ -165,10 +171,10 @@ class Node:
             if isinstance(arg, Node):
                 self._upstream_nodes.add(arg)
 
-        # Process keyword arguments. When a collector is active we keep the
+        # Process keyword arguments. When error capture is active we keep the
         # node registered and best-effort wire what we can; otherwise we
         # unregister on failure so the workflow stays clean.
-        if collector is not None:
+        if capture is not None:
             self._process_kwargs()
         else:
             try:
@@ -181,16 +187,15 @@ class Node:
     def _process_kwargs(self) -> None:
         """Validate and categorize keyword arguments.
 
-        When an error-collector is active (via ``Workflow.collect_errors``),
+        When an error-capture buffer is active (via ``Workflow.capture_errors``),
         per-kwarg exceptions are appended as :class:`ValidationError` and
         processing continues so the GUI can surface every problem in one
-        pass. Without a collector, the first error is raised (existing
-        behavior).
+        pass. Without a capture buffer, the first error is raised.
         """
         from bioimageflow.template import validate_template, get_output_templates
 
         input_annotations = self.tool.Inputs._get_all_annotations()
-        collector = _get_error_collector()
+        capture = _get_error_capture()
 
         for key, value in self._kwargs.items():
             try:
@@ -215,22 +220,22 @@ class Node:
                         f"{list(input_annotations.keys())}"
                     )
             except BindingError as exc:
-                if collector is None:
+                if capture is None:
                     raise
                 # Distinguish "unknown kwarg" from type-mismatch/missing by
                 # checking whether the key is a declared input.
                 if key not in input_annotations:
-                    collector.append(exc.to_validation_error(
+                    capture.append(exc.to_validation_error(
                         self._name, field=key, kind="unknown_input",
                     ))
                 else:
-                    collector.append(exc.to_validation_error(
+                    capture.append(exc.to_validation_error(
                         self._name, field=key, kind="type_mismatch",
                     ))
             except ColumnNotFoundError as exc:
-                if collector is None:
+                if capture is None:
                     raise
-                collector.append(exc.to_validation_error(self._name, field=key))
+                capture.append(exc.to_validation_error(self._name, field=key))
 
         # Check for missing required fields (no default, no binding)
         for field_name, annotation in input_annotations.items():
@@ -244,9 +249,9 @@ class Node:
                 f"Missing required input '{field_name}' for tool '{type(self.tool).__name__}'. "
                 f"Binding error: no column reference, constant, or default provided."
             )
-            if collector is None:
+            if capture is None:
                 raise exc
-            collector.append(exc.to_validation_error(self._name, field=field_name))
+            capture.append(exc.to_validation_error(self._name, field=field_name))
 
         # Validate output templates for ProcessingTool
         if isinstance(self.tool, ProcessingTool) and self.tool.Outputs is not None:
@@ -257,9 +262,9 @@ class Node:
                     try:
                         validate_template(template, input_annotations)
                     except Exception as exc:
-                        if collector is None:
+                        if capture is None:
                             raise
-                        collector.append(ValidationError(
+                        capture.append(ValidationError(
                             kind="construction_failed",
                             message=str(exc),
                             node=self._name,
@@ -325,12 +330,12 @@ class Node:
                     if close:
                         msg += f" Did you mean: {', '.join(close)}?"
                     exc = ColumnNotFoundError(msg)
-                    collector = _get_error_collector()
-                    if collector is None:
+                    capture = _get_error_capture()
+                    if capture is None:
                         raise exc
-                    collector.append(exc.to_validation_error(self._name))
+                    capture.append(exc.to_validation_error(self._name))
                     # Fall through — return a best-effort ColumnRef so
-                    # downstream construction can continue collecting.
+                    # downstream construction can keep going.
 
         return ColumnRef(node=self, column=column)
 

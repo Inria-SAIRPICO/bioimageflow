@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
@@ -107,6 +108,48 @@ class WorkflowCancelledError(Exception):
     pass
 
 
+class CycleInWorkflowError(ValueError):
+    """Raised by :meth:`DefaultEngine.plan` / :meth:`Workflow.plan` when the
+    graph contains a cycle.
+
+    Use :meth:`Workflow.validate` for non-fatal cycle reporting (it returns
+    a :class:`ValidationError` with ``kind="cycle"`` instead of raising).
+    """
+
+    def __init__(self, nodes: list[str]) -> None:
+        self.nodes = list(nodes)
+        super().__init__(f"Cycle detected in workflow graph: {self.nodes}")
+
+
+class NodePlanStatus(str, Enum):
+    """Per-node status returned alongside :class:`NodePlan`.
+
+    Use this enum (or its string values) instead of inspecting the cache
+    directory layout — the platform should not need to know how the
+    library stores cached node results.
+
+    Values
+    ------
+    CACHED
+        The node's current signature hash matches an existing entry in
+        the storage directory; ``compute()`` would short-circuit.
+    OUT_OF_DATE
+        The storage directory contains entries from a previous run, but
+        none match the current signature hash. ``compute()`` would
+        re-execute and replace.
+    UNEXECUTED
+        No storage directory exists for this node yet — it has never
+        run.
+    SKIPPED
+        The node is disabled, or has a disabled upstream that prevents
+        execution. ``sig_hash`` is empty.
+    """
+    CACHED = "cached"
+    OUT_OF_DATE = "out_of_date"
+    UNEXECUTED = "unexecuted"
+    SKIPPED = "skipped"
+
+
 @dataclass(frozen=True)
 class NodePlan:
     """A single node's pre-execution plan entry, returned by :meth:`DefaultEngine.plan`.
@@ -119,18 +162,29 @@ class NodePlan:
     sig_hash
         Signature hash — byte-identical to what ``compute()`` produces.
         Empty string for ``skipped`` nodes.
-    cached
-        True if the node's result is already in the cache.
+    status
+        Per-node :class:`NodePlanStatus` — the canonical signal for
+        external callers wanting to display "cached / out-of-date /
+        unexecuted / skipped" in a GUI.
     upstream
         Scoped names of this node's direct upstreams.
-    skipped
-        True if the node is disabled or has a disabled upstream.
+
+    ``cached`` and ``skipped`` are read-only convenience accessors
+    derived from ``status`` (``cached == status is CACHED``,
+    ``skipped == status is SKIPPED``).
     """
     node_name: str
     sig_hash: str
-    cached: bool
+    status: NodePlanStatus
     upstream: tuple[str, ...]
-    skipped: bool
+
+    @property
+    def cached(self) -> bool:
+        return self.status is NodePlanStatus.CACHED
+
+    @property
+    def skipped(self) -> bool:
+        return self.status is NodePlanStatus.SKIPPED
 
 
 class WorkerTimeoutError(RuntimeError):
@@ -1715,17 +1769,21 @@ class DefaultEngine:
 
         Disabled nodes and nodes downstream of disabled nodes are
         returned with ``skipped=True`` and ``sig_hash=""``.
+
+        Raises
+        ------
+        CycleInWorkflowError
+            If the graph contains a cycle. Use :meth:`Workflow.validate`
+            for non-fatal cycle reporting.
         """
         reachable = set(workflow._nodes.values())
+        dep_graph = self._build_dep_graph_from_set(reachable)
         try:
-            order = self._topological_sort(reachable)
-        except Exception:
-            # On cycle, return empty-plan entries so callers still see every
-            # node — validate() is the right tool for cycle reporting.
-            return {
-                name: NodePlan(name, "", False, (), True)
-                for name in workflow._nodes
-            }
+            order = list(TopologicalSorter(dep_graph).static_order())
+        except CycleError as exc:
+            cycle_nodes = exc.args[1] if len(exc.args) > 1 else []
+            names = [getattr(n, "name", str(n)) for n in cycle_nodes]
+            raise CycleInWorkflowError(names) from exc
         _executable, skipped = self._filter_executable(order)
 
         plan: dict[str, NodePlan] = {}
@@ -1735,8 +1793,8 @@ class DefaultEngine:
         for node in order:
             if node in skipped:
                 plan[node.name] = NodePlan(
-                    node.name, "", False,
-                    tuple(self._plan_upstream_names(node)), True,
+                    node.name, "", NodePlanStatus.SKIPPED,
+                    tuple(self._plan_upstream_names(node)),
                 )
                 continue
             self._plan_node(node, results, sig_hashes, workflow, plan)
@@ -1744,7 +1802,9 @@ class DefaultEngine:
         # Include any nodes not reachable from terminals (shouldn't happen
         # in practice, but plan is expected to cover every registered node).
         for name, node in workflow._nodes.items():
-            plan.setdefault(name, NodePlan(name, "", False, (), True))
+            plan.setdefault(name, NodePlan(
+                name, "", NodePlanStatus.SKIPPED, (),
+            ))
         return plan
 
     def _plan_node(
@@ -1768,17 +1828,25 @@ class DefaultEngine:
         if sig_hash is None:
             # Non-cacheable top-level node (shouldn't happen outside SubWorkflowNode)
             plan[node.name] = NodePlan(
-                node.name, "", False,
-                tuple(self._plan_upstream_names(node)), False,
+                node.name, "", NodePlanStatus.UNEXECUTED,
+                tuple(self._plan_upstream_names(node)),
             )
             return
         sig_hashes[node] = sig_hash
+        if cached_df is not None:
+            status = NodePlanStatus.CACHED
+        else:
+            from bioimageflow.storage import has_other_hash_dirs
+            node_dir = get_node_dir(workflow.storage_path, node.name)
+            if has_other_hash_dirs(node_dir, sig_hash):
+                status = NodePlanStatus.OUT_OF_DATE
+            else:
+                status = NodePlanStatus.UNEXECUTED
         plan[node.name] = NodePlan(
             node.name,
             sig_hash,
-            cached_df is not None,
+            status,
             tuple(self._plan_upstream_names(node)),
-            False,
         )
 
     def _plan_sub_workflow(
@@ -1826,12 +1894,26 @@ class DefaultEngine:
                 json.dumps(terminal_hashes, sort_keys=True).encode()
             ).hexdigest()
             sig_hashes[node] = combined
+            # SubWorkflowNode itself isn't cached at this level — its
+            # status mirrors the aggregate of internal-node statuses.
+            # We surface it as UNEXECUTED unless every internal entry
+            # already has a cache hit.
+            internal_statuses = [
+                plan[inode._name].status
+                for inode in node.internal_nodes
+                if inode._name in plan
+            ]
+            if internal_statuses and all(
+                s is NodePlanStatus.CACHED for s in internal_statuses
+            ):
+                sw_status = NodePlanStatus.CACHED
+            else:
+                sw_status = NodePlanStatus.UNEXECUTED
             plan[node.name] = NodePlan(
                 node.name,
                 combined,
-                False,  # SubWorkflowNode itself isn't cached at this level.
+                sw_status,
                 tuple(self._plan_upstream_names(node)),
-                False,
             )
         finally:
             for inode, orig_name in original_names.items():

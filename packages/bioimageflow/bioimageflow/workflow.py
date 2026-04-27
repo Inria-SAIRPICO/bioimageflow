@@ -3,7 +3,7 @@
 import json
 import importlib
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,10 +14,14 @@ from bioimageflow.node import (
     set_active_workflow,
     get_active_workflow,
     _reset_name_counters,
-    _error_collector,
+    _error_capture,
     Node,
 )
-from bioimageflow.validation import ValidationError
+from bioimageflow.validation import (
+    ValidationError,
+    serialize_constant,
+    deserialize_constant,
+)
 
 if TYPE_CHECKING:
     from bioimageflow.engine import DefaultEngine, NodeStep, NodePlan
@@ -34,55 +38,6 @@ class WorkflowEnvironment:
     max_workers: int = 0
     worker_env: Callable[[int], dict[str, str]] | None = None
     worker_timeout: float | None = None
-
-
-def _serialize_constant(value: Any) -> dict[str, Any]:
-    """Serialize a constant value with type metadata for lossless round-trip."""
-    if isinstance(value, bool):
-        return {"__type__": "bool", "value": value}
-    if isinstance(value, int):
-        return {"__type__": "int", "value": value}
-    if isinstance(value, float):
-        return {"__type__": "float", "value": value}
-    if isinstance(value, (list, tuple)):
-        return {"__type__": type(value).__name__, "value": list(value)}
-    return {"__type__": "str", "value": str(value)}
-
-
-def _deserialize_constant(data: Any) -> Any:
-    """Deserialize a constant value from its typed representation.
-
-    Supports both the new typed format (``{__type__, value}``) and the
-    legacy format (bare string) for backwards compatibility.
-    """
-    if isinstance(data, dict) and "__type__" in data:
-        t = data["__type__"]
-        v = data["value"]
-        if t == "bool":
-            return bool(v)
-        if t == "int":
-            return int(v)
-        if t == "float":
-            return float(v)
-        if t == "tuple":
-            return tuple(v)
-        if t == "list":
-            return list(v)
-        return str(v)
-    # Legacy fallback: bare string — try numeric coercion
-    if isinstance(data, str):
-        try:
-            int_val = int(data)
-            # Check if it was originally an int (no decimal point)
-            if "." not in data:
-                return int_val
-        except (ValueError, TypeError):
-            pass
-        try:
-            return float(data)
-        except (ValueError, TypeError):
-            pass
-    return data
 
 
 @dataclass
@@ -125,6 +80,14 @@ class Workflow:
         self._nodes: dict[str, Node] = {}
         self._prev_workflow: Any = None
         self._dev_mode: bool = False
+        # Build-time errors and failed-node bookkeeping. These are
+        # populated by ``from_dict`` (in collecting modes) and exposed
+        # via the public ``errors`` / ``failed_nodes`` / ``is_partial``
+        # properties so external callers don't have to remember to
+        # capture the second tuple element of ``from_dict``.
+        self._build_errors: list[ValidationError] = []
+        self._failed_nodes: dict[str, ValidationError] = {}
+        self._expected_node_names: set[str] | None = None
 
     def __enter__(self) -> "Workflow":
         self._prev_workflow = get_active_workflow()
@@ -144,6 +107,54 @@ class Workflow:
         """
         from bioimageflow.engine import topological_order as _topo
         return _topo(self)
+
+    def invalidate(
+        self,
+        node_ids: "Iterable[str]",
+        *,
+        cascade: bool = True,
+    ) -> set[str]:
+        """Remove cache directories for the given nodes (and their
+        downstream by default).
+
+        Returns the set of node IDs whose cache directories were
+        cleared. ``cascade=True`` (the default) also removes the cache
+        of every node transitively downstream of each input node, so a
+        single call leaves the workflow in a state where re-running
+        will recompute everything that depended on the changed node.
+
+        ``KeyError`` is raised if any name in ``node_ids`` is not
+        registered with this workflow — matching the existing behavior
+        of :meth:`downstream_of`.
+
+        Concurrency
+        -----------
+        This method is **not** safe to call concurrently with
+        :meth:`compute` on the same workflow. The library does not
+        currently expose a public lock primitive; callers that need
+        to invalidate while a compute is in flight must coordinate
+        externally (e.g., cancel + join + invalidate).
+        """
+        import shutil
+        from bioimageflow.storage import get_node_dir
+
+        targets: set[str] = set()
+        for nid in node_ids:
+            if nid not in self._nodes:
+                raise KeyError(
+                    f"Node '{nid}' not found. Available: {list(self._nodes)}"
+                )
+            targets.add(nid)
+            if cascade:
+                targets.update(self.downstream_of(nid))
+
+        cleared: set[str] = set()
+        for name in targets:
+            node_dir = get_node_dir(self.storage_path, name)
+            if node_dir.exists():
+                shutil.rmtree(node_dir)
+                cleared.add(name)
+        return cleared
 
     def downstream_of(self, node_name: str) -> set[str]:
         """Return node names transitively downstream of ``node_name``.
@@ -203,10 +214,11 @@ class Workflow:
 
         Steps 1–3 are already enforced by ``Node.__init__`` during
         construction; this method exists so GUIs that built the workflow
-        via :meth:`collect_errors` / :meth:`from_dict` can re-check after
-        the fact. Step 4 (constant Pydantic validation) is *new behavior*
-        and only runs here — it is not performed at construction time
-        for backward compatibility.
+        via :meth:`capture_errors` / :meth:`from_dict` can re-check after
+        the fact. Step 4 (constant Pydantic validation) only runs here —
+        it is intentionally not performed at construction time, so a GUI
+        editing one field at a time does not need every other field to
+        be valid yet.
 
         Parameters
         ----------
@@ -251,14 +263,22 @@ class Workflow:
                         node=e.node,
                         field=e.field,
                         edge=e.edge,
+                        edge_id=e.edge_id,
                         path=(name, *e.path),
                     ))
                 continue
 
             # Step 2: type compatibility on column bindings.
             for field, col_ref in node._column_bindings.items():
+                eid = node._column_binding_edge_ids.get(field)
                 err = check_type_compat(node, field, col_ref)
                 if err is not None:
+                    if eid is not None and err.edge_id is None:
+                        err = ValidationError(
+                            kind=err.kind, message=err.message, node=err.node,
+                            field=err.field, edge=err.edge, edge_id=eid,
+                            path=err.path,
+                        )
                     errors.append(err)
                 # Column-not-found on bindings recorded at the structural level.
                 upstream_outputs = col_ref.node.tool.Outputs
@@ -277,6 +297,7 @@ class Workflow:
                             node=name,
                             field=field,
                             edge=(col_ref.node.name, name, field),
+                            edge_id=eid,
                         ))
 
             # Step 3: missing required inputs.
@@ -315,7 +336,7 @@ class Workflow:
         seen: set[tuple[Any, ...]] = set()
         unique: list[ValidationError] = []
         for e in errors:
-            key = (e.path, e.node, e.field, e.kind, e.message)
+            key = (e.path, e.node, e.field, e.kind, e.message, e.edge_id)
             if key in seen:
                 continue
             seen.add(key)
@@ -324,13 +345,13 @@ class Workflow:
         return unique
 
     @contextmanager
-    def collect_errors(self) -> Iterator[list[ValidationError]]:
+    def capture_errors(self) -> Iterator[list[ValidationError]]:
         """Capture node-construction errors as :class:`ValidationError`.
 
         Usage::
 
             wf = Workflow()
-            with wf, wf.collect_errors() as errors:
+            with wf, wf.capture_errors() as errors:
                 MyTool()(input=upstream["bad_col"])
             # errors: list[ValidationError]
 
@@ -339,11 +360,11 @@ class Workflow:
         construction only for the duration of the block.
         """
         errs: list[ValidationError] = []
-        token = _error_collector.set(errs)
+        token = _error_capture.set(errs)
         try:
             yield errs
         finally:
-            _error_collector.reset(token)
+            _error_capture.reset(token)
 
     def _register_node(self, node: Node) -> None:
         """Register a node with this workflow."""
@@ -352,6 +373,41 @@ class Workflow:
     @property
     def nodes(self) -> dict[str, Node]:
         return dict(self._nodes)
+
+    @property
+    def errors(self) -> list[ValidationError]:
+        """Build-time errors accumulated during :meth:`from_dict`.
+
+        Empty when the workflow was constructed programmatically (via
+        the context-manager / call-tools pattern) or when ``from_dict``
+        was called in strict mode.
+        """
+        return list(self._build_errors)
+
+    @property
+    def failed_nodes(self) -> dict[str, ValidationError]:
+        """Map of node name → :class:`ValidationError` for nodes that
+        failed to construct during :meth:`from_dict`.
+
+        Populated only when ``from_dict`` is called with ``partial=True``
+        and a node's tool resolution or construction raised. Empty
+        otherwise.
+        """
+        return dict(self._failed_nodes)
+
+    @property
+    def is_partial(self) -> bool:
+        """Whether the workflow is missing nodes that the input dict
+        described.
+
+        ``True`` when at least one entry in the source ``data["nodes"]``
+        is absent from :attr:`nodes` (typically because it failed to
+        construct in collect mode). ``False`` for fully-built workflows
+        and for workflows constructed without :meth:`from_dict`.
+        """
+        if self._expected_node_names is None:
+            return False
+        return not self._expected_node_names.issubset(self._nodes.keys())
 
     def disable(self, *nodes: "Node | str") -> None:
         """Disable nodes by reference or name."""
@@ -567,17 +623,21 @@ class Workflow:
                 if not node.enabled:
                     node_info["enabled"] = False
                 for field, value in node._input_constant_bindings.items():
-                    node_info["constants"][field] = _serialize_constant(value)
+                    node_info["constants"][field] = serialize_constant(value)
                 nodes_data.append(node_info)
 
                 # Input column binding edges
                 for field, col_ref in node._input_column_bindings.items():
-                    edges_data.append({
+                    edge: dict[str, Any] = {
                         "from": col_ref.node.name,
                         "to": name,
                         "column": col_ref.column,
                         "field": field,
-                    })
+                    }
+                    eid = getattr(node, "_input_column_binding_edge_ids", {}).get(field)
+                    if eid is not None:
+                        edge["id"] = eid
+                    edges_data.append(edge)
             else:
                 pkg, pkg_ver, canonical_module = get_tool_package_info(node.tool)
                 node_info = {
@@ -592,24 +652,36 @@ class Workflow:
                 if not node.enabled:
                     node_info["enabled"] = False
                 for field, value in node._constant_bindings.items():
-                    node_info["constants"][field] = _serialize_constant(value)
+                    node_info["constants"][field] = serialize_constant(value)
                 nodes_data.append(node_info)
 
                 for field, col_ref in node._column_bindings.items():
-                    edges_data.append({
+                    edge = {
                         "from": col_ref.node.name,
                         "to": name,
                         "column": col_ref.column,
                         "field": field,
-                    })
-                for arg in node._args:
+                    }
+                    eid = node._column_binding_edge_ids.get(field)
+                    if eid is not None:
+                        edge["id"] = eid
+                    edges_data.append(edge)
+                for idx, arg in enumerate(node._args):
                     if isinstance(arg, Node):
-                        edges_data.append({
+                        edge = {
                             "from": arg.name,
                             "to": name,
                             "column": "__positional__",
                             "field": "__positional__",
-                        })
+                        }
+                        eid = (
+                            node._arg_edge_ids[idx]
+                            if idx < len(node._arg_edge_ids)
+                            else None
+                        )
+                        if eid is not None:
+                            edge["id"] = eid
+                        edges_data.append(edge)
 
         return {
             "nodes": nodes_data,
@@ -648,7 +720,8 @@ class Workflow:
         cls,
         data: dict[str, Any],
         *,
-        collect_errors: bool = False,
+        validate_only: bool = False,
+        partial: bool = False,
         auto_install: bool = True,
         storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
@@ -662,15 +735,21 @@ class Workflow:
         data
             A dict with the shape produced by :meth:`to_dict` /
             :meth:`export`: ``{"nodes": [...], "edges": [...], "config": {...}}``.
-        collect_errors
-            When False (default), behaves like :meth:`load` and raises on
-            the first error. When True, returns ``(workflow, errors)``; the
-            workflow is best-effort partially wired and ``errors`` may be
-            non-empty.
+        validate_only
+            Drives the **return type**. When ``True``, returns a
+            ``(workflow, errors)`` tuple; the workflow may be partial.
+            When ``False`` (default), returns the ``Workflow`` directly
+            and aggregates any captured errors into a raised exception.
+        partial
+            Drives **error suppression / continuation**. When ``True``,
+            per-node failures are captured as :class:`ValidationError`
+            entries and construction continues; the workflow may be
+            best-effort partially wired. When ``False`` (default),
+            construction stops at the first failure.
         auto_install
             When True (default), missing versioned packages are installed
             automatically. When False, missing packages produce an
-            ``unknown_tool`` error (collect mode) or raise (strict mode).
+            ``unknown_tool`` error (when captured) or raise.
         storage_path_override
             Override ``data["config"]["storage_path"]`` without mutating
             the dict. Useful for GUIs that validate a graph against a
@@ -678,6 +757,13 @@ class Workflow:
         on_progress, use_wetlands, wetlands_config
             Passed to :class:`Workflow`. ``None`` means "use the values
             from ``data['config']`` (or defaults)".
+
+        Notes
+        -----
+        The ``partial=False, validate_only=True`` combination returns a
+        ``(workflow, errors)`` tuple where ``errors`` contains at most
+        one entry (the first failure) and the workflow may be empty —
+        useful as a fail-fast diagnostic.
         """
         config = data.get("config", {})
         storage_path = storage_path_override if storage_path_override is not None \
@@ -698,12 +784,38 @@ class Workflow:
         wf = cls(**wf_kwargs)
 
         errors: list[ValidationError] = []
-        if collect_errors:
-            result = wf._reconstruct_from_dict(
-                data, auto_install=auto_install, errors=errors,
+        # `partial` mode: pass an errors list so failures accumulate
+        # instead of raising. `partial=False`: pass None so the inner
+        # method raises on the first failure.
+        errs_arg: list[ValidationError] | None = errors if partial else None
+
+        try:
+            wf._reconstruct_from_dict(
+                data, auto_install=auto_install, errors=errs_arg,
             )
-            return result, errors
-        wf._reconstruct_from_dict(data, auto_install=auto_install, errors=None)
+        except Exception as exc:
+            # partial=False raises; capture only when validate_only also
+            # asks for the diagnostic "fail-fast tuple" return.
+            if validate_only:
+                errors.append(ValidationError(
+                    kind="construction_failed",
+                    message=str(exc),
+                ))
+            else:
+                raise
+
+        # Expose accumulated build-time errors via the public
+        # Workflow.errors property.
+        wf._build_errors = list(errors)
+
+        if validate_only:
+            return wf, errors
+        if errors:
+            # partial=True, validate_only=False — surface aggregated errors.
+            raise ValueError(
+                f"Workflow construction failed with {len(errors)} error(s); "
+                f"first: {errors[0].message}"
+            )
         return wf
 
     def _reconstruct_from_dict(
@@ -729,6 +841,13 @@ class Workflow:
         store = _get_store_path()
         tool_instances: dict[str, Any] = {}
 
+        # Record the set of node names the input dict described, so the
+        # public ``is_partial`` property can detect missing nodes after
+        # the build.
+        self._expected_node_names = {
+            nd["name"] for nd in data.get("nodes", [])
+        }
+
         # --- Pass 1: resolve tool classes and instantiate ---
         for node_data in data.get("nodes", []):
             name = node_data["name"]
@@ -744,9 +863,9 @@ class Workflow:
                 kind = "unknown_tool" if isinstance(
                     exc, (ImportError, AttributeError, FileNotFoundError, ModuleNotFoundError)
                 ) else "construction_failed"
-                errors.append(ValidationError(
-                    kind=kind, message=str(exc), node=name,
-                ))
+                err = ValidationError(kind=kind, message=str(exc), node=name)
+                errors.append(err)
+                self._failed_nodes[name] = err
 
         # --- Pass 2: build dependency graph and topologically sort names ---
         edge_map: dict[str, list[dict[str, str]]] = {}
@@ -783,11 +902,11 @@ class Workflow:
         set_active_workflow(self)
         _reset_name_counters()
 
-        # Activate error collector for collect mode so Node.__init__
+        # Activate error capture for partial mode so Node.__init__
         # per-kwarg failures end up in our list.
         token = None
         if errors is not None:
-            token = _error_collector.set(errors)
+            token = _error_capture.set(errors)
 
         node_map: dict[str, Node] = {}
         try:
@@ -802,10 +921,16 @@ class Workflow:
 
                 kwargs: dict[str, Any] = {}
                 positional_args: list[Node] = []
+                # Parallel to positional_args; carries the optional
+                # opaque edge identifier per positional edge.
+                positional_arg_edge_ids: list[str | None] = []
+                # field -> edge_id for kwarg edges (column bindings).
+                column_edge_ids: dict[str, str | None] = {}
                 missing_upstream = False
                 for edge in edge_map.get(name, []):
                     upstream_name = edge["from"]
                     upstream_node = node_map.get(upstream_name)
+                    eid = edge.get("id")
                     if upstream_node is None:
                         if errors is None:
                             raise KeyError(
@@ -821,16 +946,19 @@ class Workflow:
                             node=name,
                             field=edge.get("field"),
                             edge=(upstream_name, name, edge.get("field", "")),
+                            edge_id=eid,
                         ))
                         missing_upstream = True
                         continue
                     if edge["field"] == "__positional__":
                         positional_args.append(upstream_node)
+                        positional_arg_edge_ids.append(eid)
                     else:
                         kwargs[edge["field"]] = upstream_node[edge["column"]]
+                        column_edge_ids[edge["field"]] = eid
 
                 for field, value in node_data.get("constants", {}).items():
-                    kwargs[field] = _deserialize_constant(value)
+                    kwargs[field] = deserialize_constant(value)
 
                 try:
                     if isinstance(instance, SubWorkflow):
@@ -841,19 +969,37 @@ class Workflow:
                         node = instance(name=name, **kwargs)
                     node.enabled = node_data.get("enabled", True)
                     node_map[name] = node
+                    # Stamp edge_ids on the constructed node so they
+                    # survive to to_dict and to validate() emission.
+                    if isinstance(instance, SubWorkflow):
+                        for f, eid in column_edge_ids.items():
+                            if eid is not None:
+                                node._input_column_binding_edge_ids[f] = eid
+                    else:
+                        for f, eid in column_edge_ids.items():
+                            if eid is not None:
+                                node._column_binding_edge_ids[f] = eid
+                    if isinstance(instance, DataFrameTool):
+                        # _args was populated via positional construction;
+                        # parallel ids align by position.
+                        node._arg_edge_ids = list(positional_arg_edge_ids) + [
+                            None
+                        ] * max(0, len(node._args) - len(positional_arg_edge_ids))
                 except Exception as exc:
                     if errors is None:
                         raise
                     # missing_upstream already reported; other failures become construction_failed.
                     if not missing_upstream:
-                        errors.append(ValidationError(
+                        err = ValidationError(
                             kind="construction_failed",
                             message=str(exc),
                             node=name,
-                        ))
+                        )
+                        errors.append(err)
+                        self._failed_nodes[name] = err
         finally:
             if token is not None:
-                _error_collector.reset(token)
+                _error_capture.reset(token)
             set_active_workflow(prev_wf)
 
         return self

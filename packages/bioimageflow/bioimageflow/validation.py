@@ -38,17 +38,26 @@ ValidationErrorKind = Literal[
 class ValidationError:
     """A single problem found during graph construction or validation.
 
-    Instances are produced by the error-collector (:meth:`Workflow.collect_errors`),
-    ``Workflow.from_dict(..., collect_errors=True)``, and
-    ``Workflow.validate()``. Consumers (GUIs, linters) map these to their own
-    display formats. The library never raises ``ValidationError``; it raises
-    the existing exceptions unless an error-collector is active.
+    Instances are produced by :meth:`Workflow.capture_errors`,
+    ``Workflow.from_dict(..., partial=True)``, and ``Workflow.validate()``.
+    Consumers (GUIs, linters) map these to their own display formats. The
+    library never raises ``ValidationError``; it raises the existing
+    exceptions unless an error-collector is active.
+
+    ``edge`` carries the structural ``(from_node, to_node, field)`` triple.
+    ``edge_id`` is an optional opaque identifier that GUIs can attach to
+    edges via the ``id`` key in the wire format; the library round-trips
+    it through :meth:`Workflow.to_dict` / :meth:`Workflow.from_dict` and
+    copies it onto every ``ValidationError`` raised against that edge.
+    This is the disambiguator for cases like positional args, where
+    multiple edges share the same triple by construction.
     """
     kind: ValidationErrorKind
     message: str
     node: str | None = None
     field: str | None = None
     edge: tuple[str, str, str] | None = None
+    edge_id: str | None = None
     path: tuple[str, ...] = ()
 
 
@@ -293,6 +302,65 @@ def get_source_hash(tool_class: type[Any]) -> str:
         return hashlib.sha256(source.encode()).hexdigest()
     except (OSError, TypeError):
         return "nosource"
+
+
+# ---------------------------------------------------------------------------
+# Constant value serialization (serialize_constant / deserialize_constant)
+# ---------------------------------------------------------------------------
+
+
+def serialize_constant(value: Any) -> dict[str, Any]:
+    """Serialize a tool-parameter constant to a JSON-safe envelope.
+
+    The output is a dict ``{"__type__": <name>, "value": <payload>}`` that
+    round-trips through :func:`deserialize_constant`. This is the format
+    used inside the ``constants`` block of a workflow's
+    :meth:`Workflow.to_dict` output.
+
+    Supported types and their envelopes:
+
+    - ``bool``   → ``{"__type__": "bool", "value": <bool>}``
+    - ``int``    → ``{"__type__": "int", "value": <int>}``
+    - ``float``  → ``{"__type__": "float", "value": <float>}``
+    - ``list``   → ``{"__type__": "list", "value": [...]}``
+    - ``tuple``  → ``{"__type__": "tuple", "value": [...]}``
+    - anything else (including :class:`pathlib.Path`, Pydantic models,
+      enums, custom dataclasses) is **lossily** stringified via ``str()``
+      and tagged ``{"__type__": "str", ...}``. Callers that need lossless
+      round-trip for non-primitive values must serialize them at a
+      higher layer.
+    """
+    if isinstance(value, bool):
+        return {"__type__": "bool", "value": value}
+    if isinstance(value, int):
+        return {"__type__": "int", "value": value}
+    if isinstance(value, float):
+        return {"__type__": "float", "value": value}
+    if isinstance(value, (list, tuple)):
+        return {"__type__": type(value).__name__, "value": list(value)}
+    return {"__type__": "str", "value": str(value)}
+
+
+def deserialize_constant(data: dict[str, Any]) -> Any:
+    """Inverse of :func:`serialize_constant`.
+
+    Expects a typed envelope ``{"__type__": <name>, "value": <payload>}``
+    produced by :func:`serialize_constant`. Unknown ``__type__`` values
+    are coerced to ``str``.
+    """
+    t = data["__type__"]
+    v = data["value"]
+    if t == "bool":
+        return bool(v)
+    if t == "int":
+        return int(v)
+    if t == "float":
+        return float(v)
+    if t == "tuple":
+        return tuple(v)
+    if t == "list":
+        return list(v)
+    return str(v)
 
 
 # ---------------------------------------------------------------------------

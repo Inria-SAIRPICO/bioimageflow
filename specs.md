@@ -1327,6 +1327,44 @@ This is safe because PEP 723 declares exactly one version per package — there 
 
 `Workflow.load()` also auto-installs missing versioned packages. When a serialized workflow references `tool_package` and `tool_package_version`, the loader checks the tool store and installs via Wetlands' pixi if the package is absent. This means both `.py` scripts and `.json` workflow files are self-resolving — the user only needs `bioimageflow` (which bundles Wetlands) installed.
 
+### 3.11 Tool Registry
+
+`ToolRegistry` is the public, stateful index for tool classes loaded from versioned packages. It is the surface GUIs and other host applications should use to enumerate and resolve tools — it wraps `load_versioned_package`, `resolve_tool_class`, and the schema serializers behind a single object so consumers do not have to rebuild metadata serialization or package-resolution layers themselves.
+
+The registry deliberately separates **install** (slow, network-bound) from **register** (fast, in-process index lookup):
+
+```python
+from bioimageflow import ToolRegistry, ToolMetadata
+
+reg = ToolRegistry()                                 # uses default tool store path
+reg.install_package("cellpose_tools", "2.3.1")       # network: installs via Wetlands' pixi
+metas: list[ToolMetadata] = reg.register_package(    # fast: loads + indexes already-installed pkg
+    "cellpose_tools", "2.3.1"
+)
+
+reg.get_class("CellposeSegmenter")                   # type | None
+reg.get_metadata("CellposeSegmenter")                # ToolMetadata | None
+reg.list_tools()                                     # list[ToolMetadata] in registration order
+reg.forget("CellposeSegmenter")                      # drop from index; no-op if absent
+```
+
+`register_package` raises `FileNotFoundError` when the package is not present in the store — it never reaches for the network. Callers that validate on every keystroke must call `register_package` on hot paths and `install_package` only from explicit user actions.
+
+`ToolMetadata` is a frozen dataclass:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `package` | `str` | Package import name (e.g. `"my_tools"`). |
+| `version` | `str` | Pinned package version. |
+| `module` | `str` | Canonical module path (not the scoped `__1_0_0` variant). |
+| `class_name` | `str` | The tool class name as written in source. |
+| `inputs_schema` | `dict[str, Any]` | Output of `serialize_input_schema(cls)`. |
+| `outputs_schema` | `dict[str, Any]` | Output of `serialize_output_schema(cls)`. |
+| `display_name` | `str` | The class's `display_name` attribute, or `class_name`. |
+| `tags` | `tuple[str, ...]` | The class's `tags` attribute (empty tuple if none). |
+
+The registry indexes `BaseTool` and `SubWorkflow` subclasses; abstract base classes themselves are excluded. Multiple versions of the same package can be registered — they coexist as distinct entries because `resolve_tool_class` keys on the scoped module, not the class name alone.
+
 ---
 
 ## 4. Workflow Definition and Graph Engine
@@ -1454,6 +1492,15 @@ registered = register(
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
   - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, the engine uses a single-row index (`["0"]`), builds arguments from constants and defaults only, and dispatches to `process_row`/`process_batch` as usual. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
 
+**Wire-format edge entries.** In `Workflow.to_dict() / from_dict()` the `edges` list contains one dict per edge with the keys `from`, `to`, `column`, `field`, plus an optional opaque `id`:
+
+```json
+{"id": "e_42", "from": "loader_1", "to": "segmenter_1",
+ "column": "path", "field": "input_image"}
+```
+
+`id` is opaque to the library: GUIs assign whatever stable identifier they want (e.g., to drive selection / hover state in the editor canvas). The library round-trips it through `to_dict` / `from_dict` and copies it onto every `ValidationError` raised against that edge (see [§6.6](#66-validation-error-reference)). For positional arguments (`column = field = "__positional__"`), `id` is the only way to disambiguate multiple edges between the same pair of nodes — `validate()`'s deduplication includes `edge_id` in the key.
+
 ### 4.3 The `Workflow` Object
 
 The `Workflow` class holds the DAG graph object and provides configuration for storage, caching, execution engine, and progress monitoring.
@@ -1544,10 +1591,14 @@ data: dict = workflow.to_dict()
 # Reconstruct from a dict (strict mode: raises on first error)
 wf = Workflow.from_dict(data)
 
-# Reconstruct in collect mode: best-effort partial wiring, returns errors
+# Reconstruct as a non-raising diagnostic: returns (wf, errors).
+# `partial=True` keeps building past failures; `validate_only=True`
+# changes the return type to a tuple. Together they yield the
+# original GUI "build everything you can" mode.
 wf, errors = Workflow.from_dict(
     data,
-    collect_errors=True,        # non-raising; returns (wf, list[ValidationError])
+    validate_only=True,         # return (wf, list[ValidationError]) instead of raising
+    partial=True,               # keep building after per-node failures
     auto_install=True,          # default; False produces unknown_tool errors on missing packages
     storage_path_override=None, # override data["config"]["storage_path"] without mutating dict
 )
@@ -1555,7 +1606,27 @@ wf, errors = Workflow.from_dict(
 
 `from_dict` accepts the same options as the `Workflow` constructor via keyword arguments (`on_progress`, `use_wetlands`, `wetlands_config`). When any of those is `None`, values from `data["config"]` or constructor defaults are used. `Workflow.load(path)` is preserved as a thin wrapper over `from_dict`.
 
-In collect mode the library maps construction failures to `ValidationError` entries (see the Validation Error Reference section) and produces a best-effort workflow with as much of the graph as could be wired. Subsequent calls to `workflow.validate()` and `workflow.plan()` remain meaningful on a partially-wired workflow.
+The two flags compose orthogonally:
+
+| `validate_only` | `partial` | Behavior |
+|-----------------|-----------|----------|
+| `False` (default) | `False` (default) | Strict: returns `Workflow`; raises on first failure. |
+| `False` | `True` | Builds best-effort; raises an aggregated `ValueError` if any failure occurred. |
+| `True` | `False` | Fail-fast diagnostic: returns `(wf, errors)` where `errors` has at most one entry. |
+| `True` | `True` | GUI mode: returns `(wf, errors)` with all failures captured; `wf.is_partial` may be `True`. |
+
+In partial mode the library maps construction failures to `ValidationError` entries (see the Validation Error Reference section) and produces a best-effort workflow with as much of the graph as could be wired. Subsequent calls to `workflow.validate()` and `workflow.plan()` remain meaningful on a partially-wired workflow.
+
+**Build-time inspection.** After `from_dict`, callers can inspect what survived without a separate `validate()` call:
+
+```python
+wf, errors = Workflow.from_dict(data, validate_only=True, partial=True)
+wf.errors          # list[ValidationError] — same list returned alongside wf
+wf.failed_nodes    # dict[str, ValidationError] — nodes whose tool resolution / __init__ failed
+wf.is_partial      # bool — True if any node from data["nodes"] is missing from wf.nodes
+```
+
+These properties are populated only by `from_dict`; for programmatic graph construction they are empty / `False`.
 
 **Introspection helpers:**
 
@@ -1564,7 +1635,16 @@ names: list[str] = workflow.topological_order()        # raises on cycle
 deps: set[str] = workflow.downstream_of("loader_1")    # transitive downstream names, excluding argument
 ```
 
-`topological_order` is a thin wrapper over `bioimageflow.engine.topological_order(workflow)`. If the graph may contain a cycle, call `workflow.validate()` first — the latter reports cycles via a `ValidationError` instead of raising.
+`topological_order` is a thin wrapper over `bioimageflow.engine.topological_order(workflow)`. If the graph may contain a cycle, call `workflow.validate()` first — the latter reports cycles via a `ValidationError` (`kind="cycle"`) instead of raising. `workflow.plan()` raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes`) when the graph is cyclic, so a typical GUI flow runs `validate()` first and only calls `plan()` when no `cycle` error was reported.
+
+**Cache invalidation:**
+
+```python
+cleared: set[str] = workflow.invalidate(["segmenter_1"])               # cascades to downstream
+cleared = workflow.invalidate(["segmenter_1"], cascade=False)          # only this node
+```
+
+`invalidate` removes the per-node cache directory under `storage_path` for each named node; with `cascade=True` (default) it also clears every transitively downstream node so a subsequent `compute()` recomputes everything that depended on the changed node. Returns the set of node names whose directories were actually removed (a node with no prior cache is not in the result). Raises `KeyError` for unknown names. **Not safe** to call concurrently with `compute()` on the same workflow — coordinate externally (cancel + join + invalidate).
 
 **Workflow validation:**
 
@@ -1580,33 +1660,35 @@ errors: list[ValidationError] = workflow.validate()
 4. Pydantic validation of every node's supplied constants (`parameter_invalid` for each violation — this step is opt-in; constants are not Pydantic-validated during `Node.__init__`).
 5. Recursive validation of sub-workflows (internal errors carry a `path` prefixed with the parent's name).
 
-Steps 1–3 are already enforced by `Node.__init__` during ordinary graph construction; `validate()` exists so GUIs that built the workflow via `collect_errors` / `from_dict(collect_errors=True)` can re-check after the fact. Step 4 may surface errors previously deferred to execution — if you were relying on the engine's best-effort coercion, add explicit defaults or broaden your `Inputs` type annotations.
+Steps 1–3 are already enforced by `Node.__init__` during ordinary graph construction; `validate()` exists so GUIs that built the workflow via `capture_errors()` / `from_dict(validate_only=True, partial=True)` can re-check after the fact. Step 4 only runs here — it is intentionally not performed at construction time, so a GUI editing one field at a time does not need every other field to be valid yet. Callers that previously relied on the engine's best-effort constant coercion at execution time should add explicit defaults or broaden their `Inputs` type annotations.
 
 The module-level helper `bioimageflow.validate_parameters(tool_class, parameters)` validates a single node's constants in isolation (no Workflow needed) — useful for inline GUI form validation.
 
-**Error collection:**
+**Error capture:**
 
 ```python
 wf = Workflow()
-with wf, wf.collect_errors() as errors:
+with wf, wf.capture_errors() as errors:
     BadTool()(input=upstream["nonexistent"])
 # errors: list[ValidationError]; wf is partially wired.
 ```
 
-`collect_errors()` is a context manager that redirects node-construction failures (`BindingError`, `ColumnNotFoundError`, unknown kwargs, missing required inputs) into a `ValidationError` list instead of raising. Node registration is best-effort: failed nodes remain registered so that downstream references can still be inspected. Nested blocks push independent buffers.
+`capture_errors()` is a context manager that redirects node-construction failures (`BindingError`, `ColumnNotFoundError`, unknown kwargs, missing required inputs) into a `ValidationError` list instead of raising. Node registration is best-effort: failed nodes remain registered so that downstream references can still be inspected. Nested blocks push independent buffers.
 
 **Pre-execution planning:**
 
 ```python
-from bioimageflow import NodePlan
+from bioimageflow import NodePlan, NodePlanStatus
 plan: dict[str, NodePlan] = workflow.plan()
 for name, entry in plan.items():
-    print(name, entry.sig_hash, entry.cached, entry.skipped)
+    print(name, entry.sig_hash, entry.status)
+    # entry.status is one of: CACHED, OUT_OF_DATE, UNEXECUTED, SKIPPED
+    # entry.cached and entry.skipped are kept as boolean shortcuts
 ```
 
-`plan()` returns every node's signature hash and cache status without executing anything. The hashes are byte-identical to what `compute()` would compute for the same nodes — callers can rely on this to report cache state without reimplementing signature composition. `plan()` never launches a Wetlands environment and is safe to call even when `use_wetlands=True`.
+`plan()` returns every node's signature hash and cache status without executing anything. The hashes are byte-identical to what `compute()` would compute for the same nodes — callers can rely on this to report cache state without reimplementing signature composition. `plan()` never launches a Wetlands environment and is safe to call even when `use_wetlands=True`. It raises `CycleInWorkflowError` if the graph is cyclic.
 
-Sub-workflow internal nodes appear under scoped names (`"subworkflow_name/internal_name"`), matching `compute_steps()`.
+Sub-workflow internal nodes appear under scoped names (`"subworkflow_name/internal_name"`), matching `compute_steps()`. A sub-workflow's outer entry aggregates: `CACHED` only when every internal node is `CACHED`, otherwise `UNEXECUTED`.
 
 ### 4.4 Progress Monitoring
 
@@ -1688,7 +1770,7 @@ There is no implicit name-based or type-based column matching. Every column bind
 
 #### Error Collection
 
-When `Node.__init__` runs under `Workflow.collect_errors()`, `BindingError` / `ColumnNotFoundError` raised by the binding rules above are appended to the active collector as `ValidationError` entries instead of raising, and the node is registered with best-effort partial bindings so subsequent nodes can still be wired. See [Section 4.3](#43-the-workflow-object) for the `collect_errors()` contract and the Validation Error Reference section for the `ValidationError` shape.
+When `Node.__init__` runs under `Workflow.capture_errors()`, `BindingError` / `ColumnNotFoundError` raised by the binding rules above are appended to the active capture buffer as `ValidationError` entries instead of raising, and the node is registered with best-effort partial bindings so subsequent nodes can still be wired. See [Section 4.3](#43-the-workflow-object) for the `capture_errors()` contract and the Validation Error Reference section for the `ValidationError` shape.
 
 ### 4.6 Enabling and Disabling Nodes
 
@@ -1763,6 +1845,50 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 `tool_module` stores the **canonical** module path (not the scoped `__1_0_0` variant). When `tool_package` and `tool_package_version` are present, `Workflow.load()` uses `load_versioned_package()` to load the package and `resolve_tool_class()` to find the class in the scoped namespace. When these fields are absent or `null`, the loader falls back to `importlib.import_module()` for backwards compatibility with non-versioned tools.
 
 `Workflow.load()` restores the flag: disabled nodes remain disabled in the loaded workflow.
+
+### 4.7 WorkflowSession (Incremental Editing API)
+
+`WorkflowSession` is a parallel, **dict-backed** model of a workflow designed for GUI clients that mutate the graph incrementally. The session is the canonical state — a `Workflow` is materialized on demand and cached across edits, with selective rebuilds triggered only by structural changes.
+
+**Why a separate class?** `Workflow` builds nodes eagerly in `__init__`, with `_upstream_nodes` and column bindings wired at construction. Retrofitting incremental mutation onto that model would require invasive changes to `Node`. A dict-backed session, materialized to a `Workflow` only when needed, is both simpler and matches what GUIs actually want to send over the wire.
+
+```python
+from bioimageflow import WorkflowSession
+
+s = WorkflowSession(data)             # `data` is the wire format from Workflow.to_dict()
+s = WorkflowSession.from_dict(data)   # equivalent classmethod
+
+# Mutations
+s.add_node({"name": "load", "tool_module": "...", "tool_class": "...",
+            "constants": {...}, "args": []})
+s.remove_node("load")                  # also strips edges that touch it
+s.add_edge({"id": "e1", "from": "load", "to": "seg",
+            "column": "path", "field": "input_image"})
+s.remove_edge("e1")                    # by edge id
+s.set_constant("seg", "diameter", 30.0)
+s.set_enabled("seg", False)
+
+# Read-only views (deep copies)
+s.nodes        # dict[str, dict] keyed by node name
+s.edges        # list[dict]
+s.errors       # list[ValidationError] from the last validate() (or empty)
+s.failed_nodes # dict[str, ValidationError] from the last to_workflow() build
+
+# Materialization
+data = s.to_dict()                     # snapshot of the wire format
+wf = s.to_workflow()                   # cached; rebuilt only on structural edits
+errs = s.validate()                    # cached across non-structural edits
+plan = s.plan()                        # cached across non-structural edits
+```
+
+**Edit semantics.** Edits are split into two categories:
+
+- **Structural edits** (`add_node`, `remove_node`, `add_edge`, `remove_edge`) invalidate the cached `Workflow` — the next `to_workflow()` call rebuilds.
+- **Non-structural edits** (`set_constant`, `set_enabled`) update the cached `Workflow`'s node fields **in place**. A `set_constant` followed by `validate()` / `plan()` does not re-resolve any tool class — this is the contract that makes the session viable for keystroke-rate validation.
+
+`to_workflow()` always uses `Workflow.from_dict(validate_only=True, partial=True, auto_install=False)`, so per-node failures surface in `wf.failed_nodes` rather than raising. Callers should treat `s.failed_nodes` and `s.is_partial` (via the cached workflow) as part of normal operation, not as exceptional state.
+
+**Round-trip identity.** `WorkflowSession(data).to_dict()` preserves the wire format including edge `id` keys, constant envelopes, and the `enabled` flag (the latter is omitted when re-enabling, matching `Workflow.to_dict`'s clean form).
 
 ---
 
@@ -2011,14 +2137,24 @@ Users configure cache retention per workflow:
 `Workflow.plan()` exposes the same signature hashes (byte-identical) at pre-execution time, along with each node's cache-hit status — without actually executing anything. Callers that need to report cache status (for example, a GUI indicating "cached / out-of-date / unexecuted" per node) should use `plan()` rather than reimplementing hash composition.
 
 ```python
-from bioimageflow import NodePlan
+from bioimageflow import NodePlan, NodePlanStatus
 plan: dict[str, NodePlan] = workflow.plan(dev_mode=False)
 for name, entry in plan.items():
     assert isinstance(entry, NodePlan)
-    # entry.node_name, entry.sig_hash, entry.cached, entry.upstream, entry.skipped
+    # entry.node_name, entry.sig_hash, entry.status, entry.upstream
+    # entry.cached / entry.skipped: boolean shortcuts derived from status
 ```
 
-`NodePlan` is a frozen dataclass with fields `node_name`, `sig_hash`, `cached`, `upstream` (tuple of upstream scoped names), and `skipped`. Sub-workflow internal nodes appear under scoped names `"subworkflow_name/internal_name"`. `plan()` never launches a Wetlands environment (an internal non-Wetlands engine is used regardless of `Workflow.use_wetlands`).
+`NodePlan` is a frozen dataclass with fields `node_name`, `sig_hash`, `status` (a `NodePlanStatus`), and `upstream` (tuple of upstream scoped names). The `cached` and `skipped` booleans are read-only shortcuts (`cached == status is CACHED`, `skipped == status is SKIPPED`). `NodePlanStatus` values:
+
+| Status | Meaning |
+|--------|---------|
+| `CACHED` | Current sig_hash matches an existing cache entry; `compute()` would short-circuit. |
+| `OUT_OF_DATE` | Cache directory has prior runs but none match the current sig_hash; `compute()` would re-execute. |
+| `UNEXECUTED` | No cache directory yet — node has never run. |
+| `SKIPPED` | Node is disabled, or its upstream chain contains a disabled node. `sig_hash` is empty. |
+
+Sub-workflow internal nodes appear under scoped names `"subworkflow_name/internal_name"`. The outer sub-workflow entry's status is `CACHED` only when every internal node is `CACHED`, otherwise `UNEXECUTED`. `plan()` never launches a Wetlands environment (an internal non-Wetlands engine is used regardless of `Workflow.use_wetlands`). It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list[str]`) on a cyclic graph; call `workflow.validate()` first if a cycle is possible.
 
 ---
 
@@ -2026,9 +2162,10 @@ for name, entry in plan.items():
 
 `ValidationError` is a frozen dataclass produced by:
 
-- `Workflow.collect_errors()` — for construction-time errors when the context is active.
-- `Workflow.from_dict(..., collect_errors=True)` — for tool-resolution and per-node construction failures during deserialization.
+- `Workflow.capture_errors()` — for construction-time errors when the context is active.
+- `Workflow.from_dict(..., partial=True)` — for tool-resolution and per-node construction failures during deserialization (also accessible via `wf.errors` and `wf.failed_nodes` after the call).
 - `Workflow.validate()` — for post-construction checks.
+- `WorkflowSession.validate()` — same as `Workflow.validate()` but cached across non-structural session edits.
 
 ```python
 from bioimageflow import ValidationError, ValidationErrorKind
@@ -2040,16 +2177,19 @@ class ValidationError:
     node: str | None = None
     field: str | None = None
     edge: tuple[str, str, str] | None = None        # (from_node, to_node, field)
+    edge_id: str | None = None                      # opaque GUI-supplied id (see §4.2)
     path: tuple[str, ...] = ()                      # sub-workflow scope, root → leaf
 ```
 
-**The library never raises `ValidationError`.** It raises the existing domain exceptions (`BindingError`, `ColumnNotFoundError`, `IndexAlignmentError`, `ValueError` for duplicate names, `RuntimeError`/`CycleError` for cycles) unless an error-collector is active.
+`edge_id` carries the optional `id` value that GUIs attach to edges in the wire format (see [§4.2 / Wire format](#42-nodes-and-edges)). When an error is raised against an edge that has an `id`, the library copies that id onto the `ValidationError`. This is the disambiguator for cases like positional args, where multiple edges share the same `(from, to, field)` triple by construction. `edge_id` is also part of the deduplication key inside `validate()` — two errors that differ only by their `edge_id` are reported as distinct.
+
+**The library never raises `ValidationError`.** It raises the existing domain exceptions (`BindingError`, `ColumnNotFoundError`, `IndexAlignmentError`, `ValueError` for duplicate names, `CycleInWorkflowError` for cycles in `plan()`) unless an error-collector is active.
 
 **`ValidationErrorKind` values and origins:**
 
 | Kind | Produced when |
 |------|----------------|
-| `cycle` | Graph contains a cycle. Detected by `validate()`; `from_dict(collect_errors=True)` also reports on serialized cycles. |
+| `cycle` | Graph contains a cycle. Detected by `validate()`; `from_dict(partial=True)` also reports on serialized cycles. `plan()` raises `CycleInWorkflowError` instead. |
 | `type_mismatch` | Upstream output's `ImageSpec` is incompatible with the downstream input's `ImageSpec`. |
 | `missing_input` | A required input has no column binding, no constant, and no `Inputs` default. Also reported for serialized edges referencing an unknown upstream node. |
 | `unknown_input` | A keyword argument does not correspond to any declared `Inputs` field. |
@@ -2357,9 +2497,20 @@ from bioimageflow import (
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,
     require_tool_packages,
+    # GUI / platform integration
+    WorkflowSession,
+    ToolRegistry, ToolMetadata,
+    # Pre-execution planning
+    NodePlan, NodePlanStatus, NodeStep,
+    DisabledNodeError, CycleInWorkflowError,
+    # Validation surface
+    ValidationError, ValidationErrorKind,
+    validate_parameters, check_type_compat,
+    serialize_image_spec, serialize_constant, deserialize_constant,
+    serialize_input_schema, serialize_output_schema, SchemaSerializationError,
+    get_inputs_schema,
 )
 from bioimageflow.node import Node, ColumnRef
-from bioimageflow.engine import DisabledNodeError
 from bioimageflow.tool_loader import resolve_tool_class
 ```
 
@@ -2806,5 +2957,14 @@ env.exit()  # Shuts down all workers and releases resources
 
 ## Changelog
 
-- GUI Validation and Planning API: `Workflow.from_dict` / `to_dict`, `Workflow.validate`, `Workflow.plan`, `Workflow.collect_errors`, `Workflow.topological_order`, `Workflow.downstream_of`, `ValidationError` dataclass, `NodePlan` dataclass, and helpers `validate_parameters` / `check_type_compat` / `serialize_image_spec`. Additive; `Workflow.load` / `export` / `compute` are unchanged. Note: `Workflow.validate()` runs Pydantic validation on supplied constants (`parameter_invalid`) that was previously deferred to execution — callers relying on engine coercion may need explicit defaults or broader `Inputs` types.
+- GUI Validation and Planning API: `Workflow.from_dict` / `to_dict`, `Workflow.validate`, `Workflow.plan`, `Workflow.capture_errors`, `Workflow.topological_order`, `Workflow.downstream_of`, `ValidationError` dataclass, `NodePlan` dataclass, and helpers `validate_parameters` / `check_type_compat` / `serialize_image_spec`. Additive; `Workflow.load` / `export` / `compute` are unchanged. Note: `Workflow.validate()` runs Pydantic validation on supplied constants (`parameter_invalid`) that was previously deferred to execution — callers relying on engine coercion may need explicit defaults or broader `Inputs` types.
 - Wire-format schema serializers: `bioimageflow.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` return JSON-safe per-field schemas (including `choices` from `Literal` / `Enum`, three-state `connectable`, `image_spec`) for tool classes without requiring instantiation. `Passthrough` outputs serialize to `{"_passthrough": True}`. `SchemaSerializationError` is the accompanying exception. Recommended for any GUI or external consumer that needs tool metadata over the wire; `get_inputs_schema(tool)` is still available for Python-object introspection. Additive; no existing API changed.
+- Platform-boundary refactor (GUI integration surface):
+  - `Workflow.from_dict` gains orthogonal `validate_only` and `partial` flags. The legacy `collect_errors=` kwarg is **removed** (passing it raises `TypeError`); `validate_only=True, partial=True` is the equivalent.
+  - The `Workflow.collect_errors()` context manager is **renamed** to `Workflow.capture_errors()`; the underlying `_error_capture` ContextVar is consistent. No alias.
+  - `Workflow` exposes `errors`, `failed_nodes`, `is_partial` build-time properties and `invalidate(node_ids, *, cascade=True)` for cache cleanup. `invalidate` is **not** safe vs concurrent `compute()`.
+  - `Workflow.plan()` adds per-node `NodePlanStatus` (`CACHED` / `OUT_OF_DATE` / `UNEXECUTED` / `SKIPPED`) on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
+  - `ValidationError` adds an `edge_id: str | None` field, copied from the optional `id` key on wire-format edges. `validate()`'s deduplication includes `edge_id`, so two errors that differ only by `edge_id` are reported as distinct.
+  - `serialize_constant` / `deserialize_constant` are public exports of `bioimageflow.validation`. `deserialize_constant` requires the typed envelope; bare-string input is no longer accepted.
+  - New `bioimageflow.ToolRegistry` and `bioimageflow.ToolMetadata` for GUIs to enumerate tools without rebuilding loader plumbing. `install_package` (network) and `register_package` (in-process) are split so hot validation paths never touch the network.
+  - New `bioimageflow.WorkflowSession` — a dict-backed incremental editing model with cached `to_workflow()`, in-place updates for `set_constant` / `set_enabled` (no tool re-resolution), and structural-edit invalidation. Aimed at GUI clients that mutate graphs at keystroke rate.

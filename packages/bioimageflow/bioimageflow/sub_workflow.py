@@ -121,11 +121,17 @@ class SubWorkflowNode(Node):
         self._output_mapping = output_mapping
         self._input_column_bindings = input_column_bindings
         self._input_constant_bindings = input_constant_bindings
+        # Edge IDs parallel to _input_column_bindings, populated by
+        # Workflow._reconstruct_from_dict; defaults to empty for
+        # programmatic construction.
+        self._input_column_binding_edge_ids: dict[str, str | None] = {}
         self.enabled = True
         self._args: list[Any] = []
         self._kwargs: dict[str, Any] = {}
         self._column_bindings: dict[str, ColumnRef] = {}
         self._constant_bindings: dict[str, Any] = {}
+        self._column_binding_edge_ids: dict[str, str | None] = {}
+        self._arg_edge_ids: list[str | None] = []
 
         # Upstream nodes: everything referenced via input column bindings
         self._upstream_nodes: set[Node] = set()

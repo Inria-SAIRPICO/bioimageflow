@@ -83,17 +83,17 @@ class TestValidationErrorDataclass:
 # ---------------------------------------------------------------------------
 
 
-class TestCollectErrors:
-    def test_collector_off_raises_like_today(self) -> None:
+class TestCaptureErrors:
+    def test_capture_off_raises_like_today(self) -> None:
         wf = Workflow()
         with wf:
             with pytest.raises(BindingError):
                 StubSegmenter()()  # missing required input
 
-    def test_collector_captures_multiple_errors_one_pass(self) -> None:
+    def test_capture_captures_multiple_errors_one_pass(self) -> None:
         wf = Workflow()
         with wf:
-            with wf.collect_errors() as errs:
+            with wf.capture_errors() as errs:
                 load = FileLoader()(path="/tmp/x")
                 # 3 distinct problems on separate nodes
                 StubSegmenter()(input_image=load["nonexistent"])       # column_not_found
@@ -105,11 +105,11 @@ class TestCollectErrors:
         assert "missing_input" in kinds
         assert len(errs) >= 3
 
-    def test_nested_collectors_do_not_share_buffers(self) -> None:
+    def test_nested_captures_do_not_share_buffers(self) -> None:
         wf = Workflow()
         with wf:
-            with wf.collect_errors() as outer:
-                with wf.collect_errors() as inner:
+            with wf.capture_errors() as outer:
+                with wf.capture_errors() as inner:
                     StubSegmenter()()  # inner captures
                 # outer shouldn't see inner's error
                 StubSegmenter()()  # outer captures its own
@@ -117,10 +117,10 @@ class TestCollectErrors:
         assert len(outer) == 1
         assert inner[0] != outer[0] or inner[0].node != outer[0].node
 
-    def test_collector_active_no_errors_workflow_still_usable(self, tmp_path: Path) -> None:
+    def test_capture_active_no_errors_workflow_still_usable(self, tmp_path: Path) -> None:
         wf = Workflow(storage_path=tmp_path, use_wetlands=False)
         with wf:
-            with wf.collect_errors() as errs:
+            with wf.capture_errors() as errs:
                 load = FileLoader()(path=str(tmp_path))
                 StubSegmenter()(input_image=load["path"])
         assert errs == []
@@ -165,7 +165,7 @@ class TestFromDictToDict:
         assert isinstance(wf_from_dict, Workflow)
         assert set(wf_loaded._nodes) == set(wf_from_dict._nodes)
 
-    def test_collect_errors_unknown_tool(self, tmp_path: Path) -> None:
+    def test_partial_unknown_tool(self, tmp_path: Path) -> None:
         data = {
             "nodes": [
                 {
@@ -179,11 +179,11 @@ class TestFromDictToDict:
             "edges": [],
             "config": {"storage_path": str(tmp_path)},
         }
-        wf, errs = Workflow.from_dict(data, collect_errors=True)
+        wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert isinstance(wf, Workflow)
         assert any(e.kind == "unknown_tool" for e in errs)
 
-    def test_collect_errors_three_broken_nodes(self, tmp_path: Path) -> None:
+    def test_partial_three_broken_nodes(self, tmp_path: Path) -> None:
         data = {
             "nodes": [
                 {"name": "a", "tool_module": "no.mod.a", "tool_class": "A", "constants": {}, "args": []},
@@ -193,10 +193,10 @@ class TestFromDictToDict:
             "edges": [],
             "config": {"storage_path": str(tmp_path)},
         }
-        wf, errs = Workflow.from_dict(data, collect_errors=True)
+        wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert sum(1 for e in errs if e.kind == "unknown_tool") == 3
 
-    def test_edge_referencing_unknown_from_node_collect(self, tmp_path: Path) -> None:
+    def test_edge_referencing_unknown_from_node_partial(self, tmp_path: Path) -> None:
         data = {
             "nodes": [
                 {
@@ -213,7 +213,7 @@ class TestFromDictToDict:
             ],
             "config": {"storage_path": str(tmp_path)},
         }
-        wf, errs = Workflow.from_dict(data, collect_errors=True)
+        wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert any(e.kind == "missing_input" for e in errs)
 
     def test_storage_path_override(self, tmp_path: Path) -> None:
@@ -226,6 +226,56 @@ class TestFromDictToDict:
         wf = Workflow.from_dict(data, storage_path_override=override)
         assert isinstance(wf, Workflow)
         assert str(wf.storage_path) == str(override)
+
+    # --- validate_only / partial flag matrix ---
+
+    def _bad_data(self, tmp_path: Path) -> dict:
+        return {
+            "nodes": [
+                {"name": "a", "tool_module": "no.mod.a", "tool_class": "A",
+                 "constants": {}, "args": []},
+                {"name": "b", "tool_module": "no.mod.b", "tool_class": "B",
+                 "constants": {}, "args": []},
+            ],
+            "edges": [],
+            "config": {"storage_path": str(tmp_path)},
+        }
+
+    def test_default_strict_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(Exception):  # ImportError / ModuleNotFoundError etc.
+            Workflow.from_dict(self._bad_data(tmp_path))
+
+    def test_partial_true_validate_only_false_raises_aggregated(
+        self, tmp_path: Path,
+    ) -> None:
+        # partial collects errors, validate_only=False raises a summary.
+        with pytest.raises(ValueError, match="construction failed"):
+            Workflow.from_dict(self._bad_data(tmp_path), partial=True)
+
+    def test_validate_only_true_partial_false_returns_first_error(
+        self, tmp_path: Path,
+    ) -> None:
+        # Fail-fast tuple mode: capture the first failure, return tuple.
+        wf, errs = Workflow.from_dict(
+            self._bad_data(tmp_path), validate_only=True, partial=False,
+        )
+        assert isinstance(wf, Workflow)
+        assert len(errs) == 1  # stopped at first failure
+
+    def test_validate_only_true_partial_true_returns_all(
+        self, tmp_path: Path,
+    ) -> None:
+        wf, errs = Workflow.from_dict(
+            self._bad_data(tmp_path), validate_only=True, partial=True,
+        )
+        assert isinstance(wf, Workflow)
+        assert sum(1 for e in errs if e.kind == "unknown_tool") == 2
+
+    def test_collect_errors_kwarg_is_removed(self, tmp_path: Path) -> None:
+        # The legacy `collect_errors=` kwarg was removed; passing it must
+        # raise TypeError so callers see the migration immediately.
+        with pytest.raises(TypeError):
+            Workflow.from_dict(self._bad_data(tmp_path), collect_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +318,10 @@ class TestValidate:
             StubStats()(image=load["path"], mask=seg["mask"])
         assert wf.validate() == []
 
-    def test_missing_required_after_collect(self) -> None:
+    def test_missing_required_after_capture(self) -> None:
         wf = Workflow()
         with wf:
-            with wf.collect_errors():
+            with wf.capture_errors():
                 StubSegmenter()()
         errs = wf.validate()
         assert any(e.kind == "missing_input" and e.field == "input_image" for e in errs)
@@ -303,6 +353,23 @@ class TestValidate:
         from graphlib import CycleError
         with pytest.raises(CycleError):
             topological_order(wf)
+        errs = wf.validate()
+        assert any(e.kind == "cycle" for e in errs)
+
+    def test_plan_raises_cycle_in_workflow_error(self) -> None:
+        from bioimageflow import CycleInWorkflowError
+
+        wf = Workflow(use_wetlands=False)
+        with wf:
+            load = FileLoader()(path="/tmp/x")
+            seg = StubSegmenter()(input_image=load["path"])
+        seg._upstream_nodes.add(seg)
+        with pytest.raises(CycleInWorkflowError) as excinfo:
+            wf.plan()
+        # Carries the offending node names; subclass of ValueError.
+        assert isinstance(excinfo.value, ValueError)
+        assert excinfo.value.nodes  # non-empty
+        # validate() still reports cycles non-fatally (unchanged behavior).
         errs = wf.validate()
         assert any(e.kind == "cycle" for e in errs)
 
@@ -469,9 +536,9 @@ class TestIntegration:
         wf.export(p)
         wf_loaded = Workflow.load(p)
 
-        # to_dict → from_dict(collect_errors)
+        # to_dict → from_dict(validate_only=True, partial=True)
         data = wf_loaded.to_dict()
-        wf_collect, errs = Workflow.from_dict(data, collect_errors=True)
+        wf_collect, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert errs == []
         assert isinstance(wf_collect, Workflow)
         assert set(wf.to_dict()["nodes"][0].keys()) == \
@@ -511,7 +578,7 @@ class TestIntegration:
             ],
             "config": {"storage_path": str(tmp_path)},
         }
-        wf, errs = Workflow.from_dict(data, collect_errors=True)
+        wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert any(e.kind == "unknown_tool" for e in errs)
 
         # validate() now runs on the partial wf
