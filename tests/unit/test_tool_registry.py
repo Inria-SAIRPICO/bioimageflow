@@ -106,3 +106,55 @@ class TestInstallPackageSeparation:
         # Just smoke-test the interface — not running an actual install.
         assert hasattr(reg, "install_package")
         assert hasattr(reg, "register_package")
+
+
+@pytest.fixture
+def tool_store_absolute_imports(tmp_path):
+    """A versioned package whose __init__.py uses absolute imports.
+
+    This is a spec violation (specs.md §"Tool packages") but is the
+    exact regression that left the platform's tool list empty when
+    bioimageflow_common_tools shipped with absolute imports. The
+    registry must warn loudly so the failure is diagnosable.
+    """
+    store = tmp_path / "tool_packages"
+    pkg_dir = store / "abs_tools" / "1.0.0" / "abs_tools"
+    pkg_dir.mkdir(parents=True)
+    # Absolute import bypasses the scoped loader — tool classes are
+    # loaded under the canonical name, so _stamp_tool_classes skips
+    # them and they end up in the scoped namespace without _bif_package.
+    (pkg_dir / "__init__.py").write_text(
+        "from abs_tools.alpha import AlphaTool\n"
+    )
+    (pkg_dir / "alpha.py").write_text(
+        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "class AlphaTool(ProcessingTool):\n"
+        "    class Inputs(IOModel):\n"
+        "        value: int = 0\n"
+        "    class Outputs(IOModel):\n"
+        "        result: str\n"
+        "    def process_row(self, arguments: Arguments):\n"
+        "        return self.Outputs(result='ok')\n"
+    )
+    yield store
+    for k in [k for k in sys.modules if k.startswith("abs_tools")]:
+        del sys.modules[k]
+    sys.path[:] = [p for p in sys.path if "abs_tools" not in p]
+
+
+class TestAbsoluteImportDiagnostic:
+    def test_register_warns_on_absolute_import(
+        self, tool_store_absolute_imports, caplog
+    ) -> None:
+        reg = ToolRegistry(store_path=tool_store_absolute_imports)
+        with caplog.at_level("WARNING", logger="bioimageflow"):
+            metas = reg.register_package("abs_tools", "1.0.0")
+
+        # No tools register, but the warning explains why.
+        assert metas == []
+        assert any(
+            "AlphaTool" in rec.message
+            and "absolute imports" in rec.message
+            and "abs_tools" in rec.message
+            for rec in caplog.records
+        ), f"expected absolute-import warning, got: {caplog.records}"

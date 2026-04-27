@@ -21,6 +21,7 @@ action.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ from bioimageflow.validation import (
     serialize_input_schema,
     serialize_output_schema,
 )
+
+logger = logging.getLogger("bioimageflow")
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ class ToolRegistry:
 
         discovered: list[ToolMetadata] = []
         seen: set[type] = set()
+        unstamped: dict[type, str] = {}
 
         # Walk the loaded module and any submodules registered under its
         # scoped name. Tool classes stamped by _stamp_tool_classes carry
@@ -146,6 +150,19 @@ class ToolRegistry:
                 if obj is BaseTool or obj is SubWorkflow:
                     continue
                 if getattr(obj, "_bif_package", None) != name:
+                    # A tool-like class that wasn't stamped for this
+                    # package. If its __module__ points at the canonical
+                    # package name, it's almost certainly an absolute
+                    # import in __init__.py bypassing the scoped loader.
+                    # Track it so we can warn once per offending class
+                    # below — silent skip would leave the GUI's tool
+                    # list empty with no actionable diagnostic.
+                    obj_module = getattr(obj, "__module__", "")
+                    if (
+                        obj_module == name
+                        or obj_module.startswith(name + ".")
+                    ) and obj not in unstamped:
+                        unstamped[obj] = obj_module
                     continue
                 seen.add(obj)
 
@@ -153,6 +170,17 @@ class ToolRegistry:
                 self._classes[meta.class_name] = obj
                 self._metadata[meta.class_name] = meta
                 discovered.append(meta)
+
+        for cls, obj_module in unstamped.items():
+            logger.warning(
+                "Tool class %s.%s found in package %r v%s but missing "
+                "scope marker — this usually means the package's "
+                "__init__.py uses absolute imports "
+                "(`from %s.module import X`) instead of relative ones "
+                "(`from .module import X`). The class will not be "
+                "registered. See specs.md §Tool Packages.",
+                obj_module, cls.__name__, name, version, name,
+            )
 
         return discovered
 
