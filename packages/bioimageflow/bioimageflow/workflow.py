@@ -990,11 +990,29 @@ class Workflow:
                         raise
                     # missing_upstream already reported; other failures become construction_failed.
                     if not missing_upstream:
-                        err = ValidationError(
-                            kind="construction_failed",
-                            message=str(exc),
-                            node=name,
-                        )
+                        # SourceToolUpstreamError carries its own
+                        # kind ("source_tool_upstream") — preserve it
+                        # and attach the first positional edge ID so
+                        # the platform can highlight the offending edge.
+                        from bioimageflow.node import SourceToolUpstreamError
+                        if isinstance(exc, SourceToolUpstreamError):
+                            first_eid = (
+                                positional_arg_edge_ids[0]
+                                if positional_arg_edge_ids
+                                else None
+                            )
+                            err = ValidationError(
+                                kind="source_tool_upstream",
+                                message=str(exc),
+                                node=name,
+                                edge_id=first_eid,
+                            )
+                        else:
+                            err = ValidationError(
+                                kind="construction_failed",
+                                message=str(exc),
+                                node=name,
+                            )
                         errors.append(err)
                         self._failed_nodes[name] = err
         finally:
