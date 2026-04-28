@@ -3,7 +3,7 @@ name = "bioimageflow-common-tools"
 version = "0.1.3"
 description = "Common bioimage analysis tools for BioImageFlow"
 requires-python = ">=3.10"
-dependencies = ["bioimageflow-core>=0.1.3", "bioimageflow"]
+dependencies = ["bioimageflow-core>=0.1.3", "bioimageflow>=0.1.3"]
 
 [tool.uv.sources]
 bioimageflow-core = { workspace = true }
