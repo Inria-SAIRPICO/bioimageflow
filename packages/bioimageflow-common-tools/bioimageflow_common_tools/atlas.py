@@ -55,21 +55,21 @@ class Atlas(ProcessingTool):
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
-        gaussian_std: Annotated[int, GUIMeta(
+        gaussian_std: Annotated[int | None, GUIMeta(
             display_name="Gaussian std",
-            description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size.",
+            description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size. Leave unset to use Atlas's built-in default.",
             min=0, max=200, step=1,
-        )] = 60
-        p_value: Annotated[float, GUIMeta(
+        )] = None
+        p_value: Annotated[float | None, GUIMeta(
             display_name="P-value",
-            description="Detection significance threshold. Lower values yield fewer, more confident detections.",
+            description="Detection significance threshold. Lower values yield fewer, more confident detections. Leave unset to use Atlas's built-in default.",
             min=0.0, max=1.0, step=0.000001,
-        )] = 0.001
-        area_lim: Annotated[float, GUIMeta(
+        )] = None
+        area_lim: Annotated[float | None, GUIMeta(
             display_name="Area limit",
-            description="Remove detections smaller than this area (in pixels). Set to 0 to keep all detections.",
+            description="Remove detections smaller than this area (in pixels). Leave unset to use Atlas's built-in default.",
             min=0.0, max=10000.0, step=0.01,
-        )] = 0.0
+        )] = None
         verbose: Annotated[bool, GUIMeta(
             display_name="Verbose",
             description="Print detailed progress information from the Atlas CLI.",
@@ -108,10 +108,13 @@ class Atlas(ProcessingTool):
             "-ref", str(blobs_file),
             "-i", str(input_path),
             "-o", str(output_path),
-            "-rad", str(arguments.gaussian_std),
-            "-pval", str(arguments.p_value),
-            "-arealim", str(arguments.area_lim),
         ]
+        if arguments.gaussian_std is not None:
+            command += ["-rad", str(arguments.gaussian_std)]
+        if arguments.p_value is not None:
+            command += ["-pval", str(arguments.p_value)]
+        if arguments.area_lim is not None:
+            command += ["-arealim", str(arguments.area_lim)]
         if arguments.verbose:
             command.append("-v")
 
