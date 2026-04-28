@@ -30,7 +30,6 @@ from bioimageflow.paths import get_tool_store_path
 from bioimageflow.tool_loader import (
     ensure_installed,
     load_versioned_package,
-    resolve_tool_class,
 )
 from bioimageflow.validation import (
     serialize_input_schema,

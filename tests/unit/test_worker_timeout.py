@@ -162,14 +162,15 @@ class _StubEnvManager:
 
 class TestWorkerTimeoutErrorRaised:
 
-    def _make_engine_with_stub(self):
+    def _make_engine_with_stub(self) -> tuple[DefaultEngine, _StubEnvManager]:
         engine = DefaultEngine(use_wetlands=False)
         engine._use_wetlands = True
-        engine._env_manager = _StubEnvManager()
-        return engine
+        stub = _StubEnvManager()
+        engine._env_manager = stub  # type: ignore[assignment]
+        return engine, stub
 
     def test_row_path_raises_worker_timeout_error(self):
-        engine = self._make_engine_with_stub()
+        engine, stub = self._make_engine_with_stub()
         tool = _StubTool()
         wf = Workflow(use_wetlands=False)
         wf.get_environment(tool).worker_timeout = 10.0
@@ -186,13 +187,12 @@ class TestWorkerTimeoutErrorRaised:
             )
 
         # All tasks should have been asked to cancel after timeout
-        stub = engine._env_manager
         assert all(t.cancel_called for t in stub.hanging_tasks)
         # worker_timeout should have been passed through
         assert stub.last_worker_timeout == 10.0
 
     def test_batch_path_raises_worker_timeout_error(self):
-        engine = self._make_engine_with_stub()
+        engine, stub = self._make_engine_with_stub()
 
         class _BatchTool(_StubTool):
             def process_batch(self, arguments_list):
@@ -211,7 +211,6 @@ class TestWorkerTimeoutErrorRaised:
                 has_batch=True,
             )
 
-        stub = engine._env_manager
         assert stub.hanging_tasks[0].cancel_called
         assert stub.last_worker_timeout == 5.0
 
@@ -261,7 +260,8 @@ class TestWorkerTimeoutErrorRaised:
 
         engine = DefaultEngine(use_wetlands=False)
         engine._use_wetlands = True
-        engine._env_manager = _Env()
+        stub = _Env()
+        engine._env_manager = stub  # type: ignore[assignment]
 
         tool = _StubTool()
         wf = Workflow(use_wetlands=False)
@@ -274,7 +274,6 @@ class TestWorkerTimeoutErrorRaised:
             node_name="n",
             has_batch=False,
         )
-        stub = engine._env_manager
         assert stub.last_worker_timeout is None
         assert stub.tasks[0].timeouts_seen == [None]
 

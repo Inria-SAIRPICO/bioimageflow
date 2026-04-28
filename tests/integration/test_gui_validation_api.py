@@ -278,7 +278,7 @@ class TestFromDictToDict:
         # The legacy `collect_errors=` kwarg was removed; passing it must
         # raise TypeError so callers see the migration immediately.
         with pytest.raises(TypeError):
-            Workflow.from_dict(self._bad_data(tmp_path), collect_errors=True)
+            Workflow.from_dict(self._bad_data(tmp_path), collect_errors=True)  # type: ignore[call-overload]
 
 
 # ---------------------------------------------------------------------------

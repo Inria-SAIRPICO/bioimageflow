@@ -262,7 +262,7 @@ class TestGetToolPackageInfo:
                 pass
             class Outputs(IOModel):
                 result: str
-            def process_row(self, a):
+            def process_row(self, arguments):
                 return self.Outputs(result="x")
 
         pkg, ver, canonical = get_tool_package_info(Stub)
@@ -414,7 +414,7 @@ class TestGetToolVersion:
                 pass
             class Outputs(IOModel):
                 result: str
-            def process_row(self, a):
+            def process_row(self, arguments):
                 return self.Outputs(result="x")
 
         version = get_tool_version(Stub())

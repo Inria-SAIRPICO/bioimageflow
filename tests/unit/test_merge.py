@@ -9,12 +9,12 @@ from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat
 
 @pytest.fixture
 def df_a():
-    return pd.DataFrame({"x": [1, 2, 3]}, index=["0", "1", "2"])
+    return pd.DataFrame({"x": [1, 2, 3]}, index=pd.Index(["0", "1", "2"]))
 
 
 @pytest.fixture
 def df_b():
-    return pd.DataFrame({"y": [10, 20, 30]}, index=["0", "1", "2"])
+    return pd.DataFrame({"y": [10, 20, 30]}, index=pd.Index(["0", "1", "2"]))
 
 
 class TestInnerJoin:
@@ -32,8 +32,8 @@ class TestInnerJoin:
         assert len(result) == 3
 
     def test_duplicate_columns_deduplicated(self):
-        df1 = pd.DataFrame({"col": [1, 2]}, index=["0", "1"])
-        df2 = pd.DataFrame({"col": [3, 4]}, index=["0", "1"])
+        df1 = pd.DataFrame({"col": [1, 2]}, index=pd.Index(["0", "1"]))
+        df2 = pd.DataFrame({"col": [3, 4]}, index=pd.Index(["0", "1"]))
         tool = InnerJoin()
         result = tool.merge_dataframes([df1, df2], Arguments())
         assert "col" in result.columns
@@ -48,8 +48,8 @@ class TestInnerJoin:
 class TestCrossJoin:
 
     def test_cross_product(self):
-        df1 = pd.DataFrame({"a": [1, 2]}, index=["0", "1"])
-        df2 = pd.DataFrame({"b": [10, 20]}, index=["0", "1"])
+        df1 = pd.DataFrame({"a": [1, 2]}, index=pd.Index(["0", "1"]))
+        df2 = pd.DataFrame({"b": [10, 20]}, index=pd.Index(["0", "1"]))
         tool = CrossJoin()
         result = tool.merge_dataframes([df1, df2], Arguments(suffixes=("_left", "_right")))
         assert len(result) == 4
@@ -83,8 +83,8 @@ class TestConcat:
         assert list(result["x"]) == [1, 2, 3, 4]
 
     def test_preserves_index(self):
-        df1 = pd.DataFrame({"x": [1]}, index=["a"])
-        df2 = pd.DataFrame({"x": [2]}, index=["b"])
+        df1 = pd.DataFrame({"x": [1]}, index=pd.Index(["a"]))
+        df2 = pd.DataFrame({"x": [2]}, index=pd.Index(["b"]))
         tool = Concat()
         result = tool.merge_dataframes([df1, df2], Arguments())
         assert list(result.index) == ["a", "b"]
@@ -95,6 +95,6 @@ class TestCollect:
     def test_collect_is_passthrough(self):
         tool = Collect()
         # Collect uses default merge (inner join) and default transform (identity)
-        df = pd.DataFrame({"a": [1], "b": [2]}, index=["0"])
+        df = pd.DataFrame({"a": [1], "b": [2]}, index=pd.Index(["0"]))
         result = tool.transform(df, Arguments())
         pd.testing.assert_frame_equal(result, df)

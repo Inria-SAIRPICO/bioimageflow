@@ -131,9 +131,9 @@ class TestBuildIOModel:
         assert ann["y"] is float
         assert ann["name"] is str
         assert ann["flag"] is bool
-        assert cls.y == 3.14
-        assert cls.name == "hello"
-        assert cls.flag is True
+        assert cls.y == 3.14  # type: ignore[attr-defined]
+        assert cls.name == "hello"  # type: ignore[attr-defined]
+        assert cls.flag is True  # type: ignore[attr-defined]
         assert not hasattr(cls, "x")
 
     def test_path_with_image_spec(self):
@@ -169,8 +169,8 @@ class TestBuildIOModel:
             "y": {"type": "float", "default": 1.0},
         })
         obj = cls(x=42)
-        assert obj.x == 42
-        assert obj.y == 1.0
+        assert obj.x == 42  # type: ignore[attr-defined]
+        assert obj.y == 1.0  # type: ignore[attr-defined]
         with pytest.raises(TypeError, match="Missing required"):
             cls()  # x is required
 
@@ -242,6 +242,8 @@ class TestFromConfig:
         sw = SubWorkflow.from_config(config)
         assert isinstance(sw, SubWorkflow)
         assert sw.display_name == "test_sw"
+        assert sw.Inputs is not None
+        assert sw.Outputs is not None
         assert sw.Inputs._get_all_annotations()["x"] is int
         assert sw.Outputs._get_all_annotations()["y"] is int
 
@@ -249,7 +251,7 @@ class TestFromConfig:
         """from_config stores the config dict for serialization."""
         config = _single_seg_config()
         sw = SubWorkflow.from_config(config)
-        assert sw._config == config
+        assert sw._config == config  # type: ignore[attr-defined]
 
 
 # ===========================================================================

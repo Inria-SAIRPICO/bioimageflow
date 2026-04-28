@@ -351,18 +351,19 @@ class Node:
         tool_cls = type(self.tool)
 
         if isinstance(self.tool, DataFrameTool):
+            df_tool_cls: type[DataFrameTool] = type(self.tool)
             # _constant_bindings holds exactly the kwargs that aren't
             # ColumnRefs/Nodes (see Node._process_kwargs); it's the right
             # input dict for resolve_outputs / resolve_merge_schema.
-            if _overrides_resolve_merge_schema(tool_cls):
+            if _overrides_resolve_merge_schema(df_tool_cls):
                 upstream_schemas = [
                     arg.get_output_schema() if isinstance(arg, Node) else None
                     for arg in self._args
                 ]
-                return tool_cls.resolve_merge_schema(
+                return df_tool_cls.resolve_merge_schema(
                     upstream_schemas, self._constant_bindings,
                 )
-            return tool_cls.resolve_outputs(self._constant_bindings)
+            return df_tool_cls.resolve_outputs(self._constant_bindings)
 
         # ProcessingTool: static schema.
         if getattr(tool_cls, "Outputs", None) is None:

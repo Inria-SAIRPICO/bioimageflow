@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 from typing import TYPE_CHECKING
 
 from bioimageflow.node import (
@@ -95,7 +95,7 @@ class Workflow:
         _reset_name_counters()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         set_active_workflow(self._prev_workflow)
         return False
 
@@ -714,6 +714,36 @@ class Workflow:
         result = cls.from_dict(data)
         assert isinstance(result, Workflow)  # strict mode
         return result
+
+    @overload
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        validate_only: Literal[True],
+        partial: bool = False,
+        auto_install: bool = True,
+        storage_path_override: str | Path | None = None,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+        use_wetlands: bool | None = None,
+        wetlands_config: dict[str, Any] | None = None,
+    ) -> "tuple[Workflow, list[ValidationError]]": ...
+
+    @overload
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        validate_only: Literal[False] = False,
+        partial: bool = False,
+        auto_install: bool = True,
+        storage_path_override: str | Path | None = None,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+        use_wetlands: bool | None = None,
+        wetlands_config: dict[str, Any] | None = None,
+    ) -> "Workflow": ...
 
     @classmethod
     def from_dict(

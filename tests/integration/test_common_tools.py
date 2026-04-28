@@ -170,7 +170,7 @@ class TestLabelOverlaps:
         assert set(nucleus_1_spots["spot_label"]) == {1, 2}
 
         nucleus_2_spots = real[real["reference_label"] == 2]
-        assert 3 in nucleus_2_spots["spot_label"].values
+        assert 3 in set(nucleus_2_spots["spot_label"])
 
         nucleus_3_spots = real[real["reference_label"] == 3]
         assert set(nucleus_3_spots["spot_label"]) == {4, 5}

@@ -311,8 +311,6 @@ class TestSubRowProgress:
             out = tool(input_path=raw["path"])
             wf.compute(out)
 
-        # batch tasks emit row_complete events
-        complete_events = [e for e in events if e.status == "row_complete"]
         # At minimum we get completed events
         completed_events = [e for e in events if e.status == "completed"]
         assert len(completed_events) >= 1
@@ -462,7 +460,7 @@ class TestBranchParallelism:
             use_wetlands=True,
         ) as wf:
             raw = load(path=str(workspace / "data"))
-            tagged = add_col(column_name="tag", value="test")
+            add_col(column_name="tag", value="test")
             out = tool(input_path=raw["path"])
             df = wf.compute(out)
 

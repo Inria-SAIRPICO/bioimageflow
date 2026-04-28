@@ -1,6 +1,6 @@
 """Built-in merge DataFrameTools."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeGuard
 
 import pandas as pd
 
@@ -14,7 +14,9 @@ def _any_field() -> dict[str, Any]:
     return {"type": "any", "default": None, "image_spec": None}
 
 
-def _all_resolved(schemas: list[dict[str, Any] | None]) -> bool:
+def _all_resolved(
+    schemas: list[dict[str, dict[str, Any]] | None],
+) -> TypeGuard[list[dict[str, dict[str, Any]]]]:
     """Return ``True`` when every upstream schema is resolved (not ``None``)."""
     return all(s is not None for s in schemas)
 

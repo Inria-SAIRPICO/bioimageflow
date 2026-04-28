@@ -116,7 +116,7 @@ def run_process_row(args_tuple, *, task=None):
     tool = _get_instance(tool_file_path, tool_class_name)
     args = Arguments(**arguments_dict)
     if task is not None and _tool_accepts_task(tool):
-        result = tool.process_row(args, task=task)
+        result = tool.process_row(args, task=task)  # type: ignore[call-arg]
     else:
         result = tool.process_row(args)
     outputs = result if isinstance(result, list) else [result]
@@ -135,7 +135,7 @@ def run_process_batch(
     tool = _get_instance(tool_file_path, tool_class_name)
     args_list = [Arguments(**d) for d in arguments_dicts]
     if task is not None and _batch_accepts_task(tool):
-        results = tool.process_batch(args_list, task=task)
+        results = tool.process_batch(args_list, task=task)  # type: ignore[call-arg]
     else:
         results = tool.process_batch(args_list)
     # Auto-wrap list[Outputs] -> list[list[Outputs]] for 1-to-1 batch tools
