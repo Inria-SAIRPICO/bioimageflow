@@ -389,6 +389,22 @@ def _unwrap_optional(annotation: Any) -> Any:
     return annotation
 
 
+def _is_nullable(annotation: Any) -> bool:
+    """Return True iff ``annotation`` admits ``None`` as a value.
+
+    Strips a leading ``Annotated[...]`` wrapper, then checks whether the inner
+    type is a ``Union`` / ``X | Y`` whose args include ``NoneType``. Used by
+    :func:`serialize_input_schema` to surface nullability to GUIs separately
+    from ``required`` (which only reflects whether a class-level default exists
+    on ``Inputs``).
+    """
+    inner = _unwrap_annotated(annotation)
+    origin = get_origin(inner)
+    if origin is Union or origin is UnionType:
+        return type(None) in get_args(inner)
+    return False
+
+
 def _jsonify_default(value: Any) -> Any:
     """Convert a default value to a JSON-safe representation (§4.3).
 
@@ -537,6 +553,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
         entry: dict[str, Any] = {
             "type": _display_type_name(annotation),
             "required": not has_default,
+            "nullable": _is_nullable(annotation),
             "connectable": _serialize_connectable(
                 gui_meta.connectable if gui_meta is not None else None
             ),

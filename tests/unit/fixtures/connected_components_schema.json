@@ -15,6 +15,7 @@
       },
       "max": null,
       "min": null,
+      "nullable": false,
       "required": true,
       "step": null,
       "type": "ImagePath"

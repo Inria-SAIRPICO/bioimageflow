@@ -193,6 +193,7 @@ For inputs, each field entry has exactly these keys:
 {
     "type": "float",                 # display-name string (see rules below)
     "required": True,                # bool; True iff no class-level default
+    "nullable": False,               # bool; True iff the type admits None
     "connectable": "not_by_default", # "never" | "not_by_default" | "by_default"
     "default": 1.0,                  # JSON-safe default, or None
     "display_name": "Blur sigma",    # GUIMeta.display_name or None
@@ -210,7 +211,11 @@ The `type` display name follows deterministic rules: bare Python types use `__na
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
 
-`required` is determined solely by presence of a class-level default on `Inputs`: a field with no default is `required=True`, even when its type is `Optional[X]` or `X | None`. These are orthogonal concerns — a caller of a tool whose field is typed `Optional[int]` with no default must pass `None` explicitly.
+`required`, `nullable`, and the type-display rules are three orthogonal concerns:
+
+- `required` is determined solely by presence of a class-level default on `Inputs`: a field with no default is `required=True`, even when its type is `Optional[X]` or `X | None`. A caller of a tool whose field is typed `Optional[int]` with no default must pass *something* — but `None` is acceptable when `nullable=True`.
+- `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
+- The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
 Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None}`. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
 

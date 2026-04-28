@@ -30,6 +30,7 @@ from bioimageflow.validation import (
     SchemaSerializationError,
     _display_type_name,
     _extract_choices,
+    _is_nullable,
     _jsonify_default,
     _serialize_connectable,
     serialize_input_schema,
@@ -183,6 +184,41 @@ class TestExtractChoices:
 
 
 # ---------------------------------------------------------------------------
+# _is_nullable
+# ---------------------------------------------------------------------------
+
+
+class TestIsNullable:
+    def test_bare_int(self) -> None:
+        assert _is_nullable(int) is False
+
+    def test_int_or_none(self) -> None:
+        assert _is_nullable(int | None) is True
+
+    def test_optional_int(self) -> None:
+        assert _is_nullable(Optional[int]) is True
+
+    def test_annotated_optional(self) -> None:
+        assert _is_nullable(Annotated[int | None, GUIMeta(min=0)]) is True
+
+    def test_annotated_non_optional(self) -> None:
+        assert _is_nullable(Annotated[int, GUIMeta(min=0)]) is False
+
+    def test_image_path_non_optional(self) -> None:
+        # ImagePath(...) is Annotated[Path, ImageSpec(...)] — no None.
+        assert _is_nullable(ImagePath(semantics={Semantic.INTENSITY})) is False
+
+    def test_three_way_union_with_none(self) -> None:
+        assert _is_nullable(int | str | None) is True
+
+    def test_literal(self) -> None:
+        assert _is_nullable(Literal["a", "b"]) is False
+
+    def test_optional_literal(self) -> None:
+        assert _is_nullable(Optional[Literal["a", "b"]]) is True
+
+
+# ---------------------------------------------------------------------------
 # _serialize_connectable
 # ---------------------------------------------------------------------------
 
@@ -233,6 +269,11 @@ class _SchemaTool(ProcessingTool):
         model: Annotated[Literal["fast", "accurate"], GUIMeta(group="advanced")] = "fast"
         mode_enum: _Mode = _Mode.FAST
         count: int = 5
+        # Nullable with default None — e.g. a CLI flag that should be omitted
+        # entirely when the user wants the binary's built-in default.
+        area_lim: float | None = None
+        # Nullable but required — user must explicitly pass a value or None.
+        threshold: int | None
 
     class Outputs(IOModel):
         mask: Annotated[
@@ -250,7 +291,7 @@ class TestSerializeInputSchema:
     def test_keys_present(self) -> None:
         schema = serialize_input_schema(_SchemaTool)
         expected_keys = {
-            "type", "required", "connectable", "default",
+            "type", "required", "nullable", "connectable", "default",
             "display_name", "description", "group",
             "min", "max", "step", "choices", "image_spec",
         }
@@ -303,9 +344,35 @@ class TestSerializeInputSchema:
         entry = schema["count"]
         assert entry["type"] == "int"
         assert entry["required"] is False
+        assert entry["nullable"] is False
         assert entry["default"] == 5
         assert entry["display_name"] is None
         assert entry["image_spec"] is None
+
+    def test_required_field_not_nullable(self) -> None:
+        schema = serialize_input_schema(_SchemaTool)
+        # input_image is required and non-Optional → nullable: False.
+        assert schema["input_image"]["nullable"] is False
+
+    def test_optional_with_default_none(self) -> None:
+        schema = serialize_input_schema(_SchemaTool)
+        entry = schema["area_lim"]
+        # `Optional[X]` is unwrapped for type display, but `nullable` surfaces
+        # the None-ness so the GUI can offer a "set to null" toggle.
+        assert entry["type"] == "float"
+        assert entry["required"] is False
+        assert entry["nullable"] is True
+        assert entry["default"] is None
+
+    def test_optional_required(self) -> None:
+        schema = serialize_input_schema(_SchemaTool)
+        entry = schema["threshold"]
+        # `int | None` with no class-level default — user must pass something,
+        # but None is an acceptable value.
+        assert entry["type"] == "int"
+        assert entry["required"] is True
+        assert entry["nullable"] is True
+        assert entry["default"] is None
 
     def test_tool_with_no_inputs_class(self) -> None:
         class NoInputs:
