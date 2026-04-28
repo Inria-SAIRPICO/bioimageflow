@@ -8,6 +8,7 @@ everything else picks up the same instance automatically.
 
 import inspect
 import logging
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +20,23 @@ from wetlands._internal.dependency_manager import Dependencies
 import threading
 
 logger = logging.getLogger("bioimageflow")
+
+
+def _bioimageflow_core_pin() -> str:
+    """Return the pip requirement pinning the orchestrator's bioimageflow-core.
+
+    Tool environments must run the same ``bioimageflow-core`` API the
+    orchestrator was built against, otherwise tools that import newer
+    symbols (e.g. ``Connectable``) fail at import time inside the worker.
+    """
+    try:
+        return f"bioimageflow-core=={_pkg_version('bioimageflow-core')}"
+    except PackageNotFoundError:
+        logger.warning(
+            "bioimageflow-core package metadata not found; "
+            "tool environments will install the latest published version."
+        )
+        return "bioimageflow-core"
 
 # ── Shared EnvironmentManager singleton ──────────────────────────────
 
@@ -125,7 +143,7 @@ class WetlandsEnvManager:
         deps = cast(Dependencies, {k: v for k, v in dependencies.items()})
         pip_deps = list(deps.get("pip", []))
         if not any("bioimageflow-core" in d for d in pip_deps):
-            pip_deps.append("bioimageflow-core==0.1.2")
+            pip_deps.append(_bioimageflow_core_pin())
         deps["pip"] = pip_deps
         return deps
 
