@@ -993,7 +993,16 @@ class DefaultEngine:
         input_annotations: dict[str, Any],
         index_sets: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
-        """Resolve column bindings, constants, and defaults for one row."""
+        """Resolve column bindings, constants, and defaults for one row.
+
+        Precedence: column bindings > constants > class-level defaults.
+        Construction (Node.__init__, from_dict) usually enforces that a
+        field is bound at most one way, but ``session.set_constant`` can
+        leave a stale entry in ``_constant_bindings`` for a field that is
+        also column-bound. In that case the upstream value must win —
+        otherwise a stray ``None`` constant silently clobbers the row's
+        real input (see the Files → Atlas regression).
+        """
         row_args: dict[str, Any] = {}
 
         for field, col_ref in node._column_bindings.items():
@@ -1011,7 +1020,8 @@ class DefaultEngine:
                         f"in node '{col_ref.node.name}'"
                     )
 
-        row_args.update(node._constant_bindings)
+        for field, value in node._constant_bindings.items():
+            row_args.setdefault(field, value)
 
         for field_name in input_annotations:
             if field_name not in row_args and hasattr(node.tool.Inputs, field_name):

@@ -320,6 +320,7 @@ def serialize_constant(value: Any) -> dict[str, Any]:
 
     Supported types and their envelopes:
 
+    - ``None``   → ``{"__type__": "none", "value": None}``
     - ``bool``   → ``{"__type__": "bool", "value": <bool>}``
     - ``int``    → ``{"__type__": "int", "value": <int>}``
     - ``float``  → ``{"__type__": "float", "value": <float>}``
@@ -331,6 +332,8 @@ def serialize_constant(value: Any) -> dict[str, Any]:
       round-trip for non-primitive values must serialize them at a
       higher layer.
     """
+    if value is None:
+        return {"__type__": "none", "value": None}
     if isinstance(value, bool):
         return {"__type__": "bool", "value": value}
     if isinstance(value, int):
@@ -351,6 +354,8 @@ def deserialize_constant(data: dict[str, Any]) -> Any:
     """
     t = data["__type__"]
     v = data["value"]
+    if t == "none":
+        return None
     if t == "bool":
         return bool(v)
     if t == "int":

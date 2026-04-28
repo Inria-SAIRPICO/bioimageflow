@@ -173,3 +173,40 @@ class TestMultipleTerminals:
             out = wf.compute(masks_a, masks_b)
             assert "seg_a" in out
             assert "seg_b" in out
+
+
+class TestColumnBindingWinsOverStaleConstant:
+    """If a node has both a column binding and a stale constant for the same
+    field, the column binding (per-row upstream value) must win.
+
+    Construction normally enforces mutual exclusion, but ``set_constant`` and
+    other manual mutations can leave both populated. Before the fix, a stray
+    ``None`` constant on a connected ``input_image`` field overwrote the
+    upstream path, and the worker received the literal string ``'None'``.
+    """
+
+    def test_stale_constant_does_not_override_upstream_value(self, tmp_workspace):
+        load = FileLoader()
+        segment = StubSegmenter()
+
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            raw = load(path=str(tmp_workspace / "data"))
+            masks = segment(input_image=raw["path"])
+
+            # Simulate a stale platform mutation: a constant lingered on a
+            # field that is also column-bound. Without the fix this clobbers
+            # the upstream Path with ``None``.
+            seg_node = next(
+                n for n in wf._nodes.values()
+                if type(n.tool).__name__ == "StubSegmenter"
+            )
+            assert "input_image" in seg_node._column_bindings
+            seg_node._constant_bindings["input_image"] = None
+
+            df = wf.compute(masks)
+
+        # The mask filenames are templated as ``{input_image.stem}_mask_…``.
+        # If the stale constant had won, the stem would be ``"None"``.
+        mask_paths = [str(p) for p in df["mask"]]
+        assert all("cell_0" in p for p in mask_paths), mask_paths
+        assert not any("None_mask" in p for p in mask_paths), mask_paths

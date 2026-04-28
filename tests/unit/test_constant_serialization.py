@@ -11,6 +11,13 @@ from bioimageflow import serialize_constant, deserialize_constant
 
 
 class TestSerializeConstant:
+    def test_none_round_trip(self):
+        # None must round-trip to None — never to the lossy string "None",
+        # which silently turned into a literal path argument when a tool
+        # received it as ``input_image``.
+        assert serialize_constant(None) == {"__type__": "none", "value": None}
+        assert deserialize_constant({"__type__": "none", "value": None}) is None
+
     def test_bool_round_trip(self):
         assert serialize_constant(True) == {"__type__": "bool", "value": True}
         assert deserialize_constant({"__type__": "bool", "value": True}) is True
