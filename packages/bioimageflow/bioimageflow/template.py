@@ -14,7 +14,11 @@ _SPECIAL_VARS = {'node_name', 'row_index', 'timestamp', 'ext'}
 _VALID_PROPERTIES = {'stem', 'name', 'ext', 'exts'}
 
 
-def get_output_templates(outputs_cls: type[IOModel], inputs_cls: type[IOModel]) -> dict[str, str]:
+def get_output_templates(
+    outputs_cls: type[IOModel],
+    inputs_cls: type[IOModel],
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Extract templates from Outputs defaults. Apply default for path fields without template."""
     templates: dict[str, str] = {}
     output_annotations = outputs_cls._get_all_annotations()
@@ -38,6 +42,11 @@ def get_output_templates(outputs_cls: type[IOModel], inputs_cls: type[IOModel]) 
                 templates[name] = "{node_name}_{row_index}{ext}"
             else:
                 templates[name] = "{node_name}_{row_index}"
+
+    if overrides:
+        for name, template in overrides.items():
+            if name in templates and isinstance(template, str) and template:
+                templates[name] = template
     return templates
 
 

@@ -21,7 +21,13 @@ class DataFrameTool(BaseTool):
     :class:`SourceToolUpstreamError` if any positional argument is passed.
     """
 
-    def __call__(self, *upstream_nodes: Any, name: str | None = None, **kwargs: Any) -> Any:
+    def __call__(
+        self,
+        *upstream_nodes: Any,
+        name: str | None = None,
+        output_templates: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Create a graph node. No computation occurs."""
         if not self.accepts_upstream and upstream_nodes:
             from bioimageflow.node import SourceToolUpstreamError
@@ -37,7 +43,13 @@ class DataFrameTool(BaseTool):
                 f"{type(self).__name__}.__call__() requires the bioimageflow "
                 f"orchestrator package."
             )
-        return Node(tool=self, args=list(upstream_nodes), kwargs=kwargs, name=name)
+        return Node(
+            tool=self,
+            args=list(upstream_nodes),
+            kwargs=kwargs,
+            name=name,
+            output_templates=output_templates,
+        )
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         """Default: inner join on index."""

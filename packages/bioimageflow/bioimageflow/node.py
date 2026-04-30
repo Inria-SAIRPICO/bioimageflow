@@ -141,10 +141,12 @@ class Node:
         kwargs: dict[str, Any] | None = None,
         args: list[Any] | None = None,
         name: str | None = None,
+        output_templates: dict[str, str] | None = None,
     ) -> None:
         self.tool = tool
         self._kwargs = kwargs or {}
         self._args: list[Any] = args or []
+        self.output_templates: dict[str, str] = dict(output_templates or {})
         self.enabled: bool = True
         self._upstream_nodes: set[Node] = set()
         self._column_bindings: dict[str, ColumnRef] = {}
@@ -276,6 +278,38 @@ class Node:
             outputs_cls = self.tool.Outputs
             if hasattr(outputs_cls, '_get_all_annotations'):
                 templates = get_output_templates(outputs_cls, self.tool.Inputs)
+                for field_name, template in self.output_templates.items():
+                    if template == "":
+                        continue
+                    if field_name not in templates:
+                        exc = ValueError(
+                            f"Output template references unknown path output "
+                            f"'{field_name}'. Available path outputs: "
+                            f"{list(templates.keys())}"
+                        )
+                        if capture is None:
+                            raise exc
+                        capture.append(ValidationError(
+                            kind="construction_failed",
+                            message=str(exc),
+                            node=self._name,
+                            field=field_name,
+                        ))
+                        continue
+                    if not isinstance(template, str):
+                        exc = TypeError(
+                            f"Output template for '{field_name}' must be a string."
+                        )
+                        if capture is None:
+                            raise exc
+                        capture.append(ValidationError(
+                            kind="construction_failed",
+                            message=str(exc),
+                            node=self._name,
+                            field=field_name,
+                        ))
+                        continue
+                    templates[field_name] = template
                 for field_name, template in templates.items():
                     try:
                         validate_template(template, input_annotations)

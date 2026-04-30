@@ -651,6 +651,8 @@ class Workflow:
                 }
                 if not node.enabled:
                     node_info["enabled"] = False
+                if node.output_templates:
+                    node_info["output_templates"] = dict(node.output_templates)
                 for field, value in node._constant_bindings.items():
                     node_info["constants"][field] = serialize_constant(value)
                 nodes_data.append(node_info)
@@ -994,9 +996,18 @@ class Workflow:
                     if isinstance(instance, SubWorkflow):
                         node = instance(name=name, **kwargs)
                     elif isinstance(instance, DataFrameTool):
-                        node = instance(*positional_args, name=name, **kwargs)
+                        node = instance(
+                            *positional_args,
+                            name=name,
+                            output_templates=node_data.get("output_templates"),
+                            **kwargs,
+                        )
                     else:
-                        node = instance(name=name, **kwargs)
+                        node = instance(
+                            name=name,
+                            output_templates=node_data.get("output_templates"),
+                            **kwargs,
+                        )
                     node.enabled = node_data.get("enabled", True)
                     node_map[name] = node
                     # Stamp edge_ids on the constructed node so they

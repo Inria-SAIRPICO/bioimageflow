@@ -828,14 +828,25 @@ class DefaultEngine:
 
         input_annotations = node.tool.Inputs._get_all_annotations()
         assert node.tool.Outputs is not None  # ProcessingTool always has Outputs
-        templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
+        templates = get_output_templates(
+            node.tool.Outputs,
+            node.tool.Inputs,
+            node.output_templates,
+        )
 
         aligned_index: list[Any] = ["0"]
 
         # --- Signature hash ---
         env_hash = compute_env_hash(node.tool.environment.dependencies)
         sig_hash = self._compute_sig_hash(
-            node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
+            node,
+            env_hash,
+            {
+                'constants': node._constant_bindings,
+                'output_templates': templates,
+            },
+            {},
+            workflow,
         )
 
         # --- Cache check ---
@@ -879,7 +890,11 @@ class DefaultEngine:
 
         input_annotations = node.tool.Inputs._get_all_annotations()
         assert node.tool.Outputs is not None  # ProcessingTool always has Outputs
-        templates = get_output_templates(node.tool.Outputs, node.tool.Inputs)
+        templates = get_output_templates(
+            node.tool.Outputs,
+            node.tool.Inputs,
+            node.output_templates,
+        )
 
         upstream_nodes = {cr.node.name: cr.node
                          for cr in node._column_bindings.values()}
@@ -1113,6 +1128,7 @@ class DefaultEngine:
     ) -> str:
         """Compute signature hash for a non-source ProcessingTool."""
         env_hash = compute_env_hash(cast(ProcessingTool, node.tool).environment.dependencies)
+        assert node.tool.Outputs is not None
         missing = [n.name for n in upstream_nodes.values() if n not in sig_hashes]
         if missing:
             raise RuntimeError(
@@ -1130,6 +1146,11 @@ class DefaultEngine:
                          if f not in node._column_bindings
                          and f not in node._constant_bindings
                          and hasattr(node.tool.Inputs, f)},
+            'output_templates': get_output_templates(
+                node.tool.Outputs,
+                node.tool.Inputs,
+                node.output_templates,
+            ),
         }
         return self._compute_sig_hash(
             node, env_hash, resolved_params, upstream_hash_map, workflow,

@@ -87,7 +87,13 @@ class ProcessingTool(BaseTool):
                 f"{cls.__name__} must implement process_row or process_batch"
             )
 
-    def __call__(self, *, name: str | None = None, **kwargs: Any) -> Any:
+    def __call__(
+        self,
+        *,
+        name: str | None = None,
+        output_templates: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Create a graph node. No computation occurs."""
         try:
             from bioimageflow.node import Node
@@ -97,7 +103,12 @@ class ProcessingTool(BaseTool):
                 f"orchestrator package. This method is not available in worker "
                 f"environments — use process_row/process_batch instead."
             )
-        return Node(tool=self, kwargs=kwargs, name=name)
+        return Node(
+            tool=self,
+            kwargs=kwargs,
+            name=name,
+            output_templates=output_templates,
+        )
 
     def process_row(self, arguments: Any) -> Any:
         """Process a single row. Override in subclasses."""
