@@ -16,11 +16,35 @@ method also declares ``task``.
 import importlib.util
 import inspect
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from bioimageflow_core.arguments import Arguments
 from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
+
+try:
+    from bioimageflow_core.arguments import ExecutionContext
+except ImportError:
+    @dataclass(frozen=True)
+    class ExecutionContext:  # type: ignore[no-redef]
+        """Fallback for existing Wetlands envs with an older core package."""
+
+        run_dir: Path
+        assets_dir: Path
+        work_dir: Path
+        rows_dir: Path | None = None
+        row_index: str | None = None
+
+        @classmethod
+        def from_dict(cls, data: dict[str, Any]) -> "ExecutionContext":
+            return cls(
+                run_dir=Path(data["run_dir"]),
+                assets_dir=Path(data["assets_dir"]),
+                work_dir=Path(data["work_dir"]),
+                rows_dir=Path(data["rows_dir"]) if data.get("rows_dir") is not None else None,
+                row_index=data.get("row_index"),
+            )
 
 
 # Per-file registries: file_path -> {class_name -> class}
@@ -31,6 +55,10 @@ _instances: dict[str, dict[str, ProcessingTool]] = {}
 _accepts_task: dict[type, bool] = {}
 # Cache: tool_class -> bool (whether process_batch accepts 'task')
 _batch_accepts_task_cache: dict[type, bool] = {}
+# Cache: tool_class -> bool (whether process_row accepts 'context')
+_accepts_context: dict[type, bool] = {}
+# Cache: tool_class -> bool (whether process_batch accepts 'context')
+_batch_accepts_context_cache: dict[type, bool] = {}
 
 
 def _discover_tools(module: object) -> dict[str, type]:
@@ -104,40 +132,70 @@ def _batch_accepts_task(tool: ProcessingTool) -> bool:
     return _batch_accepts_task_cache[cls]
 
 
+def _tool_accepts_context(tool: ProcessingTool) -> bool:
+    """Check (once per class) whether process_row accepts 'context'."""
+    cls = type(tool)
+    if cls not in _accepts_context:
+        sig = inspect.signature(tool.process_row)
+        _accepts_context[cls] = 'context' in sig.parameters
+    return _accepts_context[cls]
+
+
+def _batch_accepts_context(tool: ProcessingTool) -> bool:
+    """Check (once per class) whether process_batch accepts 'context'."""
+    cls = type(tool)
+    if cls not in _batch_accepts_context_cache:
+        sig = inspect.signature(tool.process_batch)
+        _batch_accepts_context_cache[cls] = 'context' in sig.parameters
+    return _batch_accepts_context_cache[cls]
+
+
 def run_process_row(args_tuple, *, task=None):
     """Dispatch a single-row call to a tool's process_row method.
 
     ``args_tuple``: ``(tool_file_path, tool_class_name, arguments_dict)``
+    or ``(tool_file_path, tool_class_name, arguments_dict, context_dict)``
     ``task``: ``RemoteTaskHandle`` injected by Wetlands via module_executor (optional).
 
     Returns a list of output dicts (one per output row, usually one).
     """
-    tool_file_path, tool_class_name, arguments_dict = args_tuple
+    if len(args_tuple) == 3:
+        tool_file_path, tool_class_name, arguments_dict = args_tuple
+        context_dict = None
+    else:
+        tool_file_path, tool_class_name, arguments_dict, context_dict = args_tuple
     tool = _get_instance(tool_file_path, tool_class_name)
     args = Arguments(**arguments_dict)
+    kwargs: dict[str, Any] = {}
     if task is not None and _tool_accepts_task(tool):
-        result = tool.process_row(args, task=task)  # type: ignore[call-arg]
-    else:
-        result = tool.process_row(args)
+        kwargs["task"] = task
+    if context_dict is not None and _tool_accepts_context(tool):
+        kwargs["context"] = ExecutionContext.from_dict(context_dict)
+    result = tool.process_row(args, **kwargs)
     outputs = result if isinstance(result, list) else [result]
     return [_outputs_to_dict(out) for out in outputs]
 
 
 def run_process_batch(
-    tool_file_path: str, tool_class_name: str,
-    arguments_dicts: list[dict], *, task=None,
+    tool_file_path: str,
+    tool_class_name: str,
+    arguments_dicts: list[dict],
+    context_dict: dict | None = None,
+    *,
+    task=None,
 ) -> list[list[dict]]:
     """Dispatch a batch call to a tool's process_batch method.
 
-    Signature unchanged for ``submit()`` — receives three positional args.
     Returns a list of lists of output dicts (one inner list per input row).
     """
     tool = _get_instance(tool_file_path, tool_class_name)
     args_list = [Arguments(**d) for d in arguments_dicts]
+    kwargs: dict[str, Any] = {}
     if task is not None and _batch_accepts_task(tool):
-        results = tool.process_batch(args_list, task=task)  # type: ignore[call-arg]
-    else:
-        results = tool.process_batch(args_list)
+        kwargs["task"] = task
+    if context_dict is not None and _batch_accepts_context(tool):
+        kwargs["context"] = ExecutionContext.from_dict(context_dict)
+    results = tool.process_batch(args_list, **kwargs)
     # Auto-wrap list[Outputs] -> list[list[Outputs]] for 1-to-1 batch tools
     if results and not isinstance(results[0], list):
         results = [[r] for r in results]

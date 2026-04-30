@@ -454,7 +454,12 @@ class ProcessingTool(BaseTool):
             )
         return Node(tool=self, kwargs=kwargs, name=name)
 
-    def process_row(self, arguments: Arguments) -> "Outputs | list[Outputs]":
+    def process_row(
+        self,
+        arguments: Arguments,
+        *,
+        context: ExecutionContext | None = None,
+    ) -> "Outputs | list[Outputs]":
         """
         Process a single row. Runs in the worker environment.
 
@@ -468,7 +473,12 @@ class ProcessingTool(BaseTool):
             f"{type(self).__name__} must implement process_row or process_batch."
         )
 
-    def process_batch(self, arguments_list: "list[Arguments]") -> "list[list[Outputs]] | list[Outputs]":
+    def process_batch(
+        self,
+        arguments_list: "list[Arguments]",
+        *,
+        context: ExecutionContext | None = None,
+    ) -> "list[list[Outputs]] | list[Outputs]":
         """
         Process all rows at once. Runs in the worker environment.
         Override for batch processing (e.g., GPU inference, training).
@@ -502,6 +512,24 @@ class MySegmenter(ProcessingTool):
 ```
 
 The `task` parameter also provides cooperative cancellation via `task.cancel_requested` (see [Cancellation](#cancellation)).
+
+**Execution scratch context:** `process_row` and `process_batch` may declare an optional keyword-only `context: ExecutionContext` parameter. The engine injects it only when the method explicitly declares `context`; existing tools with `process_row(arguments)` or `process_batch(arguments_list)` are unchanged.
+
+`ExecutionContext` is defined in `bioimageflow-core` and is picklable across the Wetlands serialization boundary:
+
+```python
+@dataclass(frozen=True)
+class ExecutionContext:
+    run_dir: Path       # storage_path/data/<node>/<timestamp>_<hash12>/
+    assets_dir: Path    # run_dir/assets/
+    work_dir: Path      # per-row or batch scratch directory
+    rows_dir: Path | None = None  # run_dir/work/rows/
+    row_index: str | None = None  # original input row index for process_row
+```
+
+For `process_row`, `context.work_dir` is unique per input row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.work_dir` is `run_dir/work/batch/`; batch tools that need per-row scratch should create subdirectories under `context.rows_dir`.
+
+`work_dir` is for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.work_dir` to `subprocess.run()` or equivalent. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
 
 **Direct tool definition:**
 ```python
@@ -2003,27 +2031,28 @@ When `node.compute()` is called:
 
    1. **Index Alignment:** Collect all upstream nodes referenced via column bindings. Compute the aligned index — the finest-grained index that is compatible with all upstream indices (see [Section 5.3](#53-dataframe-semantics)). If upstream indices are incompatible (no common lineage), raise `IndexAlignmentError`.
    2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations.
-   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow context.
-   4. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 9.
-   5. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths).
-   6. **Environment Launch:** If not already running, create/reuse the Wetlands environment. If an environment with the same name already exists but its dependency hash differs, raise `EnvironmentMismatchError`.
-   7. **Dispatch:** If `process_batch` was overridden, submit a single batch call via `env.submit()`. Otherwise, submit all `process_row` calls via `env.map_tasks()`. When `max_workers > 1`, rows execute in parallel across worker processes. When `max_workers == 1` (default), rows execute sequentially in a single worker (equivalent to the previous behavior). Results are always collected in submission order to preserve deterministic DataFrame construction.
-   7b. **Output Validation (worker-side):** After `process_row`/`process_batch` returns, the worker performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., `ImagePath`-typed fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised immediately in the worker with clear stack traces pointing to the tool code.
-   8. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3).
-   9. **Caching:** Save the result DataFrame and metadata to the [storage structure](#72-directory-structure).
+   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow graph state.
+   4. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 10.
+   5. **Execution Context:** Create the timestamp/hash run directory and its `assets/` and `work/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Context paths are runtime details and are not included in the signature hash.
+   6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
+   7. **Environment Launch:** If not already running, create/reuse the Wetlands environment. If an environment with the same name already exists but its dependency hash differs, raise `EnvironmentMismatchError`.
+   8. **Dispatch:** If `process_batch` was overridden, submit a single batch call via `env.submit()`. Otherwise, submit all `process_row` calls via `env.map_tasks()`. When `max_workers > 1`, rows execute in parallel across worker processes. When `max_workers == 1` (default), rows execute sequentially in a single worker (equivalent to the previous behavior). Results are always collected in submission order to preserve deterministic DataFrame construction.
+   8b. **Output Validation (worker-side):** After `process_row`/`process_batch` returns, the worker performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., `ImagePath`-typed fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised immediately in the worker with clear stack traces pointing to the tool code.
+   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3).
+   10. **Caching:** Save the result DataFrame and metadata to the [storage structure](#72-directory-structure).
 
-#### Orchestrator-Worker Interaction (ProcessingTool Steps 6-9)
+#### Orchestrator-Worker Interaction (ProcessingTool Steps 6-10)
 
 The orchestrator drives all calls into the environment using Wetlands' Task API (`env.submit()` and `env.map_tasks()`). The tool's file path and class name are passed so the worker can instantiate the tool.
 
 ```python
 # === Orchestrator (main process) ===
 
-# 6. Environment Launch
+# 7. Environment Launch
 env = env_manager.get_or_create(tool.environment)
 # env.launch() was already called with configured max_workers
 
-# 7-8. Dispatch
+# 8-9. Dispatch
 worker_file = "bioimageflow_core/worker.py"  # absolute path resolved at runtime
 tool_class_name = type(tool).__name__
 tool_file_path = _find_tool_file(type(tool))  # resolved via env_manager
@@ -2031,12 +2060,14 @@ tool_file_path = _find_tool_file(type(tool))  # resolved via env_manager
 if has_batch:
     # Single task for the whole batch
     task = env.submit(worker_file, "run_process_batch",
-                      args=(tool_file_path, tool_class_name, arguments_dicts))
+                      args=(tool_file_path, tool_class_name,
+                            arguments_dicts, batch_context.to_dict()))
     task.wait_for()
     results = task.result
 else:
     # One task per row — parallel when max_workers > 1
-    row_args = [(tool_file_path, tool_class_name, d) for d in arguments_dicts]
+    row_args = [(tool_file_path, tool_class_name, d, c.to_dict())
+                for d, c in zip(arguments_dicts, row_contexts)]
     tasks = env.map_tasks(worker_file, "run_process_row", row_args)
     for task in tasks:
         task.wait_for()
@@ -2331,13 +2362,23 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
   │           ├── metadata.json     # Tool version, timestamp, user
   │           ├── parameters.json   # Resolved configuration
   │           ├── dataframe.csv     # Output table
-  │           └── assets/           # Output files (ProcessingTool only)
-  │               ├── img1_seg.tif
-  │               └── img2_seg.tif
+  │           ├── assets/           # Declared output files (ProcessingTool only)
+  │           │   ├── img1_seg.tif
+  │           │   └── img2_seg.tif
+  │           └── work/             # Runtime scratch/intermediate files
+  │               ├── rows/
+  │               │   └── <safe_row_id>/
+  │               └── batch/
   └── provenance_graph.json         # Full DAG dump
 ```
 
 The hash directory name is prefixed with a creation timestamp (`YYYYMMDD_HHMMSS`) for easy chronological sorting, followed by the first 12 characters of the signature hash (e.g., `20260309_143022_a1b2c3d4e5f6`). Cache lookup matches directories by the trailing hash suffix.
+
+`assets/` is the only directory for files that are part of a tool's declared `Outputs`. `work/` is reserved for files that exist only to execute the tool: temporary images, implicit files created by external CLIs, unpacked models, and similar intermediates. Files in `work/` are not part of the tool output contract, are not exposed as DataFrame outputs unless a tool explicitly returns them, and are not included in the signature hash.
+
+Package-local `data/` directories are read-only static resources shipped with the tool package. Tools must not generate or mutate files in package `data/` at runtime. If a static resource is missing in a development checkout and must be generated as a fallback, the tool generates it under `ExecutionContext.work_dir`.
+
+External command wrappers must avoid process-CWD pollution. If a binary writes implicit files such as `LoG.tif`, the wrapper passes `cwd=context.work_dir` to `subprocess.run()` or equivalent. The engine does not change the process working directory globally.
 
 ---
 

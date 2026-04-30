@@ -223,6 +223,7 @@ class WetlandsEnvManager:
         tool_file_path: str,
         tool_class_name: str,
         arguments_dicts: list[dict],
+        context_dict: dict,
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
@@ -234,7 +235,7 @@ class WetlandsEnvManager:
         )
         return env.submit(
             self._worker_file, "run_process_batch",
-            args=(tool_file_path, tool_class_name, arguments_dicts),
+            args=(tool_file_path, tool_class_name, arguments_dicts, context_dict),
         )
 
     def map_process_rows(
@@ -243,6 +244,7 @@ class WetlandsEnvManager:
         tool_file_path: str,
         tool_class_name: str,
         arguments_dicts: list[dict],
+        context_dicts: list[dict],
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
@@ -252,7 +254,10 @@ class WetlandsEnvManager:
             env_spec, max_workers=max_workers, worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
-        row_args = [(tool_file_path, tool_class_name, d) for d in arguments_dicts]
+        row_args = [
+            (tool_file_path, tool_class_name, d, c)
+            for d, c in zip(arguments_dicts, context_dicts)
+        ]
         return env.map_tasks(self._worker_file, "run_process_row", row_args)
 
     def shutdown_all(self) -> None:

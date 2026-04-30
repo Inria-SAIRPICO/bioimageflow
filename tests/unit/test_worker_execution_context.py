@@ -1,0 +1,86 @@
+"""Worker-side forwarding of ExecutionContext."""
+
+from bioimageflow_core.worker import run_process_batch, run_process_row
+
+
+def test_worker_forwards_row_execution_context(tmp_path):
+    tool_file = tmp_path / "ctx_tool.py"
+    tool_file.write_text(
+        """
+from pathlib import Path
+from typing import Any
+from bioimageflow_core import Arguments, EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool
+
+env = EnvironmentSpec(name="ctx", dependencies={})
+
+class ContextTool(ProcessingTool):
+    environment = env
+
+    class Inputs(IOModel):
+        value: str
+
+    class Outputs(IOModel):
+        seen: str
+
+    def process_row(self, arguments: Arguments, *, context: ExecutionContext) -> Any:
+        return self.Outputs(seen=str(context.work_dir / arguments.value))
+"""
+    )
+
+    result = run_process_row(
+        (
+            str(tool_file),
+            "ContextTool",
+            {"value": "marker"},
+            {
+                "run_dir": str(tmp_path / "run"),
+                "assets_dir": str(tmp_path / "run" / "assets"),
+                "work_dir": str(tmp_path / "run" / "work" / "rows" / "000000"),
+                "row_index": "sample",
+            },
+        )
+    )
+
+    assert result == [{"seen": str(tmp_path / "run" / "work" / "rows" / "000000" / "marker")}]
+
+
+def test_worker_forwards_batch_execution_context(tmp_path):
+    tool_file = tmp_path / "batch_ctx_tool.py"
+    tool_file.write_text(
+        """
+from pathlib import Path
+from typing import Any
+from bioimageflow_core import Arguments, EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool
+
+env = EnvironmentSpec(name="ctx", dependencies={})
+
+class BatchContextTool(ProcessingTool):
+    environment = env
+
+    class Inputs(IOModel):
+        value: str
+
+    class Outputs(IOModel):
+        seen: str
+
+    def process_batch(self, arguments_list: list[Arguments], *, context: ExecutionContext) -> Any:
+        return [self.Outputs(seen=str(context.work_dir / args.value)) for args in arguments_list]
+"""
+    )
+
+    result = run_process_batch(
+        str(tool_file),
+        "BatchContextTool",
+        [{"value": "a"}, {"value": "b"}],
+        {
+            "run_dir": str(tmp_path / "run"),
+            "assets_dir": str(tmp_path / "run" / "assets"),
+            "work_dir": str(tmp_path / "run" / "work" / "batch"),
+            "row_index": None,
+        },
+    )
+
+    assert result == [
+        [{"seen": str(tmp_path / "run" / "work" / "batch" / "a")}],
+        [{"seen": str(tmp_path / "run" / "work" / "batch" / "b")}],
+    ]

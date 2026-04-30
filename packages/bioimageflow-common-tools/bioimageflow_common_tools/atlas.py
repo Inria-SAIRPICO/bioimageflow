@@ -1,6 +1,7 @@
 """Atlas — adaptive spot detection via external CLI."""
 
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -9,6 +10,7 @@ from bioimageflow_core import (
     Category,
     Connectable,
     EnvironmentSpec,
+    ExecutionContext,
     GUIMeta,
     ImageSpec,
     IOModel,
@@ -90,35 +92,53 @@ class Atlas(ProcessingTool):
             ),
         ] = Path("{input_image.stem}_detections{ext}")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(
+        self,
+        arguments: Arguments,
+        *,
+        context: ExecutionContext | None = None,
+    ) -> Any:
         input_path = Path(arguments.input_image)
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Ensure blobs reference file exists
+        temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        if context is None:
+            temp_dir = tempfile.TemporaryDirectory(prefix="bioimageflow_atlas_")
+            work_dir = Path(temp_dir.name)
+        else:
+            work_dir = context.work_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use packaged static data when available. If a development checkout is
+        # missing it, generate the fallback into execution scratch, not package data.
         blobs_file = Path(__file__).parent.resolve() / "data" / "blobs.txt"
-        blobs_file.parent.mkdir(exist_ok=True)
         if not blobs_file.exists():
-            subprocess.run(["blobsref", "-o", str(blobs_file)], check=True)
+            blobs_file = work_dir / "blobs.txt"
+            subprocess.run(["blobsref", "-o", str(blobs_file)], check=True, cwd=work_dir)
 
-        print(f"Running Atlas spot detection on {input_path.name}...")
+        try:
+            print(f"Running Atlas spot detection on {input_path.name}...")
 
-        command = [
-            "atlas",
-            "-ref", str(blobs_file),
-            "-i", str(input_path),
-            "-o", str(output_path),
-        ]
-        if arguments.gaussian_std is not None:
-            command += ["-rad", str(arguments.gaussian_std)]
-        if arguments.p_value is not None:
-            command += ["-pval", str(arguments.p_value)]
-        if arguments.area_lim is not None:
-            command += ["-arealim", str(arguments.area_lim)]
-        if arguments.verbose:
-            command.append("-v")
+            command = [
+                "atlas",
+                "-ref", str(blobs_file),
+                "-i", str(input_path),
+                "-o", str(output_path),
+            ]
+            if arguments.gaussian_std is not None:
+                command += ["-rad", str(arguments.gaussian_std)]
+            if arguments.p_value is not None:
+                command += ["-pval", str(arguments.p_value)]
+            if arguments.area_lim is not None:
+                command += ["-arealim", str(arguments.area_lim)]
+            if arguments.verbose:
+                command.append("-v")
 
-        subprocess.run(command, check=True)
-        print(f"Atlas: detection complete -> {output_path.name}")
+            subprocess.run(command, check=True, cwd=work_dir)
+            print(f"Atlas: detection complete -> {output_path.name}")
 
-        return self.Outputs(output_image=output_path)
+            return self.Outputs(output_image=output_path)
+        finally:
+            if temp_dir is not None:
+                temp_dir.cleanup()

@@ -7,6 +7,7 @@ engine-side safety timeout fires when ``task.wait_for()`` hangs.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,7 +19,30 @@ from bioimageflow.engine import (
     _compute_engine_timeout,
 )
 from bioimageflow.workflow import Workflow, WorkflowEnvironment
-from bioimageflow_core import EnvironmentSpec, IOModel, ProcessingTool
+from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool
+
+
+def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionContext]:
+    run_dir = Path("/tmp/bif_timeout_test")
+    assets_dir = run_dir / "assets"
+    rows_dir = run_dir / "work" / "rows"
+    row_contexts = [
+        ExecutionContext(
+            run_dir=run_dir,
+            assets_dir=assets_dir,
+            work_dir=rows_dir / f"{i:06d}",
+            rows_dir=rows_dir,
+            row_index=str(i),
+        )
+        for i in range(count)
+    ]
+    batch_context = ExecutionContext(
+        run_dir=run_dir,
+        assets_dir=assets_dir,
+        work_dir=run_dir / "work" / "batch",
+        rows_dir=rows_dir,
+    )
+    return row_contexts, batch_context
 
 
 # ── `WorkflowEnvironment.worker_timeout` ─────────────────────────────
@@ -141,7 +165,8 @@ class _StubEnvManager:
         self.hanging_tasks: list[_HangingTask] = []
 
     def submit_process_batch(self, env_spec, tool_file_path, tool_class_name,
-                             arguments_dicts, max_workers=1, worker_env=None,
+                             arguments_dicts, context_dict=None,
+                             max_workers=1, worker_env=None,
                              worker_timeout=None):
         self.last_worker_timeout = worker_timeout
         t = _HangingTask()
@@ -149,7 +174,8 @@ class _StubEnvManager:
         return t
 
     def map_process_rows(self, env_spec, tool_file_path, tool_class_name,
-                         arguments_dicts, max_workers=1, worker_env=None,
+                         arguments_dicts, context_dicts=None,
+                         max_workers=1, worker_env=None,
                          worker_timeout=None):
         self.last_worker_timeout = worker_timeout
         tasks = [_HangingTask() for _ in arguments_dicts]
@@ -178,12 +204,15 @@ class TestWorkerTimeoutErrorRaised:
         # Then map_process_rows → hanging tasks → TimeoutError → WorkerTimeoutError
 
         with pytest.raises(WorkerTimeoutError, match="row 0"):
+            row_contexts, batch_context = _execution_contexts(2)
             engine._dispatch_via_wetlands(
                 tool,
                 arguments_dicts=[{"a": 1}, {"a": 2}],
                 workflow=wf,
                 node_name="my_node",
                 has_batch=False,
+                row_contexts=row_contexts,
+                batch_context=batch_context,
             )
 
         # All tasks should have been asked to cancel after timeout
@@ -203,12 +232,15 @@ class TestWorkerTimeoutErrorRaised:
         wf.get_environment(tool).worker_timeout = 5.0
 
         with pytest.raises(WorkerTimeoutError, match="Batch"):
+            row_contexts, batch_context = _execution_contexts(1)
             engine._dispatch_via_wetlands(
                 tool,
                 arguments_dicts=[{"a": 1}],
                 workflow=wf,
                 node_name="my_batch_node",
                 has_batch=True,
+                row_contexts=row_contexts,
+                batch_context=batch_context,
             )
 
         assert stub.hanging_tasks[0].cancel_called
@@ -267,12 +299,15 @@ class TestWorkerTimeoutErrorRaised:
         wf = Workflow(use_wetlands=False)
         # No worker_timeout configured → None flows through
 
+        row_contexts, batch_context = _execution_contexts(1)
         engine._dispatch_via_wetlands(
             tool,
             arguments_dicts=[{"a": 1}],
             workflow=wf,
             node_name="n",
             has_batch=False,
+            row_contexts=row_contexts,
+            batch_context=batch_context,
         )
         assert stub.last_worker_timeout is None
         assert stub.tasks[0].timeouts_seen == [None]

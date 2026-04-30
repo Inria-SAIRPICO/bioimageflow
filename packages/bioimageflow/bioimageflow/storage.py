@@ -71,6 +71,7 @@ def create_hash_dir(node_dir: str | Path, sig_hash: str) -> Path:
     hash_dir = node_dir / f"{timestamp}_{short}"
     hash_dir.mkdir(parents=True, exist_ok=True)
     (hash_dir / "assets").mkdir(exist_ok=True)
+    (hash_dir / "work").mkdir(exist_ok=True)
     return hash_dir
 
 
@@ -79,8 +80,24 @@ def get_assets_dir(hash_dir: str | Path) -> Path:
     return Path(hash_dir) / "assets"
 
 
+def get_work_dir(hash_dir: str | Path) -> Path:
+    """Get the scratch work directory within a hash dir."""
+    return Path(hash_dir) / "work"
+
+
+def get_rows_work_dir(hash_dir: str | Path) -> Path:
+    """Get the parent directory for per-row scratch directories."""
+    return get_work_dir(hash_dir) / "rows"
+
+
+def get_batch_work_dir(hash_dir: str | Path) -> Path:
+    """Get the scratch directory for process_batch execution."""
+    return get_work_dir(hash_dir) / "batch"
+
+
 def ensure_dirs(hash_dir: str | Path) -> None:
     """Create all directories needed for a hash execution."""
     hash_dir = Path(hash_dir)
     hash_dir.mkdir(parents=True, exist_ok=True)
     (hash_dir / "assets").mkdir(exist_ok=True)
+    (hash_dir / "work").mkdir(exist_ok=True)

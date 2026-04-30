@@ -110,12 +110,12 @@ class ProcessingTool(BaseTool):
             output_templates=output_templates,
         )
 
-    def process_row(self, arguments: Any) -> Any:
+    def process_row(self, arguments: Any, *, context: Any = None) -> Any:
         """Process a single row. Override in subclasses."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement process_row or process_batch."
         )
 
-    def process_batch(self, arguments_list: list[Any]) -> Any:
+    def process_batch(self, arguments_list: list[Any], *, context: Any = None) -> Any:
         """Process all rows at once. Override for batch processing."""
         raise NotImplementedError

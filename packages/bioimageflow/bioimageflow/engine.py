@@ -1,7 +1,10 @@
 """Execution engines for BioImageFlow workflows."""
 
 import concurrent.futures
+import hashlib
+import inspect
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -14,7 +17,7 @@ from typing import Any, cast, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from bioimageflow_core.arguments import Arguments
+from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.tool import ProcessingTool
 from bioimageflow_core.types import SharedArray
 from bioimageflow_core.environment import EnvironmentMismatchError
@@ -27,7 +30,15 @@ from bioimageflow.cache import (
     cleanup_cache,
 )
 from bioimageflow.node import IndexAlignmentError, Node
-from bioimageflow.storage import get_node_dir, get_hash_dir, get_assets_dir, find_hash_dir, create_hash_dir
+from bioimageflow.storage import (
+    create_hash_dir,
+    find_hash_dir,
+    get_assets_dir,
+    get_batch_work_dir,
+    get_hash_dir,
+    get_node_dir,
+    get_rows_work_dir,
+)
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
@@ -35,6 +46,22 @@ if TYPE_CHECKING:
     from bioimageflow.sub_workflow import SubWorkflowNode
 
 logger = logging.getLogger("bioimageflow")
+
+
+def _accepts_context(method: Any) -> bool:
+    """Return True when a ProcessingTool method declares a context kwarg."""
+    return "context" in inspect.signature(method).parameters
+
+
+def _safe_work_dir_name(position: int, row_index: Any) -> str:
+    """Build a collision-resistant directory name for one input row."""
+    raw = str(row_index)
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-")
+    if not sanitized:
+        sanitized = "row"
+    sanitized = sanitized[:48]
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    return f"{position:06d}_{sanitized}_{digest}"
 
 
 def topological_order(workflow: Any) -> list[str]:
@@ -870,7 +897,13 @@ class DefaultEngine:
         arguments_dicts = [row_args]
 
         # --- Dispatch & build output ---
-        raw_results = self._dispatch_tool(node.tool, arguments_dicts, workflow, node.name)
+        row_contexts, batch_context = self._build_execution_contexts(
+            hash_dir, real_assets_dir, aligned_index,
+        )
+        raw_results = self._dispatch_tool(
+            node.tool, arguments_dicts, workflow, node.name,
+            row_contexts, batch_context,
+        )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
@@ -929,7 +962,13 @@ class DefaultEngine:
         self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
 
         # --- Dispatch & build output ---
-        raw_results = self._dispatch_tool(node.tool, arguments_dicts, workflow, node.name)
+        row_contexts, batch_context = self._build_execution_contexts(
+            hash_dir, real_assets_dir, aligned_index,
+        )
+        raw_results = self._dispatch_tool(
+            node.tool, arguments_dicts, workflow, node.name,
+            row_contexts, batch_context,
+        )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
@@ -1163,6 +1202,39 @@ class DefaultEngine:
         hash_dir = create_hash_dir(node_dir, sig_hash)
         return hash_dir, get_assets_dir(hash_dir)
 
+    def _build_execution_contexts(
+        self,
+        run_dir: Path,
+        assets_dir: Path,
+        aligned_index: list[Any],
+    ) -> tuple[list[ExecutionContext], ExecutionContext]:
+        """Create per-row and batch ProcessingTool execution contexts."""
+        rows_dir = get_rows_work_dir(run_dir)
+        row_contexts: list[ExecutionContext] = []
+        for position, row_index in enumerate(aligned_index):
+            work_dir = rows_dir / _safe_work_dir_name(position, row_index)
+            work_dir.mkdir(parents=True, exist_ok=True)
+            row_contexts.append(
+                ExecutionContext(
+                    run_dir=run_dir,
+                    assets_dir=assets_dir,
+                    work_dir=work_dir,
+                    rows_dir=rows_dir,
+                    row_index=str(row_index),
+                )
+            )
+
+        batch_work_dir = get_batch_work_dir(run_dir)
+        batch_work_dir.mkdir(parents=True, exist_ok=True)
+        batch_context = ExecutionContext(
+            run_dir=run_dir,
+            assets_dir=assets_dir,
+            work_dir=batch_work_dir,
+            rows_dir=rows_dir,
+            row_index=None,
+        )
+        return row_contexts, batch_context
+
     def _fixup_output_paths(
         self,
         arguments_dicts: list[dict[str, Any]],
@@ -1182,16 +1254,20 @@ class DefaultEngine:
         arguments_dicts: list[dict[str, Any]],
         workflow: Any,
         node_name: str,
+        row_contexts: list[ExecutionContext],
+        batch_context: ExecutionContext,
     ) -> list[list[Any]]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
 
         if self._use_wetlands and self._env_manager is not None:
             return self._dispatch_via_wetlands(tool, arguments_dicts, workflow,
-                                               node_name, has_batch)
+                                               node_name, has_batch,
+                                               row_contexts, batch_context)
 
         return self._dispatch_direct(tool, arguments_dicts, workflow,
-                                     node_name, has_batch)
+                                     node_name, has_batch,
+                                     row_contexts, batch_context)
 
     def _dispatch_direct(
         self,
@@ -1200,18 +1276,25 @@ class DefaultEngine:
         workflow: Any,
         node_name: str,
         has_batch: bool,
+        row_contexts: list[ExecutionContext],
+        batch_context: ExecutionContext,
     ) -> list[list[Any]]:
         """Direct dispatch — tool runs in the main process."""
         if has_batch:
             args_list = [Arguments(**d) for d in arguments_dicts]
-            raw_results = tool.process_batch(args_list)
+            kwargs = {}
+            if _accepts_context(tool.process_batch):
+                kwargs["context"] = batch_context
+            raw_results = tool.process_batch(args_list, **kwargs)
             if raw_results and not isinstance(raw_results[0], list):
                 raw_results = [[r] for r in raw_results]
             return raw_results
 
         raw_results: list[list[Any]] = []
-        for i, args_dict in enumerate(arguments_dicts):
-            result = tool.process_row(Arguments(**args_dict))
+        accepts_context = _accepts_context(tool.process_row)
+        for i, (args_dict, context) in enumerate(zip(arguments_dicts, row_contexts)):
+            kwargs = {"context": context} if accepts_context else {}
+            result = tool.process_row(Arguments(**args_dict), **kwargs)
             if not isinstance(result, list):
                 result = [result]
             raw_results.append(result)
@@ -1276,6 +1359,8 @@ class DefaultEngine:
         workflow: Any,
         node_name: str,
         has_batch: bool,
+        row_contexts: list[ExecutionContext],
+        batch_context: ExecutionContext,
     ) -> list[list[Any]]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from bioimageflow.env_manager import _find_tool_file
@@ -1291,6 +1376,7 @@ class DefaultEngine:
         if has_batch:
             task = self._env_manager.submit_process_batch(
                 env_spec, tool_file_path, tool_class_name, arguments_dicts,
+                batch_context.to_dict(),
                 max_workers=max_workers, worker_env=worker_env,
                 worker_timeout=worker_timeout,
             )
@@ -1314,6 +1400,7 @@ class DefaultEngine:
 
         tasks = self._env_manager.map_process_rows(
             env_spec, tool_file_path, tool_class_name, arguments_dicts,
+            [context.to_dict() for context in row_contexts],
             max_workers=max_workers, worker_env=worker_env,
             worker_timeout=worker_timeout,
         )

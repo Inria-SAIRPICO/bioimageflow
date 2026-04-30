@@ -1,7 +1,41 @@
-"""Arguments namespace and index lineage helpers."""
+"""Arguments namespace, execution context, and index lineage helpers."""
 
+from dataclasses import dataclass
 from difflib import get_close_matches as _get_close_matches
+from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Per-execution filesystem context for ProcessingTool runtime scratch."""
+
+    run_dir: Path
+    assets_dir: Path
+    work_dir: Path
+    rows_dir: Path | None = None
+    row_index: str | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        """Return a picklable representation for worker dispatch."""
+        return {
+            "run_dir": str(self.run_dir),
+            "assets_dir": str(self.assets_dir),
+            "work_dir": str(self.work_dir),
+            "rows_dir": str(self.rows_dir) if self.rows_dir is not None else None,
+            "row_index": self.row_index,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionContext":
+        """Reconstruct an execution context from a worker payload."""
+        return cls(
+            run_dir=Path(data["run_dir"]),
+            assets_dir=Path(data["assets_dir"]),
+            work_dir=Path(data["work_dir"]),
+            rows_dir=Path(data["rows_dir"]) if data.get("rows_dir") is not None else None,
+            row_index=data.get("row_index"),
+        )
 
 
 class Arguments:
