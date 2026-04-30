@@ -45,6 +45,23 @@ Semantic
    * - ``FEATURE``
      - Feature map (e.g., embeddings)
 
+Semantic Groups
+~~~~~~~~~~~~~~~
+
+``SCALAR_IMAGE_SEMANTICS`` is a convenience set for consumers that accept
+displayable scalar raster images without requiring one specific pixel meaning:
+
+.. code-block:: python
+
+   from bioimageflow_core import ImagePath, SCALAR_IMAGE_SEMANTICS
+
+   image: ImagePath(semantics=SCALAR_IMAGE_SEMANTICS)
+
+It contains ``INTENSITY``, ``BINARY``, ``LABEL``, and ``PROBABILITY``. It
+intentionally excludes ``DISPLACEMENT`` and ``FEATURE``. This is useful for
+visualization and montage tools; algorithms that require raw physical values
+should still declare ``Semantic.INTENSITY`` specifically.
+
 Layout
 ------
 
@@ -121,6 +138,10 @@ output type is compatible with a consumer's input type. The rules use
 
    consumer_strict = ImageSpec(semantics=frozenset({"binary"}))
    check_compatibility(producer, consumer_strict)  # False: {"label"} & {"binary"} = {}
+
+Semantic groups do not add subtype rules. For example, a binary producer is
+still incompatible with a strict intensity consumer; the consumer must declare
+``SCALAR_IMAGE_SEMANTICS`` or an explicit set containing ``BINARY``.
 
 This checking happens automatically when you bind a column reference to an
 input --- you don't need to call it manually.
@@ -201,26 +222,7 @@ show tooltips:
 Introspection
 ~~~~~~~~~~~~~
 
-Use :func:`~bioimageflow.validation.get_inputs_schema` to retrieve a
-GUI-friendly schema for a tool:
-
-.. code-block:: python
-
-   from bioimageflow import get_inputs_schema
-
-   schema = get_inputs_schema(my_tool)
-   # {
-   #     "diameter": {
-   #         "type": float,
-   #         "default": 30.0,
-   #         "required": False,
-   #         "connectable": Connectable.NOT_BY_DEFAULT,
-   #         "image_spec": None,
-   #         "display_name": "Cell diameter",
-   #         "description": "Approximate cell diameter, in pixels.",
-   #         "min": 1.0,
-   #         "max": 500.0,
-   #         "step": 0.5,
-   #     },
-   #     ...
-   # }
+Programmatic schema introspection (``get_inputs_schema``,
+``serialize_input_schema``, ``serialize_output_schema``, the
+``Connectable`` serialization, and the wire-format helpers) lives in
+the GUI tree — see :doc:`/gui/tool_schemas`.

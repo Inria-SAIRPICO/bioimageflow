@@ -27,6 +27,7 @@ worker environments. It contains:
 
 - **Type system**: :class:`~bioimageflow_core.Semantic`,
   :class:`~bioimageflow_core.Layout`, :class:`~bioimageflow_core.ImageSpec`,
+  :data:`~bioimageflow_core.SCALAR_IMAGE_SEMANTICS`,
   :func:`~bioimageflow_core.ImagePath`, :func:`~bioimageflow_core.ImageShared`
 - **Tool base classes**: :class:`~bioimageflow_core.BaseTool`,
   :class:`~bioimageflow_core.ProcessingTool`, :class:`~bioimageflow_core.IOModel`
@@ -65,6 +66,23 @@ Key classes:
 - Merge strategies: :class:`~bioimageflow.InnerJoin`,
   :class:`~bioimageflow.CrossJoin`, :class:`~bioimageflow.JoinOnColumn`,
   :class:`~bioimageflow.Concat`, :class:`~bioimageflow.Collect`
+
+Plus ``WorkflowSession``, ``ToolRegistry``, and the validation surface for
+GUI / platform integrators — see the :doc:`GUI / Platform Integrators tree
+</gui/index>` for those.
+
+bioimageflow-common-tools
+-------------------------
+
+A third, **layered** package — ``bioimageflow_common_tools`` — ships the
+canonical source tools (``Files``, ``Generate``) and the basic processing
+tools used throughout the documentation (``ConvertImage``, ``ExtractChannel``,
+``CellposeSAM``, the merge tools, ...). It depends on ``bioimageflow`` and
+``bioimageflow-core``; it is not imported by either of them.
+
+The docs use it freely so examples are short and runnable. Workflow authors
+can rely on it directly, write their own tools following the same patterns,
+or mix both. See :doc:`/installation` for the install command.
 
 Why two packages?
 -----------------

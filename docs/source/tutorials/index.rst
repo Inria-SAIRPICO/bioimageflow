@@ -8,9 +8,10 @@ Step-by-step guides covering common BioImageFlow patterns.
 
    basic_workflow
    custom_tool
-   tool_packaging
-   branching
-   merge_strategies
-   caching
-   shared_memory
    output_templating
+   merge_strategies
+   sub_workflows
+   parallelism
+   cancellation
+   shared_memory
+   tool_packaging

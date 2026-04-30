@@ -96,11 +96,18 @@ all rows at once (e.g., for GPU batching):
            confidence: float
 
        def process_batch(self, arguments_list):
-           results = []
-           # Load all images, run model in batch, etc.
-           for args in arguments_list:
-               results.append(self.Outputs(label="cell", confidence=0.95))
-           return results
+           import numpy as np
+           from skimage.io import imread
+
+           # Load every image once, stack into one batch tensor.
+           batch = np.stack([imread(args.image) for args in arguments_list])
+           predictions = self.model.predict(batch)  # one forward pass
+
+           # Emit one Outputs per Arguments — order must match arguments_list.
+           return [
+               self.Outputs(label=label, confidence=float(conf))
+               for (label, conf) in predictions
+           ]
 
 One-to-many (explosion)
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -123,20 +130,30 @@ single input row. This is useful for tiling or splitting:
 
        def process_row(self, arguments: Arguments) -> list:
            from skimage.io import imread, imsave
-           import numpy as np
 
            img = imread(arguments.image)
            size = arguments.tile_size
+
+           # arguments.tile points at the assets directory for this row;
+           # write every child under its parent so explosion outputs land
+           # in the cache, not the cwd.
+           assets_dir = arguments.tile.parent
+           stem = arguments.image.stem
+
            tiles = []
            for y in range(0, img.shape[0], size):
                for x in range(0, img.shape[1], size):
                    patch = img[y:y+size, x:x+size]
-                   path = f"{arguments.image.stem}_tile_{len(tiles)}.tif"
-                   imsave(path, patch)
+                   path = assets_dir / f"{stem}_tile_{len(tiles)}.tif"
+                   imsave(str(path), patch)
                    tiles.append(self.Outputs(tile=path))
            return tiles
 
-The index expands from ``"0"`` to ``"0::0"``, ``"0::1"``, etc.
+A 1-to-N tool resolves its own row's output template (``arguments.tile``)
+to the canonical asset path; writing siblings under
+``arguments.tile.parent`` keeps every emitted file inside that node's cache
+directory (specs.md §7.1). The index expands from ``"0"`` to ``"0::0"``,
+``"0::1"``, etc.
 
 DataFrameTool
 -------------

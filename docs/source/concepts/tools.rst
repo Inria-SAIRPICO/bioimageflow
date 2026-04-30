@@ -73,15 +73,39 @@ Key properties:
 - **Source tools**: set ``accepts_upstream = False`` on tools that produce a
   DataFrame from constants alone (e.g. ``Files``, ``Generate``). Constructing
   a source tool with positional upstream arguments raises
-  :class:`~bioimageflow.SourceToolUpstreamError`.
-- **Dynamic output schema**: tools whose output column names depend on their
-  inputs override the ``resolve_outputs(cls, inputs)`` classmethod (e.g.
-  ``Generate``, where ``column_name`` is a runtime parameter). Built-in
-  merge tools (``InnerJoin``, ``CrossJoin``, ``JoinOnColumn``, ``Concat``,
-  ``Collect``) override ``resolve_merge_schema(cls, upstream_schemas, inputs)``
-  instead — their output columns depend on the *upstream* schemas. A node's
-  effective schema is available via :meth:`Node.get_output_schema`, and is
-  also what ``node["col"]`` consults for construction-time validation.
+  :class:`~bioimageflow.SourceToolUpstreamError`. See
+  :doc:`graph` for the source-node patterns.
+
+Dynamic output schemas
+~~~~~~~~~~~~~~~~~~~~~~
+
+Most tools declare their output columns statically on the ``Outputs`` class.
+Two cases need a *dynamic* schema — output column names that depend on
+runtime values:
+
+**Inputs-driven schema** — override ``resolve_outputs(cls, inputs)`` when
+the column names come from constant parameters. ``Generate`` is the
+canonical example, where ``column_name`` is a runtime parameter:
+
+.. code-block:: python
+
+   from bioimageflow_common_tools import Generate
+
+   gen = Generate()
+   sweep = gen(column_name="x", values=[0.1, 0.5, 1.0])
+
+   sweep["x"]            # OK — column_name resolved at construction time
+   sweep["unknown"]      # raises ColumnNotFoundError immediately
+
+**Upstream-driven schema** — built-in merge tools (``InnerJoin``,
+``CrossJoin``, ``JoinOnColumn``, ``Concat``, ``Collect``) override
+``resolve_merge_schema(cls, upstream_schemas, inputs)`` instead, because
+their output columns depend on the *upstream* schemas, not on their own
+inputs.
+
+A node's effective schema is available via :meth:`Node.get_output_schema`,
+and is also what ``node["col"]`` consults for construction-time
+validation.
 
 IOModel
 -------

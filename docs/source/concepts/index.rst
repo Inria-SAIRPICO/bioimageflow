@@ -11,3 +11,4 @@ In-depth explanations of BioImageFlow's design and internals.
    tools
    graph
    execution
+   caching

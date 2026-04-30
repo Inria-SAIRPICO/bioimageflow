@@ -78,6 +78,19 @@ class Semantic(str, Enum):
     DISPLACEMENT = "displacement" # Vector fields
     FEATURE = "feature"           # Embeddings
 
+SCALAR_IMAGE_SEMANTICS = frozenset({
+    Semantic.INTENSITY,
+    Semantic.BINARY,
+    Semantic.LABEL,
+    Semantic.PROBABILITY,
+})
+"""Semantic values for scalar raster images.
+
+Use this group for tools that consume displayable scalar images without
+requiring a specific pixel meaning, such as visualization and montage tools.
+It intentionally excludes vector fields and feature images.
+"""
+
 class Layout(str, Enum):
     """Axis ordering of the image data."""
     # 2D variants
@@ -142,13 +155,22 @@ All parameters accept a single value, a set, or `None` (wildcard).
 
 **Usage examples:**
 ```python
-from bioimageflow_core import ImagePath, ImageShared, Semantic, Layout
+from bioimageflow_core import (
+    ImagePath,
+    ImageShared,
+    Layout,
+    SCALAR_IMAGE_SEMANTICS,
+    Semantic,
+)
 
 # File-based MRI input
 MRI_File = ImagePath(semantics=Semantic.INTENSITY, layouts=Layout.VOLUMETRIC, formats={".nii.gz"})
 
 # Shared memory video stream
 Video_Stream = ImageShared(semantics=Semantic.INTENSITY, layouts=Layout.PLANAR_TIME_CHANNEL, dtypes="uint8")
+
+# Displayable scalar image input for visualization tools
+Displayable_Image = ImagePath(semantics=SCALAR_IMAGE_SEMANTICS)
 ```
 
 ### 2.4 Type Compatibility
@@ -178,6 +200,11 @@ def check_compatibility(producer_spec: ImageSpec, consumer_spec: ImageSpec) -> b
 ```
 
 This check is used during [input binding](#45-input-binding-logic-graph-construction) to validate that a column reference's upstream type is compatible with the consuming input field's type.
+
+`SCALAR_IMAGE_SEMANTICS` is only a convenience set for consumers that accept
+several scalar image semantics. It does not change the compatibility relation:
+a `BINARY` producer remains incompatible with a strict `INTENSITY` consumer
+unless the consumer explicitly declares a set containing `BINARY`.
 
 **Wire-shape serialization:** `bioimageflow.validation.serialize_image_spec(spec) -> dict | None` returns a JSON-friendly representation of an `ImageSpec` — `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}` with enum value strings (e.g. `"intensity"`, `"YX"`). This is the canonical shape for callers (GUIs, linters, documentation generators) that need to expose type information over the wire. `get_inputs_schema(tool)` includes it alongside the raw `ImageSpec` object under `image_spec_serialized`.
 
@@ -2521,7 +2548,7 @@ Tools that don't check `task.cancel_requested` are unaffected — they complete 
 from bioimageflow_core import (
     # Types
     Semantic, Layout, ImageSpec, SharedArray, ImagePath, ImageShared,
-    check_compatibility,
+    SCALAR_IMAGE_SEMANTICS, check_compatibility,
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
     # Tool

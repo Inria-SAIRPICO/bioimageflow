@@ -4,6 +4,39 @@ Basic Workflow
 This tutorial builds a simple linear pipeline: load images, segment them,
 then measure properties of the segmented regions.
 
+Before running
+--------------
+
+BioImageFlow writes to a few distinct locations:
+
+- The workflow ``storage_path`` contains node outputs, cached
+  DataFrames, metadata, and generated assets.
+- The Wetlands instance path contains isolated tool environments,
+  Wetlands logs, debug metadata, and the bundled Pixi or Micromamba
+  installation.
+- The tool store contains versioned tool packages installed by
+  ``require_tool_packages()`` or ``Workflow.load()``. It is resolved
+  from ``BIOIMAGEFLOW_TOOL_STORE``, then
+  ``BIOIMAGEFLOW_HOME / "tool_packages"``, then
+  ``~/.bioimageflow/tool_packages``.
+
+Use explicit project-local paths while learning:
+
+.. code-block:: python
+
+   from bioimageflow import Workflow, configure_wetlands
+
+   configure_wetlands(wetlands_instance_path="./wetlands")
+
+   with Workflow(storage_path="./bif_data") as wf:
+       ...
+
+``configure_wetlands()`` must run before Wetlands is first initialized:
+that means before ``Workflow.compute()``, ``Workflow.load()``, or
+``require_tool_packages()``. If it is omitted, BioImageFlow uses
+``BIOIMAGEFLOW_WETLANDS``, then ``BIOIMAGEFLOW_HOME / "wetlands"``,
+then ``~/.bioimageflow/wetlands``.
+
 Setting up tools
 ----------------
 
@@ -87,11 +120,13 @@ Wire the tools together in a :class:`~bioimageflow.Workflow`:
 
 .. code-block:: python
 
-   from bioimageflow import Workflow
+   from bioimageflow import Workflow, configure_wetlands
 
    loader = LoadImages()
    segment = Segment()
    measure = Measure()
+
+   configure_wetlands(wetlands_instance_path="./wetlands")
 
    with Workflow(storage_path="./bif_data") as wf:
        raw = loader(folder="/data/experiment_01")
@@ -112,6 +147,10 @@ The pipeline forms a linear chain:
 
 Each arrow represents a column binding --- ``raw["image"]`` feeds into the
 ``image`` input of ``Segment``, and ``masks["mask"]`` feeds into ``Measure``.
+
+During execution, generated masks are written under
+``./bif_data/data/segment/<timestamp>_<hash>/assets/``. The Cellpose
+environment for ``Segment`` is created under ``./wetlands``.
 
 Computing multiple targets
 --------------------------
@@ -154,5 +193,6 @@ Track execution progress with a callback:
 Next steps
 ----------
 
-- :doc:`branching` --- build DAGs with multiple branches
+- :doc:`/concepts/graph` --- nodes, column references, branching, source tools
 - :doc:`custom_tool` --- write your own tools from scratch
+- :doc:`/reference/environments` --- Wetlands paths and environment settings

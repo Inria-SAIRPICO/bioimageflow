@@ -168,8 +168,9 @@ and registers canonical names so standard imports work:
    # ]
    # ///
 
-   from bioimageflow import Workflow, require_tool_packages
+   from bioimageflow import Workflow, configure_wetlands, require_tool_packages
 
+   configure_wetlands(wetlands_instance_path="./wetlands")
    require_tool_packages(__file__)
 
    # Normal imports work after require_tool_packages
@@ -238,3 +239,18 @@ Packages are installed automatically by ``require_tool_packages`` or
 ``Workflow.load()`` when version info is present in a serialized workflow.
 The store path can be overridden via the ``BIOIMAGEFLOW_TOOL_STORE``
 environment variable.
+
+``require_tool_packages`` uses Wetlands' Pixi installation to run
+``pip install --target`` for missing packages. If a script needs a
+project-local Wetlands directory, call ``configure_wetlands()`` before
+``require_tool_packages()``; otherwise the default instance path is used.
+
+Programmatic tool enumeration
+-----------------------------
+
+For programmatic tool enumeration — populating a GUI tool palette, building a
+plugin index, or wiring schema serializers into a host process — prefer
+``ToolRegistry`` over the lower-level ``load_versioned_package`` /
+``resolve_tool_class`` pair. ``ToolRegistry`` wraps both and exposes
+``register_package``, ``get_class``, ``get_metadata``, and ``list_tools``.
+See :doc:`/gui/tool_registry` for the full surface.

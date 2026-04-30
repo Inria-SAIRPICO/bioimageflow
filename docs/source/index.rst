@@ -11,7 +11,8 @@ provenance tracking.
 .. code-block:: python
 
    from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments
-   from bioimageflow import Workflow, DataFrameTool
+   from bioimageflow import Workflow, configure_wetlands
+   from bioimageflow_common_tools import Files
 
    class Threshold(ProcessingTool):
        display_name = "Threshold"
@@ -34,10 +35,12 @@ provenance tracking.
            return self.Outputs(mask=arguments.mask)
 
    threshold = Threshold()
-   loader = FileLoader()
+   files = Files()
 
-   with Workflow() as wf:
-       raw = loader(folder="/data/images")
+   configure_wetlands(wetlands_instance_path="./wetlands")
+
+   with Workflow(storage_path="./bif_data") as wf:
+       raw = files(path="/data/images", pattern="*.tif")
        masks = threshold(image=raw["path"], cutoff=100.0)
        result = wf.compute(masks)
 
@@ -55,25 +58,22 @@ Features
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started
+   :caption: Workflow Authors
 
    installation
    quickstart
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Tutorials
-
+   concepts/index
    tutorials/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: Concepts
+   :caption: GUI / Platform Integrators
 
-   concepts/index
+   gui/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference
+   :caption: Reference
 
-   api/index
+   reference/index
+   specs

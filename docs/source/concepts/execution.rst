@@ -51,12 +51,15 @@ For explosion tools (one-to-many), child indices use ``::`` separators:
 Downstream tools receiving both parent and child data use the parent prefix to
 align rows correctly.
 
-Sequential engine
------------------
+Default engine
+--------------
 
-The current engine is :class:`~bioimageflow.engine.SequentialEngine`. It
-executes nodes one at a time, rows one at a time. Future engines may add
-parallel or distributed execution.
+The default engine runs **independent nodes concurrently** and dispatches
+**rows in parallel** across Wetlands worker processes — one process pool per
+declared :class:`~bioimageflow_core.EnvironmentSpec`. See
+:doc:`../tutorials/parallelism` for ``max_workers``,
+:class:`~bioimageflow_core.ResourceSpec`, and per-environment overrides. A
+deterministic ``engine="sequential"`` mode is available for debugging.
 
 Storage layout
 --------------
@@ -66,13 +69,15 @@ Storage layout
    {storage_path}/
    └── data/
        └── {node_name}/
-           └── {signature_hash}/
+           └── {YYYYMMDD_HHMMSS}_{hash[:12]}/
                ├── dataframe.csv     # output DataFrame
                ├── metadata.json     # tool class name, version, timestamp
                ├── parameters.json   # resolved parameter values
                └── assets/           # output files
 
-The ``assets/`` directory contains files produced by ProcessingTools (images,
+Each cache entry lives in a directory named with a wall-clock timestamp and
+the first twelve characters of the signature hash (specs.md §7.2). The
+``assets/`` directory contains files produced by ProcessingTools (images,
 reports, etc.). Output path templates resolve to paths within this directory.
 
 Signature hash
@@ -104,3 +109,10 @@ The engine emits :class:`~bioimageflow.ProgressEvent` objects via the
 - ``row_complete``: a single row finished (with ``row`` and ``total_rows``)
 - ``completed``: node execution finished
 - ``cached``: node result loaded from cache (no execution)
+
+See also
+--------
+
+- :doc:`caching` --- the signature-hash model, ``plan()``, ``invalidate()``,
+  and the four ``NodePlanStatus`` values.
+

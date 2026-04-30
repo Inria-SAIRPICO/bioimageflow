@@ -4,32 +4,60 @@ Quick Start
 This guide walks you through building and running your first BioImageFlow
 pipeline in under 5 minutes.
 
-Define a source
----------------
+Files created by BioImageFlow
+-----------------------------
 
-A source tool produces the initial DataFrame that feeds the pipeline. Use a
-:class:`~bioimageflow.DataFrameTool` to load file paths, read a CSV, or generate
-data programmatically:
+Before running a workflow, choose where BioImageFlow should write its
+state. There are three separate locations:
+
+- ``Workflow(storage_path=...)`` stores workflow outputs, cache
+  metadata, and generated assets. If omitted, it defaults to
+  ``./bif_data``.
+- ``configure_wetlands(wetlands_instance_path=...)`` stores Wetlands'
+  environment state: logs, debug port metadata, the bundled Pixi or
+  Micromamba installation, and the isolated tool environments. Call it
+  before ``Workflow.compute()``, ``Workflow.load()``, or
+  ``require_tool_packages()``.
+- The tool store holds versioned tool packages installed by
+  ``require_tool_packages()`` or ``Workflow.load()``. It defaults to
+  ``~/.bioimageflow/tool_packages`` unless ``BIOIMAGEFLOW_HOME`` is set.
+
+For a project-local run, start scripts like this:
 
 .. code-block:: python
 
-   import pandas as pd
-   from bioimageflow import DataFrameTool
+   from bioimageflow import Workflow, configure_wetlands
 
-   class ImageSource(DataFrameTool):
-       display_name = "Image Source"
-       accepts_upstream = False  # produces its own DataFrame; no upstream
+   configure_wetlands(wetlands_instance_path="./wetlands")
 
-       class Inputs:
-           folder: str
+   with Workflow(storage_path="./bif_data") as wf:
+       ...
 
-       def transform(self, df, arguments):
-           from pathlib import Path
-           files = sorted(Path(arguments.folder).glob("*.tif"))
-           return pd.DataFrame({"path": [str(f) for f in files]})
+If ``configure_wetlands()`` is not called, the Wetlands instance path
+is resolved from ``BIOIMAGEFLOW_WETLANDS``, then
+``BIOIMAGEFLOW_HOME / "wetlands"``, then ``~/.bioimageflow/wetlands``.
+The tool store is resolved from ``BIOIMAGEFLOW_TOOL_STORE``, then
+``BIOIMAGEFLOW_HOME / "tool_packages"``, then
+``~/.bioimageflow/tool_packages``.
 
-The ``Inputs`` class declares the parameters the tool expects. ``transform``
-receives an empty DataFrame and returns the one you build.
+Pick a source
+-------------
+
+A workflow starts at a *source node* — a tool that produces the initial
+DataFrame without consuming any upstream data. The companion
+``bioimageflow_common_tools`` package ships ``Files``, which lists the files in
+a directory:
+
+.. code-block:: python
+
+   from bioimageflow_common_tools import Files
+
+   files = Files()
+
+``Files`` is a :class:`~bioimageflow.DataFrameTool` with
+``accepts_upstream = False``. Its outputs are a ``path`` column (absolute
+paths) and a ``filename`` column. Source-tool patterns (and how to write your
+own) are covered in :doc:`concepts/graph`.
 
 Define a processing tool
 ------------------------
@@ -76,29 +104,36 @@ Wire tools together inside a :class:`~bioimageflow.Workflow` context manager:
 
 .. code-block:: python
 
-   from bioimageflow import Workflow
+   from bioimageflow import Workflow, configure_wetlands
 
-   source = ImageSource()
    invert = InvertImage()
 
+   configure_wetlands(wetlands_instance_path="./wetlands")
+
    with Workflow(storage_path="./bif_data") as wf:
-       images = source(folder="/data/raw")
+       images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"])
        result = wf.compute(inverted)
 
    print(result)
    #    inverted
-   # 0  bif_data/data/invert/abc123/assets/image1_inv.tif
-   # 1  bif_data/data/invert/abc123/assets/image2_inv.tif
+   # 0  bif_data/data/invert/20260101_120000_abc123def456/assets/image1_inv.tif
+   # 1  bif_data/data/invert/20260101_120000_abc123def456/assets/image2_inv.tif
 
 What happens:
 
-1. ``source(folder=...)`` creates a graph node --- no computation yet.
+1. ``files(path=...)`` creates a graph node --- no computation yet.
 2. ``invert(image=images["path"])`` binds the ``image`` input to the ``path``
    column of the source node.
 3. ``wf.compute(inverted)`` executes the DAG in topological order.
 
-The result is a pandas DataFrame with one column per output field.
+The result is a pandas DataFrame with one column per output field. Each cached
+node lives under
+``./bif_data/data/<node_name>/<timestamp>_<hash>/``, with the output DataFrame
+in ``dataframe.csv`` and any image outputs under ``assets/`` —
+:doc:`concepts/caching` covers the cache lifecycle, ``plan()`` and
+``invalidate()``. Wetlands environments for this run are kept under
+``./wetlands`` because the script called ``configure_wetlands()``.
 
 Re-running is free
 ------------------
@@ -109,14 +144,17 @@ that inputs, parameters, and tool versions haven't changed:
 .. code-block:: python
 
    with Workflow(storage_path="./bif_data") as wf:
-       images = source(folder="/data/raw")
+       images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"])
        result = wf.compute(inverted)  # cache hit, no recomputation
 
 Next steps
 ----------
 
-- :doc:`tutorials/basic_workflow` --- longer walkthrough with branching
+- :doc:`concepts/graph` --- nodes, column references, branching, and source
+  tools
 - :doc:`tutorials/custom_tool` --- writing your own ProcessingTool and
   DataFrameTool
+- :doc:`reference/environments` --- Wetlands paths, environment
+  configuration, and per-environment runtime settings
 - :doc:`concepts/architecture` --- understand the two-package design

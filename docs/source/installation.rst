@@ -16,6 +16,24 @@ Install from PyPI
 This installs both ``bioimageflow`` (the orchestrator) and ``bioimageflow-core``
 (the zero-dependency core).
 
+Common tools package
+--------------------
+
+The documentation imports source and processing tools (``Files``, ``Generate``,
+``ConvertImage``, ``ExtractChannel``, the merge tools, ...) from a layered
+companion package, ``bioimageflow-common-tools``. Installing it alongside the
+core library lets every example in the docs run without copy-pasting helper
+classes:
+
+.. code-block:: bash
+
+   pip install bioimageflow-common-tools
+
+The package is **not** part of the core surface; it is a curated set of basic
+tools built on top of ``bioimageflow`` and ``bioimageflow-core``. Workflow
+authors are free to use it directly, write their own tools following the same
+patterns, or mix both.
+
 Install for development
 -----------------------
 

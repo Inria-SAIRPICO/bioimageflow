@@ -24,7 +24,15 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
     "sphinx_autodoc_typehints",
+    "myst_parser",
 ]
+
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
+
+myst_heading_anchors = 4
 
 templates_path = ["_templates"]
 exclude_patterns = []
@@ -53,6 +61,7 @@ autodoc_class_signature = "separated"
 
 napoleon_google_docstrings = True
 napoleon_numpy_docstrings = True
+napoleon_use_ivar = True
 
 # -- Intersphinx -------------------------------------------------------------
 
