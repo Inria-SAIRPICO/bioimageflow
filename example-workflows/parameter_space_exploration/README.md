@@ -10,7 +10,7 @@ The workflow:
 2. Generates parameter value lists using the `Generate` tool (one for sensitivity, one for size).
 3. Performs a Cartesian product using `CrossJoin`.
 4. Executes `Atlas` spot detection on each image/parameter combination.
-5. Creates a mosaic of all detection results using the `Mosaic` tool.
+5. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
 
 ## Prerequisites
 

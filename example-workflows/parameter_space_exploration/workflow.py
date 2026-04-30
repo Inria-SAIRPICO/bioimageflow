@@ -14,7 +14,7 @@ The workflow:
 
 from __future__ import annotations
 
-from bioimageflow import Workflow
+from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.node import Node
 from bioimageflow_common_tools import Files, Generate, Atlas, Mosaic, CrossJoin
 
@@ -81,7 +81,8 @@ def build_parameter_space_workflow(
     )
     # Atlas produces output_image column with detection results
 
-    # Step 5: Mosaic of all detection results
+    # Step 5: Mosaic of all detection results. Mosaic accepts scalar image
+    # semantics, so Atlas's binary detections can be visualized directly.
     mosaic = Mosaic()(
         input_image=detections["output_image"],
         columns=6,  # arrange in a 6-column grid
@@ -95,6 +96,8 @@ def main() -> None:
     import sys
     data_dir = sys.argv[1] if len(sys.argv) > 1 else "./data"
     storage_path = sys.argv[2] if len(sys.argv) > 2 else "./parameter_space_results"
+
+    configure_wetlands(wetlands_instance_path="./wetlands")
 
     wf, mosaic = build_parameter_space_workflow(data_dir, storage_path)
     # Compute just the mosaic (which triggers all upstream)

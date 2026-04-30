@@ -6,11 +6,15 @@ from typing import Annotated, get_args
 
 import pytest
 
+from bioimageflow_core import (
+    SCALAR_IMAGE_SEMANTICS as EXPORTED_SCALAR_IMAGE_SEMANTICS,
+)
 from bioimageflow_core.types import (
     Connectable,
     GUIMeta,
     ImageSpec,
     Layout,
+    SCALAR_IMAGE_SEMANTICS,
     Semantic,
     SharedArray,
     ImagePath,
@@ -54,6 +58,17 @@ class TestNormalizeParam:
 
 
 class TestImageFactories:
+
+    def test_scalar_image_semantics_group(self):
+        assert SCALAR_IMAGE_SEMANTICS == frozenset({
+            Semantic.INTENSITY,
+            Semantic.BINARY,
+            Semantic.LABEL,
+            Semantic.PROBABILITY,
+        })
+        assert Semantic.DISPLACEMENT not in SCALAR_IMAGE_SEMANTICS
+        assert Semantic.FEATURE not in SCALAR_IMAGE_SEMANTICS
+        assert EXPORTED_SCALAR_IMAGE_SEMANTICS is SCALAR_IMAGE_SEMANTICS
 
     def test_image_path_is_annotated_path(self):
         ann = ImagePath(semantics=Semantic.INTENSITY)
@@ -103,6 +118,16 @@ class TestCheckCompatibility:
         producer = ImageSpec(semantics={Semantic.LABEL, Semantic.BINARY})
         consumer = ImageSpec(semantics={Semantic.LABEL, Semantic.INTENSITY})
         assert check_compatibility(producer, consumer) is True
+
+    def test_scalar_image_semantics_accepts_binary(self):
+        producer = ImageSpec(semantics={Semantic.BINARY})
+        consumer = ImageSpec(semantics=SCALAR_IMAGE_SEMANTICS)
+        assert check_compatibility(producer, consumer) is True
+
+    def test_binary_is_not_globally_intensity_compatible(self):
+        producer = ImageSpec(semantics={Semantic.BINARY})
+        consumer = ImageSpec(semantics={Semantic.INTENSITY})
+        assert check_compatibility(producer, consumer) is False
 
     def test_layout_mismatch(self):
         producer = ImageSpec(layouts={Layout.PLANAR})

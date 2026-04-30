@@ -17,6 +17,20 @@ class Semantic(str, Enum):
     FEATURE = "feature"
 
 
+SCALAR_IMAGE_SEMANTICS = frozenset({
+    Semantic.INTENSITY,
+    Semantic.BINARY,
+    Semantic.LABEL,
+    Semantic.PROBABILITY,
+})
+"""Semantic values for scalar raster images.
+
+Use this group for tools that consume displayable scalar images without
+requiring a specific pixel meaning, such as visualization and montage tools.
+It intentionally excludes vector fields and feature images.
+"""
+
+
 class Layout(str, Enum):
     """Axis ordering of the image data."""
     PLANAR = "YX"

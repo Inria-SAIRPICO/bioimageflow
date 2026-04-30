@@ -24,10 +24,12 @@ from bioimageflow_core import (
     Semantic,
 )
 from bioimageflow import Workflow
+from bioimageflow.validation import serialize_input_schema
 from bioimageflow_common_tools import (
     ExtractChannel,
     Files,
     LabelOverlaps,
+    Mosaic,
 )
 
 
@@ -174,6 +176,37 @@ class TestLabelOverlaps:
 
         nucleus_3_spots = real[real["reference_label"] == 3]
         assert set(nucleus_3_spots["spot_label"]) == {4, 5}
+
+
+# ---------------------------------------------------------------------------
+# Mosaic tool
+# ---------------------------------------------------------------------------
+
+class TestMosaic:
+    def test_input_schema_declares_scalar_image_semantics(self) -> None:
+        schema = serialize_input_schema(Mosaic)
+        semantics = schema["input_image"]["image_spec"]["semantics"]
+        assert semantics == ["binary", "intensity", "label", "probability"]
+
+    def test_accepts_binary_images_for_visualization(self, tmp_path: Path) -> None:
+        class BinaryProducer(ProcessingTool):
+            display_name = "Binary Producer"
+            environment = EnvironmentSpec(name="stub", dependencies={})
+
+            class Inputs(IOModel):
+                pass
+
+            class Outputs(IOModel):
+                output_image: ImagePath(semantics=Semantic.BINARY) = (  # type: ignore[valid-type]
+                    "binary.tif"
+                )
+
+            def process_row(self, arguments: Any) -> Any:
+                raise AssertionError("graph construction test only")
+
+        with Workflow(storage_path=str(tmp_path / "bif")):
+            binary = BinaryProducer()(name="binary")
+            Mosaic()(input_image=binary["output_image"], name="mosaic")
 
 
 # ---------------------------------------------------------------------------

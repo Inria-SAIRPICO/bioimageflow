@@ -56,7 +56,7 @@ class ConvertImage(ProcessingTool):
         )]
         dim_order: Annotated[str, GUIMeta(
             display_name="Dimension order",
-            description="Target dimension order used when reading the image (subset of TCZYX).",
+            description="Target dimension order used when reading the image.",
         )] = "TCZYX"
         scene: Annotated[int | None, GUIMeta(
             display_name="Scene",

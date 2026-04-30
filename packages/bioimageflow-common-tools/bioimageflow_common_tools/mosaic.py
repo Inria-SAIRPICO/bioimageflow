@@ -12,7 +12,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
-    Semantic,
+    SCALAR_IMAGE_SEMANTICS,
 )
 
 
@@ -35,10 +35,10 @@ class Mosaic(ProcessingTool):
     class Inputs(IOModel):
         input_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.INTENSITY}),
+            ImageSpec(semantics=SCALAR_IMAGE_SEMANTICS),
             GUIMeta(
                 display_name="Input image",
-                description="Image tile to include in the mosaic. One row per tile.",
+                description="Scalar image tile to include in the mosaic. One row per tile.",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]

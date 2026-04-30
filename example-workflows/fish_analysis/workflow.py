@@ -35,7 +35,7 @@ Pipeline topology:
 
 import sys
 
-from bioimageflow import Workflow
+from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 
 from bioimageflow_common_tools.merge import Collect
@@ -162,6 +162,8 @@ def build_fish_workflow(
 def main() -> None:
     storage_path = sys.argv[1] if len(sys.argv) > 1 else "./fish_results"
     data_dir = sys.argv[2] if len(sys.argv) > 2 else "./data"
+
+    configure_wetlands(wetlands_instance_path="./wetlands")
 
     wf, stats = build_fish_workflow(storage_path, data_dir, debug=True)
 

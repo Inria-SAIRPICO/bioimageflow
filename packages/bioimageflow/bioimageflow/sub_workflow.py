@@ -173,6 +173,7 @@ class SubWorkflow:
     """Base class for reusable sub-workflow definitions.
 
     Subclasses must declare:
+
     - ``display_name``: str — human-readable label for GUI display
     - ``Inputs``: IOModel subclass — declared inputs
     - ``Outputs``: IOModel subclass — declared outputs

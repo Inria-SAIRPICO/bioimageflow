@@ -5,6 +5,7 @@ from bioimageflow_core.types import (
     ImageShared as ImageShared,
     ImageSpec as ImageSpec,
     Layout as Layout,
+    SCALAR_IMAGE_SEMANTICS as SCALAR_IMAGE_SEMANTICS,
     Semantic as Semantic,
     SharedArray as SharedArray,
     check_compatibility as check_compatibility,
