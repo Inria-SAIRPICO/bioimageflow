@@ -68,7 +68,12 @@ class Mosaic(ProcessingTool):
             description="Number of input tiles assembled in the mosaic.",
         )]
 
-    def process_batch(self, arguments_list: list[Arguments]) -> Any:
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+        *,
+        context: Any = None,
+    ) -> Any:
         from PIL import Image
 
         images = []

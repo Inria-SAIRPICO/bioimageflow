@@ -35,10 +35,6 @@ class Files(DataFrameTool):
             display_name="Path",
             description="Absolute path of a matching file.",
         )]
-        filename: Annotated[str, GUIMeta(
-            display_name="Filename",
-            description="Base name of the file (without directory).",
-        )]
 
     def transform(self, df: Any, arguments: Any) -> Any:
         import pandas as pd
@@ -46,7 +42,7 @@ class Files(DataFrameTool):
         directory = Path(arguments.path)
         files = sorted(directory.glob(arguments.pattern))
         rows = [
-            {"path": str(f), "filename": f.name}
+            {"path": str(f)}
             for f in files
             if f.is_file()
         ]

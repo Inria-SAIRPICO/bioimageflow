@@ -1,10 +1,11 @@
 """BioImageFlow type system — zero external dependencies."""
 
 import warnings
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Set, Tuple, get_args, get_origin
+from typing import Annotated, Any, Tuple, get_args, get_origin
 
 
 class Semantic(str, Enum):
@@ -50,10 +51,18 @@ class Layout(str, Enum):
 @dataclass(frozen=True)
 class ImageSpec:
     """Defines type constraints. Empty sets mean 'any' (wildcard)."""
-    semantics: Set[Semantic] = field(default_factory=set)
-    layouts: Set[Layout] = field(default_factory=set)
-    dtypes: Set[str] = field(default_factory=set)
-    formats: Set[str] = field(default_factory=set)
+    __hash__ = None
+
+    semantics: AbstractSet[Semantic] = field(default_factory=frozenset)
+    layouts: AbstractSet[Layout] = field(default_factory=frozenset)
+    dtypes: AbstractSet[str] = field(default_factory=frozenset)
+    formats: AbstractSet[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "semantics", frozenset(self.semantics))
+        object.__setattr__(self, "layouts", frozenset(self.layouts))
+        object.__setattr__(self, "dtypes", frozenset(self.dtypes))
+        object.__setattr__(self, "formats", frozenset(self.formats))
 
 
 @dataclass(frozen=True)
@@ -171,13 +180,13 @@ def extract_gui_meta(annotation: Any) -> GUIMeta | None:
 def check_compatibility(producer_spec: ImageSpec, consumer_spec: ImageSpec) -> bool:
     """Returns True if the producer's output is acceptable for the consumer's input."""
     for attr in ["semantics", "layouts", "dtypes", "formats"]:
-        producer_values: set[Any] = getattr(producer_spec, attr)
-        consumer_values: set[Any] = getattr(consumer_spec, attr)
+        producer_values: AbstractSet[Any] = getattr(producer_spec, attr)
+        consumer_values: AbstractSet[Any] = getattr(consumer_spec, attr)
         if not consumer_values:
             continue
         if not producer_values:
             warnings.warn(f"Producer does not declare '{attr}'; cannot verify.")
             continue
-        if not producer_values.intersection(consumer_values):
+        if producer_values.isdisjoint(consumer_values):
             return False
     return True

@@ -3,6 +3,7 @@
   "venv": ".venv",
   "extraPaths": [
     "packages/bioimageflow-core",
+    "packages/bioimageflow-common-tools",
     "packages/bioimageflow"
   ]
 }

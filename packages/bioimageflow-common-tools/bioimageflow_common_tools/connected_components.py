@@ -69,7 +69,7 @@ class ConnectedComponents(ProcessingTool):
             description="Number of connected components labelled in the image.",
         )]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import SimpleITK as sitk    # type: ignore
 
         sitk_image = sitk.ReadImage(str(arguments.input_image))

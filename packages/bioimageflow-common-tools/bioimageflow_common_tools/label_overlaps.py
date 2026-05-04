@@ -65,7 +65,7 @@ class LabelOverlaps(ProcessingTool):
             description="CSV table with columns (reference_label, spot_label, overlap_count) giving the pixel count for each pair.",
         )] = Path("{label_image.stem}_overlaps.csv")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import numpy as np
         import imageio.v3 as iio
 

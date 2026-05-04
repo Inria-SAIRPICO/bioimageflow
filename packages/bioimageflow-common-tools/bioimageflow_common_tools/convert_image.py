@@ -51,7 +51,7 @@ class ConvertImage(ProcessingTool):
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(
             display_name="Input image",
-            description="Source image file to convert. Format is detected automatically by bioio.",
+            description="Source image file to convert.",
             connectable=Connectable.BY_DEFAULT,
         )]
         dim_order: Annotated[str, GUIMeta(
@@ -85,7 +85,7 @@ class ConvertImage(ProcessingTool):
             description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
         )] = Path("{input_image.stem}.ome.tiff")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from bioio import BioImage                          #type: ignore
         from bioio_ome_tiff.writers import OmeTiffWriter    #type: ignore
         from bioio_ome_zarr.writers import OMEZarrWriter    #type: ignore

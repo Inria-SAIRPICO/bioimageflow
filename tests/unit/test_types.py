@@ -85,6 +85,15 @@ class TestImageFactories:
         spec = get_args(ann)[1]
         assert spec.semantics == set()
 
+    def test_image_spec_normalizes_constraints_to_frozensets(self):
+        semantics = {Semantic.INTENSITY}
+        spec = ImageSpec(semantics=semantics)
+
+        semantics.add(Semantic.LABEL)
+
+        assert isinstance(spec.semantics, frozenset)
+        assert spec.semantics == {Semantic.INTENSITY}
+
 
 class TestCheckCompatibility:
 

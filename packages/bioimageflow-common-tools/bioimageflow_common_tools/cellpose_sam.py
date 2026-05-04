@@ -100,7 +100,7 @@ class CellposeSAM(ProcessingTool):
             description="Number of cells (non-zero labels) detected in the image.",
         )]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from cellpose import models #type: ignore
         import numpy as np
         import imageio.v3 as iio

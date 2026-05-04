@@ -107,7 +107,7 @@ class StarDistSegmenter(ProcessingTool):
             description="Number of non-background labels detected in the mask.",
         )]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from csbdeep.utils import normalize  # type: ignore
         import imageio.v3 as iio
         import numpy as np

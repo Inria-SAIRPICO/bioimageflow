@@ -110,7 +110,7 @@ class Cellpose3(ProcessingTool):
             description="Number of non-background labels detected in the mask.",
         )]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from cellpose import models  # type: ignore
         import imageio.v3 as iio
         import numpy as np

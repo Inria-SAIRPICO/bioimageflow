@@ -60,7 +60,7 @@ class ExtractChannel(ProcessingTool):
             ),
         ] = Path("{input_image.stem}_ch{channel}{ext}")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
         img = iio.imread(str(arguments.input_image))
