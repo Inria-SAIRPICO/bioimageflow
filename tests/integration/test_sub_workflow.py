@@ -15,6 +15,7 @@ Covers:
 """
 
 from pathlib import Path
+import sys
 
 import pandas as pd
 import pytest
@@ -31,6 +32,83 @@ from .conftest import (
 )
 
 from typing import Annotated
+
+
+def _clear_tools_modules() -> None:
+    for name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+        del sys.modules[name]
+
+
+def _write_sub_workflow_tools_package(root: Path) -> None:
+    tools_dir = root / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text(
+        "from .source import LocalFileLoader\n"
+        "from .subworkflows import LocalSegmentOnly\n",
+        encoding="utf-8",
+    )
+    (tools_dir / "source.py").write_text(
+        "from pathlib import Path\n"
+        "from typing import Any\n\n"
+        "import pandas as pd\n\n"
+        "from bioimageflow import DataFrameTool\n"
+        "from bioimageflow_core import IOModel\n\n"
+        "class LocalFileLoader(DataFrameTool):\n"
+        "    display_name = 'Local File Loader'\n"
+        "    class Inputs(IOModel):\n"
+        "        path: str\n"
+        "    class Outputs(IOModel):\n"
+        "        path: Path\n"
+        "        filename: str\n"
+        "    def transform(self, df: Any, arguments: Any) -> Any:\n"
+        "        directory = Path(arguments.path)\n"
+        "        rows = [\n"
+        "            {'path': f, 'filename': f.name}\n"
+        "            for f in sorted(directory.glob('*'))\n"
+        "            if f.is_file()\n"
+        "        ]\n"
+        "        return pd.DataFrame(rows)\n",
+        encoding="utf-8",
+    )
+    (tools_dir / "segment.py").write_text(
+        "from pathlib import Path\n"
+        "from typing import Annotated, Any\n\n"
+        "from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ImageSpec, ProcessingTool, Semantic, Template\n\n"
+        "class LocalSegmenter(ProcessingTool):\n"
+        "    display_name = 'Local Segmenter'\n"
+        "    environment = EnvironmentSpec(name='local-segmenter', dependencies={})\n"
+        "    class Inputs(IOModel):\n"
+        "        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]\n"
+        "    class Outputs(IOModel):\n"
+        "        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(\n"
+        "            '{input_image.stem}_mask_{row_index}.png'\n"
+        "        )\n"
+        "        cell_count: int\n"
+        "    def process_row(self, arguments: Arguments) -> Any:\n"
+        "        mask_path = Path(arguments.mask)\n"
+        "        mask_path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "        mask_path.write_text('LOCAL_MASK_DATA')\n"
+        "        return self.Outputs(mask=mask_path, cell_count=42)\n",
+        encoding="utf-8",
+    )
+    (tools_dir / "subworkflows.py").write_text(
+        "from pathlib import Path\n"
+        "from typing import Annotated\n\n"
+        "from bioimageflow.sub_workflow import SubWorkflow\n"
+        "from bioimageflow_core import IOModel, ImageSpec, Semantic\n\n"
+        "from .segment import LocalSegmenter\n\n"
+        "class LocalSegmentOnly(SubWorkflow):\n"
+        "    display_name = 'Local Segment Only'\n"
+        "    class Inputs(IOModel):\n"
+        "        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]\n"
+        "    class Outputs(IOModel):\n"
+        "        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]\n"
+        "        cell_count: int\n"
+        "    def build(self, inputs):\n"
+        "        masks = LocalSegmenter()(input_image=inputs.image)\n"
+        "        return {'mask': masks['mask'], 'cell_count': masks['cell_count']}\n",
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -473,24 +551,35 @@ class TestSubWorkflowSerialization:
 
     def test_export_and_load_round_trip(self, tmp_workspace):
         """Workflow with sub-workflow can be exported and re-loaded."""
-        load = FileLoader()
-        seg = SegmentOnly()
+        _write_sub_workflow_tools_package(tmp_workspace)
+        _clear_tools_modules()
+        sys.path.insert(0, str(tmp_workspace))
+        try:
+            from tools import LocalFileLoader, LocalSegmentOnly
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
-            raw = load(path=str(tmp_workspace / "data"))
-            results = seg(image=raw["path"])
-            df1 = wf.compute(results)
-            wf.export(tmp_workspace / "workflow.json")
+            load = LocalFileLoader()
+            seg = LocalSegmentOnly()
 
-            # Load and re-execute
+            with Workflow(storage_path=tmp_workspace / "results") as wf:
+                raw = load(path=str(tmp_workspace / "data"))
+                results = seg(image=raw["path"])
+                df1 = wf.compute(results)
+                wf.export(tmp_workspace / "workflow.json")
+
+            _clear_tools_modules()
+            sys.path = [p for p in sys.path if p != str(tmp_workspace)]
+
+            # Load and re-execute from the bundled workflow-local tools package.
             wf2 = Workflow.load(tmp_workspace / "workflow.json")
-            # Find the terminal node
-            terminal_names = [n for n in wf2.nodes if "SegmentOnly" in n]
+            terminal_names = [n for n in wf2.nodes if "LocalSegmentOnly" in n]
             assert len(terminal_names) == 1
             df2 = wf2.compute(wf2.nodes[terminal_names[0]])
 
             assert set(df1.columns) == set(df2.columns)
             assert len(df1) == len(df2)
+        finally:
+            sys.path = [p for p in sys.path if p != str(tmp_workspace)]
+            _clear_tools_modules()
 
 
 # ---------------------------------------------------------------------------
