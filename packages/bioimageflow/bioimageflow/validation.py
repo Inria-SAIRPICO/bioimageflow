@@ -83,7 +83,7 @@ def extract_image_spec(annotation: Any) -> ImageSpec | None:
 
 
 def is_path_type(annotation: Any) -> bool:
-    """Check if an annotation is Path-based (Path, ImagePath, Annotated[Path, ...])."""
+    """Check if an annotation is Path-based (Path or Annotated[Path, ...])."""
     from pathlib import Path
 
     if annotation is Path:
@@ -95,7 +95,7 @@ def is_path_type(annotation: Any) -> bool:
 
 
 def is_image_type(annotation: Any) -> bool:
-    """Check if annotation is ImagePath or ImageShared (Annotated with ImageSpec)."""
+    """Check if annotation is an image field (Annotated with ImageSpec)."""
     return extract_image_spec(annotation) is not None
 
 
@@ -491,10 +491,10 @@ def _display_type_name(annotation: Any) -> str:
     runtime type — enumeration of values goes through :func:`_extract_choices`
     and ``None``-ability is expressed via ``required``.
     """
-    # ``ImagePath(...)`` / ``ImageShared(...)`` are factory functions that
-    # return ``Annotated[Path | SharedArray, ImageSpec(...)]``. Platform code
-    # special-cases these names for widget selection, so we recognize them
-    # before generic Annotated-unwrapping collapses them to the base type.
+    # Image annotations are ``Annotated[Path | SharedArray, ImageSpec(...)]``.
+    # Platform code special-cases these names for widget selection, so we
+    # recognize them before generic Annotated-unwrapping collapses them to the
+    # base type.
     if get_origin(annotation) is Annotated and extract_image_spec(annotation) is not None:
         base = get_args(annotation)[0]
         if base is Path:

@@ -53,9 +53,12 @@ displayable scalar raster images without requiring one specific pixel meaning:
 
 .. code-block:: python
 
-   from bioimageflow_core import ImagePath, SCALAR_IMAGE_SEMANTICS
+   from pathlib import Path
+   from typing import Annotated
 
-   image: ImagePath(semantics=SCALAR_IMAGE_SEMANTICS)
+   from bioimageflow_core import ImageSpec, SCALAR_IMAGE_SEMANTICS
+
+   image: Annotated[Path, ImageSpec(semantics=SCALAR_IMAGE_SEMANTICS)]
 
 It contains ``INTENSITY``, ``BINARY``, ``LABEL``, and ``PROBABILITY``. It
 intentionally excludes ``DISPLACEMENT`` and ``FEATURE``. This is useful for
@@ -98,36 +101,41 @@ Layout
      - TCZYX
      - 5
 
-ImagePath and ImageShared
--------------------------
+Image Fields and ImageShared
+----------------------------
 
-These are factory functions that produce ``Annotated`` types:
+File-based image fields are declared as ``Annotated[Path, ImageSpec(...)]``.
+``ImageShared`` is a factory function for shared-memory image fields:
 
 .. code-block:: python
 
-   from bioimageflow_core import Connectable, GUIMeta, ImagePath, ImageShared
+   from pathlib import Path
+   from typing import Annotated
 
-   # File-based image: Annotated[Path, ImageSpec(...)]
-   image: ImagePath(semantics={"intensity"}, layouts={"YX", "CYX"})
+   from bioimageflow_core import Connectable, GUIMeta, ImageShared, ImageSpec
 
-   # File-based image with GUI metadata:
-   # Annotated[Path, ImageSpec(...), GUIMeta(...)]
-   visible_image: ImagePath(
-       semantics={"intensity"},
-       gui=GUIMeta(display_name="Input image",
-                   connectable=Connectable.BY_DEFAULT),
-   )
+   image: Annotated[
+       Path,
+       ImageSpec(semantics={"intensity"}, layouts={"YX", "CYX"}),
+   ]
+
+   visible_image: Annotated[
+       Path,
+       ImageSpec(semantics={"intensity"}),
+       GUIMeta(
+           display_name="Input image",
+           connectable=Connectable.BY_DEFAULT,
+       ),
+   ]
 
    # Shared-memory image:
    # Annotated[SharedArray, ImageSpec(..., formats={"memory"})]
    image: ImageShared(semantics={"intensity"})
 
-Use :func:`~bioimageflow_core.ImagePath` for file-based I/O and
+Use ``Annotated[Path, ImageSpec(...)]`` for file-based I/O and
 :func:`~bioimageflow_core.ImageShared` for zero-copy shared memory.
-Both factories accept an optional ``gui=GUIMeta(...)`` argument. ``ImagePath``
-returns an ``Annotated`` :class:`pathlib.Path` with an ``ImageSpec`` and,
-when supplied, the ``GUIMeta`` object; ``ImageShared`` does the same for
-``SharedArray``.
+Add :class:`~bioimageflow_core.GUIMeta` as another ``Annotated`` metadata
+entry when the field needs GUI hints.
 
 Compatibility checking
 ----------------------
@@ -169,18 +177,21 @@ labels, and tooltips.
 
 .. code-block:: python
 
+   from pathlib import Path
    from typing import Annotated
-   from bioimageflow_core import Connectable, GUIMeta, ImagePath, Semantic, Template
+
+   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic, Template
 
    class Inputs(IOModel):
-       image: ImagePath(
-           semantics={Semantic.INTENSITY},
-           gui=GUIMeta(
+       image: Annotated[
+           Path,
+           ImageSpec(semantics={Semantic.INTENSITY}),
+           GUIMeta(
                display_name="Input image",
                description="Fluorescence image to segment.",
                connectable=Connectable.BY_DEFAULT,
            ),
-       )
+       ]
        diameter: Annotated[float, GUIMeta(
            display_name="Cell diameter",
            description="Approximate cell diameter, in pixels.",
@@ -214,26 +225,29 @@ show tooltips:
 .. code-block:: python
 
    class Outputs(IOModel):
-       mask: ImagePath(
-           semantics={Semantic.LABEL},
-           gui=GUIMeta(
+       mask: Annotated[
+           Path,
+           ImageSpec(semantics={Semantic.LABEL}),
+           GUIMeta(
                display_name="Segmentation mask",
                description="Label image; each cell gets a unique ID.",
            ),
-       ) = Template("{input_image.stem}_mask{ext}")
+       ] = Template("{input_image.stem}_mask{ext}")
        cell_count: Annotated[int, GUIMeta(
            display_name="Cell count",
            description="Number of cells detected.",
        )]
 
-``GUIMeta`` and ``ImageSpec`` coexist on image fields via ``gui=``:
+``GUIMeta`` and ``ImageSpec`` coexist as separate ``Annotated`` metadata
+entries:
 
 .. code-block:: python
 
-   image: ImagePath(
-       semantics={Semantic.INTENSITY},
-       gui=GUIMeta(connectable=Connectable.BY_DEFAULT),
-   )
+   image: Annotated[
+       Path,
+       ImageSpec(semantics={Semantic.INTENSITY}),
+       GUIMeta(connectable=Connectable.BY_DEFAULT),
+   ]
 
 Introspection
 ~~~~~~~~~~~~~

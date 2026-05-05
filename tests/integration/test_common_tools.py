@@ -7,7 +7,7 @@ external libs are tested for graph construction only.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import imageio.v3 as iio
 import numpy as np
@@ -18,7 +18,7 @@ from bioimageflow_core import (
     Arguments,
     EnvironmentSpec,
     IOModel,
-    ImagePath,
+    ImageSpec,
     Layout,
     ProcessingTool,
     Semantic,
@@ -200,9 +200,10 @@ class TestMosaic:
                 pass
 
             class Outputs(IOModel):
-                output_image: ImagePath(semantics=Semantic.BINARY) = (  # type: ignore[valid-type]
-                    Template("binary.tif")
-                )
+                output_image: Annotated[
+                    Path,
+                    ImageSpec(semantics={Semantic.BINARY}),
+                ] = Template("binary.tif")
 
             def process_row(self, arguments: Any) -> Any:
                 raise AssertionError("graph construction test only")
@@ -260,12 +261,19 @@ class TestMiniPipeline:
             environment = stub_env
 
             class Inputs(IOModel):
-                input_image: ImagePath(semantics=Semantic.INTENSITY)  # type: ignore[valid-type]
+                input_image: Annotated[
+                    Path,
+                    ImageSpec(semantics={Semantic.INTENSITY}),
+                ]
 
             class Outputs(IOModel):
-                output_image: ImagePath(semantics=Semantic.LABEL, layouts=Layout.PLANAR) = (  # type: ignore[valid-type]
-                    Template("{input_image.stem}_labeled{ext}")
-                )
+                output_image: Annotated[
+                    Path,
+                    ImageSpec(
+                        semantics={Semantic.LABEL},
+                        layouts={Layout.PLANAR},
+                    ),
+                ] = Template("{input_image.stem}_labeled{ext}")
 
             def process_row(self, arguments: Any) -> Any:
                 import shutil

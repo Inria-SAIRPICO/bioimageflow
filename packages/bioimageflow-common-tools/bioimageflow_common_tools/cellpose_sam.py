@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImagePath,
+    ImageSpec,
     IOModel,
     Layout,
     ProcessingTool,
@@ -39,15 +39,18 @@ class CellposeSAM(ProcessingTool):
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(
-            semantics={Semantic.INTENSITY},
-            layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
-            gui=GUIMeta(
+        input_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
+            ),
+            GUIMeta(
                 display_name="Input image",
                 description="Fluorescence or brightfield image to segment (2D intensity, optionally multi-channel).",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        )
+        ]
         diameter: Annotated[float, GUIMeta(
             display_name="Cell diameter",
             description="Approximate cell diameter in pixels. Set to 0 for automatic estimation.",
@@ -82,14 +85,17 @@ class CellposeSAM(ProcessingTool):
         )] = 0.0
 
     class Outputs(IOModel):
-        mask: ImagePath(
-            semantics={Semantic.LABEL},
-            layouts={Layout.PLANAR},
-            gui=GUIMeta(
+        mask: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.LABEL},
+                layouts={Layout.PLANAR},
+            ),
+            GUIMeta(
                 display_name="Segmentation mask",
                 description="Label image; each detected cell/nucleus has a unique integer ID.",
             ),
-        ) = Template("{input_image.stem}_mask{ext}")
+        ] = Template("{input_image.stem}_mask{ext}")
         cell_count: Annotated[int, GUIMeta(
             display_name="Cell count",
             description="Number of cells (non-zero labels) detected in the image.",

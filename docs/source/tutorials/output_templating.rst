@@ -16,10 +16,12 @@ Basic templates
        environment = EnvironmentSpec(name="cellpose", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = Template("{image.stem}_mask.tif")
+           mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
+               "{image.stem}_mask.tif"
+           )
 
 The template ``{image.stem}_mask.tif`` resolves using the ``image`` input path:
 
@@ -59,14 +61,17 @@ Available variables
 Path-derived variables
 ----------------------
 
-Any input annotated with a path type (:func:`~bioimageflow_core.ImagePath`)
-exposes ``.stem``, ``.name``, ``.ext``, and ``.exts``:
+Any input annotated with a path type, including
+``Annotated[Path, ImageSpec(...)]``, exposes ``.stem``, ``.name``, ``.ext``,
+and ``.exts``:
 
 .. code-block:: python
 
    class Outputs:
        # Given image = "cells.ome.tif"
-       result: ImagePath() = Template("{image.stem}_result{image.exts}")
+       result: Annotated[Path, ImageSpec()] = Template(
+           "{image.stem}_result{image.exts}"
+       )
        # → "cells_result.ome.tif"
 
 Column references
@@ -92,7 +97,9 @@ a single input row produces multiple outputs:
        # ...
 
        class Outputs:
-           tile: ImagePath() = Template("{image.stem}_tile_{row_index}.tif")
+           tile: Annotated[Path, ImageSpec()] = Template(
+               "{image.stem}_tile_{row_index}.tif"
+           )
            # → "cell_001_tile_0::0.tif", "cell_001_tile_0::1.tif", ...
 
 Resolution order

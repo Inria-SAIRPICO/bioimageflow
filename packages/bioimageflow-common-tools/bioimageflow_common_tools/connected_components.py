@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImagePath,
+    ImageSpec,
     IOModel,
     Layout,
     ProcessingTool,
@@ -40,25 +40,31 @@ class ConnectedComponents(ProcessingTool):
     environment = simpleitk_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(
-            semantics={Semantic.BINARY},
-            layouts={Layout.PLANAR, Layout.VOLUMETRIC},
-            gui=GUIMeta(
+        input_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.BINARY},
+                layouts={Layout.PLANAR, Layout.VOLUMETRIC},
+            ),
+            GUIMeta(
                 display_name="Input image",
                 description="Binary image (non-zero pixels are foreground) whose connected components are labelled.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        )
+        ]
 
     class Outputs(IOModel):
-        output_image: ImagePath(
-            semantics={Semantic.LABEL},
-            layouts={Layout.PLANAR, Layout.VOLUMETRIC},
-            gui=GUIMeta(
+        output_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.LABEL},
+                layouts={Layout.PLANAR, Layout.VOLUMETRIC},
+            ),
+            GUIMeta(
                 display_name="Label image",
                 description="Label image where each connected component has a unique integer ID.",
             ),
-        ) = Template("{input_image.stem}_labels{ext}")
+        ] = Template("{input_image.stem}_labels{ext}")
         num_labels: Annotated[int, GUIMeta(
             display_name="Label count",
             description="Number of connected components labelled in the image.",

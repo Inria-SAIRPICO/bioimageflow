@@ -118,7 +118,7 @@ runs in its own environment, and emits a one-row output DataFrame:
            folder: str
 
        class Outputs:
-           image: ImagePath() = Template("out.tif")
+           image: Annotated[Path, ImageSpec()] = Template("out.tif")
 
        def process_row(self, arguments: Arguments) -> "LoadDicom.Outputs":
            ...

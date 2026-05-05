@@ -77,9 +77,10 @@ Minimal example
 
 .. code-block:: python
 
+   from pathlib import Path
    from typing import Annotated
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, GUIMeta, Connectable, ImagePath, Arguments,
+       ProcessingTool, EnvironmentSpec, GUIMeta, Connectable, ImageSpec, Arguments,
        Template,
    )
 
@@ -88,11 +89,11 @@ Minimal example
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
            sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
 
        class Outputs:
-           blurred: ImagePath() = Template("{image.stem}_blur.tif")
+           blurred: Annotated[Path, ImageSpec()] = Template("{image.stem}_blur.tif")
 
        def process_row(self, arguments: Arguments) -> "GaussianBlur.Outputs":
            from skimage.io import imread, imsave
@@ -126,7 +127,7 @@ Outputs aren't limited to file paths. Return scalars for measurements:
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
            mean: float
@@ -152,7 +153,7 @@ all rows at once (e.g., for GPU batching):
        environment = EnvironmentSpec(name="torch", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
            label: str
@@ -185,11 +186,13 @@ single input row. This is useful for tiling or splitting:
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
            tile_size: int = 256
 
        class Outputs:
-           tile: ImagePath() = Template("{image.stem}_tile_{row_index}.tif")
+           tile: Annotated[Path, ImageSpec()] = Template(
+               "{image.stem}_tile_{row_index}.tif"
+           )
 
        def process_row(self, arguments: Arguments) -> list:
            from skimage.io import imread, imsave

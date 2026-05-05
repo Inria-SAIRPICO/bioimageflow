@@ -2,20 +2,21 @@
 Test the type system and compatibility checking.
 
 Covers:
-- ImageSpec creation via ImagePath/ImageShared factories
+- ImageSpec creation on Annotated Path and ImageShared fields
 - Compatibility checking rules (wildcard semantics)
 - Type mismatch detection at graph construction time
 - Layout enum properties
 """
 
 import warnings
+from pathlib import Path
+from typing import Annotated
 
 import pytest
 
 from bioimageflow_core import (
     Connectable,
     GUIMeta,
-    ImagePath,
     ImageShared,
     ImageSpec,
     Layout,
@@ -27,14 +28,16 @@ from bioimageflow_core import (
 
 class TestImageSpecCreation:
 
-    def test_image_path_with_all_constraints(self):
-        """ImagePath returns Annotated[Path, ImageSpec(...)]."""
-        ann = ImagePath(
-            semantics=Semantic.INTENSITY,
-            layouts=Layout.VOLUMETRIC,
-            dtypes={"float32"},
-            formats={".nii.gz"},
-        )
+    def test_annotated_path_with_all_constraints(self):
+        ann = Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.VOLUMETRIC},
+                dtypes={"float32"},
+                formats={".nii.gz"},
+            ),
+        ]
         # The annotation should carry an ImageSpec
         spec = ann.__metadata__[0]
         assert isinstance(spec, ImageSpec)
@@ -43,14 +46,14 @@ class TestImageSpecCreation:
         assert "float32" in spec.dtypes
         assert ".nii.gz" in spec.formats
 
-    def test_image_path_with_single_values(self):
-        ann = ImagePath(semantics=Semantic.LABEL)
+    def test_annotated_path_with_semantics(self):
+        ann = Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
         spec = ann.__metadata__[0]
         assert spec.semantics == {Semantic.LABEL}
         assert spec.layouts == set()  # Wildcard
 
-    def test_image_path_wildcard(self):
-        ann = ImagePath()
+    def test_annotated_path_wildcard(self):
+        ann = Annotated[Path, ImageSpec()]
         spec = ann.__metadata__[0]
         assert spec.semantics == set()
         assert spec.layouts == set()
@@ -61,14 +64,17 @@ class TestImageSpecCreation:
         spec = ann.__metadata__[0]
         assert "memory" in spec.formats
 
-    def test_image_path_with_set_of_semantics(self):
-        ann = ImagePath(semantics={Semantic.INTENSITY, Semantic.PROBABILITY})
+    def test_annotated_path_with_set_of_semantics(self):
+        ann = Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY, Semantic.PROBABILITY}),
+        ]
         spec = ann.__metadata__[0]
         assert len(spec.semantics) == 2
 
-    def test_image_path_with_gui_meta(self):
+    def test_annotated_path_with_gui_meta(self):
         gui = GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT)
-        ann = ImagePath(semantics=Semantic.INTENSITY, gui=gui)
+        ann = Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), gui]
         assert ann.__metadata__[0].semantics == {Semantic.INTENSITY}
         assert ann.__metadata__[1] is gui
 

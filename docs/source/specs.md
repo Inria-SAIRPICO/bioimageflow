@@ -137,30 +137,30 @@ class SharedArray:
     dtype: str
 ```
 
-### 2.3 Type Factories
+### 2.3 Image Annotations
 
 ```python
-def ImagePath(
-    semantics=None, layouts=None, dtypes=None, formats=None, gui=None
-) -> Any:
-    """Returns Annotated[Path, ImageSpec(...), optional GUIMeta]."""
-
 def ImageShared(
     semantics=None, layouts=None, dtypes=None, gui=None
 ) -> Any:
     """Returns Annotated[SharedArray, ImageSpec(...), optional GUIMeta]."""
 ```
 
-The image constraint parameters accept a single value, a set, or `None`
-(wildcard). `gui` accepts an optional `GUIMeta`; when supplied, the returned
-annotation is an `Annotated` type carrying both `ImageSpec` and `GUIMeta`.
+File-based image fields are declared directly as
+`Annotated[Path, ImageSpec(...)]`. Add `GUIMeta(...)` as another `Annotated`
+metadata entry when the field needs GUI hints. `ImageShared(...)` remains a
+factory for shared-memory image fields; its constraint parameters accept a
+single value, a set, or `None` (wildcard).
 
 **Usage examples:**
 ```python
+from pathlib import Path
+from typing import Annotated
+
 from bioimageflow_core import (
     Connectable,
-    ImagePath,
     ImageShared,
+    ImageSpec,
     GUIMeta,
     Layout,
     SCALAR_IMAGE_SEMANTICS,
@@ -168,19 +168,30 @@ from bioimageflow_core import (
 )
 
 # File-based MRI input
-MRI_File = ImagePath(semantics=Semantic.INTENSITY, layouts=Layout.VOLUMETRIC, formats={".nii.gz"})
+MRI_File = Annotated[
+    Path,
+    ImageSpec(
+        semantics={Semantic.INTENSITY},
+        layouts={Layout.VOLUMETRIC},
+        formats={".nii.gz"},
+    ),
+]
 
 # Shared memory video stream
 Video_Stream = ImageShared(semantics=Semantic.INTENSITY, layouts=Layout.PLANAR_TIME_CHANNEL, dtypes="uint8")
 
 # Displayable scalar image input for visualization tools
-Displayable_Image = ImagePath(semantics=SCALAR_IMAGE_SEMANTICS)
+Displayable_Image = Annotated[
+    Path,
+    ImageSpec(semantics=SCALAR_IMAGE_SEMANTICS),
+]
 
 # Image input with GUI metadata
-Visible_Input = ImagePath(
-    semantics=Semantic.INTENSITY,
-    gui=GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT),
-)
+Visible_Input = Annotated[
+    Path,
+    ImageSpec(semantics={Semantic.INTENSITY}),
+    GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT),
+]
 ```
 
 ### 2.4 Type Compatibility
@@ -244,7 +255,7 @@ For inputs, each field entry has exactly these keys:
 }
 ```
 
-The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `ImagePath(...)` / `ImageShared(...)` are recognized specially and emit `"ImagePath"` / `"ImageShared"`. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
+The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImagePath"` and `"ImageShared"` respectively. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
 
@@ -260,9 +271,9 @@ Callers that want the Python-facing objects (raw `type`, raw `Connectable`) shou
 
 ### 2.5 Interface Type Constraints
 
-`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` types (`ImagePath`, `ImageShared`). Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.4](#34-dataframetool)).
+`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.4](#34-dataframetool)).
 
-**Runtime type resolution:** `ImagePath` and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), but the orchestrator's Pydantic model builder resolves both to `Union[Path, str, SharedArray]` at validation time. This is necessary because caching may convert a `SharedArray` output to a file `Path` (see [Section 8.2](#82-lifecycle)), and the reverse can happen when shared memory is enabled. Tools should use `load_image()` which handles both transparently.
+**Runtime type resolution:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), but the orchestrator's Pydantic model builder resolves both to `Union[Path, str, SharedArray]` at validation time. This is necessary because caching may convert a `SharedArray` output to a file `Path` (see [Section 8.2](#82-lifecycle)), and the reverse can happen when shared memory is enabled. Tools should use `load_image()` which handles both transparently.
 
 ---
 
@@ -345,18 +356,21 @@ GENERAL_ENV = EnvironmentSpec(
 **Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine creates it on first use and reuses it for all tools referencing it. All tools with `environment = GENERAL_ENV` share a single Wetlands worker process.
 
 ```python
-from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImagePath, Semantic, Template
+from pathlib import Path
+from typing import Annotated
+
+from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImageSpec, Semantic, Template
 
 class ExtractChannel(ProcessingTool):
     name = "extract_channel"
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        input_image: ImagePath(semantics=Semantic.INTENSITY)
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         channel: int = 0
 
     class Outputs(IOModel):
-        output_image: ImagePath(semantics=Semantic.INTENSITY) = Template("{input_image.stem}_ch{channel}{ext}")
+        output_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = Template("{input_image.stem}_ch{channel}{ext}")
 
     def process_row(self, arguments: Arguments) -> "Outputs":
         import imageio.v3 as iio
@@ -543,7 +557,10 @@ For `process_row`, `context.work_dir` is unique per input row: `run_dir/work/row
 
 **Direct tool definition:**
 ```python
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, Category, Template
+from pathlib import Path
+from typing import Annotated
+
+from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, Category, Template
 
 class MySegmenter(ProcessingTool):
     name = "my_segmenter"
@@ -553,11 +570,11 @@ class MySegmenter(ProcessingTool):
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(semantics=Semantic.INTENSITY)
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         diameter: float = 30.0
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
@@ -580,11 +597,11 @@ class CellposeSegmenter(CellposeBase):
     documentation = "Segments cells using the Cellpose algorithm."
 
     class Inputs(IOModel):
-        input_image: ImagePath(semantics=Semantic.INTENSITY)
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         diameter: float = 30.0
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
@@ -597,8 +614,8 @@ class CellposeTrain(CellposeBase):
     tags = ["cellpose", "training"]
 
     class Inputs(IOModel):
-        training_images: ImagePath(semantics=Semantic.INTENSITY)
-        training_masks: ImagePath(semantics=Semantic.LABEL)
+        training_images: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        training_masks: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
         epochs: int = 100
 
     class Outputs(IOModel):
@@ -735,7 +752,7 @@ class CountLabelOverlaps(DataFrameTool):
 Three modes:
 - **No `Outputs`** (default): Column validation is deferred to execution time. Use when the output schema is dynamic (e.g., `ColumnRegex`, where columns depend on the regex).
 - **`class Outputs(Passthrough)`**: The tool preserves all input columns. `Passthrough` is a special base class provided by `bioimageflow` (alongside `IOModel`). The engine uses the upstream schema for validation. New fields can be declared on `Passthrough` subclasses to indicate columns added by the tool: `class Outputs(Passthrough): cell_count: int`. The engine merges these with the upstream schema for construction-time validation.
-- **`class Outputs(IOModel)`**: Explicit output schema. The engine validates downstream ColumnRefs against this declaration at construction time. Supports full `IOModel` annotations including `ImagePath`/`ImageShared` type metadata for downstream type compatibility checks.
+- **`class Outputs(IOModel)`**: Explicit output schema. The engine validates downstream ColumnRefs against this declaration at construction time. Supports full `IOModel` annotations including `Annotated[Path, ImageSpec(...)]` and `ImageShared` type metadata for downstream type compatibility checks.
 
 The execution lifecycle for DataFrameTool is:
 1. Collect upstream DataFrames (from positional arguments)
@@ -980,7 +997,7 @@ class IOModel:
         return f"{self.__class__.__name__}({fields})"
 ```
 
-- **`Inputs`**: Declared on both `ProcessingTool` and `DataFrameTool`. Fields typed as `ImagePath` or `ImageShared` represent data dependencies; scalar fields represent parameters. Default values are supported.
+- **`Inputs`**: Declared on both `ProcessingTool` and `DataFrameTool`. Fields typed as `Annotated[Path, ImageSpec(...)]` or `ImageShared` represent data dependencies; scalar fields represent parameters. Default values are supported.
 - **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. Path outputs without a `Template(...)` default use the built-in default template. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
 
 Both models use only standard-library types and `bioimageflow-core` types.
@@ -1004,7 +1021,7 @@ def build_pydantic_model(tool_model_cls):
 
 *Module: `bioimageflow_core.tool`*
 
-`Inputs` and `Outputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`. For image fields, pass it directly to `ImagePath(..., gui=GUIMeta(...))` or `ImageShared(..., gui=GUIMeta(...))`; these factories return `Annotated` types carrying `ImageSpec` plus optional `GUIMeta`.
+`Inputs` and `Outputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`. For file-based image fields, use `Annotated[Path, ImageSpec(...), GUIMeta(...)]`. For shared-memory image fields, use `ImageShared(..., gui=GUIMeta(...))`.
 
 ```python
 class Connectable(Enum):
@@ -1046,22 +1063,25 @@ For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
 **Usage:**
 
 ```python
+from pathlib import Path
 from typing import Annotated
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta, Connectable, Template
+
+from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, GUIMeta, Connectable, Template
 
 class CellposeSegmenter(ProcessingTool):
     name = "cellpose_segmenter"
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(
-            semantics=Semantic.INTENSITY,
-            gui=GUIMeta(
+        input_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}),
+            GUIMeta(
                 display_name="Input image",
                 description="Fluorescence or brightfield image to segment.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        )
+        ]
         diameter: Annotated[float, GUIMeta(
             display_name="Cell diameter",
             description="Approximate diameter of cells in pixels. Set to 0 for auto-detection.",
@@ -1084,13 +1104,14 @@ class CellposeSegmenter(ProcessingTool):
         )] = True
 
     class Outputs(IOModel):
-        mask: ImagePath(
-            semantics=Semantic.LABEL,
-            gui=GUIMeta(
+        mask: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.LABEL}),
+            GUIMeta(
                 display_name="Segmentation mask",
                 description="Label image where each cell has a unique integer ID.",
             ),
-        ) = Template("{input_image.stem}_mask_{row_index}.png")
+        ] = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: Annotated[int, GUIMeta(
             display_name="Cell count",
             description="Number of cells detected in the image.",
@@ -1124,7 +1145,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
     return None
 ```
 
-**Compatibility with ImagePath/ImageShared:** `ImagePath(...)` returns `Annotated[Path, ImageSpec(...)]` by default, or `Annotated[Path, ImageSpec(...), GUIMeta(...)]` when `gui=` is supplied. `ImageShared(...)` behaves the same way with `SharedArray` and an implicit `formats={"memory"}` constraint. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
+**Compatibility with image fields and ImageShared:** File-based image fields use `Annotated[Path, ImageSpec(...)]`, optionally with a `GUIMeta(...)` metadata entry. `ImageShared(...)` returns `Annotated[SharedArray, ImageSpec(...), GUIMeta(...)]` when `gui=` is supplied and always includes an implicit `formats={"memory"}` constraint. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
 
 **Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets, labels, tooltips, and port visibility.
 
@@ -1209,7 +1230,7 @@ if TYPE_CHECKING:
     import cellpose.models  # Visible to IDEs and type checkers, not imported at runtime
 ```
 
-Imports from `bioimageflow-core` (e.g., `ImagePath`, `Arguments`, `IOModel`) can be at module level since the package is always available and has zero external dependencies.
+Imports from `bioimageflow-core` (e.g., `ImageSpec`, `Arguments`, `IOModel`) can be at module level since the package is always available and has zero external dependencies.
 
 DataFrameTool definitions import from `bioimageflow` and run exclusively in the main process, so they have full access to Pandas and any main-process library at module level:
 ```python
@@ -2100,7 +2121,7 @@ When `node.compute()` is called:
    6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
    7. **Environment Launch:** If not already running, create/reuse the Wetlands environment. If an environment with the same name already exists but its dependency hash differs, raise `EnvironmentMismatchError`.
    8. **Dispatch:** If `process_batch` was overridden, submit a single batch call via `env.submit()`. Otherwise, submit all `process_row` calls via `env.map_tasks()`. When `max_workers > 1`, rows execute in parallel across worker processes. When `max_workers == 1` (default), rows execute sequentially in a single worker (equivalent to the previous behavior). Results are always collected in submission order to preserve deterministic DataFrame construction.
-   8b. **Output Validation (worker-side):** After `process_row`/`process_batch` returns, the worker performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., `ImagePath`-typed fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised immediately in the worker with clear stack traces pointing to the tool code.
+   8b. **Output Validation (worker-side):** After `process_row`/`process_batch` returns, the worker performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., image path fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised immediately in the worker with clear stack traces pointing to the tool code.
    9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3).
    10. **Caching:** Save the result DataFrame and metadata to the [storage structure](#72-directory-structure).
 
@@ -2385,7 +2406,7 @@ The module-level helper `bioimageflow.validate_parameters(tool_class, parameters
 
 BioImageFlow enforces structured file naming to prevent overwrites and maintain order. Path output fields in `ProcessingTool.Outputs` with `Template(...)` defaults are treated as path templates, resolved by the engine before dispatch. (DataFrameTool does not use output templating — it returns DataFrames directly.)
 
-**Template declaration rule:** Templates must be declared explicitly with `Template("...")` on fields whose type annotation is Path-based (`Path`, `ImagePath(...)`, `Annotated[Path, ...]`). Non-path fields cannot declare `Template(...)`. Old-style explicit template defaults such as `"{input_image.stem}.tif"` or `Path("{input_image.stem}.tif")` are invalid and raise an error.
+**Template declaration rule:** Templates must be declared explicitly with `Template("...")` on fields whose type annotation is Path-based (`Path` or `Annotated[Path, ...]`). Non-path fields cannot declare `Template(...)`. Old-style explicit template defaults such as `"{input_image.stem}.tif"` or `Path("{input_image.stem}.tif")` are invalid and raise an error.
 
 **Available template variables:**
 
@@ -2410,7 +2431,7 @@ BioImageFlow enforces structured file naming to prevent overwrites and maintain 
 **Example:**
 ```python
 class Outputs(IOModel):
-    mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
+    mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{input_image.stem}_mask_{row_index}.png")
 ```
 For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, this resolves to `cell_01_mask_3.png`.
 
@@ -2652,7 +2673,7 @@ Tools that don't check `task.cancel_requested` are unaffected — they complete 
 # === bioimageflow-core (available in all environments) ===
 from bioimageflow_core import (
     # Types
-    Semantic, Layout, ImageSpec, SharedArray, ImagePath, ImageShared,
+    Semantic, Layout, ImageSpec, SharedArray, ImageShared,
     SCALAR_IMAGE_SEMANTICS, check_compatibility,
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
@@ -2705,17 +2726,20 @@ Sub-workflows allow users to package an entire workflow DAG as a reusable node. 
 
 ```python
 from bioimageflow.sub_workflow import SubWorkflow
-from bioimageflow_core import IOModel, ImagePath, Semantic, Arguments
+from pathlib import Path
+from typing import Annotated
+
+from bioimageflow_core import IOModel, ImageSpec, Semantic, Arguments
 
 class SegmentAndMeasure(SubWorkflow):
     name = "segment_and_measure"
 
     class Inputs(IOModel):
-        image: ImagePath(semantics=Semantic.INTENSITY)
+        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         diameter: float = 30.0
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL)
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
         cell_count: int
         mean_intensity: float
 

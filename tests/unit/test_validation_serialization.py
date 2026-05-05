@@ -17,7 +17,6 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImagePath,
     ImageShared,
     ImageSpec,
     IOModel,
@@ -144,14 +143,14 @@ class TestDisplayTypeName:
     def test_optional_annotated(self) -> None:
         assert _display_type_name(Optional[Annotated[int, GUIMeta(min=0)]]) == "int"
 
-    def test_image_path(self) -> None:
-        assert _display_type_name(ImagePath()) == "ImagePath"
+    def test_image_field_path(self) -> None:
+        assert _display_type_name(Annotated[Path, ImageSpec()]) == "ImagePath"
 
     def test_image_shared(self) -> None:
         assert _display_type_name(ImageShared()) == "ImageShared"
 
     def test_plain_path_with_non_imagespec_annotation(self) -> None:
-        # ImageSpec is absent → this is a plain Path, not an ImagePath.
+        # ImageSpec is absent, so this is serialized as a plain Path.
         assert _display_type_name(Annotated[Path, GUIMeta(display_name="p")]) == "Path"
 
 
@@ -205,9 +204,12 @@ class TestIsNullable:
     def test_annotated_non_optional(self) -> None:
         assert _is_nullable(Annotated[int, GUIMeta(min=0)]) is False
 
-    def test_image_path_non_optional(self) -> None:
-        # ImagePath(...) is Annotated[Path, ImageSpec(...)] — no None.
-        assert _is_nullable(ImagePath(semantics={Semantic.INTENSITY})) is False
+    def test_image_field_path_non_optional(self) -> None:
+        # Annotated[Path, ImageSpec(...)] has no None.
+        assert (
+            _is_nullable(Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})])
+            is False
+        )
 
     def test_three_way_union_with_none(self) -> None:
         assert _is_nullable(int | str | None) is True
@@ -288,33 +290,39 @@ class _SchemaTool(ProcessingTool):
         return self.Outputs(mask=Path("x"), cell_count=0)
 
 
-class _ImagePathGuiTool(ProcessingTool):
-    display_name = "ImagePath GUI Test Tool"
+class _ImageFieldGuiTool(ProcessingTool):
+    display_name = "Image Field GUI Test Tool"
     category = Category.UTILITIES
     environment = _ENV
 
     class Inputs(IOModel):
-        input_image: ImagePath(
-            semantics=Semantic.INTENSITY,
-            layouts=Layout.PLANAR,
-            gui=GUIMeta(
+        input_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.PLANAR},
+            ),
+            GUIMeta(
                 display_name="Input image",
                 description="A 2D intensity image.",
                 connectable=Connectable.BY_DEFAULT,
                 group="data",
             ),
-        )
+        ]
 
     class Outputs(IOModel):
-        mask: ImagePath(
-            semantics=Semantic.LABEL,
-            formats={".tif"},
-            gui=GUIMeta(
+        mask: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.LABEL},
+                formats={".tif"},
+            ),
+            GUIMeta(
                 display_name="Segmentation mask",
                 description="A label image.",
                 group="results",
             ),
-        ) = Template("{input_image.stem}_mask{ext}")
+        ] = Template("{input_image.stem}_mask{ext}")
 
     def process_row(self, arguments):  # type: ignore[override]
         return self.Outputs(mask=Path("x"))
@@ -438,7 +446,7 @@ class TestSerializeInputSchema:
         assert entry["type"] == "int"
 
     def test_image_path_gui_meta_preserved(self) -> None:
-        schema = serialize_input_schema(_ImagePathGuiTool)
+        schema = serialize_input_schema(_ImageFieldGuiTool)
         entry = schema["input_image"]
         assert entry["type"] == "ImagePath"
         assert entry["connectable"] == "by_default"
@@ -563,7 +571,7 @@ class TestSerializeOutputSchema:
         assert schema["mask"]["template"] == "mask.tif"
 
     def test_image_path_gui_meta_preserved(self) -> None:
-        schema = serialize_output_schema(_ImagePathGuiTool)
+        schema = serialize_output_schema(_ImageFieldGuiTool)
         mask = schema["mask"]
         assert mask["type"] == "ImagePath"
         assert mask["display_name"] == "Segmentation mask"

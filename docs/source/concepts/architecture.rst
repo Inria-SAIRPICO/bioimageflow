@@ -10,7 +10,7 @@ concerns.
    (zero deps, worker-safe)    (pandas + pydantic, main process)
    ┌──────────────────────┐   ┌───────────────────────────┐
    │  Semantic, Layout     │   │  Workflow                  │
-   │  ImageSpec, ImagePath │   │  Node, ColumnRef           │
+   │  ImageSpec, image I/O  │   │  Node, ColumnRef           │
    │  ProcessingTool       │   │  SequentialEngine          │
    │  IOModel, Arguments   │   │  DataFrameTool, Passthrough│
    │  EnvironmentSpec      │   │  Merge strategies          │
@@ -28,7 +28,7 @@ worker environments. It contains:
 - **Type system**: :class:`~bioimageflow_core.Semantic`,
   :class:`~bioimageflow_core.Layout`, :class:`~bioimageflow_core.ImageSpec`,
   :data:`~bioimageflow_core.SCALAR_IMAGE_SEMANTICS`,
-  :func:`~bioimageflow_core.ImagePath`, :func:`~bioimageflow_core.ImageShared`
+  :func:`~bioimageflow_core.ImageShared`
 - **Tool base classes**: :class:`~bioimageflow_core.BaseTool`,
   :class:`~bioimageflow_core.ProcessingTool`, :class:`~bioimageflow_core.IOModel`
 - **Argument passing**: :class:`~bioimageflow_core.Arguments`

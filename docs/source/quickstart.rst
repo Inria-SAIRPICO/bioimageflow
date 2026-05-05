@@ -67,8 +67,11 @@ Declare its inputs, outputs, and the environment it needs:
 
 .. code-block:: python
 
+   from pathlib import Path
+   from typing import Annotated
+
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template,
+       ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
    )
 
    class InvertImage(ProcessingTool):
@@ -76,10 +79,10 @@ Declare its inputs, outputs, and the environment it needs:
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
-           inverted: ImagePath() = Template("{image.stem}_inv.tif")
+           inverted: Annotated[Path, ImageSpec()] = Template("{image.stem}_inv.tif")
 
        def process_row(self, arguments: Arguments) -> "InvertImage.Outputs":
            from skimage.io import imread, imsave
@@ -90,8 +93,8 @@ Declare its inputs, outputs, and the environment it needs:
 
 Key points:
 
-- ``Inputs`` fields that receive upstream data use type annotations like
-  :func:`~bioimageflow_core.ImagePath`.
+- ``Inputs`` fields that receive image data use
+  ``Annotated[Path, ImageSpec(...)]``.
 - ``Outputs`` path fields use ``Template(...)`` defaults for **output path templates**
   (see :doc:`tutorials/output_templating`).
 - ``process_row`` receives an :class:`~bioimageflow_core.Arguments` object with

@@ -47,8 +47,10 @@ workflow mechanics:
 
    import pandas as pd
    from pathlib import Path
+   from typing import Annotated
+
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template,
+       ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
    )
    from bioimageflow import DataFrameTool
 
@@ -75,10 +77,12 @@ workflow mechanics:
        environment = cellpose_env
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = Template("{image.stem}_seg.tif")
+           mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
+               "{image.stem}_seg.tif"
+           )
 
        def process_row(self, arguments: Arguments) -> "Segment.Outputs":
            # In a real tool, you would call Cellpose here
@@ -97,7 +101,7 @@ workflow mechanics:
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           mask: ImagePath(semantics={"label"})
+           mask: Annotated[Path, ImageSpec(semantics={"label"})]
 
        class Outputs:
            cell_count: int

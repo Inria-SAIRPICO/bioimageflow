@@ -17,7 +17,6 @@ from bioimageflow_core.types import (
     SCALAR_IMAGE_SEMANTICS,
     Semantic,
     SharedArray,
-    ImagePath,
     ImageShared,
     check_compatibility,
     extract_gui_meta,
@@ -57,7 +56,7 @@ class TestNormalizeParam:
         assert _normalize_param((Layout.PLANAR,)) == {Layout.PLANAR}
 
 
-class TestImageFactories:
+class TestImageTypes:
 
     def test_scalar_image_semantics_group(self):
         assert SCALAR_IMAGE_SEMANTICS == frozenset({
@@ -70,8 +69,8 @@ class TestImageFactories:
         assert Semantic.FEATURE not in SCALAR_IMAGE_SEMANTICS
         assert EXPORTED_SCALAR_IMAGE_SEMANTICS is SCALAR_IMAGE_SEMANTICS
 
-    def test_image_path_is_annotated_path(self):
-        ann = ImagePath(semantics=Semantic.INTENSITY)
+    def test_annotated_path_can_carry_image_spec(self):
+        ann = Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
         base = get_args(ann)[0]
         assert base is Path
 
@@ -80,8 +79,8 @@ class TestImageFactories:
         spec = get_args(ann)[1]
         assert "memory" in spec.formats
 
-    def test_image_path_empty_spec(self):
-        ann = ImagePath()
+    def test_annotated_path_empty_spec(self):
+        ann = Annotated[Path, ImageSpec()]
         spec = get_args(ann)[1]
         assert spec.semantics == set()
 

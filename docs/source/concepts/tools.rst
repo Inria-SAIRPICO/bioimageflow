@@ -14,18 +14,23 @@ measurement --- anything that operates on individual images or arrays.
 
 .. code-block:: python
 
-   from bioimageflow_core import GENERAL_ENV, Template
+   from pathlib import Path
+   from typing import Annotated
+
+   from bioimageflow_core import GENERAL_ENV, ImageSpec, Template
 
    class MyTool(ProcessingTool):
        display_name = "My Tool"
        environment = GENERAL_ENV  # or a custom EnvironmentSpec for specialized deps
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
            threshold: float = 0.5
 
        class Outputs:
-           mask: ImagePath(semantics={"binary"}) = Template("{image.stem}_mask.tif")
+           mask: Annotated[Path, ImageSpec(semantics={"binary"})] = Template(
+               "{image.stem}_mask.tif"
+           )
 
        def process_row(self, arguments: Arguments) -> "MyTool.Outputs":
            ...
@@ -117,7 +122,7 @@ type annotations and validation.
 .. code-block:: python
 
    class Inputs(IOModel):
-       image: ImagePath()
+       image: Annotated[Path, ImageSpec()]
        sigma: float = 1.0
 
 - Fields without defaults are **required** (must be bound to upstream columns

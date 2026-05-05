@@ -47,10 +47,10 @@ points in its loop:
        environment = EnvironmentSpec(name="torch", dependencies={...})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
-           mask: ImagePath() = Template("{image.stem}_mask.tif")
+           mask: Annotated[Path, ImageSpec()] = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments, *, task=None):
            img = self._load(arguments.image)

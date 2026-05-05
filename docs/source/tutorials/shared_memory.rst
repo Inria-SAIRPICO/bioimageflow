@@ -13,7 +13,7 @@ Instead of saving an image to a file and loading it in the next tool, you can:
 1. Write a numpy array to shared memory with
    :func:`~bioimageflow_core.shm.create_shared_output`
 2. Annotate the output with :func:`~bioimageflow_core.ImageShared` instead of
-   :func:`~bioimageflow_core.ImagePath`
+   ``Annotated[Path, ImageSpec(...)]``
 3. Read it back in the next tool with :func:`~bioimageflow_core.io.load_image`
    --- which returns a zero-copy numpy view
 
@@ -22,8 +22,11 @@ Producing shared arrays
 
 .. code-block:: python
 
+   from pathlib import Path
+   from typing import Annotated
+
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImagePath, ImageShared, Arguments, Template,
+       ProcessingTool, EnvironmentSpec, ImageShared, ImageSpec, Arguments, Template,
    )
    from bioimageflow_core.shm import create_shared_output
 
@@ -32,7 +35,7 @@ Producing shared arrays
        environment = EnvironmentSpec(name="skimage", dependencies={})
 
        class Inputs:
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
 
        class Outputs:
            result: ImageShared()
@@ -66,7 +69,9 @@ Consuming shared arrays
            image: ImageShared()
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = Template("{node_name}_mask.tif")
+           mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
+               "{node_name}_mask.tif"
+           )
 
        def process_row(self, arguments: Arguments) -> "Segment.Outputs":
            with load_image(arguments.image, file_reader=None) as arr:
@@ -98,14 +103,14 @@ Wiring it together
 Type annotations
 ----------------
 
-:func:`~bioimageflow_core.ImageShared` works like :func:`~bioimageflow_core.ImagePath`
-but sets ``formats={"memory"}``. Both factories accept optional
-``gui=GUIMeta(...)`` metadata:
+:func:`~bioimageflow_core.ImageShared` produces a shared-memory image
+annotation by setting ``formats={"memory"}``. File-based image fields use
+``Annotated[Path, ImageSpec(...)]``:
 
 .. code-block:: python
 
    # File-based: Annotated[Path, ImageSpec(...)]
-   image: ImagePath(semantics={"intensity"}, layouts={"YX"})
+   image: Annotated[Path, ImageSpec(semantics={"intensity"}, layouts={"YX"})]
 
    # Memory-based: Annotated[SharedArray, ImageSpec(..., formats={"memory"})]
    image: ImageShared(semantics={"intensity"}, layouts={"YX"})

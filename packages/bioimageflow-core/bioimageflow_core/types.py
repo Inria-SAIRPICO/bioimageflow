@@ -4,7 +4,6 @@ import warnings
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Tuple, get_args, get_origin
 
 
@@ -83,25 +82,6 @@ def _normalize_param(value: Any) -> set[Any]:
     if isinstance(value, (list, tuple, frozenset)):
         return set(value)
     return {value}
-
-
-def ImagePath(
-    semantics: Any = None,
-    layouts: Any = None,
-    dtypes: Any = None,
-    formats: Any = None,
-    gui: Any = None,
-) -> Any:
-    """Returns Annotated[Path, ImageSpec(...), optional GUIMeta]."""
-    spec = ImageSpec(
-        semantics=_normalize_param(semantics),
-        layouts=_normalize_param(layouts),
-        dtypes=_normalize_param(dtypes),
-        formats=_normalize_param(formats),
-    )
-    if gui is not None:
-        return Annotated[Path, spec, gui]
-    return Annotated[Path, spec]
 
 
 def ImageShared(

@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImagePath,
+    ImageSpec,
     IOModel,
     Layout,
     ProcessingTool,
@@ -39,15 +39,18 @@ class StarDistSegmenter(ProcessingTool):
     environment = stardist_env
 
     class Inputs(IOModel):
-        input_image: ImagePath(
-            semantics={Semantic.INTENSITY},
-            layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
-            gui=GUIMeta(
+        input_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
+            ),
+            GUIMeta(
                 display_name="Input image",
                 description="2D fluorescence or RGB/H&E image to segment.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        )
+        ]
         model_name: Annotated[
             Literal["2D_versatile_fluo", "2D_paper_dsb2018", "2D_versatile_he"],
             GUIMeta(
@@ -89,14 +92,17 @@ class StarDistSegmenter(ProcessingTool):
         )] = 99.8
 
     class Outputs(IOModel):
-        mask: ImagePath(
-            semantics={Semantic.LABEL},
-            layouts={Layout.PLANAR},
-            gui=GUIMeta(
+        mask: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.LABEL},
+                layouts={Layout.PLANAR},
+            ),
+            GUIMeta(
                 display_name="Segmentation mask",
                 description="Label image where each detected object has a unique integer ID.",
             ),
-        ) = Template("{input_image.stem}_stardist_mask{ext}")
+        ] = Template("{input_image.stem}_stardist_mask{ext}")
         object_count: Annotated[int, GUIMeta(
             display_name="Object count",
             description="Number of non-background labels detected in the mask.",

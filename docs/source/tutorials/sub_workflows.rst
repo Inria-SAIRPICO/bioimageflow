@@ -28,8 +28,11 @@ to a :class:`~bioimageflow.ColumnRef` from one of the internal nodes:
 
 .. code-block:: python
 
+   from pathlib import Path
+   from typing import Annotated
+
    from bioimageflow import SubWorkflow
-   from bioimageflow_core import IOModel, ImagePath
+   from bioimageflow_core import IOModel, ImageSpec
    from bioimageflow_common_tools import ConvertImage
    from my_tools import Threshold, Measure
 
@@ -37,11 +40,11 @@ to a :class:`~bioimageflow.ColumnRef` from one of the internal nodes:
        display_name = "Segment and Measure"
 
        class Inputs(IOModel):
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
            cutoff: float = 128.0
 
        class Outputs(IOModel):
-           mask: ImagePath()
+           mask: Annotated[Path, ImageSpec()]
            area: float
 
        def build(self, inputs):
@@ -133,11 +136,11 @@ Sub-workflows can call other sub-workflows from inside ``build``:
        display_name = "Full Pipeline"
 
        class Inputs(IOModel):
-           image: ImagePath()
+           image: Annotated[Path, ImageSpec()]
            cutoff: float = 128.0
 
        class Outputs(IOModel):
-           mask: ImagePath()
+           mask: Annotated[Path, ImageSpec()]
            area: float
 
        def build(self, inputs):
