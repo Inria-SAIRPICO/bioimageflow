@@ -564,6 +564,17 @@ def _serialize_connectable(c: Connectable | None) -> str:
     return c.value
 
 
+def _add_gui_meta_fields(entry: dict[str, Any], gui_meta: Any) -> None:
+    """Add JSON-safe GUIMeta fields to a serialized schema entry."""
+    entry["connectable"] = _serialize_connectable(gui_meta.connectable)
+    entry["display_name"] = gui_meta.display_name
+    entry["description"] = gui_meta.description
+    entry["group"] = gui_meta.group
+    entry["min"] = gui_meta.min
+    entry["max"] = gui_meta.max
+    entry["step"] = gui_meta.step
+
+
 def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, Any]]:
     """Return a JSON-serializable input schema for a tool.
 
@@ -609,19 +620,22 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
             "type": _display_type_name(annotation),
             "required": not has_default,
             "nullable": _is_nullable(annotation),
-            "connectable": _serialize_connectable(
-                gui_meta.connectable if gui_meta is not None else None
-            ),
             "default": _jsonify_default(raw_default) if has_default else None,
-            "display_name": gui_meta.display_name if gui_meta is not None else None,
-            "description": gui_meta.description if gui_meta is not None else None,
-            "group": gui_meta.group if gui_meta is not None else None,
-            "min": gui_meta.min if gui_meta is not None else None,
-            "max": gui_meta.max if gui_meta is not None else None,
-            "step": gui_meta.step if gui_meta is not None else None,
             "choices": _extract_choices(annotation),
             "image_spec": serialize_image_spec(image_spec),
         }
+        if gui_meta is not None:
+            _add_gui_meta_fields(entry, gui_meta)
+        else:
+            entry.update({
+                "connectable": _serialize_connectable(None),
+                "display_name": None,
+                "description": None,
+                "group": None,
+                "min": None,
+                "max": None,
+                "step": None,
+            })
         schema[field_name] = entry
 
     return schema
@@ -745,15 +759,18 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
 
     for field_name, annotation in annotations.items():
         image_spec = extract_image_spec(annotation)
+        gui_meta = extract_gui_meta(annotation)
         has_default = hasattr(outputs_cls, field_name)
         raw_default = getattr(outputs_cls, field_name, None) if has_default else None
         template = raw_default.pattern if isinstance(raw_default, Template) else None
 
-        entry = {
+        entry: dict[str, Any] = {
             "type": _display_type_name(annotation),
             "default": _jsonify_default(raw_default) if has_default else None,
             "image_spec": serialize_image_spec(image_spec),
         }
+        if gui_meta is not None:
+            _add_gui_meta_fields(entry, gui_meta)
         if template is not None:
             entry["template"] = template
         schema[field_name] = entry

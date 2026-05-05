@@ -12,7 +12,7 @@ from bioimageflow_core import (
     EnvironmentSpec,
     ExecutionContext,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     Layout,
     ProcessingTool,
@@ -45,19 +45,16 @@ class Atlas(ProcessingTool):
     environment = atlas_env
 
     class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.INTENSITY},
-                layouts={Layout.PLANAR},
-                formats={"tiff"},
-            ),
-            GUIMeta(
+        input_image: ImagePath(
+            semantics={Semantic.INTENSITY},
+            layouts={Layout.PLANAR},
+            formats={"tiff"},
+            gui=GUIMeta(
                 display_name="Input image",
                 description="2D intensity TIFF image on which to detect spots.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
         gaussian_std: Annotated[int | None, GUIMeta(
             display_name="Gaussian std",
             description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size. Leave unset to use Atlas's built-in default.",
@@ -80,18 +77,15 @@ class Atlas(ProcessingTool):
         )] = False
 
     class Outputs(IOModel):
-        output_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.BINARY},
-                layouts={Layout.PLANAR},
-                formats={"tiff"},
-            ),
-            GUIMeta(
+        output_image: ImagePath(
+            semantics={Semantic.BINARY},
+            layouts={Layout.PLANAR},
+            formats={"tiff"},
+            gui=GUIMeta(
                 display_name="Detections",
                 description="Binary mask of detected spots (non-zero pixels mark spot locations).",
             ),
-        ] = Template("{input_image.stem}_detections{ext}")
+        ) = Template("{input_image.stem}_detections{ext}")
 
     def process_row(
         self,

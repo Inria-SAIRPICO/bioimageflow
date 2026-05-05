@@ -13,6 +13,8 @@ import warnings
 import pytest
 
 from bioimageflow_core import (
+    Connectable,
+    GUIMeta,
     ImagePath,
     ImageShared,
     ImageSpec,
@@ -63,6 +65,19 @@ class TestImageSpecCreation:
         ann = ImagePath(semantics={Semantic.INTENSITY, Semantic.PROBABILITY})
         spec = ann.__metadata__[0]
         assert len(spec.semantics) == 2
+
+    def test_image_path_with_gui_meta(self):
+        gui = GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT)
+        ann = ImagePath(semantics=Semantic.INTENSITY, gui=gui)
+        assert ann.__metadata__[0].semantics == {Semantic.INTENSITY}
+        assert ann.__metadata__[1] is gui
+
+    def test_image_shared_with_gui_meta(self):
+        gui = GUIMeta(display_name="Shared image", connectable=Connectable.BY_DEFAULT)
+        ann = ImageShared(semantics=Semantic.LABEL, gui=gui)
+        assert ann.__metadata__[0].semantics == {Semantic.LABEL}
+        assert "memory" in ann.__metadata__[0].formats
+        assert ann.__metadata__[1] is gui
 
 
 class TestLayoutEnum:

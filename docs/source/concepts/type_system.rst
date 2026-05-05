@@ -105,16 +105,29 @@ These are factory functions that produce ``Annotated`` types:
 
 .. code-block:: python
 
-   from bioimageflow_core import ImagePath, ImageShared
+   from bioimageflow_core import Connectable, GUIMeta, ImagePath, ImageShared
 
    # File-based image: Annotated[Path, ImageSpec(...)]
    image: ImagePath(semantics={"intensity"}, layouts={"YX", "CYX"})
 
-   # Shared-memory image: Annotated[SharedArray, ImageSpec(..., formats={"memory"})]
+   # File-based image with GUI metadata:
+   # Annotated[Path, ImageSpec(...), GUIMeta(...)]
+   visible_image: ImagePath(
+       semantics={"intensity"},
+       gui=GUIMeta(display_name="Input image",
+                   connectable=Connectable.BY_DEFAULT),
+   )
+
+   # Shared-memory image:
+   # Annotated[SharedArray, ImageSpec(..., formats={"memory"})]
    image: ImageShared(semantics={"intensity"})
 
 Use :func:`~bioimageflow_core.ImagePath` for file-based I/O and
 :func:`~bioimageflow_core.ImageShared` for zero-copy shared memory.
+Both factories accept an optional ``gui=GUIMeta(...)`` argument. ``ImagePath``
+returns an ``Annotated`` :class:`pathlib.Path` with an ``ImageSpec`` and,
+when supplied, the ``GUIMeta`` object; ``ImageShared`` does the same for
+``SharedArray``.
 
 Compatibility checking
 ----------------------
@@ -157,18 +170,17 @@ labels, and tooltips.
 .. code-block:: python
 
    from typing import Annotated
-   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic, Template
+   from bioimageflow_core import Connectable, GUIMeta, ImagePath, Semantic, Template
 
    class Inputs(IOModel):
-       image: Annotated[
-           Path,
-           ImageSpec(semantics={Semantic.INTENSITY}),
-           GUIMeta(
+       image: ImagePath(
+           semantics={Semantic.INTENSITY},
+           gui=GUIMeta(
                display_name="Input image",
                description="Fluorescence image to segment.",
                connectable=Connectable.BY_DEFAULT,
            ),
-       ]
+       )
        diameter: Annotated[float, GUIMeta(
            display_name="Cell diameter",
            description="Approximate cell diameter, in pixels.",
@@ -202,22 +214,26 @@ show tooltips:
 .. code-block:: python
 
    class Outputs(IOModel):
-       mask: Annotated[
-           Path,
-           ImageSpec(semantics={Semantic.LABEL}),
-           GUIMeta(display_name="Segmentation mask",
-                   description="Label image; each cell gets a unique ID."),
-       ] = Template("{input_image.stem}_mask{ext}")
+       mask: ImagePath(
+           semantics={Semantic.LABEL},
+           gui=GUIMeta(
+               display_name="Segmentation mask",
+               description="Label image; each cell gets a unique ID.",
+           ),
+       ) = Template("{input_image.stem}_mask{ext}")
        cell_count: Annotated[int, GUIMeta(
            display_name="Cell count",
            description="Number of cells detected.",
        )]
 
-``GUIMeta`` and ``ImageSpec`` can coexist on the same field:
+``GUIMeta`` and ``ImageSpec`` coexist on image fields via ``gui=``:
 
 .. code-block:: python
 
-   image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
+   image: ImagePath(
+       semantics={Semantic.INTENSITY},
+       gui=GUIMeta(connectable=Connectable.BY_DEFAULT),
+   )
 
 Introspection
 ~~~~~~~~~~~~~

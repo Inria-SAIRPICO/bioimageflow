@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     ProcessingTool,
     Template,
@@ -50,11 +50,13 @@ class ConvertImage(ProcessingTool):
     environment = bioio_env
 
     class Inputs(IOModel):
-        input_image: Annotated[Path, ImageSpec(), GUIMeta(
-            display_name="Input image",
-            description="Source image file to convert.",
-            connectable=Connectable.BY_DEFAULT,
-        )]
+        input_image: ImagePath(
+            gui=GUIMeta(
+                display_name="Input image",
+                description="Source image file to convert.",
+                connectable=Connectable.BY_DEFAULT,
+            )
+        )
         dim_order: Annotated[str, GUIMeta(
             display_name="Dimension order",
             description="Target dimension order used when reading the image.",
@@ -81,10 +83,12 @@ class ConvertImage(ProcessingTool):
         )] = None
 
     class Outputs(IOModel):
-        output_image: Annotated[Path, ImageSpec(), GUIMeta(
-            display_name="Output image",
-            description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
-        )] = Template("{input_image.stem}.ome.tiff")
+        output_image: ImagePath(
+            gui=GUIMeta(
+                display_name="Output image",
+                description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
+            )
+        ) = Template("{input_image.stem}.ome.tiff")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from bioio import BioImage                          #type: ignore

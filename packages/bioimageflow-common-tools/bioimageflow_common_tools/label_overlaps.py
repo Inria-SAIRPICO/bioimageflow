@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     GENERAL_ENV,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     Layout,
     ProcessingTool,
@@ -35,30 +35,24 @@ class LabelOverlaps(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        label_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.LABEL},
-                layouts={Layout.PLANAR},
-            ),
-            GUIMeta(
+        label_image: ImagePath(
+            semantics={Semantic.LABEL},
+            layouts={Layout.PLANAR},
+            gui=GUIMeta(
                 display_name="Label image",
                 description="Label image whose regions will be matched against the reference.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
-        reference_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.LABEL},
-                layouts={Layout.PLANAR},
-            ),
-            GUIMeta(
+        )
+        reference_image: ImagePath(
+            semantics={Semantic.LABEL},
+            layouts={Layout.PLANAR},
+            gui=GUIMeta(
                 display_name="Reference label image",
                 description="Reference label image. Each pixel of the label image is paired with the reference label at the same location.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
 
     class Outputs(IOModel):
         overlaps: Annotated[Path, GUIMeta(

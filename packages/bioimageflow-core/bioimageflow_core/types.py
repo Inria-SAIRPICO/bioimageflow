@@ -90,14 +90,17 @@ def ImagePath(
     layouts: Any = None,
     dtypes: Any = None,
     formats: Any = None,
+    gui: Any = None,
 ) -> Any:
-    """Returns Annotated[Path, ImageSpec(...)]. Used for file-based image data."""
+    """Returns Annotated[Path, ImageSpec(...), optional GUIMeta]."""
     spec = ImageSpec(
         semantics=_normalize_param(semantics),
         layouts=_normalize_param(layouts),
         dtypes=_normalize_param(dtypes),
         formats=_normalize_param(formats),
     )
+    if gui is not None:
+        return Annotated[Path, spec, gui]
     return Annotated[Path, spec]
 
 
@@ -105,14 +108,17 @@ def ImageShared(
     semantics: Any = None,
     layouts: Any = None,
     dtypes: Any = None,
+    gui: Any = None,
 ) -> Any:
-    """Returns Annotated[SharedArray, ImageSpec(...)]. Formats is implicitly {'memory'}."""
+    """Returns Annotated[SharedArray, ImageSpec(...), optional GUIMeta]."""
     spec = ImageSpec(
         semantics=_normalize_param(semantics),
         layouts=_normalize_param(layouts),
         dtypes=_normalize_param(dtypes),
         formats={"memory"},
     )
+    if gui is not None:
+        return Annotated[SharedArray, spec, gui]
     return Annotated[SharedArray, spec]
 
 

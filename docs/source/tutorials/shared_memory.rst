@@ -99,7 +99,8 @@ Type annotations
 ----------------
 
 :func:`~bioimageflow_core.ImageShared` works like :func:`~bioimageflow_core.ImagePath`
-but sets ``formats={"memory"}``:
+but sets ``formats={"memory"}``. Both factories accept optional
+``gui=GUIMeta(...)`` metadata:
 
 .. code-block:: python
 

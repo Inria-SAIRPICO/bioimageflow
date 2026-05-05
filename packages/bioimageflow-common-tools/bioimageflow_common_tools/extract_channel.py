@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     GENERAL_ENV,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     Layout,
     ProcessingTool,
@@ -31,17 +31,14 @@ class ExtractChannel(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(
-                layouts={Layout.PLANAR_CHANNEL, Layout.VOLUMETRIC_CHANNEL},
-            ),
-            GUIMeta(
+        input_image: ImagePath(
+            layouts={Layout.PLANAR_CHANNEL, Layout.VOLUMETRIC_CHANNEL},
+            gui=GUIMeta(
                 display_name="Input image",
                 description="Multi-channel image (CYX or CZYX). The first axis is treated as the channel axis.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
         channel: Annotated[int, GUIMeta(
             display_name="Channel",
             description="Index of the channel to extract (0-based).",
@@ -49,17 +46,14 @@ class ExtractChannel(ProcessingTool):
         )] = 0
 
     class Outputs(IOModel):
-        output_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.INTENSITY},
-                layouts={Layout.PLANAR},
-            ),
-            GUIMeta(
+        output_image: ImagePath(
+            semantics={Semantic.INTENSITY},
+            layouts={Layout.PLANAR},
+            gui=GUIMeta(
                 display_name="Channel image",
                 description="Single-channel image containing the extracted channel.",
             ),
-        ] = Template("{input_image.stem}_ch{channel}{ext}")
+        ) = Template("{input_image.stem}_ch{channel}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio

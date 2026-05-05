@@ -98,18 +98,35 @@ The ``connectable`` field surfaces the
      - ``Connectable.BY_DEFAULT``
      - Pin visible; data input.
 
-This applies only to ``Inputs``; ``Outputs`` fields are always
-connectable, so the field is omitted there.
+For ``Outputs``, ``connectable`` is ignored by the runtime because outputs
+always expose a pin. When an output carries ``GUIMeta``, the serializer still
+emits the string value so frontends can preserve the full metadata object.
 
 Output schema
 -------------
 
 :func:`~bioimageflow.validation.serialize_output_schema` returns a
-similar dict, with simpler per-field shape:
+similar dict, with simpler per-field shape. Outputs include GUI metadata
+keys only when the output annotation carries
+:class:`~bioimageflow_core.GUIMeta`.
 
 .. code-block:: python
 
-   {"mask": {"type": "ImagePath", "default": None, "image_spec": {...}}}
+   {
+       "mask": {
+           "type": "ImagePath",
+           "default": "{input_image.stem}_mask{ext}",
+           "image_spec": {...},
+           "template": "{input_image.stem}_mask{ext}",
+           "connectable": "not_by_default",
+           "display_name": "Segmentation mask",
+           "description": "Label image.",
+           "group": None,
+           "min": None,
+           "max": None,
+           "step": None,
+       }
+   }
 
 Two special cases:
 

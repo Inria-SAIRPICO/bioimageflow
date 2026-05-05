@@ -23,18 +23,32 @@
   },
   "outputs": {
     "num_labels": {
+      "connectable": "not_by_default",
       "default": null,
+      "description": "Number of connected components labelled in the image.",
+      "display_name": "Label count",
+      "group": null,
       "image_spec": null,
+      "max": null,
+      "min": null,
+      "step": null,
       "type": "int"
     },
     "output_image": {
+      "connectable": "not_by_default",
       "default": "{input_image.stem}_labels{ext}",
+      "description": "Label image where each connected component has a unique integer ID.",
+      "display_name": "Label image",
+      "group": null,
       "image_spec": {
         "dtypes": [],
         "formats": [],
         "layouts": ["YX", "ZYX"],
         "semantics": ["label"]
       },
+      "max": null,
+      "min": null,
+      "step": null,
       "template": "{input_image.stem}_labels{ext}",
       "type": "ImagePath"
     }

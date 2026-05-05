@@ -288,6 +288,38 @@ class _SchemaTool(ProcessingTool):
         return self.Outputs(mask=Path("x"), cell_count=0)
 
 
+class _ImagePathGuiTool(ProcessingTool):
+    display_name = "ImagePath GUI Test Tool"
+    category = Category.UTILITIES
+    environment = _ENV
+
+    class Inputs(IOModel):
+        input_image: ImagePath(
+            semantics=Semantic.INTENSITY,
+            layouts=Layout.PLANAR,
+            gui=GUIMeta(
+                display_name="Input image",
+                description="A 2D intensity image.",
+                connectable=Connectable.BY_DEFAULT,
+                group="data",
+            ),
+        )
+
+    class Outputs(IOModel):
+        mask: ImagePath(
+            semantics=Semantic.LABEL,
+            formats={".tif"},
+            gui=GUIMeta(
+                display_name="Segmentation mask",
+                description="A label image.",
+                group="results",
+            ),
+        ) = Template("{input_image.stem}_mask{ext}")
+
+    def process_row(self, arguments):  # type: ignore[override]
+        return self.Outputs(mask=Path("x"))
+
+
 class TestSerializeInputSchema:
     def test_keys_present(self) -> None:
         schema = serialize_input_schema(_SchemaTool)
@@ -405,6 +437,21 @@ class TestSerializeInputSchema:
         assert entry["required"] is True
         assert entry["type"] == "int"
 
+    def test_image_path_gui_meta_preserved(self) -> None:
+        schema = serialize_input_schema(_ImagePathGuiTool)
+        entry = schema["input_image"]
+        assert entry["type"] == "ImagePath"
+        assert entry["connectable"] == "by_default"
+        assert entry["display_name"] == "Input image"
+        assert entry["description"] == "A 2D intensity image."
+        assert entry["group"] == "data"
+        assert entry["image_spec"] == {
+            "semantics": ["intensity"],
+            "layouts": ["YX"],
+            "dtypes": [],
+            "formats": [],
+        }
+
 
 # ---------------------------------------------------------------------------
 # serialize_output_schema
@@ -515,6 +562,20 @@ class TestSerializeOutputSchema:
         assert schema["mask"]["default"] == "mask.tif"
         assert schema["mask"]["template"] == "mask.tif"
 
+    def test_image_path_gui_meta_preserved(self) -> None:
+        schema = serialize_output_schema(_ImagePathGuiTool)
+        mask = schema["mask"]
+        assert mask["type"] == "ImagePath"
+        assert mask["display_name"] == "Segmentation mask"
+        assert mask["description"] == "A label image."
+        assert mask["group"] == "results"
+        assert mask["image_spec"] == {
+            "semantics": ["label"],
+            "layouts": [],
+            "dtypes": [],
+            "formats": [".tif"],
+        }
+
 
 # ---------------------------------------------------------------------------
 # Integration: all common tools must produce JSON-serializable schemas
@@ -541,6 +602,28 @@ def test_common_tool_serializes_to_json(tool_cls: type) -> None:
     # Every declared input field is present.
     declared_inputs = set(tool_cls.Inputs._get_all_annotations())
     assert set(inputs.keys()) == declared_inputs
+
+
+def test_common_tool_image_fields_use_imagepath_without_converting_plain_paths() -> None:
+    from bioimageflow_common_tools import Atlas, LabelOverlaps, Mosaic, StarDistSegmenter
+
+    atlas_inputs = serialize_input_schema(Atlas)
+    atlas_outputs = serialize_output_schema(Atlas)
+    assert atlas_inputs["input_image"]["type"] == "ImagePath"
+    assert atlas_outputs["output_image"]["type"] == "ImagePath"
+
+    mosaic_inputs = serialize_input_schema(Mosaic)
+    mosaic_outputs = serialize_output_schema(Mosaic)
+    assert mosaic_inputs["input_image"]["type"] == "ImagePath"
+    assert mosaic_outputs["mosaic_path"]["type"] == "Path"
+
+    stardist_inputs = serialize_input_schema(StarDistSegmenter)
+    stardist_outputs = serialize_output_schema(StarDistSegmenter)
+    assert stardist_inputs["input_image"]["type"] == "ImagePath"
+    assert stardist_outputs["mask"]["type"] == "ImagePath"
+
+    label_outputs = serialize_output_schema(LabelOverlaps)
+    assert label_outputs["overlaps"]["type"] == "Path"
 
 
 def test_schema_serialization_error_exists() -> None:

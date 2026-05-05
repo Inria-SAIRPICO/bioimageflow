@@ -141,23 +141,27 @@ class SharedArray:
 
 ```python
 def ImagePath(
-    semantics=None, layouts=None, dtypes=None, formats=None
+    semantics=None, layouts=None, dtypes=None, formats=None, gui=None
 ) -> Any:
-    """Returns Annotated[Path, ImageSpec(...)]. Used for file-based image data."""
+    """Returns Annotated[Path, ImageSpec(...), optional GUIMeta]."""
 
 def ImageShared(
-    semantics=None, layouts=None, dtypes=None
+    semantics=None, layouts=None, dtypes=None, gui=None
 ) -> Any:
-    """Returns Annotated[SharedArray, ImageSpec(...)]. Formats is implicitly {'memory'}."""
+    """Returns Annotated[SharedArray, ImageSpec(...), optional GUIMeta]."""
 ```
 
-All parameters accept a single value, a set, or `None` (wildcard).
+The image constraint parameters accept a single value, a set, or `None`
+(wildcard). `gui` accepts an optional `GUIMeta`; when supplied, the returned
+annotation is an `Annotated` type carrying both `ImageSpec` and `GUIMeta`.
 
 **Usage examples:**
 ```python
 from bioimageflow_core import (
+    Connectable,
     ImagePath,
     ImageShared,
+    GUIMeta,
     Layout,
     SCALAR_IMAGE_SEMANTICS,
     Semantic,
@@ -171,6 +175,12 @@ Video_Stream = ImageShared(semantics=Semantic.INTENSITY, layouts=Layout.PLANAR_T
 
 # Displayable scalar image input for visualization tools
 Displayable_Image = ImagePath(semantics=SCALAR_IMAGE_SEMANTICS)
+
+# Image input with GUI metadata
+Visible_Input = ImagePath(
+    semantics=Semantic.INTENSITY,
+    gui=GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT),
+)
 ```
 
 ### 2.4 Type Compatibility
@@ -244,7 +254,7 @@ The `connectable` field uses three-state strings: `"never"` (no pin, no toggle),
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
+Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
@@ -994,7 +1004,7 @@ def build_pydantic_model(tool_model_cls):
 
 *Module: `bioimageflow_core.tool`*
 
-`Inputs` and `Outputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`.
+`Inputs` and `Outputs` fields can carry optional `GUIMeta` annotations that provide hints to GUI frontends (e.g., node editors, property panels). `GUIMeta` is a frozen dataclass attached via `typing.Annotated`, following the same pattern as `ImageSpec`. For image fields, pass it directly to `ImagePath(..., gui=GUIMeta(...))` or `ImageShared(..., gui=GUIMeta(...))`; these factories return `Annotated` types carrying `ImageSpec` plus optional `GUIMeta`.
 
 ```python
 class Connectable(Enum):
@@ -1044,14 +1054,14 @@ class CellposeSegmenter(ProcessingTool):
     environment = cellpose_env
 
     class Inputs(IOModel):
-        input_image: Annotated[
-            ImagePath(semantics=Semantic.INTENSITY),
-            GUIMeta(
+        input_image: ImagePath(
+            semantics=Semantic.INTENSITY,
+            gui=GUIMeta(
                 display_name="Input image",
                 description="Fluorescence or brightfield image to segment.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
         diameter: Annotated[float, GUIMeta(
             display_name="Cell diameter",
             description="Approximate diameter of cells in pixels. Set to 0 for auto-detection.",
@@ -1074,11 +1084,13 @@ class CellposeSegmenter(ProcessingTool):
         )] = True
 
     class Outputs(IOModel):
-        mask: Annotated[
-            ImagePath(semantics=Semantic.LABEL),
-            GUIMeta(display_name="Segmentation mask",
-                    description="Label image where each cell has a unique integer ID."),
-        ] = Template("{input_image.stem}_mask_{row_index}.png")
+        mask: ImagePath(
+            semantics=Semantic.LABEL,
+            gui=GUIMeta(
+                display_name="Segmentation mask",
+                description="Label image where each cell has a unique integer ID.",
+            ),
+        ) = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: Annotated[int, GUIMeta(
             display_name="Cell count",
             description="Number of cells detected in the image.",
@@ -1112,7 +1124,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
     return None
 ```
 
-**Compatibility with ImagePath/ImageShared:** Since `ImagePath(...)` already returns `Annotated[Path, ImageSpec(...)]`, a field can carry both `ImageSpec` and `GUIMeta` by nesting: `Annotated[ImagePath(...), GUIMeta(connectable=Connectable.BY_DEFAULT)]`. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
+**Compatibility with ImagePath/ImageShared:** `ImagePath(...)` returns `Annotated[Path, ImageSpec(...)]` by default, or `Annotated[Path, ImageSpec(...), GUIMeta(...)]` when `gui=` is supplied. `ImageShared(...)` behaves the same way with `SharedArray` and an implicit `formats={"memory"}` constraint. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
 
 **Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets, labels, tooltips, and port visibility.
 

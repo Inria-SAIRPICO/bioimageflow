@@ -3,7 +3,15 @@
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core.types import Connectable, GUIMeta, ImageSpec, Semantic, SharedArray
+from bioimageflow_core.types import (
+    Connectable,
+    GUIMeta,
+    ImagePath,
+    ImageSpec,
+    Semantic,
+    SharedArray,
+    extract_gui_meta,
+)
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow.validation import (
@@ -56,6 +64,23 @@ class TestExtractImageSpec:
 
     def test_returns_none_for_plain(self):
         assert extract_image_spec(int) is None
+
+    def test_image_path_gui_meta_preserves_image_spec(self):
+        ann = ImagePath(
+            semantics=Semantic.INTENSITY,
+            gui=GUIMeta(connectable=Connectable.BY_DEFAULT),
+        )
+        spec = extract_image_spec(ann)
+        assert spec is not None
+        assert spec.semantics == {Semantic.INTENSITY}
+
+
+class TestExtractGUIMeta:
+
+    def test_image_path_gui_meta_preserved(self):
+        gui = GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT)
+        ann = ImagePath(semantics=Semantic.INTENSITY, gui=gui)
+        assert extract_gui_meta(ann) is gui
 
 
 class TestGetInputsSchema:

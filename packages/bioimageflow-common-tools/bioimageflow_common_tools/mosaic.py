@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     GENERAL_ENV,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     ProcessingTool,
     SCALAR_IMAGE_SEMANTICS,
@@ -34,15 +34,14 @@ class Mosaic(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(semantics=SCALAR_IMAGE_SEMANTICS),
-            GUIMeta(
+        input_image: ImagePath(
+            semantics=SCALAR_IMAGE_SEMANTICS,
+            gui=GUIMeta(
                 display_name="Input image",
                 description="Scalar image tile to include in the mosaic. One row per tile.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
         columns: Annotated[int, GUIMeta(
             display_name="Columns",
             description="Number of tiles per row in the output grid.",

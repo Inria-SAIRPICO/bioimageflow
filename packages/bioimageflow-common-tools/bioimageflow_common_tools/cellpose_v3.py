@@ -9,7 +9,7 @@ from bioimageflow_core import (
     Connectable,
     EnvironmentSpec,
     GUIMeta,
-    ImageSpec,
+    ImagePath,
     IOModel,
     Layout,
     ProcessingTool,
@@ -39,18 +39,15 @@ class Cellpose3(ProcessingTool):
     environment = cellpose_v3_env
 
     class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.INTENSITY},
-                layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
-            ),
-            GUIMeta(
+        input_image: ImagePath(
+            semantics={Semantic.INTENSITY},
+            layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
+            gui=GUIMeta(
                 display_name="Input image",
                 description="2D intensity image to segment, optionally with channels.",
                 connectable=Connectable.BY_DEFAULT,
             ),
-        ]
+        )
         diameter: Annotated[float, GUIMeta(
             display_name="Object diameter",
             description="Approximate object diameter in pixels. Set to 0 for Cellpose size estimation.",
@@ -95,17 +92,14 @@ class Cellpose3(ProcessingTool):
         )] = 0.0
 
     class Outputs(IOModel):
-        mask: Annotated[
-            Path,
-            ImageSpec(
-                semantics={Semantic.LABEL},
-                layouts={Layout.PLANAR},
-            ),
-            GUIMeta(
+        mask: ImagePath(
+            semantics={Semantic.LABEL},
+            layouts={Layout.PLANAR},
+            gui=GUIMeta(
                 display_name="Segmentation mask",
                 description="Label image where each detected object has a unique integer ID.",
             ),
-        ] = Template("{input_image.stem}_cellpose3_mask{ext}")
+        ) = Template("{input_image.stem}_cellpose3_mask{ext}")
         cell_count: Annotated[int, GUIMeta(
             display_name="Object count",
             description="Number of non-background labels detected in the mask.",
