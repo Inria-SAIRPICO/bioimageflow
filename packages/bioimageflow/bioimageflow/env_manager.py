@@ -7,6 +7,7 @@ everything else picks up the same instance automatically.
 """
 
 import inspect
+import json
 import logging
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
@@ -103,6 +104,27 @@ def _find_worker_file() -> str:
 
 def _find_tool_file(tool_class: type) -> str:
     """Return the absolute file path of the module defining a tool class."""
+    worker_module = getattr(tool_class, "_bif_worker_module", None)
+    worker_sys_path = getattr(tool_class, "_bif_worker_sys_path", None)
+    if worker_module and worker_sys_path:
+        return json.dumps({
+            "mode": "module",
+            "module": worker_module,
+            "sys_path": worker_sys_path,
+        }, sort_keys=True)
+
+    try:
+        from bioimageflow.workflow import _find_custom_tools_dir
+        source_file = Path(inspect.getfile(tool_class)).resolve()
+        tools_dir = _find_custom_tools_dir(source_file)
+        if tools_dir is not None:
+            return json.dumps({
+                "mode": "module",
+                "module": tool_class.__module__,
+                "sys_path": str(tools_dir.parent),
+            }, sort_keys=True)
+    except Exception:
+        pass
     return str(Path(inspect.getfile(tool_class)).resolve())
 
 

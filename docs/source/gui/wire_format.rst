@@ -165,8 +165,9 @@ Workflow custom tools
 
 Exported workflows carry workflow-local custom tools with the workflow.
 When a node uses a tool class that is not part of a versioned tool
-package, ``Workflow.export(path)`` stores that Python module in
-``custom_tool_modules`` and adds a source reference to the node:
+package, ``Workflow.export(path)`` stores the workflow-local ``tools/``
+package in ``custom_tool_modules`` and adds a source reference to the
+node:
 
 .. code-block:: json
 
@@ -176,8 +177,28 @@ package, ``Workflow.export(path)`` stores that Python module in
          "id": "m_1f2e3d4c5b6a7980",
          "module": "tools.threshold",
          "filename": "threshold.py",
+         "root_package": "tools",
          "source_hash": "...",
-         "source": "from bioimageflow_core import ...\n..."
+         "files": [
+           {
+             "path": "tools/__init__.py",
+             "encoding": "base64",
+             "content": "...",
+             "source_hash": "..."
+           },
+           {
+             "path": "tools/threshold.py",
+             "encoding": "base64",
+             "content": "...",
+             "source_hash": "..."
+           },
+           {
+             "path": "tools/data/lut.json",
+             "encoding": "base64",
+             "content": "...",
+             "source_hash": "..."
+           }
+         ]
        }
      ],
      "nodes": [
@@ -199,8 +220,8 @@ package, ``Workflow.export(path)`` stores that Python module in
 Class-based custom sub-workflows use ``sub_workflow_source_module`` in
 the same way. ``Workflow.load()`` prefers the embedded source reference
 over importing ``tool_module`` / ``sub_workflow_module`` from the local
-machine, so the workflow file is portable across machines for custom
-workflow tools.
+machine. The bundle preserves relative paths under ``tools/``, so helper
+modules, relative imports, and small runtime assets work after loading.
 
 GUIs that need a palette for the tools used by a specific workflow
 should call ``ToolRegistry.register_workflow(workflow_or_data)``. It

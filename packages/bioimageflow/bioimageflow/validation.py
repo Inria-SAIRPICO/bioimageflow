@@ -286,6 +286,13 @@ def get_tool_version(tool: BaseTool) -> str:
     bif_version = getattr(tool_class, "_bif_package_version", None)
     if bif_version is not None:
         return bif_version
+    try:
+        from bioimageflow.workflow import _get_custom_tools_dir_bundle_hash
+        bundle_hash = _get_custom_tools_dir_bundle_hash(tool_class)
+        if bundle_hash is not None:
+            return f"source:{bundle_hash}"
+    except Exception:
+        pass
     source_hash = getattr(tool_class, "_bif_custom_source_hash", None)
     if source_hash is not None:
         return f"source:{source_hash}"

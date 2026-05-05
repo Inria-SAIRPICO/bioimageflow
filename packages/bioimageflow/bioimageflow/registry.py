@@ -203,6 +203,7 @@ class ToolRegistry:
             Workflow,
             _is_workflow_custom_class,
             _load_custom_tool_modules,
+            _resolve_custom_tool_class,
         )
 
         classes: list[type] = []
@@ -227,8 +228,14 @@ class ToolRegistry:
                     class_name = node_data.get("tool_class")
                 if not source_id or not class_name:
                     continue
-                module = modules[source_id]
-                classes.append(getattr(module, class_name))
+                module_name = (
+                    node_data.get("sub_workflow_module")
+                    if node_data.get("type") == "sub_workflow"
+                    else node_data.get("tool_module")
+                )
+                classes.append(_resolve_custom_tool_class(
+                    modules, source_id, module_name, class_name
+                ))
         else:
             raise TypeError(
                 "register_workflow expects a Workflow instance or workflow dict"

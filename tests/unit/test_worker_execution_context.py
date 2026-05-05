@@ -1,5 +1,7 @@
 """Worker-side forwarding of ExecutionContext."""
 
+import json
+
 from bioimageflow_core.worker import run_process_batch, run_process_row
 
 
@@ -84,3 +86,45 @@ class BatchContextTool(ProcessingTool):
         [{"seen": str(tmp_path / "run" / "work" / "batch" / "a")}],
         [{"seen": str(tmp_path / "run" / "work" / "batch" / "b")}],
     ]
+
+
+def test_worker_loads_tool_package_with_relative_imports(tmp_path):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("", encoding="utf-8")
+    (tools_dir / "helpers.py").write_text(
+        "def suffix():\n"
+        "    return 'ok'\n",
+        encoding="utf-8",
+    )
+    (tools_dir / "pkg_tool.py").write_text(
+        """
+from typing import Any
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool
+from .helpers import suffix
+
+env = EnvironmentSpec(name="pkg", dependencies={})
+
+class PackageTool(ProcessingTool):
+    environment = env
+
+    class Inputs(IOModel):
+        value: str
+
+    class Outputs(IOModel):
+        seen: str
+
+    def process_row(self, arguments: Arguments) -> Any:
+        return self.Outputs(seen=f"{arguments.value}-{suffix()}")
+""",
+        encoding="utf-8",
+    )
+    tool_ref = json.dumps({
+        "mode": "module",
+        "module": "tools.pkg_tool",
+        "sys_path": str(tmp_path),
+    })
+
+    result = run_process_row((tool_ref, "PackageTool", {"value": "sample"}))
+
+    assert result == [{"seen": "sample-ok"}]

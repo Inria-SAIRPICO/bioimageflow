@@ -46,8 +46,8 @@ Workflow custom tools
 
 Custom tools that live with a workflow are not promoted to packages just
 to make the workflow portable. ``Workflow.export(path)`` embeds their
-source modules in the exported JSON, and the registry can discover those
-tools for that specific workflow:
+workflow-local ``tools/`` package in the exported JSON, and the registry
+can discover those tools for that specific workflow:
 
 .. code-block:: python
 

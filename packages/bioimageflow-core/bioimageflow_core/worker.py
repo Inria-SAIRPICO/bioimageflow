@@ -15,6 +15,7 @@ method also declares ``task``.
 
 import importlib.util
 import inspect
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +73,14 @@ def _discover_tools(module: object) -> dict[str, type]:
 
 def _load_module_from_file(file_path: str) -> object:
     """Load a Python module from a file path."""
+    if file_path.startswith("{"):
+        config = json.loads(file_path)
+        if config.get("mode") == "module":
+            sys_path = config.get("sys_path")
+            if sys_path and sys_path not in sys.path:
+                sys.path.insert(0, sys_path)
+            return importlib.import_module(config["module"])
+
     path = Path(file_path)
     module_name = path.stem
     spec = importlib.util.spec_from_file_location(module_name, file_path)

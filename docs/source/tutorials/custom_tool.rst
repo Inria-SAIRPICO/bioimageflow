@@ -20,6 +20,9 @@ Recommended layout:
        __init__.py
        download_images.py
        average_spots_per_nucleus.py
+       utils.py
+       data/
+         small_runtime_asset.json
      tests/
        test_tools.py
        data/
@@ -38,28 +41,29 @@ tools:
        stats = AverageSpotsPerNucleus()(images)
        wf.export("workflow.json")
 
-``Workflow.export(path)`` embeds the source modules for workflow-local
-custom tools in the exported JSON. ``Workflow.load(path)`` reconstructs
-those tools from the embedded source before falling back to imports, so
-the exported workflow can move to another machine without separately
-installing the custom tool code.
+``Workflow.export(path)`` embeds the workflow-local ``tools/`` package in
+the exported JSON when custom tools from that package are used.
+``Workflow.load(path)`` reconstructs the package before falling back to
+imports, so the exported workflow can move to another machine without
+separately installing the custom tool code.
 
 Keep workflow-local tools small and explicit:
 
 - Put tool classes in ``tools/*.py`` and re-export them from
   ``tools/__init__.py`` for readable imports.
-- Keep code needed by the worker in the same tool module or in normal
-  installed dependencies. The export currently bundles the module that
-  defines the custom tool class.
+- Put helper modules, package constants, and small runtime assets needed
+  by the custom tools under ``tools/``. Use relative imports inside that
+  package, for example ``from .utils import normalize``.
 - Put tests under ``tests/`` next to the workflow. Test schema
   serialization, parameter validation, and at least one execution path
   with tiny data.
 - Store tiny committed fixtures under ``tests/data/``. Generated test
   output belongs in pytest temporary directories or the workflow
   ``storage_path`` and should not be committed.
-- Ship small static assets only when they are part of the tool behavior.
-  Large models, binaries, or generated artifacts should be downloaded,
-  declared as environment/package dependencies, or produced at runtime.
+- Ship small static assets under ``tools/data/`` only when they are part
+  of the tool behavior. Large models, binaries, downloaded datasets, or
+  generated artifacts should be downloaded, declared as
+  environment/package dependencies, or produced at runtime.
 
 ProcessingTool
 --------------
