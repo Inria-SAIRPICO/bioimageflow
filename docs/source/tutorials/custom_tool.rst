@@ -3,6 +3,64 @@ Writing Custom Tools
 
 BioImageFlow has two kinds of tools. This tutorial shows how to write each.
 
+Workflow-local custom tools
+---------------------------
+
+A workflow can carry its own custom tools beside the workflow script. Use
+this for tools that belong to one workflow or one project and are not
+intended as a reusable, versioned tool package.
+
+Recommended layout:
+
+.. code-block:: text
+
+   fish_analysis/
+     workflow.py
+     tools/
+       __init__.py
+       download_images.py
+       average_spots_per_nucleus.py
+     tests/
+       test_tools.py
+       data/
+         small_input.csv
+
+Import those tools from the workflow script and use them like package
+tools:
+
+.. code-block:: python
+
+   from bioimageflow import Workflow
+   from tools import DownloadImages, AverageSpotsPerNucleus
+
+   with Workflow() as wf:
+       images = DownloadImages()(dataset="demo")
+       stats = AverageSpotsPerNucleus()(images)
+       wf.export("workflow.json")
+
+``Workflow.export(path)`` embeds the source modules for workflow-local
+custom tools in the exported JSON. ``Workflow.load(path)`` reconstructs
+those tools from the embedded source before falling back to imports, so
+the exported workflow can move to another machine without separately
+installing the custom tool code.
+
+Keep workflow-local tools small and explicit:
+
+- Put tool classes in ``tools/*.py`` and re-export them from
+  ``tools/__init__.py`` for readable imports.
+- Keep code needed by the worker in the same tool module or in normal
+  installed dependencies. The export currently bundles the module that
+  defines the custom tool class.
+- Put tests under ``tests/`` next to the workflow. Test schema
+  serialization, parameter validation, and at least one execution path
+  with tiny data.
+- Store tiny committed fixtures under ``tests/data/``. Generated test
+  output belongs in pytest temporary directories or the workflow
+  ``storage_path`` and should not be committed.
+- Ship small static assets only when they are part of the tool behavior.
+  Large models, binaries, or generated artifacts should be downloaded,
+  declared as environment/package dependencies, or produced at runtime.
+
 ProcessingTool
 --------------
 

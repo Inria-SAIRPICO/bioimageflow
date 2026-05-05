@@ -1,7 +1,11 @@
 """Workflow container and progress events."""
 
-import json
 import importlib
+import hashlib
+import inspect
+import json
+import sys
+import tempfile
 import threading
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
@@ -583,17 +587,21 @@ class Workflow:
                 if isinstance(arg, Node):
                     queue.append(arg)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_custom_tools: bool = False) -> dict[str, Any]:
         """Serialize the workflow to a JSON-friendly dict.
 
-        Same shape as the JSON produced by :meth:`export`, with no
-        filesystem I/O. The inverse of :meth:`from_dict`.
+        By default this emits the editable wire format and does not embed
+        source code. Pass ``include_custom_tools=True`` to include source
+        modules for workflow-local custom tools; :meth:`export` uses that
+        mode so exported workflow files are self-contained for custom tools.
         """
         from bioimageflow.sub_workflow import SubWorkflowNode
         from bioimageflow.tool_loader import get_tool_package_info
 
         nodes_data: list[dict[str, Any]] = []
         edges_data: list[dict[str, str]] = []
+        custom_tool_modules: list[dict[str, Any]] = []
+        custom_tool_module_ids: set[str] = set()
 
         for name, node in self._nodes.items():
             if isinstance(node, SubWorkflowNode):
@@ -620,6 +628,14 @@ class Workflow:
                         "sub_workflow_package_version": pkg_ver,
                         "constants": {},
                     }
+                    if include_custom_tools:
+                        source_id = _register_custom_tool_module(
+                            type(node.sub_workflow),
+                            records=custom_tool_modules,
+                            seen_ids=custom_tool_module_ids,
+                        )
+                        if source_id is not None:
+                            node_info["sub_workflow_source_module"] = source_id
                 if not node.enabled:
                     node_info["enabled"] = False
                 for field, value in node._input_constant_bindings.items():
@@ -649,6 +665,14 @@ class Workflow:
                     "constants": {},
                     "args": [arg.name for arg in node._args if isinstance(arg, Node)],
                 }
+                if include_custom_tools:
+                    source_id = _register_custom_tool_module(
+                        type(node.tool),
+                        records=custom_tool_modules,
+                        seen_ids=custom_tool_module_ids,
+                    )
+                    if source_id is not None:
+                        node_info["tool_source_module"] = source_id
                 if not node.enabled:
                     node_info["enabled"] = False
                 if node.output_templates:
@@ -685,7 +709,7 @@ class Workflow:
                             edge["id"] = eid
                         edges_data.append(edge)
 
-        return {
+        result = {
             "nodes": nodes_data,
             "edges": edges_data,
             "config": {
@@ -695,11 +719,14 @@ class Workflow:
                 "max_age": self.max_age,
             },
         }
+        if custom_tool_modules:
+            result["custom_tool_modules"] = custom_tool_modules
+        return result
 
     def export(self, path: str | Path) -> None:
         """Serialize the workflow to a JSON file."""
         path = Path(path)
-        data = self.to_dict()
+        data = self.to_dict(include_custom_tools=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, default=str))
 
@@ -872,6 +899,9 @@ class Workflow:
 
         store = _get_store_path()
         tool_instances: dict[str, Any] = {}
+        custom_modules = _load_custom_tool_modules(
+            data.get("custom_tool_modules", [])
+        )
 
         # Record the set of node names the input dict described, so the
         # public ``is_partial`` property can detect missing nodes after
@@ -888,6 +918,7 @@ class Workflow:
                     node_data, store=store, auto_install=auto_install,
                     load_versioned_package=load_versioned_package,
                     resolve_tool_class=resolve_tool_class,
+                    custom_modules=custom_modules,
                 )
             except Exception as exc:
                 if errors is None:
@@ -1071,12 +1102,18 @@ class Workflow:
         auto_install: bool,
         load_versioned_package: Any,
         resolve_tool_class: Any,
+        custom_modules: dict[str, Any],
     ) -> Any:
         """Resolve and instantiate a tool or sub-workflow from node_data."""
         if node_data.get("type") == "sub_workflow":
             if node_data.get("sub_workflow_type") == "config":
                 from bioimageflow.sub_workflow import SubWorkflow as _SW
                 return _SW.from_config(node_data["config"])
+            source_id = node_data.get("sub_workflow_source_module")
+            if source_id:
+                module = custom_modules[source_id]
+                sw_class = getattr(module, node_data["sub_workflow_class"])
+                return sw_class()
             pkg = node_data.get("sub_workflow_package")
             pkg_ver = node_data.get("sub_workflow_package_version")
             if pkg and pkg_ver:
@@ -1095,7 +1132,11 @@ class Workflow:
 
         pkg = node_data.get("tool_package")
         pkg_ver = node_data.get("tool_package_version")
-        if pkg and pkg_ver:
+        source_id = node_data.get("tool_source_module")
+        if source_id:
+            module = custom_modules[source_id]
+            tool_class = getattr(module, node_data["tool_class"])
+        elif pkg and pkg_ver:
             if auto_install:
                 _auto_install_if_missing(pkg, pkg_ver, store)
             load_versioned_package(pkg, pkg_ver, store)
@@ -1165,6 +1206,113 @@ def _validate_sub_workflow_internal(sw_node: Any) -> list[ValidationError]:
 def _get_store_path() -> Path:
     from bioimageflow.tool_loader import _get_tool_store_path
     return _get_tool_store_path()
+
+
+_LIBRARY_MODULE_PREFIXES = (
+    "bioimageflow",
+    "bioimageflow_core",
+    "bioimageflow_common_tools",
+)
+
+
+def _is_workflow_custom_class(cls: type) -> bool:
+    """Return whether a class should be embedded in workflow exports."""
+    package = getattr(cls, "_bif_package", None)
+    package_version = getattr(cls, "_bif_package_version", None)
+    if package and package_version:
+        return False
+
+    module_name = getattr(cls, "__module__", "")
+    if module_name.startswith(_LIBRARY_MODULE_PREFIXES):
+        return False
+
+    try:
+        source_file = inspect.getsourcefile(cls) or inspect.getfile(cls)
+    except (OSError, TypeError):
+        return False
+    path = Path(source_file)
+    return path.exists() and path.suffix == ".py"
+
+
+def _register_custom_tool_module(
+    cls: type,
+    *,
+    records: list[dict[str, Any]],
+    seen_ids: set[str],
+) -> str | None:
+    if not _is_workflow_custom_class(cls):
+        return None
+
+    source_file = Path(inspect.getsourcefile(cls) or inspect.getfile(cls))
+    source = source_file.read_text(encoding="utf-8")
+    source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    source_id = f"m_{source_hash[:16]}"
+    if source_id not in seen_ids:
+        records.append({
+            "id": source_id,
+            "module": cls.__module__,
+            "filename": source_file.name,
+            "source_hash": source_hash,
+            "source": source,
+        })
+        seen_ids.add(source_id)
+    return source_id
+
+
+def _load_custom_tool_modules(
+    records: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    modules: dict[str, Any] = {}
+    for record in records:
+        source_id = record["id"]
+        source = record["source"]
+        expected_hash = record.get("source_hash")
+        actual_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if expected_hash and expected_hash != actual_hash:
+            raise ValueError(
+                f"Embedded custom tool module {source_id!r} hash mismatch"
+            )
+
+        filename = record.get("filename") or f"{source_id}.py"
+        module_dir = Path(tempfile.mkdtemp(prefix="bioimageflow_custom_tools_"))
+        module_path = module_dir / filename
+        module_path.write_text(source, encoding="utf-8")
+        module_name = f"bioimageflow_custom_tools_{source_id}"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(
+                f"Cannot load embedded custom tool module {source_id!r}"
+            )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        _stamp_embedded_custom_classes(module, actual_hash, record.get("module", ""))
+        modules[source_id] = module
+    return modules
+
+
+def _stamp_embedded_custom_classes(
+    module: Any,
+    source_hash: str,
+    canonical_module: str,
+) -> None:
+    from bioimageflow_core.tool import BaseTool
+    from bioimageflow.sub_workflow import SubWorkflow
+
+    for attr_name in dir(module):
+        try:
+            obj = getattr(module, attr_name)
+        except Exception:
+            continue
+        if not isinstance(obj, type):
+            continue
+        if not issubclass(obj, (BaseTool, SubWorkflow)):
+            continue
+        if obj is BaseTool or obj is SubWorkflow:
+            continue
+        setattr(obj, "_bif_custom_source_hash", source_hash)
+        if canonical_module:
+            setattr(obj, "_bif_canonical_module", canonical_module)
 
 
 def _auto_install_if_missing(pkg: str, pkg_ver: str, store: Path) -> None:

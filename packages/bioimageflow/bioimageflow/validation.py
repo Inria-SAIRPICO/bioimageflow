@@ -278,11 +278,17 @@ def get_tool_version(tool: BaseTool) -> str:
     """Extract version of the Python package containing the tool class.
 
     Checks ``_bif_package_version`` first (set by the versioned tool loader),
-    then falls back to ``importlib.metadata`` and finally file mtime.
+    then embedded custom-tool source hashes, then falls back to
+    ``importlib.metadata``, then source-file content hash, and finally
+    file mtime.
     """
-    bif_version = getattr(type(tool), "_bif_package_version", None)
+    tool_class = type(tool)
+    bif_version = getattr(tool_class, "_bif_package_version", None)
     if bif_version is not None:
         return bif_version
+    source_hash = getattr(tool_class, "_bif_custom_source_hash", None)
+    if source_hash is not None:
+        return f"source:{source_hash}"
     try:
         module = tool.__module__
         package = module.split('.')[0]
@@ -290,7 +296,12 @@ def get_tool_version(tool: BaseTool) -> str:
     except Exception:
         pass
     try:
-        source_file = inspect.getfile(tool.__class__)
+        source_file = Path(inspect.getfile(tool.__class__))
+        return "source:" + hashlib.sha256(source_file.read_bytes()).hexdigest()
+    except Exception:
+        pass
+    try:
+        source_file = inspect.getfile(tool_class)
         return str(os.path.getmtime(source_file))
     except Exception:
         return "unversioned"

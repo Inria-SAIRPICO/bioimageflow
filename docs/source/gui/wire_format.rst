@@ -14,13 +14,18 @@ Top-level shape
    {
      "nodes":  [ ... ],
      "edges":  [ ... ],
-     "config": { ... }
+     "config": { ... },
+     "custom_tool_modules": [ ... ]   // optional; export-only custom tool bundle
    }
 
 - ``nodes`` — list of node entries (see below).
 - ``edges`` — list of column-binding edges between nodes.
 - ``config`` — workflow-level settings: ``storage_path``, ``engine``,
   ``max_executions``, ``max_age``.
+- ``custom_tool_modules`` — optional source bundle for workflow-local
+  custom tools. ``Workflow.export(path)`` writes this when needed;
+  plain ``Workflow.to_dict()`` omits it unless called with
+  ``include_custom_tools=True``.
 
 The format is JSON-serializable; ``Workflow.export(path)`` writes it via
 ``json.dumps(..., indent=2, default=str)``.
@@ -155,13 +160,62 @@ Config-driven sub-workflows (those built via
 and a ``config`` dict instead of module / class names — see specs.md
 §14.11 for the config schema.
 
+Workflow custom tools
+---------------------
+
+Exported workflows carry workflow-local custom tools with the workflow.
+When a node uses a tool class that is not part of a versioned tool
+package, ``Workflow.export(path)`` stores that Python module in
+``custom_tool_modules`` and adds a source reference to the node:
+
+.. code-block:: json
+
+   {
+     "custom_tool_modules": [
+       {
+         "id": "m_1f2e3d4c5b6a7980",
+         "module": "tools.threshold",
+         "filename": "threshold.py",
+         "source_hash": "...",
+         "source": "from bioimageflow_core import ...\n..."
+       }
+     ],
+     "nodes": [
+       {
+         "name": "threshold",
+         "tool_module": "tools.threshold",
+         "tool_class": "Threshold",
+         "tool_package": null,
+         "tool_package_version": null,
+         "tool_source_module": "m_1f2e3d4c5b6a7980",
+         "constants": {},
+         "args": []
+       }
+     ],
+     "edges": [],
+     "config": { "storage_path": "./bif_data" }
+   }
+
+Class-based custom sub-workflows use ``sub_workflow_source_module`` in
+the same way. ``Workflow.load()`` prefers the embedded source reference
+over importing ``tool_module`` / ``sub_workflow_module`` from the local
+machine, so the workflow file is portable across machines for custom
+workflow tools.
+
+GUIs that need a palette for the tools used by a specific workflow
+should call ``ToolRegistry.register_workflow(workflow_or_data)``. It
+discovers only the custom tools carried by that workflow; package tools
+still come from ``register_package(name, version)``.
+
 Round-trip identity
 -------------------
 
 For a workflow ``wf`` reconstructed from a dict ``data``,
 ``Workflow.from_dict(data).to_dict()`` produces a dict that is **equal**
-to the input modulo the clean-form rule for ``enabled``. The same is
-true for :class:`~bioimageflow.WorkflowSession`:
+to the editable input modulo the clean-form rule for ``enabled``.
+Export-only ``custom_tool_modules`` are omitted unless
+``to_dict(include_custom_tools=True)`` is requested. The same editable
+wire-format identity is true for :class:`~bioimageflow.WorkflowSession`:
 ``WorkflowSession(data).to_dict()`` returns a deep copy of the wire
 format byte-for-byte (with ``"enabled": false`` stripped on
 re-enable).

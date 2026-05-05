@@ -17,6 +17,11 @@ side effect) from **register** (a fast, in-process index lookup):
 GUIs that validate on every keystroke must call ``register_package``
 on hot paths and ``install_package`` only from a user-initiated
 action.
+
+Workflow exports may also carry embedded custom tool modules. GUIs can
+call :meth:`ToolRegistry.register_workflow` to discover those local tools
+for the specific workflow being edited without promoting them to a
+versioned tool package.
 """
 
 from __future__ import annotations
@@ -76,7 +81,7 @@ class ToolMetadata:
 
 
 class ToolRegistry:
-    """Stateful index of tool classes loaded from versioned packages."""
+    """Stateful index of tool classes loaded from packages or workflows."""
 
     def __init__(self, *, store_path: Path | None = None) -> None:
         self._store_path: Path = (
@@ -181,6 +186,64 @@ class ToolRegistry:
                 obj_module, cls.__name__, name, version, name,
             )
 
+        return discovered
+
+    def register_workflow(self, workflow: Any) -> list[ToolMetadata]:
+        """Index custom tools carried by a workflow.
+
+        ``workflow`` may be either a live :class:`bioimageflow.Workflow`
+        instance or an exported workflow dict. Live workflows are
+        inspected directly; exported dicts must contain the
+        ``custom_tool_modules`` bundle written by ``Workflow.export``.
+        Package tools referenced by the workflow are not loaded or
+        installed here; use :meth:`register_package` for those.
+        """
+        from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.workflow import (
+            Workflow,
+            _is_workflow_custom_class,
+            _load_custom_tool_modules,
+        )
+
+        classes: list[type] = []
+        if isinstance(workflow, Workflow):
+            for node in workflow.nodes.values():
+                if isinstance(node, SubWorkflowNode):
+                    cls = type(node.sub_workflow)
+                else:
+                    cls = type(node.tool)
+                if _is_workflow_custom_class(cls):
+                    classes.append(cls)
+        elif isinstance(workflow, dict):
+            modules = _load_custom_tool_modules(
+                workflow.get("custom_tool_modules", [])
+            )
+            for node_data in workflow.get("nodes", []):
+                if node_data.get("type") == "sub_workflow":
+                    source_id = node_data.get("sub_workflow_source_module")
+                    class_name = node_data.get("sub_workflow_class")
+                else:
+                    source_id = node_data.get("tool_source_module")
+                    class_name = node_data.get("tool_class")
+                if not source_id or not class_name:
+                    continue
+                module = modules[source_id]
+                classes.append(getattr(module, class_name))
+        else:
+            raise TypeError(
+                "register_workflow expects a Workflow instance or workflow dict"
+            )
+
+        discovered: list[ToolMetadata] = []
+        seen: set[type] = set()
+        for cls in classes:
+            if cls in seen:
+                continue
+            seen.add(cls)
+            meta = self._build_metadata(cls)
+            self._classes[meta.class_name] = cls
+            self._metadata[meta.class_name] = meta
+            discovered.append(meta)
         return discovered
 
     def _build_metadata(self, cls: type) -> ToolMetadata:

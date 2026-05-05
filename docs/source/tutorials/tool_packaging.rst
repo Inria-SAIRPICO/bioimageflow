@@ -152,6 +152,12 @@ Re-export tools for convenient access:
 Using versioned packages
 ------------------------
 
+Workflow-local custom tools do not need to become packages just to make
+a workflow shareable: ``Workflow.export(path)`` embeds those custom tool
+modules in the workflow JSON. Package a tool when it should be reused by
+multiple workflows, distributed independently, versioned, or installed
+with non-trivial assets and dependencies.
+
 Loading a single version
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

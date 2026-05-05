@@ -7,6 +7,13 @@ ToolRegistry
 serializers. Hosts use it to populate tool palettes, build plugin
 indexes, and serve schemas to inline form widgets.
 
+The registry has two discovery surfaces:
+
+- ``register_package(name, version)`` indexes tools from an installed,
+  versioned tool package.
+- ``register_workflow(workflow_or_data)`` indexes workflow-local custom
+  tools carried by one live workflow or exported workflow dict.
+
 install vs register
 -------------------
 
@@ -33,6 +40,33 @@ performance:
 Hot validation paths (sessions, validators, keystroke-rate previews)
 must call ``register_package`` only. Trigger ``install_package`` from
 a user-initiated action (a "Install plugin" button, an explicit dialog).
+
+Workflow custom tools
+---------------------
+
+Custom tools that live with a workflow are not promoted to packages just
+to make the workflow portable. ``Workflow.export(path)`` embeds their
+source modules in the exported JSON, and the registry can discover those
+tools for that specific workflow:
+
+.. code-block:: python
+
+   from bioimageflow import ToolRegistry, Workflow
+   from pathlib import Path
+
+   reg = ToolRegistry()
+
+   wf = Workflow.load("workflow.json")
+   metas = reg.register_workflow(wf)
+
+   # Or register directly from the exported dict before materializing it.
+   import json
+   workflow_data = json.loads(Path("workflow.json").read_text())
+   metas = reg.register_workflow(workflow_data)
+
+``register_workflow`` only indexes custom tools carried by the workflow.
+It does not install or register package references; keep using
+``register_package`` for package-backed tools.
 
 ToolMetadata
 ------------
