@@ -157,7 +157,7 @@ labels, and tooltips.
 .. code-block:: python
 
    from typing import Annotated
-   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic
+   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic, Template
 
    class Inputs(IOModel):
        image: Annotated[
@@ -207,7 +207,7 @@ show tooltips:
            ImageSpec(semantics={Semantic.LABEL}),
            GUIMeta(display_name="Segmentation mask",
                    description="Label image; each cell gets a unique ID."),
-       ] = Path("{input_image.stem}_mask{ext}")
+       ] = Template("{input_image.stem}_mask{ext}")
        cell_count: Annotated[int, GUIMeta(
            display_name="Cell count",
            description="Number of cells detected.",

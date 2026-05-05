@@ -14,6 +14,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 cellpose_env = EnvironmentSpec(
@@ -94,7 +95,7 @@ class CellposeSAM(ProcessingTool):
                 display_name="Segmentation mask",
                 description="Label image; each detected cell/nucleus has a unique integer ID.",
             ),
-        ] = Path("{input_image.stem}_mask{ext}")
+        ] = Template("{input_image.stem}_mask{ext}")
         cell_count: Annotated[int, GUIMeta(
             display_name="Cell count",
             description="Number of cells (non-zero labels) detected in the image.",

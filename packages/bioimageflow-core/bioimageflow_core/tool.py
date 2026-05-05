@@ -1,5 +1,6 @@
 """Tool base classes — zero external dependencies."""
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -20,6 +21,22 @@ class Category(str, Enum):
     STITCHING = "stitching"
     CLASSIFICATION = "classification"
     UTILITIES = "utilities"
+
+
+@dataclass(frozen=True)
+class Template:
+    """Explicit marker for ProcessingTool output path templates."""
+
+    pattern: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pattern, str):
+            raise TypeError("Template pattern must be a string.")
+        if self.pattern == "":
+            raise ValueError("Template pattern must not be empty.")
+
+    def __str__(self) -> str:
+        return self.pattern
 
 
 class IOModel:

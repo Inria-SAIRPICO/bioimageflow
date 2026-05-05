@@ -36,7 +36,7 @@ uv sync
 ## Quick Start
 
 ```python
-from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments
+from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template
 from bioimageflow import Workflow, DataFrameTool
 
 # 1. Define a source tool (DataFrameTool produces a DataFrame)
@@ -64,7 +64,7 @@ class Threshold(ProcessingTool):
         cutoff: float = 128.0
 
     class Outputs:
-        mask: ImagePath(semantics={"binary"}) = "{image.stem}_mask.tif"
+        mask: ImagePath(semantics={"binary"}) = Template("{image.stem}_mask.tif")
 
     def process_row(self, arguments: Arguments) -> "Threshold.Outputs":
         import numpy as np

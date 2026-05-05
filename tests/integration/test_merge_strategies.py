@@ -204,9 +204,9 @@ class TestMergeSchemaPropagation:
             joined = InnerJoin()(files, seg)
             schema = joined.get_output_schema()
             assert schema is not None
-            # Files (path, filename) ∪ StubSegmenter (mask, cell_count); first
+            # Files (path) ∪ StubSegmenter (mask, cell_count); first
             # wins on duplicate keys.
-            assert set(schema.keys()) >= {"path", "filename", "mask", "cell_count"}
+            assert set(schema.keys()) >= {"path", "mask", "cell_count"}
 
     def test_cross_join_schema_parameter_space_pattern(self):
         """The exact pattern from example-workflows/parameter_space_exploration."""
@@ -219,7 +219,7 @@ class TestMergeSchemaPropagation:
             grid = CrossJoin()(files, sens, size)
             schema = grid.get_output_schema()
             assert schema is not None
-            assert set(schema.keys()) == {"path", "filename", "sensitivity", "size"}
+            assert set(schema.keys()) == {"path", "sensitivity", "size"}
 
     def test_join_on_column_schema(self):
         from bioimageflow_common_tools import Files
@@ -228,14 +228,11 @@ class TestMergeSchemaPropagation:
             mri = Files()(path="/tmp/mri", name="mri")
             ct = Files()(path="/tmp/ct", name="ct")
             joined = JoinOnColumn()(
-                mri, ct, join_column="filename", suffixes=("_mri", "_ct"),
+                mri, ct, join_column="path", suffixes=("_mri", "_ct"),
             )
             schema = joined.get_output_schema()
             assert schema is not None
-            # filename kept once; path appears in both → suffixed.
-            assert "filename" in schema
-            assert "path_mri" in schema
-            assert "path_ct" in schema
+            assert set(schema.keys()) == {"path"}
 
     def test_concat_schema(self):
         from bioimageflow_common_tools import Files
@@ -246,7 +243,7 @@ class TestMergeSchemaPropagation:
             stacked = Concat()(mri, ct)
             schema = stacked.get_output_schema()
             assert schema is not None
-            assert set(schema.keys()) == {"path", "filename"}
+            assert set(schema.keys()) == {"path"}
 
     def test_concat_type_conflict_falls_back_to_any(self):
         """Concat with mismatched column types yields the 'any' fallback."""
@@ -274,11 +271,9 @@ class TestMergeSchemaPropagation:
             collected = Collect()(a, b)
             schema = collected.get_output_schema()
             assert schema is not None
-            # Both have path/filename → second's get _1 suffix.
+            # Both have path → second gets _1 suffix.
             assert "path" in schema
             assert "path_1" in schema
-            assert "filename" in schema
-            assert "filename_1" in schema
 
     def test_merge_unresolvable_when_upstream_unresolvable(self):
         """If any upstream returns None, merge propagates None."""

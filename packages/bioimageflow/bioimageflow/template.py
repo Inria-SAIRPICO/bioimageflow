@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from bioimageflow_core.tool import IOModel
-from bioimageflow.validation import is_path_type
+from bioimageflow_core.tool import IOModel, Template
+from bioimageflow.validation import is_path_type, validate_output_template_defaults
 
 logger = logging.getLogger("bioimageflow")
 
@@ -19,10 +19,16 @@ def get_output_templates(
     inputs_cls: type[IOModel],
     overrides: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Extract templates from Outputs defaults. Apply default for path fields without template."""
+    """Extract templates from explicit Template defaults.
+
+    Path outputs without a Template default use the built-in default template.
+    Non-path outputs may not declare Template defaults.
+    """
     templates: dict[str, str] = {}
     output_annotations = outputs_cls._get_all_annotations()
     input_annotations = inputs_cls._get_all_annotations()
+
+    validate_output_template_defaults(outputs_cls)
 
     # Count path-typed input fields for {ext} resolution
     path_input_fields = [
@@ -34,8 +40,8 @@ def get_output_templates(
         if not is_path_type(ann):
             continue
         default = getattr(outputs_cls, name, None)
-        if default is not None and isinstance(default, str):
-            templates[name] = default
+        if isinstance(default, Template):
+            templates[name] = default.pattern
         else:
             # Default template
             if len(path_input_fields) == 1:
@@ -134,10 +140,13 @@ def resolve_template(template_str: str, context: dict[str, Any]) -> str:
         ext_value = context.get('_ext', '')
         result = result.replace('{ext}', str(ext_value))
 
-    # Resolve simple variables
-    for key in ['node_name', 'row_index', 'timestamp']:
-        placeholder = '{' + key + '}'
-        if placeholder in result:
-            result = result.replace(placeholder, str(context.get(key, '')))
+    # Resolve bare variables ({node_name}, {row_index}, scalar input fields, ...).
+    def replace_bare(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key in context and not key.startswith('_'):
+            return str(context[key])
+        return match.group(0)
+
+    result = re.sub(r'\{(\w+)\}', replace_bare, result)
 
     return result

@@ -35,6 +35,7 @@
         "layouts": ["YX", "ZYX"],
         "semantics": ["label"]
       },
+      "template": "{input_image.stem}_labels{ext}",
       "type": "ImagePath"
     }
   }

@@ -11,7 +11,7 @@ from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from bioimageflow_core.types import Connectable, ImageSpec, extract_gui_meta
-from bioimageflow_core.tool import IOModel, BaseTool
+from bioimageflow_core.tool import IOModel, BaseTool, Template
 
 
 class SchemaSerializationError(Exception):
@@ -425,6 +425,8 @@ def _jsonify_default(value: Any) -> Any:
         return value
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, Template):
+        return value.pattern
     if isinstance(value, Enum):
         return str(value.value)
     if isinstance(value, (list, tuple)):
@@ -432,6 +434,36 @@ def _jsonify_default(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): _jsonify_default(v) for k, v in value.items()}
     return str(value)
+
+
+def validate_output_template_defaults(outputs_cls: type[IOModel]) -> None:
+    """Validate explicit Template defaults on an Outputs model.
+
+    ``Template(...)`` is only valid on path-typed output fields. Explicit
+    string or ``Path`` defaults on path outputs are rejected, including static
+    names like ``"fixed.tif"``. Use ``Template("fixed.tif")`` for static
+    filenames, or omit the default to use generated naming.
+    """
+    annotations = outputs_cls._get_all_annotations()
+    for field_name, annotation in annotations.items():
+        if not hasattr(outputs_cls, field_name):
+            continue
+
+        default = getattr(outputs_cls, field_name)
+        is_path_output = is_path_type(annotation)
+        if isinstance(default, Template):
+            if not is_path_output:
+                raise TypeError(
+                    f"Template default for '{field_name}' is only valid on "
+                    f"path output fields."
+                )
+            continue
+
+        if is_path_output and isinstance(default, (str, Path)):
+            raise TypeError(
+                f"Output path default for '{field_name}' must be declared "
+                f"with Template(...), not a string or Path default."
+            )
 
 
 def _display_type_name(annotation: Any) -> str:
@@ -688,6 +720,8 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
     if Passthrough is not None and isinstance(outputs_cls, type) and issubclass(outputs_cls, Passthrough):
         return {"_passthrough": True}
 
+    validate_output_template_defaults(outputs_cls)
+
     annotations = outputs_cls._get_all_annotations()
     schema: dict[str, dict[str, Any]] = {}
 
@@ -695,11 +729,15 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
         image_spec = extract_image_spec(annotation)
         has_default = hasattr(outputs_cls, field_name)
         raw_default = getattr(outputs_cls, field_name, None) if has_default else None
+        template = raw_default.pattern if isinstance(raw_default, Template) else None
 
-        schema[field_name] = {
+        entry = {
             "type": _display_type_name(annotation),
             "default": _jsonify_default(raw_default) if has_default else None,
             "image_spec": serialize_image_spec(image_spec),
         }
+        if template is not None:
+            entry["template"] = template
+        schema[field_name] = entry
 
     return schema

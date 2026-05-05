@@ -14,6 +14,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 
@@ -58,7 +59,7 @@ class ExtractChannel(ProcessingTool):
                 display_name="Channel image",
                 description="Single-channel image containing the extracted channel.",
             ),
-        ] = Path("{input_image.stem}_ch{channel}{ext}")
+        ] = Template("{input_image.stem}_ch{channel}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio

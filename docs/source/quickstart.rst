@@ -55,9 +55,9 @@ a directory:
    files = Files()
 
 ``Files`` is a :class:`~bioimageflow.DataFrameTool` with
-``accepts_upstream = False``. Its outputs are a ``path`` column (absolute
-paths) and a ``filename`` column. Source-tool patterns (and how to write your
-own) are covered in :doc:`concepts/graph`.
+``accepts_upstream = False``. Its output is a ``path`` column containing
+absolute paths. Source-tool patterns (and how to write your own) are covered
+in :doc:`concepts/graph`.
 
 Define a processing tool
 ------------------------
@@ -68,7 +68,7 @@ Declare its inputs, outputs, and the environment it needs:
 .. code-block:: python
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImagePath, Arguments,
+       ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template,
    )
 
    class InvertImage(ProcessingTool):
@@ -79,7 +79,7 @@ Declare its inputs, outputs, and the environment it needs:
            image: ImagePath()
 
        class Outputs:
-           inverted: ImagePath() = "{image.stem}_inv.tif"
+           inverted: ImagePath() = Template("{image.stem}_inv.tif")
 
        def process_row(self, arguments: Arguments) -> "InvertImage.Outputs":
            from skimage.io import imread, imsave
@@ -92,7 +92,7 @@ Key points:
 
 - ``Inputs`` fields that receive upstream data use type annotations like
   :func:`~bioimageflow_core.ImagePath`.
-- ``Outputs`` fields have default values that are **output path templates**
+- ``Outputs`` path fields use ``Template(...)`` defaults for **output path templates**
   (see :doc:`tutorials/output_templating`).
 - ``process_row`` receives an :class:`~bioimageflow_core.Arguments` object with
   resolved values for every input and output field.

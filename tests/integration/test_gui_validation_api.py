@@ -16,6 +16,7 @@ from bioimageflow_core import (
     ProcessingTool,
     Semantic,
     Layout,
+    Template,
 )
 from bioimageflow import (
     NodePlan,
@@ -299,7 +300,7 @@ class _BadConstraintTool(ProcessingTool):
         diameter: Annotated[float, Field(gt=0)] = 1.0
 
     class Outputs(IOModel):
-        result: Path = "{diameter}.txt"  # type: ignore[assignment]
+        result: Path = Template("{diameter}.txt")
 
     def process_row(self, arguments: Arguments) -> Any:
         p = Path(arguments.result)
@@ -626,7 +627,7 @@ class TestSerializeResolvedOutputsWireFormat:
             grid = CrossJoin()(files, sens, size)
             out = serialize_resolved_outputs(grid)
             assert out["resolved"] is True
-            assert set(out["columns"].keys()) == {"path", "filename", "sensitivity", "size"}
+            assert set(out["columns"].keys()) == {"path", "sensitivity", "size"}
             json.dumps(out)
 
 

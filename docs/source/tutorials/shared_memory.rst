@@ -23,7 +23,7 @@ Producing shared arrays
 .. code-block:: python
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImageShared, Arguments,
+       ProcessingTool, EnvironmentSpec, ImagePath, ImageShared, Arguments, Template,
    )
    from bioimageflow_core.shm import create_shared_output
 
@@ -66,7 +66,7 @@ Consuming shared arrays
            image: ImageShared()
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = "{node_name}_mask.tif"
+           mask: ImagePath(semantics={"label"}) = Template("{node_name}_mask.tif")
 
        def process_row(self, arguments: Arguments) -> "Segment.Outputs":
            with load_image(arguments.image, file_reader=None) as arr:

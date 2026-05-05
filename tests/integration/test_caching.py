@@ -24,6 +24,7 @@ from bioimageflow_core import (
     IOModel,
     ProcessingTool,
     Semantic,
+    Template,
 )
 from bioimageflow_core.types import ImageSpec
 
@@ -180,7 +181,9 @@ class TestDevMode:
                 diameter: float = 30.0
 
             class Outputs(IOModel):
-                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_mask_{row_index}.png"  # type: ignore[assignment]
+                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+                    "{input_image.stem}_mask_{row_index}.png"
+                )
                 cell_count: int
 
             def process_row(self, arguments: Arguments):

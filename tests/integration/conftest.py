@@ -22,6 +22,7 @@ from bioimageflow_core import (
     ResourceSpec,
     Semantic,
     SharedArray,
+    Template,
 )
 from bioimageflow import (
     DataFrameTool,
@@ -107,7 +108,9 @@ class StubSegmenter(ProcessingTool):
         diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_mask_{row_index}.png"  # type: ignore[assignment]
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+            "{input_image.stem}_mask_{row_index}.png"
+        )
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -146,7 +149,9 @@ class StubTiler(ProcessingTool):
         tile_count: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=64, step=1)] = 4
 
     class Outputs(IOModel):
-        tile: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = "{input_image.stem}_tile_{row_index}.png"  # type: ignore[assignment]
+        tile: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = Template(
+            "{input_image.stem}_tile_{row_index}.png"
+        )
 
     def process_row(self, arguments: Arguments) -> Any:
         base = Path(arguments.tile)
@@ -170,7 +175,7 @@ class StubBatchProcessor(ProcessingTool):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
-        embedding: Path = "{input_image.stem}_embed_{row_index}.npy"  # type: ignore[assignment]
+        embedding: Path = Template("{input_image.stem}_embed_{row_index}.npy")
 
     def process_batch(self, arguments_list: list[Any]) -> Any:
         results = []
@@ -192,7 +197,7 @@ class StubBatchExploder(ProcessingTool):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
-        crop: Path = "{input_image.stem}_crop_{row_index}.png"  # type: ignore[assignment]
+        crop: Path = Template("{input_image.stem}_crop_{row_index}.png")
 
     def process_batch(self, arguments_list: list[Any]) -> Any:
         results = []
@@ -241,8 +246,12 @@ class StubRegistration(ProcessingTool):
         moving: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
-        registered: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = "{fixed.stem}_registered_{row_index}.tif"  # type: ignore[assignment]
-        displacement: Annotated[Path, ImageSpec(semantics={Semantic.DISPLACEMENT})] = "{fixed.stem}_disp_{row_index}.tif"  # type: ignore[assignment]
+        registered: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = Template(
+            "{fixed.stem}_registered_{row_index}.tif"
+        )
+        displacement: Annotated[
+            Path, ImageSpec(semantics={Semantic.DISPLACEMENT})
+        ] = Template("{fixed.stem}_disp_{row_index}.tif")
 
     def process_row(self, arguments: Arguments) -> Any:
         reg_path = Path(arguments.registered)
@@ -316,7 +325,9 @@ class CellposeSegmenter(CellposeBase):
         diameter: Annotated[float, GUIMeta(connectable=Connectable.NEVER, min=1.0, max=500.0, step=0.5)] = 30.0
 
     class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_mask_{row_index}.png"  # type: ignore[assignment]
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+            "{input_image.stem}_mask_{row_index}.png"
+        )
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -337,7 +348,7 @@ class CellposeTrain(CellposeBase):
         epochs: Annotated[int, GUIMeta(connectable=Connectable.NEVER, min=1, max=10000, step=10)] = 100
 
     class Outputs(IOModel):
-        model_path: Path = "{node_name}_model"  # type: ignore[assignment]
+        model_path: Path = Template("{node_name}_model")
 
     def process_batch(self, arguments_list: list[Any]) -> Any:
         results = []
@@ -358,7 +369,9 @@ class StardistSegmenter(ProcessingTool):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(connectable=Connectable.BY_DEFAULT)]
 
     class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_stardist_{row_index}.png"  # type: ignore[assignment]
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+            "{input_image.stem}_stardist_{row_index}.png"
+        )
 
     def process_row(self, arguments: Arguments) -> Any:
         mask_path = Path(arguments.mask)

@@ -22,6 +22,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_input_schema
@@ -85,9 +86,11 @@ class TestFiles:
             node = Files()(path=str(image_dir))
             result = wf.compute(node)
             assert len(result) == 2
-            assert "path" in result.columns
-            assert "filename" in result.columns
-            assert set(result["filename"]) == {"sample_01.tif", "sample_02.tif"}
+            assert list(result.columns) == ["path"]
+            assert {Path(p).name for p in result["path"]} == {
+                "sample_01.tif",
+                "sample_02.tif",
+            }
 
     def test_glob_pattern(self, image_dir: Path) -> None:
         # Create a non-matching file
@@ -198,7 +201,7 @@ class TestMosaic:
 
             class Outputs(IOModel):
                 output_image: ImagePath(semantics=Semantic.BINARY) = (  # type: ignore[valid-type]
-                    "binary.tif"
+                    Template("binary.tif")
                 )
 
             def process_row(self, arguments: Any) -> Any:
@@ -261,7 +264,7 @@ class TestMiniPipeline:
 
             class Outputs(IOModel):
                 output_image: ImagePath(semantics=Semantic.LABEL, layouts=Layout.PLANAR) = (  # type: ignore[valid-type]
-                    "{input_image.stem}_labeled{ext}"
+                    Template("{input_image.stem}_labeled{ext}")
                 )
 
             def process_row(self, arguments: Any) -> Any:

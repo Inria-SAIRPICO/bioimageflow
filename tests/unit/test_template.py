@@ -1,10 +1,12 @@
 """Unit tests for bioimageflow.template."""
 
+from pathlib import Path
+
 import pytest
 
+from bioimageflow_core import Template
 from bioimageflow_core.tool import IOModel
-from bioimageflow.template import resolve_template, validate_template, get_output_templates
-from pathlib import Path
+from bioimageflow.template import get_output_templates, resolve_template, validate_template
 
 
 class TestResolveTemplate:
@@ -36,6 +38,13 @@ class TestResolveTemplate:
             {"img": "/data/stack.ome.tif"},
         )
         assert result == "output.ome.tif"
+
+    def test_bare_input_field(self):
+        result = resolve_template(
+            "{img.stem}_ch{channel}{img.ext}",
+            {"img": "/data/photo.tif", "channel": 2},
+        )
+        assert result == "photo_ch2.tif"
 
     def test_ext_special_variable(self):
         result = resolve_template(
@@ -74,15 +83,75 @@ class TestValidateTemplate:
 
 class TestGetOutputTemplates:
 
-    def test_explicit_template(self):
+    def test_explicit_template_marker(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            result: Path = Template("{img.stem}_out.tif")
+
+        templates = get_output_templates(Out, Inp)
+        assert templates["result"] == "{img.stem}_out.tif"
+
+    def test_template_default_must_be_path_output(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            status: str = Template("{img.stem}_status.txt")  # type: ignore[assignment]
+
+        with pytest.raises(TypeError, match="Template default.*path output"):
+            get_output_templates(Out, Inp)
+
+    def test_string_template_default_raises(self):
         class Inp(IOModel):
             img: Path
 
         class Out(IOModel):
             result: Path = "{img.stem}_out.tif"  # type: ignore[assignment]
 
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            get_output_templates(Out, Inp)
+
+    def test_path_template_default_raises(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            result: Path = Path("{img.stem}_out.tif")
+
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            get_output_templates(Out, Inp)
+
+    def test_static_string_default_raises(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            result: Path = "fixed.tif"  # type: ignore[assignment]
+
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            get_output_templates(Out, Inp)
+
+    def test_static_path_default_raises(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            result: Path = Path("fixed.tif")
+
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            get_output_templates(Out, Inp)
+
+    def test_static_template_default_is_valid(self):
+        class Inp(IOModel):
+            img: Path
+
+        class Out(IOModel):
+            result: Path = Template("fixed.tif")
+
         templates = get_output_templates(Out, Inp)
-        assert templates["result"] == "{img.stem}_out.tif"
+        assert templates["result"] == "fixed.tif"
 
     def test_default_template_single_path_input(self):
         class Inp(IOModel):

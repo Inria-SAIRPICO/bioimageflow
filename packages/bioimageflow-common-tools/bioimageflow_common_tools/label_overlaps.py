@@ -14,6 +14,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 
@@ -63,7 +64,7 @@ class LabelOverlaps(ProcessingTool):
         overlaps: Annotated[Path, GUIMeta(
             display_name="Overlaps CSV",
             description="CSV table with columns (reference_label, spot_label, overlap_count) giving the pixel count for each pair.",
-        )] = Path("{label_image.stem}_overlaps.csv")
+        )] = Template("{label_image.stem}_overlaps.csv")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import numpy as np

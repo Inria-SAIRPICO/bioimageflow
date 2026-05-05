@@ -48,7 +48,7 @@ workflow mechanics:
    import pandas as pd
    from pathlib import Path
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImagePath, Arguments,
+       ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template,
    )
    from bioimageflow import DataFrameTool
 
@@ -78,7 +78,7 @@ workflow mechanics:
            image: ImagePath()
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = "{image.stem}_seg.tif"
+           mask: ImagePath(semantics={"label"}) = Template("{image.stem}_seg.tif")
 
        def process_row(self, arguments: Arguments) -> "Segment.Outputs":
            # In a real tool, you would call Cellpose here

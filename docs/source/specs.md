@@ -244,7 +244,7 @@ The `connectable` field uses three-state strings: `"never"` (no pin, no toggle),
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None}`. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
+Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
@@ -335,7 +335,7 @@ GENERAL_ENV = EnvironmentSpec(
 **Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine creates it on first use and reuses it for all tools referencing it. All tools with `environment = GENERAL_ENV` share a single Wetlands worker process.
 
 ```python
-from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImagePath, Semantic
+from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImagePath, Semantic, Template
 
 class ExtractChannel(ProcessingTool):
     name = "extract_channel"
@@ -346,7 +346,7 @@ class ExtractChannel(ProcessingTool):
         channel: int = 0
 
     class Outputs(IOModel):
-        output_image: ImagePath(semantics=Semantic.INTENSITY) = "{input_image.stem}_ch{channel}{ext}"
+        output_image: ImagePath(semantics=Semantic.INTENSITY) = Template("{input_image.stem}_ch{channel}{ext}")
 
     def process_row(self, arguments: Arguments) -> "Outputs":
         import imageio.v3 as iio
@@ -533,7 +533,7 @@ For `process_row`, `context.work_dir` is unique per input row: `run_dir/work/row
 
 **Direct tool definition:**
 ```python
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, Category
+from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, Category, Template
 
 class MySegmenter(ProcessingTool):
     name = "my_segmenter"
@@ -547,7 +547,7 @@ class MySegmenter(ProcessingTool):
         diameter: float = 30.0
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
+        mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
@@ -574,7 +574,7 @@ class CellposeSegmenter(CellposeBase):
         diameter: float = 30.0
 
     class Outputs(IOModel):
-        mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
+        mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: int
 
     def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
@@ -592,7 +592,7 @@ class CellposeTrain(CellposeBase):
         epochs: int = 100
 
     class Outputs(IOModel):
-        model_path: Path = "{node_name}_model_{timestamp}"
+        model_path: Path = Template("{node_name}_model_{timestamp}")
 
     def process_batch(self, arguments_list: list[Arguments]) -> list[Outputs]:
         import cellpose.models
@@ -971,7 +971,7 @@ class IOModel:
 ```
 
 - **`Inputs`**: Declared on both `ProcessingTool` and `DataFrameTool`. Fields typed as `ImagePath` or `ImageShared` represent data dependencies; scalar fields represent parameters. Default values are supported.
-- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, fields with string defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without string defaults (e.g., `cell_count: int`) are computed values returned by the tool. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
+- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. Path outputs without a `Template(...)` default use the built-in default template. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
 
 Both models use only standard-library types and `bioimageflow-core` types.
 
@@ -1037,7 +1037,7 @@ For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
 
 ```python
 from typing import Annotated
-from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta, Connectable
+from bioimageflow_core import ProcessingTool, IOModel, ImagePath, Semantic, Arguments, GUIMeta, Connectable, Template
 
 class CellposeSegmenter(ProcessingTool):
     name = "cellpose_segmenter"
@@ -1078,7 +1078,7 @@ class CellposeSegmenter(ProcessingTool):
             ImagePath(semantics=Semantic.LABEL),
             GUIMeta(display_name="Segmentation mask",
                     description="Label image where each cell has a unique integer ID."),
-        ] = "{input_image.stem}_mask_{row_index}.png"
+        ] = Template("{input_image.stem}_mask_{row_index}.png")
         cell_count: Annotated[int, GUIMeta(
             display_name="Cell count",
             description="Number of cells detected in the image.",
@@ -2320,9 +2320,9 @@ The module-level helper `bioimageflow.validate_parameters(tool_class, parameters
 
 ### 7.1 Output Templating Engine
 
-BioImageFlow enforces structured file naming to prevent overwrites and maintain order. Output fields in `ProcessingTool.Outputs` with string defaults are treated as path templates, resolved by the engine before dispatch. (DataFrameTool does not use output templating — it returns DataFrames directly.)
+BioImageFlow enforces structured file naming to prevent overwrites and maintain order. Path output fields in `ProcessingTool.Outputs` with `Template(...)` defaults are treated as path templates, resolved by the engine before dispatch. (DataFrameTool does not use output templating — it returns DataFrames directly.)
 
-**Template detection rule:** Only fields whose type annotation is Path-based (`Path`, `ImagePath(...)`, `Annotated[Path, ...]`) have their string defaults interpreted as templates. Non-path string fields (e.g., `model_name: str = "default"`) are treated as literal default values, never as templates. This eliminates ambiguity without requiring a separate `Template(...)` marker type.
+**Template declaration rule:** Templates must be declared explicitly with `Template("...")` on fields whose type annotation is Path-based (`Path`, `ImagePath(...)`, `Annotated[Path, ...]`). Non-path fields cannot declare `Template(...)`. Old-style explicit template defaults such as `"{input_image.stem}.tif"` or `Path("{input_image.stem}.tif")` are invalid and raise an error.
 
 **Available template variables:**
 
@@ -2334,19 +2334,20 @@ BioImageFlow enforces structured file naming to prevent overwrites and maintain 
 | `{<input_field>.stem}`    | Filename without extension                             |
 | `{<input_field>.ext}`     | Last file extension (e.g., `.gz`)                      |
 | `{<input_field>.exts}`    | All file extensions (e.g., `.tar.gz`)                  |
+| `{<input_field>}`         | Value of an input field, useful for scalar parameters  |
 | `{column:<column_name>}`  | Value from the named DataFrame column for this row     |
 | `{timestamp}`             | Execution timestamp                                    |
 
 `<input_field>` must be the name of an `Inputs` field typed as a path (e.g., `input_image`).
 
-**Default template:** `{node_name}_{row_index}{ext}`
+**Default template:** Path outputs without a `Template(...)` default use `{node_name}_{row_index}{ext}` when the tool has exactly one path input, otherwise `{node_name}_{row_index}`.
 
 **`{ext}` resolution:** If the tool has exactly one input path field, `{ext}` resolves to its extension. Otherwise (zero or multiple input paths), `{ext}` resolves to an empty string — the tool author must specify the extension explicitly in the template (e.g., `.tif` or `{input_image.ext}`).
 
 **Example:**
 ```python
 class Outputs(IOModel):
-    mask: ImagePath(semantics=Semantic.LABEL) = "{input_image.stem}_mask_{row_index}.png"
+    mask: ImagePath(semantics=Semantic.LABEL) = Template("{input_image.stem}_mask_{row_index}.png")
 ```
 For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, this resolves to `cell_01_mask_3.png`.
 

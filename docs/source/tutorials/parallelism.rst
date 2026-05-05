@@ -83,7 +83,7 @@ needs. Engines read it to size pools and inject environment variables:
 
 .. code-block:: python
 
-   from bioimageflow_core import ProcessingTool, EnvironmentSpec, ResourceSpec
+   from bioimageflow_core import ProcessingTool, EnvironmentSpec, ResourceSpec, Template
 
    class MyGPUTool(ProcessingTool):
        display_name = "GPU Segmenter"
@@ -156,7 +156,7 @@ GPU:
            image: ImagePath()
 
        class Outputs:
-           mask: ImagePath() = "{image.stem}_mask.tif"
+           mask: ImagePath() = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments):
            ...

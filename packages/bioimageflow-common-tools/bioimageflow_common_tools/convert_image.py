@@ -12,6 +12,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
+    Template,
 )
 
 bioio_env = EnvironmentSpec(
@@ -83,7 +84,7 @@ class ConvertImage(ProcessingTool):
         output_image: Annotated[Path, ImageSpec(), GUIMeta(
             display_name="Output image",
             description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
-        )] = Path("{input_image.stem}.ome.tiff")
+        )] = Template("{input_image.stem}.ome.tiff")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from bioio import BioImage                          #type: ignore

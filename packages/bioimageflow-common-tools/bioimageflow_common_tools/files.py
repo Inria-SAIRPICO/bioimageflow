@@ -12,7 +12,7 @@ class Files(DataFrameTool):
     display_name = "Files"
     documentation = (
         "List files in a directory matching a glob pattern. "
-        "Produces a DataFrame with 'path' and 'filename' columns."
+        "Produces a DataFrame with a 'path' column."
     )
     category = Category.UTILITIES
     tags = ["source", "loader"]

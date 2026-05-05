@@ -18,6 +18,7 @@ Minimal example
    from typing import Annotated
    from bioimageflow_core import (
        ProcessingTool, EnvironmentSpec, GUIMeta, Connectable, ImagePath, Arguments,
+       Template,
    )
 
    class GaussianBlur(ProcessingTool):
@@ -29,7 +30,7 @@ Minimal example
            sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
 
        class Outputs:
-           blurred: ImagePath() = "{image.stem}_blur.tif"
+           blurred: ImagePath() = Template("{image.stem}_blur.tif")
 
        def process_row(self, arguments: Arguments) -> "GaussianBlur.Outputs":
            from skimage.io import imread, imsave
@@ -46,7 +47,7 @@ Anatomy:
 - **environment**: declares the conda/pip dependencies this tool needs.
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.
-- **Outputs**: fields with default strings are **output path templates**
+- **Outputs**: path fields with ``Template(...)`` defaults are **output path templates**
   resolved by the engine before ``process_row`` is called.
 - **process_row**: receives an :class:`~bioimageflow_core.Arguments` namespace
   with all resolved input and output values. Returns an ``Outputs`` instance.
@@ -126,7 +127,7 @@ single input row. This is useful for tiling or splitting:
            tile_size: int = 256
 
        class Outputs:
-           tile: ImagePath() = "{image.stem}_tile_{row_index}.tif"
+           tile: ImagePath() = Template("{image.stem}_tile_{row_index}.tif")
 
        def process_row(self, arguments: Arguments) -> list:
            from skimage.io import imread, imsave
@@ -273,7 +274,7 @@ The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
 .. code-block:: python
 
    from typing import Annotated
-   from bioimageflow_core import GUIMeta, Connectable, IOModel
+   from bioimageflow_core import GUIMeta, Connectable, IOModel, Template
 
    class Inputs(IOModel):
        # Data input: BY_DEFAULT shows the pin; label + tooltip for the GUI
@@ -301,7 +302,7 @@ The ``connectable`` parameter is a :class:`~bioimageflow_core.Connectable` enum:
        blurred: Annotated[Path, GUIMeta(
            display_name="Blurred image",
            description="Gaussian-blurred output image.",
-       )] = Path("{image.stem}_blur.tif")
+       )] = Template("{image.stem}_blur.tif")
 
 To introspect a tool's schema programmatically:
 

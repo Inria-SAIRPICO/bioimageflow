@@ -17,6 +17,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 atlas_env = EnvironmentSpec(
@@ -90,7 +91,7 @@ class Atlas(ProcessingTool):
                 display_name="Detections",
                 description="Binary mask of detected spots (non-zero pixels mark spot locations).",
             ),
-        ] = Path("{input_image.stem}_detections{ext}")
+        ] = Template("{input_image.stem}_detections{ext}")
 
     def process_row(
         self,

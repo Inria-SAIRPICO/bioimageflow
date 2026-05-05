@@ -4,7 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, ExecutionContext, IOModel, ProcessingTool
+from bioimageflow_core import (
+    Arguments,
+    ExecutionContext,
+    IOModel,
+    ProcessingTool,
+    Template,
+)
 
 from .conftest import FileLoader, imageio_env
 
@@ -17,7 +23,7 @@ class RowContextTool(ProcessingTool):
         input_path: Path
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}.txt")
         work_file: Path
         row_index: str
 
@@ -50,7 +56,7 @@ class BatchContextTool(ProcessingTool):
         input_path: Path
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}.txt")
         work_dir: Path
 
     def process_batch(

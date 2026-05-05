@@ -24,6 +24,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 from bioimageflow.dataframe_tool import DataFrameTool, Passthrough
 from bioimageflow.validation import (
@@ -280,7 +281,7 @@ class _SchemaTool(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.LABEL}),
             GUIMeta(display_name="Mask"),
-        ] = Path("{input_image.stem}_mask{ext}")
+        ] = Template("{input_image.stem}_mask{ext}")
         cell_count: int
 
     def process_row(self, arguments):  # type: ignore[override]
@@ -418,6 +419,7 @@ class TestSerializeOutputSchema:
         mask = schema["mask"]
         assert mask["type"] == "ImagePath"
         assert mask["default"] == "{input_image.stem}_mask{ext}"
+        assert mask["template"] == "{input_image.stem}_mask{ext}"
         assert mask["image_spec"] is not None
         assert "label" in mask["image_spec"]["semantics"]
 
@@ -447,6 +449,71 @@ class TestSerializeOutputSchema:
 
     def test_json_serializable(self) -> None:
         json.dumps(serialize_output_schema(_SchemaTool))
+
+    def test_template_default_on_non_path_output_raises(self) -> None:
+        class BadTemplateOutput(ProcessingTool):
+            environment = _ENV
+
+            class Inputs(IOModel):
+                input_image: Path
+
+            class Outputs(IOModel):
+                status: str = Template("{input_image.stem}.txt")  # type: ignore[assignment]
+
+            def process_row(self, arguments):
+                return self.Outputs(status="ok")
+
+        with pytest.raises(TypeError, match="Template default.*path output"):
+            serialize_output_schema(BadTemplateOutput)
+
+    def test_string_output_default_raises(self) -> None:
+        class BadStringTemplateOutput(ProcessingTool):
+            environment = _ENV
+
+            class Inputs(IOModel):
+                input_image: Path
+
+            class Outputs(IOModel):
+                mask: Path = "mask.tif"  # type: ignore[assignment]
+
+            def process_row(self, arguments):
+                return self.Outputs(mask=Path("mask.tif"))
+
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            serialize_output_schema(BadStringTemplateOutput)
+
+    def test_path_output_default_raises(self) -> None:
+        class BadPathTemplateOutput(ProcessingTool):
+            environment = _ENV
+
+            class Inputs(IOModel):
+                input_image: Path
+
+            class Outputs(IOModel):
+                mask: Path = Path("mask.tif")
+
+            def process_row(self, arguments):
+                return self.Outputs(mask=Path("mask.tif"))
+
+        with pytest.raises(TypeError, match="must be declared with Template"):
+            serialize_output_schema(BadPathTemplateOutput)
+
+    def test_static_template_output_default_is_valid(self) -> None:
+        class StaticTemplateOutput(ProcessingTool):
+            environment = _ENV
+
+            class Inputs(IOModel):
+                input_image: Path
+
+            class Outputs(IOModel):
+                mask: Path = Template("mask.tif")
+
+            def process_row(self, arguments):
+                return self.Outputs(mask=Path("mask.tif"))
+
+        schema = serialize_output_schema(StaticTemplateOutput)
+        assert schema["mask"]["default"] == "mask.tif"
+        assert schema["mask"]["template"] == "mask.tif"
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,7 @@ points in its loop:
            image: ImagePath()
 
        class Outputs:
-           mask: ImagePath() = "{image.stem}_mask.tif"
+           mask: ImagePath() = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments, *, task=None):
            img = self._load(arguments.image)

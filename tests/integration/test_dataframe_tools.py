@@ -226,7 +226,7 @@ class TestNodeGetOutputSchema:
             f = Files()(path=str(tmp_workspace / "data"))
             schema = f.get_output_schema()
             assert schema is not None
-            assert set(schema.keys()) == {"path", "filename"}
+            assert set(schema.keys()) == {"path"}
 
     def test_processing_tool_static_schema(self):
         with Workflow():

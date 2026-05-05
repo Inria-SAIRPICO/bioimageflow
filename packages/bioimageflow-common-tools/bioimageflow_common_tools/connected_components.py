@@ -14,6 +14,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 simpleitk_env = EnvironmentSpec(
@@ -63,7 +64,7 @@ class ConnectedComponents(ProcessingTool):
                 display_name="Label image",
                 description="Label image where each connected component has a unique integer ID.",
             ),
-        ] = Path("{input_image.stem}_labels{ext}")
+        ] = Template("{input_image.stem}_labels{ext}")
         num_labels: Annotated[int, GUIMeta(
             display_name="Label count",
             description="Number of connected components labelled in the image.",

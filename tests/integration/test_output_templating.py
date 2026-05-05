@@ -17,7 +17,7 @@ from typing import Annotated
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, IOModel, ProcessingTool, Semantic
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, Semantic, Template
 from bioimageflow_core.types import ImageSpec
 
 from .conftest import FileLoader, StubTiler, imageio_env
@@ -50,7 +50,9 @@ class StubCustomTemplate(ProcessingTool):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = "{input_image.stem}_seg_{row_index}.png"  # type: ignore[assignment]
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+            "{input_image.stem}_seg_{row_index}.png"
+        )
 
     def process_row(self, arguments: Arguments):
         Path(arguments.mask).parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +70,9 @@ class StubMultiInput(ProcessingTool):
         image_b: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        diff: Annotated[Path, ImageSpec()] = "{image_a.stem}_vs_{image_b.stem}_{row_index}.tif"  # type: ignore[assignment]
+        diff: Annotated[Path, ImageSpec()] = Template(
+            "{image_a.stem}_vs_{image_b.stem}_{row_index}.tif"
+        )
 
     def process_row(self, arguments: Arguments):
         Path(arguments.diff).parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +171,9 @@ class TestColumnTemplate:
                 input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
             class Outputs(IOModel):
-                result: Annotated[Path, ImageSpec()] = "{column:patient}_{row_index}.png"  # type: ignore[assignment]
+                result: Annotated[Path, ImageSpec()] = Template(
+                    "{column:patient}_{row_index}.png"
+                )
 
             def process_row(self, arguments: Arguments):
                 Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
@@ -209,7 +215,9 @@ class TestTimestampTemplate:
                 input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
             class Outputs(IOModel):
-                result: Annotated[Path, ImageSpec()] = "{node_name}_{timestamp}_{row_index}.png"  # type: ignore[assignment]
+                result: Annotated[Path, ImageSpec()] = Template(
+                    "{node_name}_{timestamp}_{row_index}.png"
+                )
 
             def process_row(self, arguments: Arguments):
                 Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +254,9 @@ class TestTemplateErrors:
                 input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
             class Outputs(IOModel):
-                result: Annotated[Path, ImageSpec()] = "{nonexistent_field.stem}_out.png"  # type: ignore[assignment]
+                result: Annotated[Path, ImageSpec()] = Template(
+                    "{nonexistent_field.stem}_out.png"
+                )
 
             def process_row(self, arguments):
                 return self.Outputs(result=arguments.result)

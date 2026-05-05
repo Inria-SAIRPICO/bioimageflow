@@ -2,8 +2,9 @@ Output Templating
 =================
 
 When a :class:`~bioimageflow_core.ProcessingTool` produces file outputs, you
-declare **output path templates** as default values on the ``Outputs`` class.
-The engine resolves these templates before calling ``process_row``.
+declare **output path templates** with the explicit
+:class:`~bioimageflow_core.Template` marker on the ``Outputs`` class. The
+engine resolves these templates before calling ``process_row``.
 
 Basic templates
 ---------------
@@ -18,7 +19,7 @@ Basic templates
            image: ImagePath()
 
        class Outputs:
-           mask: ImagePath(semantics={"label"}) = "{image.stem}_mask.tif"
+           mask: ImagePath(semantics={"label"}) = Template("{image.stem}_mask.tif")
 
 The template ``{image.stem}_mask.tif`` resolves using the ``image`` input path:
 
@@ -48,6 +49,8 @@ Available variables
      - Extension of an input path (e.g., ``.tif``)
    * - ``{<input>.exts}``
      - All extensions (e.g., ``.ome.tif``)
+   * - ``{<input>}``
+     - Input value, useful for scalar parameters such as channel indices
    * - ``{ext}``
      - Extension from the single path input (shorthand)
    * - ``{column:<name>}``
@@ -63,7 +66,7 @@ exposes ``.stem``, ``.name``, ``.ext``, and ``.exts``:
 
    class Outputs:
        # Given image = "cells.ome.tif"
-       result: ImagePath() = "{image.stem}_result{image.exts}"
+       result: ImagePath() = Template("{image.stem}_result{image.exts}")
        # → "cells_result.ome.tif"
 
 Column references
@@ -74,7 +77,7 @@ Access values from the upstream DataFrame with ``{column:<name>}``:
 .. code-block:: python
 
    class Outputs:
-       report: str = "{column:sample_id}_report.csv"
+       report: Path = Template("{column:sample_id}_report.csv")
 
 Row index
 ---------
@@ -89,7 +92,7 @@ a single input row produces multiple outputs:
        # ...
 
        class Outputs:
-           tile: ImagePath() = "{image.stem}_tile_{row_index}.tif"
+           tile: ImagePath() = Template("{image.stem}_tile_{row_index}.tif")
            # → "cell_001_tile_0::0.tif", "cell_001_tile_0::1.tif", ...
 
 Resolution order

@@ -17,6 +17,7 @@ from bioimageflow_core import (
     ProcessingTool,
     ResourceSpec,
     Semantic,
+    Template,
 )
 
 
@@ -47,7 +48,7 @@ class SimpleRowTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_out_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_out_{row_index}.txt")
         value: float
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -66,7 +67,7 @@ class SlowRowTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_slow_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_slow_{row_index}.txt")
         elapsed: float
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -105,7 +106,7 @@ class GpuTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_gpu_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_gpu_{row_index}.txt")
         value: float
 
     def process_row(self, arguments: Arguments) -> Any:
@@ -126,7 +127,7 @@ class ProgressReportingTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_prog_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_prog_{row_index}.txt")
 
     def process_row(self, arguments: Arguments, *, task=None) -> Any:
         steps = 5
@@ -151,7 +152,7 @@ class BatchTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_batch_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_batch_{row_index}.txt")
         value: float
 
     def process_batch(self, arguments_list: list[Any], *, task=None) -> Any:
@@ -181,7 +182,7 @@ class CancellableRowTool(ProcessingTool):
         input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        output_path: Path = "{input_path.stem}_cancel_{row_index}.txt"  # type: ignore[assignment]
+        output_path: Path = Template("{input_path.stem}_cancel_{row_index}.txt")
 
     def process_row(self, arguments: Arguments) -> Any:
         # Sleep long enough for cancellation to arrive

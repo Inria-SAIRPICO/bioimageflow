@@ -14,6 +14,7 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
+    Template,
 )
 
 stardist_env = EnvironmentSpec(
@@ -101,7 +102,7 @@ class StarDistSegmenter(ProcessingTool):
                 display_name="Segmentation mask",
                 description="Label image where each detected object has a unique integer ID.",
             ),
-        ] = Path("{input_image.stem}_stardist_mask{ext}")
+        ] = Template("{input_image.stem}_stardist_mask{ext}")
         object_count: Annotated[int, GUIMeta(
             display_name="Object count",
             description="Number of non-background labels detected in the mask.",

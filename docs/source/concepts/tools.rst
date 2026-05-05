@@ -14,7 +14,7 @@ measurement --- anything that operates on individual images or arrays.
 
 .. code-block:: python
 
-   from bioimageflow_core import GENERAL_ENV
+   from bioimageflow_core import GENERAL_ENV, Template
 
    class MyTool(ProcessingTool):
        display_name = "My Tool"
@@ -25,7 +25,7 @@ measurement --- anything that operates on individual images or arrays.
            threshold: float = 0.5
 
        class Outputs:
-           mask: ImagePath(semantics={"binary"}) = "{image.stem}_mask.tif"
+           mask: ImagePath(semantics={"binary"}) = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments: Arguments) -> "MyTool.Outputs":
            ...

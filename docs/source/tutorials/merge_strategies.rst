@@ -145,7 +145,7 @@ nodes resolves to the union of their declared column names:
        sens = Generate()(column_name="sensitivity", values=[0.1, 0.2])
        size = Generate()(column_name="size", values=[1, 2])
        grid = CrossJoin()(files, sens, size)
-       # The merged schema {"path", "filename", "sensitivity", "size"} is
+       # The merged schema {"path", "sensitivity", "size"} is
        # resolved at construction time, so this raises immediately if you
        # mistype the column name:
        ref = grid["sensitivity"]   # OK

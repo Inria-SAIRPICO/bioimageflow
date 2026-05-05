@@ -10,7 +10,7 @@ provenance tracking.
 
 .. code-block:: python
 
-   from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments
+   from bioimageflow_core import ProcessingTool, EnvironmentSpec, ImagePath, Arguments, Template
    from bioimageflow import Workflow, configure_wetlands
    from bioimageflow_common_tools import Files
 
@@ -23,7 +23,7 @@ provenance tracking.
            cutoff: float = 128.0
 
        class Outputs:
-           mask: ImagePath(semantics={"binary"}) = "{image.stem}_mask.tif"
+           mask: ImagePath(semantics={"binary"}) = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments: Arguments) -> "Threshold.Outputs":
            import numpy as np
