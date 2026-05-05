@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 
 
 class Category(str, Enum):
@@ -23,20 +24,31 @@ class Category(str, Enum):
     UTILITIES = "utilities"
 
 
-@dataclass(frozen=True)
-class Template:
-    """Explicit marker for ProcessingTool output path templates."""
+if TYPE_CHECKING:
 
-    pattern: str
+    class Template(Path):
+        """Type-only facade for ProcessingTool output path templates."""
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.pattern, str):
-            raise TypeError("Template pattern must be a string.")
-        if self.pattern == "":
-            raise ValueError("Template pattern must not be empty.")
+        pattern: str
 
-    def __str__(self) -> str:
-        return self.pattern
+        def __new__(cls, pattern: str) -> "Template": ...
+
+else:
+
+    @dataclass(frozen=True)
+    class Template:
+        """Explicit marker for ProcessingTool output path templates."""
+
+        pattern: str
+
+        def __post_init__(self) -> None:
+            if not isinstance(self.pattern, str):
+                raise TypeError("Template pattern must be a string.")
+            if self.pattern == "":
+                raise ValueError("Template pattern must not be empty.")
+
+        def __str__(self) -> str:
+            return self.pattern
 
 
 class IOModel:
