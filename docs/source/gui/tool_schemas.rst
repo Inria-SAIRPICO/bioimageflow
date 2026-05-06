@@ -20,7 +20,7 @@ entry per field:
    schema = serialize_input_schema(MyTool)
    # {
    #     "image": {
-   #         "type": "ImagePath", "required": True, "nullable": False,
+   #         "type": "ImageFile", "required": True, "nullable": False,
    #         "connectable": "by_default", "default": None,
    #         "display_name": "Input image", "description": "...",
    #         "group": None, "min": None, "max": None, "step": None,
@@ -44,7 +44,7 @@ Per-field keys:
      - Description
    * - ``type``
      - Display-name string for the annotation (``"float"``, ``"int"``,
-       ``"Path"``, ``"ImagePath"``, ...).
+       ``"Path"``, ``"ImageFile"``, ...).
    * - ``required``
      - ``True`` when the field has no class-level default. Orthogonal
        to ``Optional[X]``.
@@ -114,7 +114,7 @@ keys only when the output annotation carries
 
    {
        "mask": {
-           "type": "ImagePath",
+           "type": "ImageFile",
            "default": "{input_image.stem}_mask{ext}",
            "image_spec": {...},
            "template": "{input_image.stem}_mask{ext}",

@@ -18,7 +18,7 @@
       "nullable": false,
       "required": true,
       "step": null,
-      "type": "ImagePath"
+      "type": "ImageFile"
     }
   },
   "outputs": {
@@ -50,7 +50,7 @@
       "min": null,
       "step": null,
       "template": "{input_image.stem}_labels{ext}",
-      "type": "ImagePath"
+      "type": "ImageFile"
     }
   }
 }

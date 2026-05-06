@@ -498,7 +498,7 @@ def _display_type_name(annotation: Any) -> str:
     if get_origin(annotation) is Annotated and extract_image_spec(annotation) is not None:
         base = get_args(annotation)[0]
         if base is Path:
-            return "ImagePath"
+            return "ImageFile"
         base_name = getattr(base, "__name__", None)
         if base_name == "SharedArray":
             return "ImageShared"
@@ -582,7 +582,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
     returns a dict with the following keys:
 
     - ``type``: display-name string (e.g. ``"float"``, ``"Path"``,
-      ``"ImagePath"``) — see :func:`_display_type_name`.
+      ``"ImageFile"``) — see :func:`_display_type_name`.
     - ``required``: ``True`` when no class-level default is set on
       ``Inputs`` for the field. Orthogonal to ``Optional[X]``.
     - ``connectable``: one of ``"never" | "not_by_default" | "by_default"``

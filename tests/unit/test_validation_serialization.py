@@ -144,7 +144,7 @@ class TestDisplayTypeName:
         assert _display_type_name(Optional[Annotated[int, GUIMeta(min=0)]]) == "int"
 
     def test_image_field_path(self) -> None:
-        assert _display_type_name(Annotated[Path, ImageSpec()]) == "ImagePath"
+        assert _display_type_name(Annotated[Path, ImageSpec()]) == "ImageFile"
 
     def test_image_shared(self) -> None:
         assert _display_type_name(ImageShared()) == "ImageShared"
@@ -344,7 +344,7 @@ class TestSerializeInputSchema:
         entry = schema["input_image"]
         assert entry["required"] is True
         assert entry["default"] is None
-        assert entry["type"] == "ImagePath"
+        assert entry["type"] == "ImageFile"
         assert entry["connectable"] == "by_default"
         assert entry["display_name"] == "Input image"
         assert entry["description"] == "A 2D intensity image."
@@ -448,7 +448,7 @@ class TestSerializeInputSchema:
     def test_image_path_gui_meta_preserved(self) -> None:
         schema = serialize_input_schema(_ImageFieldGuiTool)
         entry = schema["input_image"]
-        assert entry["type"] == "ImagePath"
+        assert entry["type"] == "ImageFile"
         assert entry["connectable"] == "by_default"
         assert entry["display_name"] == "Input image"
         assert entry["description"] == "A 2D intensity image."
@@ -472,7 +472,7 @@ class TestSerializeOutputSchema:
         assert set(schema.keys()) == {"mask", "cell_count"}
 
         mask = schema["mask"]
-        assert mask["type"] == "ImagePath"
+        assert mask["type"] == "ImageFile"
         assert mask["default"] == "{input_image.stem}_mask{ext}"
         assert mask["template"] == "{input_image.stem}_mask{ext}"
         assert mask["image_spec"] is not None
@@ -573,7 +573,7 @@ class TestSerializeOutputSchema:
     def test_image_path_gui_meta_preserved(self) -> None:
         schema = serialize_output_schema(_ImageFieldGuiTool)
         mask = schema["mask"]
-        assert mask["type"] == "ImagePath"
+        assert mask["type"] == "ImageFile"
         assert mask["display_name"] == "Segmentation mask"
         assert mask["description"] == "A label image."
         assert mask["group"] == "results"
@@ -612,23 +612,23 @@ def test_common_tool_serializes_to_json(tool_cls: type) -> None:
     assert set(inputs.keys()) == declared_inputs
 
 
-def test_common_tool_image_fields_use_imagepath_without_converting_plain_paths() -> None:
+def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths() -> None:
     from bioimageflow_common_tools import Atlas, LabelOverlaps, Mosaic, StarDistSegmenter
 
     atlas_inputs = serialize_input_schema(Atlas)
     atlas_outputs = serialize_output_schema(Atlas)
-    assert atlas_inputs["input_image"]["type"] == "ImagePath"
-    assert atlas_outputs["output_image"]["type"] == "ImagePath"
+    assert atlas_inputs["input_image"]["type"] == "ImageFile"
+    assert atlas_outputs["output_image"]["type"] == "ImageFile"
 
     mosaic_inputs = serialize_input_schema(Mosaic)
     mosaic_outputs = serialize_output_schema(Mosaic)
-    assert mosaic_inputs["input_image"]["type"] == "ImagePath"
+    assert mosaic_inputs["input_image"]["type"] == "ImageFile"
     assert mosaic_outputs["mosaic_path"]["type"] == "Path"
 
     stardist_inputs = serialize_input_schema(StarDistSegmenter)
     stardist_outputs = serialize_output_schema(StarDistSegmenter)
-    assert stardist_inputs["input_image"]["type"] == "ImagePath"
-    assert stardist_outputs["mask"]["type"] == "ImagePath"
+    assert stardist_inputs["input_image"]["type"] == "ImageFile"
+    assert stardist_outputs["mask"]["type"] == "ImageFile"
 
     label_outputs = serialize_output_schema(LabelOverlaps)
     assert label_outputs["overlaps"]["type"] == "Path"
