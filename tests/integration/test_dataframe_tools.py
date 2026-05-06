@@ -70,6 +70,21 @@ class TestFilterRows:
             df = wf.compute(filtered)
             assert len(df) == 0
 
+    def test_processing_tool_dataframe_output_feeds_dataframe_tool(self, tmp_workspace):
+        """A ProcessingTool node's result DataFrame is a positional upstream."""
+        load = FileLoader()
+        filt = FilterRows()
+        segment = StubSegmenter()
+
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            raw = load(path=str(tmp_workspace / "data"))
+            masks = segment(input_image=raw["path"])
+            filtered = filt(masks, column_name="cell_count", min=40.0)
+            df = wf.compute(filtered)
+
+            assert len(df) == 3
+            assert set(df.columns) == {"mask", "cell_count"}
+
     def test_filter_passthrough_preserves_columns(self, tmp_workspace):
         """FilterRows declares Outputs(Passthrough) — all input columns preserved."""
         load = FileLoader()

@@ -671,6 +671,7 @@ class TestSerializeToolMetadata:
             "tool_type": "DataFrameTool",
             "accepts_upstream": False,
             "dynamic_outputs": False,
+            "dataframe_output": True,
         }
 
     def test_generate_is_source(self) -> None:
@@ -696,6 +697,7 @@ class TestSerializeToolMetadata:
         assert meta["tool_type"] == "ProcessingTool"
         assert meta["accepts_upstream"] is True
         assert meta["dynamic_outputs"] is False
+        assert meta["dataframe_output"] is True
 
     def test_metadata_is_json_safe(self) -> None:
         from bioimageflow_common_tools import Files

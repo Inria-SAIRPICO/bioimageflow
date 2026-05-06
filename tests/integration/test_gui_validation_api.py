@@ -529,12 +529,14 @@ class TestIntrospectionHelpers:
         meta = serialize_tool_metadata(Files)
         assert meta["tool_type"] == "DataFrameTool"
         assert meta["accepts_upstream"] is False
+        assert meta["dataframe_output"] is True
         json.dumps(meta)  # JSON-safe
 
     def test_serialize_tool_metadata_processing_tool(self) -> None:
         meta = serialize_tool_metadata(StubSegmenter)
         assert meta["tool_type"] == "ProcessingTool"
         assert meta["accepts_upstream"] is True
+        assert meta["dataframe_output"] is True
 
     def test_serialize_tool_metadata_merge_tool(self) -> None:
         from bioimageflow_common_tools import CrossJoin
