@@ -9,6 +9,7 @@ Covers:
 """
 
 import json
+import zipfile
 import sys
 from typing import Any
 
@@ -158,6 +159,58 @@ class TestWorkflowExport:
         assert "tools/__init__.py" in paths
         assert "tools/helpers.py" in paths
         assert "tools/data/label.txt" in paths
+
+    def test_export_zip_contains_workflow_json_and_tools_directory(self, tmp_workspace):
+        _write_workflow_tools_package(tmp_workspace)
+        sys.path.insert(0, str(tmp_workspace))
+        try:
+            from tools import LocalAnnotate, LocalSource
+
+            with Workflow(storage_path=tmp_workspace / "results") as wf:
+                source = LocalSource()()
+                LocalAnnotate()(source)
+                wf.export(tmp_workspace / "workflow.bioimageflow.zip")
+        finally:
+            sys.path = [p for p in sys.path if p != str(tmp_workspace)]
+            for name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+                del sys.modules[name]
+
+        archive_path = tmp_workspace / "workflow.bioimageflow.zip"
+        with zipfile.ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+            assert "workflow.json" in names
+            assert "tools/__init__.py" in names
+            assert "tools/helpers.py" in names
+            assert "tools/data/label.txt" in names
+
+            data = json.loads(archive.read("workflow.json"))
+            assert "custom_tool_modules" not in data
+
+    def test_import_archive_extracts_workflow_json_and_tools_directory(self, tmp_workspace):
+        _write_workflow_tools_package(tmp_workspace)
+        sys.path.insert(0, str(tmp_workspace))
+        try:
+            from tools import LocalAnnotate, LocalSource
+
+            with Workflow(storage_path=tmp_workspace / "results") as wf:
+                source = LocalSource()()
+                LocalAnnotate()(source)
+                wf.export(tmp_workspace / "workflow.bioimageflow.zip")
+        finally:
+            sys.path = [p for p in sys.path if p != str(tmp_workspace)]
+            for name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+                del sys.modules[name]
+
+        imported_dir = tmp_workspace / "imported_workflow"
+        loaded = Workflow.import_archive(
+            tmp_workspace / "workflow.bioimageflow.zip",
+            imported_dir,
+        )
+
+        assert (imported_dir / "workflow.json").exists()
+        assert (imported_dir / "tools" / "__init__.py").exists()
+        assert (imported_dir / "tools" / "helpers.py").exists()
+        assert "LocalAnnotate_1" in loaded.nodes
 
 
 class TestWorkflowImport:

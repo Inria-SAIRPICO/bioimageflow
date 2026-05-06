@@ -8,6 +8,7 @@ import json
 import sys
 import tempfile
 import threading
+import zipfile
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -744,11 +745,35 @@ class Workflow:
         return result
 
     def export(self, path: str | Path) -> None:
-        """Serialize the workflow to a JSON file."""
+        """Serialize the workflow to a JSON file or BioImageFlow zip archive."""
         path = Path(path)
+        if path.suffix == ".zip":
+            self._export_archive(path)
+            return
         data = self.to_dict(include_custom_tools=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, default=str))
+
+    def _export_archive(self, path: Path) -> None:
+        data = self.to_dict(include_custom_tools=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("workflow.json", json.dumps(data, indent=2, default=str))
+            written: dict[str, str] = {}
+            for tools_dir in _workflow_custom_tools_dirs(self):
+                for file_path in _iter_custom_tools_files(tools_dir):
+                    rel_path = (Path(tools_dir.name) / file_path.relative_to(tools_dir)).as_posix()
+                    data_bytes = file_path.read_bytes()
+                    file_hash = hashlib.sha256(data_bytes).hexdigest()
+                    previous_hash = written.get(rel_path)
+                    if previous_hash is not None:
+                        if previous_hash != file_hash:
+                            raise ValueError(
+                                f"Conflicting workflow-local tool file in archive: {rel_path}"
+                            )
+                        continue
+                    archive.writestr(rel_path, data_bytes)
+                    written[rel_path] = file_hash
 
     @classmethod
     def load(cls, path: str | Path) -> "Workflow":
@@ -759,10 +784,41 @@ class Workflow:
         versioned packages.
         """
         path = Path(path)
+        if path.suffix == ".zip":
+            return cls._load_archive(path)
         data = json.loads(path.read_text())
         result = cls.from_dict(data)
         assert isinstance(result, Workflow)  # strict mode
         return result
+
+    @classmethod
+    def _load_archive(cls, path: Path) -> "Workflow":
+        temp_root = Path(tempfile.mkdtemp(prefix="bioimageflow_workflow_archive_"))
+        _extract_workflow_archive(path, temp_root)
+        workflow_path = temp_root / "workflow.json"
+        if not workflow_path.exists():
+            raise ValueError("Workflow archive is missing workflow.json")
+        with _workflow_import_scope(temp_root):
+            data = json.loads(workflow_path.read_text(encoding="utf-8"))
+            result = cls.from_dict(data)
+            assert isinstance(result, Workflow)  # strict mode
+            return result
+
+    @classmethod
+    def import_archive(cls, path: str | Path, destination: str | Path) -> "Workflow":
+        """Extract a BioImageFlow zip archive to ``destination`` and load it."""
+        path = Path(path)
+        destination = Path(destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        _extract_workflow_archive(path, destination)
+        workflow_path = destination / "workflow.json"
+        if not workflow_path.exists():
+            raise ValueError("Workflow archive is missing workflow.json")
+        with _workflow_import_scope(destination):
+            data = json.loads(workflow_path.read_text(encoding="utf-8"))
+            result = cls.from_dict(data)
+            assert isinstance(result, Workflow)  # strict mode
+            return result
 
     @overload
     @classmethod
@@ -1282,6 +1338,36 @@ def _find_custom_tools_dir(source_file: Path) -> Path | None:
     return None
 
 
+@contextmanager
+def _workflow_import_scope(root: Path):
+    """Temporarily prefer a workflow root for imports from ``tools``."""
+    root_str = str(root)
+    sys.path.insert(0, root_str)
+    previous_tools_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == _CUSTOM_TOOLS_PACKAGE or name.startswith(_CUSTOM_TOOLS_PACKAGE + ".")
+    }
+    for name in list(previous_tools_modules):
+        sys.modules.pop(name, None)
+    try:
+        yield
+    finally:
+        sys.path = [entry for entry in sys.path if entry != root_str]
+        for name in [n for n in sys.modules if n == _CUSTOM_TOOLS_PACKAGE or n.startswith(_CUSTOM_TOOLS_PACKAGE + ".")]:
+            sys.modules.pop(name, None)
+        sys.modules.update(previous_tools_modules)
+
+
+def _extract_workflow_archive(path: Path, destination: Path) -> None:
+    with zipfile.ZipFile(path) as archive:
+        for member in archive.namelist():
+            member_path = Path(member)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"Invalid workflow archive member: {member!r}")
+        archive.extractall(destination)
+
+
 def _iter_custom_tools_files(tools_dir: Path) -> Iterator[Path]:
     for path in sorted(tools_dir.rglob("*")):
         rel_parts = path.relative_to(tools_dir).parts
@@ -1348,6 +1434,47 @@ def _get_custom_tools_dir_bundle_hash(cls: type) -> str | None:
         return None
     _source_id, record = _build_custom_tools_dir_record(cls, source_file, tools_dir)
     return record["source_hash"]
+
+
+def _workflow_custom_tools_dirs(workflow: Workflow) -> list[Path]:
+    """Return workflow-local tools/ directories used by ``workflow``."""
+    from bioimageflow.sub_workflow import SubWorkflowNode
+
+    dirs: dict[Path, None] = {}
+    for node in workflow._nodes.values():
+        if isinstance(node, SubWorkflowNode):
+            cls = type(node.sub_workflow)
+            if _is_workflow_custom_class(cls):
+                source_file = Path(inspect.getsourcefile(cls) or inspect.getfile(cls))
+                tools_dir = _find_custom_tools_dir(source_file)
+                if tools_dir is not None:
+                    dirs[tools_dir.resolve()] = None
+            internal_nodes = getattr(node, "internal_nodes", [])
+            if isinstance(internal_nodes, dict):
+                internals = internal_nodes.values()
+            else:
+                internals = internal_nodes
+            for internal in internals:
+                tool = getattr(internal, "tool", None)
+                if tool is None:
+                    continue
+                cls = type(tool)
+                if not _is_workflow_custom_class(cls):
+                    continue
+                source_file = Path(inspect.getsourcefile(cls) or inspect.getfile(cls))
+                tools_dir = _find_custom_tools_dir(source_file)
+                if tools_dir is not None:
+                    dirs[tools_dir.resolve()] = None
+            continue
+
+        cls = type(node.tool)
+        if not _is_workflow_custom_class(cls):
+            continue
+        source_file = Path(inspect.getsourcefile(cls) or inspect.getfile(cls))
+        tools_dir = _find_custom_tools_dir(source_file)
+        if tools_dir is not None:
+            dirs[tools_dir.resolve()] = None
+    return list(dirs)
 
 
 def _register_custom_tool_module(
