@@ -64,6 +64,22 @@ def _safe_work_dir_name(position: int, row_index: Any) -> str:
     return f"{position:06d}_{sanitized}_{digest}"
 
 
+def _absolute_runtime_path(value: Any) -> Any:
+    """Return ``value`` as an absolute path when it is path-like."""
+    if value is None or isinstance(value, SharedArray):
+        return value
+    if isinstance(value, str) and value == "":
+        return value
+    preserve_path = isinstance(value, Path)
+    try:
+        path = Path(value).expanduser()
+    except TypeError:
+        return value
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path if preserve_path else str(path)
+
+
 def topological_order(workflow: Any) -> list[str]:
     """Return the names of the nodes in ``workflow`` in dependency order.
 
@@ -823,7 +839,8 @@ class DefaultEngine:
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
-            return self._coerce_numeric_columns(cache_load(cached)), sig_hash
+            df = self._coerce_numeric_columns(cache_load(cached))
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         self._emit_progress(workflow, node.name, "started")
 
@@ -833,6 +850,7 @@ class DefaultEngine:
         merged = self._coerce_numeric_columns(merged)
         df = node.tool.transform(merged, arguments)
         df = self._coerce_numeric_columns(df)
+        df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
 
         self._emit_progress(workflow, node.name, "completed")
@@ -865,11 +883,13 @@ class DefaultEngine:
 
         # --- Signature hash ---
         env_hash = compute_env_hash(node.tool.environment.dependencies)
+        signature_constants = dict(node._constant_bindings)
+        self._normalize_path_arguments(signature_constants, input_annotations)
         sig_hash = self._compute_sig_hash(
             node,
             env_hash,
             {
-                'constants': node._constant_bindings,
+                'constants': signature_constants,
                 'output_templates': templates,
             },
             {},
@@ -881,15 +901,20 @@ class DefaultEngine:
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
             self._emit_progress(workflow, node.name, "cached")
-            return self._coerce_numeric_columns(cache_load(cached)), sig_hash
+            df = self._coerce_numeric_columns(cache_load(cached))
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
         hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
 
         row_args = self._resolve_defaults(node, input_annotations)
+        path_input_fields = [
+            n for n, a in input_annotations.items() if is_path_type(a)
+        ]
         context = self._build_template_context(
-            node.name, '0', row_args, path_input_fields=[], upstream_nodes={},
+            node.name, '0', row_args,
+            path_input_fields=path_input_fields, upstream_nodes={},
             results={}, idx='0',
         )
         for out_field, template in templates.items():
@@ -905,6 +930,7 @@ class DefaultEngine:
             row_contexts, batch_context,
         )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
         self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__, workflow,
@@ -948,7 +974,7 @@ class DefaultEngine:
             cached_hash_dir = find_hash_dir(node_dir, sig_hash)
             if cached_hash_dir is not None:
                 df = self._restore_shared_arrays(df, cached_hash_dir)
-            return df, sig_hash
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
@@ -970,6 +996,7 @@ class DefaultEngine:
             row_contexts, batch_context,
         )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(workflow, node.name, "completed")
 
         df = self._persist_shared_arrays(df, hash_dir)
@@ -988,6 +1015,7 @@ class DefaultEngine:
         for field_name in input_annotations:
             if field_name not in args_dict and hasattr(node.tool.Inputs, field_name):
                 args_dict[field_name] = getattr(node.tool.Inputs, field_name)
+        self._normalize_path_arguments(args_dict, input_annotations)
         return Arguments(**args_dict), args_dict
 
     def _resolve_defaults(
@@ -998,7 +1026,42 @@ class DefaultEngine:
         for field_name in input_annotations:
             if field_name not in row_args and hasattr(node.tool.Inputs, field_name):
                 row_args[field_name] = getattr(node.tool.Inputs, field_name)
+        self._normalize_path_arguments(row_args, input_annotations)
         return row_args
+
+    def _normalize_path_arguments(
+        self,
+        args: dict[str, Any],
+        input_annotations: dict[str, Any],
+    ) -> None:
+        """Convert path-typed input argument values to absolute runtime paths."""
+        for field_name, annotation in input_annotations.items():
+            if field_name in args and is_path_type(annotation):
+                args[field_name] = _absolute_runtime_path(args[field_name])
+
+    def _normalize_path_output_columns(
+        self,
+        df: pd.DataFrame,
+        tool: Any,
+    ) -> pd.DataFrame:
+        """Convert declared path output columns to absolute runtime paths."""
+        outputs = getattr(tool, "Outputs", None)
+        if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+            return df
+        output_annotations = outputs._get_all_annotations()
+        path_columns = [
+            field_name
+            for field_name, annotation in output_annotations.items()
+            if field_name in df.columns and is_path_type(annotation)
+        ]
+        if not path_columns:
+            return df
+        normalized = df.copy()
+        for field_name in path_columns:
+            normalized[field_name] = normalized[field_name].map(
+                _absolute_runtime_path
+            )
+        return normalized
 
     def _resolve_all_row_arguments(
         self,
@@ -1081,6 +1144,7 @@ class DefaultEngine:
             if field_name not in row_args and hasattr(node.tool.Inputs, field_name):
                 row_args[field_name] = getattr(node.tool.Inputs, field_name)
 
+        self._normalize_path_arguments(row_args, input_annotations)
         return row_args
 
     def _build_template_context(
@@ -1176,15 +1240,21 @@ class DefaultEngine:
             )
         upstream_hash_map = {n.name: sig_hashes[n]
                             for n in upstream_nodes.values()}
+        signature_constants = dict(node._constant_bindings)
+        self._normalize_path_arguments(signature_constants, input_annotations)
+        signature_defaults = {
+            f: getattr(node.tool.Inputs, f)
+            for f in input_annotations
+            if f not in node._column_bindings
+            and f not in node._constant_bindings
+            and hasattr(node.tool.Inputs, f)
+        }
+        self._normalize_path_arguments(signature_defaults, input_annotations)
         resolved_params: dict[str, Any] = {
             'bindings': {f: {'node': cr.node.name, 'column': cr.column}
                          for f, cr in node._column_bindings.items()},
-            'constants': node._constant_bindings,
-            'defaults': {f: getattr(node.tool.Inputs, f)
-                         for f in input_annotations
-                         if f not in node._column_bindings
-                         and f not in node._constant_bindings
-                         and hasattr(node.tool.Inputs, f)},
+            'constants': signature_constants,
+            'defaults': signature_defaults,
             'output_templates': get_output_templates(
                 node.tool.Outputs,
                 node.tool.Inputs,

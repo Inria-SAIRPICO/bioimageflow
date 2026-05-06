@@ -555,6 +555,8 @@ For `process_row`, `context.work_dir` is unique per input row: `run_dir/work/row
 
 `work_dir` is for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.work_dir` to `subprocess.run()` or equivalent. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
 
+**Runtime path contract:** Before dispatch, the orchestrator converts the workflow storage root, every `ExecutionContext` directory, every generated `ProcessingTool` output path, and every path-typed `Arguments` value to an absolute runtime path. Relative user-supplied path constants are interpreted once in the orchestrator process, before the tool is called. DataFrame columns declared as path-typed outputs are also stored as absolute paths. Tool implementations may pass framework-provided path arguments directly to file I/O libraries or subprocesses, even when the subprocess runs with `cwd=context.work_dir`; tools must not call `resolve()` merely to compensate for framework-relative paths.
+
 **Direct tool definition:**
 ```python
 from pathlib import Path
@@ -1155,7 +1157,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
 
 #### The `Arguments` Object
 
-When the engine dispatches work to a tool, it constructs an `Arguments` namespace. For `ProcessingTool`, one `Arguments` per row containing all resolved input values and output template paths. For `DataFrameTool`, a single `Arguments` containing the tool's constant parameters.
+When the engine dispatches work to a tool, it constructs an `Arguments` namespace. For `ProcessingTool`, one `Arguments` per row containing all resolved input values and output template paths. For `DataFrameTool`, a single `Arguments` containing the tool's constant parameters. Fields declared as `Path` or `Annotated[Path, ...]` are absolute runtime paths by the time the tool receives them.
 
 The tool accesses values via attribute access: `arguments.input_image`, `arguments.diameter`, `arguments.mask`.
 
@@ -1715,7 +1717,7 @@ Node registration is automatic: calling a tool (e.g., `segment(...)`) appends th
 
 | Parameter       | Type          | Default         | Description                                      |
 |----------------|---------------|-----------------|--------------------------------------------------|
-| `storage_path`  | `str \| Path` | `"./bif_data"`  | Root directory for output files and cache         |
+| `storage_path`  | `str \| Path` | `"./bif_data"`  | Root directory for output files and cache. Relative values are interpreted against the orchestrator process working directory and stored internally as absolute runtime paths. |
 | `engine`        | `str`         | `"sequential"`  | `"sequential"` or `"parsl"`                      |
 | `max_executions`| `int`         | `0`             | Cache retention: number of past executions to keep |
 | `max_age`       | `str \| None` | `None`          | Cache retention: max age (e.g., `"7d"`, `"24h"`) |
@@ -2105,7 +2107,7 @@ When `node.compute()` is called:
 #### DataFrameTool Execution Path
 
    1. **Collect Upstream DataFrames:** Gather the output DataFrames from all positional upstream nodes.
-   2. **Resolve Arguments:** Resolve `Inputs` parameters into a single `Arguments` object (all constants, validated via Pydantic).
+   2. **Resolve Arguments:** Resolve `Inputs` parameters into a single `Arguments` object (all constants, validated via Pydantic). Path-typed values are converted to absolute runtime paths before `merge_dataframes()` or `transform()` is called.
    3. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 6.
    4. **Merge:** Call `tool.merge_dataframes(dfs, arguments)`. Default: inner join on index.
    5. **Transform:** Call `tool.transform(df, arguments)`. Returns a (potentially different) DataFrame. Default: identity (passthrough).
@@ -2114,8 +2116,8 @@ When `node.compute()` is called:
 #### ProcessingTool Execution Path
 
    1. **Index Alignment:** Collect all upstream nodes referenced via column bindings. Compute the aligned index — the finest-grained index that is compatible with all upstream indices (see [Section 5.3](#53-dataframe-semantics)). If upstream indices are incompatible (no common lineage), raise `IndexAlignmentError`.
-   2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations.
-   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow graph state.
+   2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations. Path-typed values are converted to absolute runtime paths in the orchestrator.
+   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow graph state. Generated output paths are absolute and point under the run's `assets/` directory.
    4. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 10.
    5. **Execution Context:** Create the timestamp/hash run directory and its `assets/` and `work/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Context paths are runtime details and are not included in the signature hash.
    6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
