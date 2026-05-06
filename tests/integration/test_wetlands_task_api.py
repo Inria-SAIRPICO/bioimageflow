@@ -31,6 +31,8 @@ from .wetlands_test_tools import (
     gpu_env,
 )
 
+pytestmark = pytest.mark.wetlands
+
 
 # Override the autouse _disable_wetlands fixture — these tests need real Wetlands.
 @pytest.fixture(autouse=True)

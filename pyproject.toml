@@ -31,7 +31,9 @@ members = ["packages/*"]
 bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
-wetlands = { path = "wetlands-lib", editable = true }
 
 [tool.pytest.ini_options]
 filterwarnings = []
+markers = [
+    "wetlands: tests that execute real Wetlands worker processes",
+]

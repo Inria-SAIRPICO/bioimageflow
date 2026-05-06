@@ -145,6 +145,9 @@ uv run pytest tests/unit/
 
 # Run only integration tests
 uv run pytest tests/integration/
+
+# Run the real Wetlands smoke tier
+uv run pytest -m wetlands tests/integration/test_wetlands_smoke.py
 ```
 
 ## FAQ
