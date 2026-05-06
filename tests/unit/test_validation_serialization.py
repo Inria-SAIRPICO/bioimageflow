@@ -631,7 +631,9 @@ def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths()
     assert stardist_outputs["mask"]["type"] == "ImageFile"
 
     label_outputs = serialize_output_schema(LabelOverlaps)
-    assert label_outputs["overlaps"]["type"] == "Path"
+    assert label_outputs["reference_label"]["type"] == "int"
+    assert label_outputs["spot_label"]["type"] == "int"
+    assert label_outputs["overlap_count"]["type"] == "int"
 
 
 def test_schema_serialization_error_exists() -> None:

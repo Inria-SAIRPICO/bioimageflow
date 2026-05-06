@@ -14,7 +14,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 
@@ -22,13 +21,13 @@ class LabelOverlaps(ProcessingTool):
     """Compute spatial overlap between a label image and a reference label image.
 
     For each pixel, records which label from image 1 overlaps with which
-    label from image 2. Outputs a CSV table with columns:
+    label from image 2. Outputs a DataFrame with columns:
     reference_label, spot_label, overlap_count.
     """
     display_name = "Label Overlaps"
     documentation = (
         "Compute the spatial overlap between two labeled images. "
-        "Outputs a CSV table of (reference_label, spot_label, overlap_count) tuples."
+        "Outputs a table of (reference_label, spot_label, overlap_count) tuples."
     )
     category = Category.MEASUREMENT
     tags = ["measurement", "spatial correlation"]
@@ -43,7 +42,9 @@ class LabelOverlaps(ProcessingTool):
             ),
             GUIMeta(
                 display_name="Label image",
-                description="Label image whose regions will be matched against the reference.",
+                description=(
+                    "Label image whose regions will be matched against the reference."
+                ),
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
@@ -55,16 +56,27 @@ class LabelOverlaps(ProcessingTool):
             ),
             GUIMeta(
                 display_name="Reference label image",
-                description="Reference label image. Each pixel of the label image is paired with the reference label at the same location.",
+                description=(
+                    "Reference label image. Each pixel of the label image is "
+                    "paired with the reference label at the same location."
+                ),
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
 
     class Outputs(IOModel):
-        overlaps: Annotated[Path, GUIMeta(
-            display_name="Overlaps CSV",
-            description="CSV table with columns (reference_label, spot_label, overlap_count) giving the pixel count for each pair.",
-        )] = Template("{label_image.stem}_overlaps.csv")
+        reference_label: Annotated[int, GUIMeta(
+            display_name="Reference label",
+            description="Label value from the reference image.",
+        )]
+        spot_label: Annotated[int, GUIMeta(
+            display_name="Spot label",
+            description="Label value from the label image.",
+        )]
+        overlap_count: Annotated[int, GUIMeta(
+            display_name="Overlap count",
+            description="Number of pixels where the two labels overlap.",
+        )]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import numpy as np
@@ -78,19 +90,22 @@ class LabelOverlaps(ProcessingTool):
         mask = (labels > 0) | (reference > 0)
         ref_vals = reference[mask]
         lbl_vals = labels[mask]
+        if ref_vals.size == 0:
+            print("Label overlaps: 0 pairs")
+            return []
 
         # Count co-occurrences
         pairs, counts = np.unique(
             np.stack([ref_vals, lbl_vals], axis=1), axis=0, return_counts=True
         )
 
-        output_path = Path(arguments.overlaps)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        lines = ["reference_label,spot_label,overlap_count"]
-        for (ref_lbl, spot_lbl), count in zip(pairs, counts):
-            lines.append(f"{int(ref_lbl)},{int(spot_lbl)},{int(count)}")
-        output_path.write_text("\n".join(lines) + "\n")
         print(f"Label overlaps: {len(pairs)} pairs")
 
-        return self.Outputs(overlaps=output_path)
+        return [
+            self.Outputs(
+                reference_label=int(ref_lbl),
+                spot_label=int(spot_lbl),
+                overlap_count=int(count),
+            )
+            for (ref_lbl, spot_lbl), count in zip(pairs, counts)
+        ]

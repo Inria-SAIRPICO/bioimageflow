@@ -26,9 +26,7 @@ Pipeline topology (sub-workflows shown as boxes)::
                                  │                                        │
                                  └── CellposeSAM (ch2, nuclei) ──────────┘
                                                                    │
-                              Collect(FOLS2 overlaps, CSF1R overlaps)
-                                                │
-                                    AverageSpotsPerNucleus
+                              AverageSpotsPerNucleus(FOLS2 overlaps, CSF1R overlaps)
 
 Compare with the original ``fish_analysis/workflow.py`` — the sub-workflow
 version has the same pipeline topology but less repetition and clearer intent.
@@ -47,7 +45,6 @@ from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
-from bioimageflow_common_tools.merge import Collect
 from bioimageflow_common_tools import CellposeSAM, ConvertImage
 
 # Workflow-specific tools (shared with the original fish_analysis)
@@ -145,12 +142,8 @@ def build_fish_workflow(
         )
 
         # -- 5. Statistical aggregation --
-        collected = Collect()(
-            fols2, csfr1,
-            name="collect_overlaps",
-        )
         stats = AverageSpotsPerNucleus()(
-            collected,
+            fols2, csfr1,
             name="avg_spots_per_nucleus",
         )
 
