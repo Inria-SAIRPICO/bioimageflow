@@ -667,6 +667,10 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
       ``DataFrameTool`` it reflects ``tool_class.accepts_upstream``.
     - ``dynamic_outputs`` — ``True`` if the tool's output schema depends on
       its inputs (i.e. it overrides :meth:`DataFrameTool.resolve_outputs`).
+    - ``dataframe_output`` — ``True`` when nodes of this tool expose their
+      full result DataFrame as a graph-level output. All current tool kinds
+      produce a DataFrame at runtime; per-field output schemas still describe
+      the DataFrame columns.
 
     Companion to :func:`serialize_input_schema` / :func:`serialize_output_schema`,
     which describe per-field schemas. This helper exists so platform code does
@@ -700,6 +704,7 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
         "tool_type": tool_type,
         "accepts_upstream": accepts_upstream,
         "dynamic_outputs": dynamic_outputs,
+        "dataframe_output": True,
     }
 
 

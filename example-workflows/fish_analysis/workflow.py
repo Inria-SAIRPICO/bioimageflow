@@ -28,17 +28,13 @@ Pipeline topology:
                              LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────┤
                              LabelOverlaps(CSF1R spots vs nuclei) ◄─────────────────────┘
                                      │                    │
-                                     └──── Collect ───────┘
-                                             │
-                                  AverageSpotsPerNucleus
+                                     └──── AverageSpotsPerNucleus
 """
 
 import sys
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
-
-from bioimageflow_common_tools.merge import Collect
 
 from bioimageflow_common_tools import (
     ConvertImage,
@@ -147,12 +143,8 @@ def build_fish_workflow(
         )
 
         # -- 7. Statistical aggregation --
-        collected = Collect()(
-            overlaps_fols2, overlaps_csfr1,
-            name="collect_overlaps",
-        )
         stats = AverageSpotsPerNucleus()(
-            collected,
+            overlaps_fols2, overlaps_csfr1,
             name="avg_spots_per_nucleus",
         )
 

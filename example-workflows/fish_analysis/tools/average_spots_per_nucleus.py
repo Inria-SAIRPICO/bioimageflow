@@ -2,18 +2,16 @@
 
 from typing import Annotated, Any
 
-from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
+from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow import DataFrameTool
 
 
 class AverageSpotsPerNucleus(DataFrameTool):
-    """Compute the average number of spots per nucleus from overlap CSVs.
+    """Compute the average number of spots per nucleus from overlap tables.
 
     Expects two upstream overlap DataFrames (one for FOLS2, one for CSF1R),
-    merged via Collect. Reads the overlap CSV files produced by
-    LabelOverlaps, filters out background labels (0), groups spots by
-    their parent nucleus, and computes the mean spot count per nucleus
-    for every image in the batch.
+    filters out background labels (0), groups spots by their parent nucleus,
+    and computes the mean spot count per nucleus for every image in the batch.
     """
     display_name = "Average Spots Per Nucleus"
     documentation = (
@@ -24,29 +22,26 @@ class AverageSpotsPerNucleus(DataFrameTool):
     tags = ["statistics", "aggregation", "fish"]
 
     class Inputs(IOModel):
-        fols2_column: Annotated[str, GUIMeta(
-            display_name="FOLS2 overlaps column",
-            description="Name of the column holding the FOLS2.",
-            connectable=Connectable.NEVER,
-        )] = "overlaps"
-        csfr1_column: Annotated[str, GUIMeta(
-            display_name="CSF1R overlaps column",
-            description="Name of the column holding the CSF1R.",
-            connectable=Connectable.NEVER,
-        )] = "overlaps_1"
+        pass
 
     class Outputs(IOModel):
         image_index: Annotated[str, GUIMeta(
             display_name="Image index",
-            description="Identifier of the source image (copied from the DataFrame index).",
+            description=(
+                "Identifier of the source image (copied from the DataFrame index)."
+            ),
         )]
         avg_fols2_per_nucleus: Annotated[float, GUIMeta(
             display_name="Avg FOLS2 spots / nucleus",
-            description="Average number of distinct FOLS2 spots overlapping each nucleus.",
+            description=(
+                "Average number of distinct FOLS2 spots overlapping each nucleus."
+            ),
         )]
         avg_csfr1_per_nucleus: Annotated[float, GUIMeta(
             display_name="Avg CSF1R spots / nucleus",
-            description="Average number of distinct CSF1R spots overlapping each nucleus.",
+            description=(
+                "Average number of distinct CSF1R spots overlapping each nucleus."
+            ),
         )]
         total_nuclei_fols2: Annotated[int, GUIMeta(
             display_name="Nuclei with FOLS2",
@@ -58,50 +53,91 @@ class AverageSpotsPerNucleus(DataFrameTool):
         )]
         total_fols2_spots: Annotated[int, GUIMeta(
             display_name="Total FOLS2 spots",
-            description="Total number of FOLS2 spot-nucleus associations across the image.",
+            description=(
+                "Total number of FOLS2 spot-nucleus associations across the image."
+            ),
         )]
         total_csfr1_spots: Annotated[int, GUIMeta(
             display_name="Total CSF1R spots",
-            description="Total number of CSF1R spot-nucleus associations across the image.",
+            description=(
+                "Total number of CSF1R spot-nucleus associations across the image."
+            ),
         )]
 
+    def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
+        if len(dfs) != 2:
+            raise ValueError(
+                "AverageSpotsPerNucleus expects two upstream overlap DataFrames: "
+                "FOLS2 first, CSF1R second."
+            )
+
+        fols2 = self._summarize_overlap_dataframe(dfs[0], "fols2")
+        csfr1 = self._summarize_overlap_dataframe(dfs[1], "csfr1")
+
+        result = fols2.join(csfr1, how="outer")
+        for col in result.columns:
+            if col.startswith("avg_"):
+                result[col] = result[col].fillna(0.0)
+            else:
+                result[col] = result[col].fillna(0).astype(int)
+
+        result.index.name = None
+        result["image_index"] = result.index.astype(str)
+        ordered_columns = [
+            "image_index",
+            "avg_fols2_per_nucleus",
+            "avg_csfr1_per_nucleus",
+            "total_nuclei_fols2",
+            "total_nuclei_csfr1",
+            "total_fols2_spots",
+            "total_csfr1_spots",
+        ]
+        return result[ordered_columns]
+
     def transform(self, df: Any, arguments: Any) -> Any:
+        return df
+
+    @staticmethod
+    def _parent_index(index: Any) -> str:
+        return str(index).split("::", 1)[0]
+
+    @classmethod
+    def _summarize_overlap_dataframe(cls, df: Any, label: str) -> Any:
         import pandas as pd
 
-        fols2_col = arguments.fols2_column
-        csfr1_col = arguments.csfr1_column
+        required = {"reference_label", "spot_label", "overlap_count"}
+        if not required.issubset(df.columns):
+            missing = ", ".join(sorted(required - set(df.columns)))
+            raise ValueError(f"Overlap DataFrame is missing columns: {missing}")
 
-        rows = []
-        for idx in df.index:
-            row_result: dict[str, Any] = {"image_index": str(idx)}
+        work = df.copy()
+        work["image_index"] = [cls._parent_index(idx) for idx in work.index]
+        image_indices = pd.Index(work["image_index"].drop_duplicates().astype(str))
 
-            for label, col in [("fols2", fols2_col), ("csfr1", csfr1_col)]:
-                overlap_path = df.at[idx, col]
-                overlap_df = pd.read_csv(str(overlap_path))
+        real = work[
+            (work["reference_label"] > 0)
+            & (work["spot_label"] > 0)
+        ]
+        if real.empty:
+            return pd.DataFrame(
+                {
+                    f"avg_{label}_per_nucleus": 0.0,
+                    f"total_nuclei_{label}": 0,
+                    f"total_{label}_spots": 0,
+                },
+                index=image_indices,
+            )
 
-                # Filter out background (label 0)
-                overlap_df = overlap_df[
-                    (overlap_df["reference_label"] > 0)
-                    & (overlap_df["spot_label"] > 0)
-                ]
-
-                if overlap_df.empty:
-                    row_result[f"avg_{label}_per_nucleus"] = 0.0
-                    row_result[f"total_nuclei_{label}"] = 0
-                    row_result[f"total_{label}_spots"] = 0
-                    continue
-
-                # Count unique spots per nucleus
-                spots_per_nucleus = (
-                    overlap_df.groupby("reference_label")["spot_label"].nunique()
-                )
-
-                row_result[f"avg_{label}_per_nucleus"] = float(
-                    spots_per_nucleus.mean()
-                )
-                row_result[f"total_nuclei_{label}"] = len(spots_per_nucleus)
-                row_result[f"total_{label}_spots"] = int(spots_per_nucleus.sum())
-
-            rows.append(row_result)
-
-        return pd.DataFrame(rows)
+        spots_per_nucleus = (
+            real.groupby(["image_index", "reference_label"])["spot_label"]
+            .nunique()
+        )
+        summary = spots_per_nucleus.groupby("image_index").agg(["mean", "count", "sum"])
+        summary = summary.rename(
+            columns={
+                "mean": f"avg_{label}_per_nucleus",
+                "count": f"total_nuclei_{label}",
+                "sum": f"total_{label}_spots",
+            }
+        )
+        return summary.reindex(image_indices, fill_value=0)

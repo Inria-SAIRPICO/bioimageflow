@@ -148,21 +148,13 @@ class TestLabelOverlaps:
 
         tool = LabelOverlaps()
 
-        assets_dir = tmp_path / "assets"
-        assets_dir.mkdir()
-        output_path = str(assets_dir / "overlaps.csv")
-
         args = Arguments(
             label_image=str(spots_path),
             reference_image=str(ref_path),
-            overlaps=output_path,
         )
         result = tool.process_row(args)
 
-        csv_path = Path(result.overlaps)
-        assert csv_path.exists()
-
-        df = pd.read_csv(csv_path)
+        df = pd.DataFrame([vars(row) for row in result])
         assert "reference_label" in df.columns
         assert "spot_label" in df.columns
         assert "overlap_count" in df.columns
@@ -311,10 +303,8 @@ class TestMiniPipeline:
                 reference_image=labeled_refs["output_image"],
             )
             result = wf.compute(overlaps)
-            assert len(result) == 1
-            assert "overlaps" in result.columns
-            csv_path = Path(result.iloc[0]["overlaps"])
-            assert csv_path.exists()
-            df = pd.read_csv(csv_path)
-            real = df[df["spot_label"] > 0]
+            assert {"reference_label", "spot_label", "overlap_count"}.issubset(
+                result.columns
+            )
+            real = result[result["spot_label"] > 0]
             assert len(real) > 0

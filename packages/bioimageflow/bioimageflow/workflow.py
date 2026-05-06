@@ -35,6 +35,14 @@ from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow_core.tool import ProcessingTool
 
 
+def _absolute_runtime_path(path: str | Path) -> Path:
+    """Return an absolute path without requiring the target to exist."""
+    expanded = Path(path).expanduser()
+    if expanded.is_absolute():
+        return expanded
+    return Path.cwd() / expanded
+
+
 @dataclass(frozen=True)
 class _CustomToolBundle:
     """Loaded embedded custom-tool source bundle."""
@@ -83,7 +91,7 @@ class Workflow:
         wetlands_config: dict[str, Any] | None = None,
         max_workers: int = 1,
     ) -> None:
-        self.storage_path = Path(storage_path)
+        self.storage_path = _absolute_runtime_path(storage_path)
         self.engine_type = engine
         self.max_executions = max_executions
         self.max_age = max_age

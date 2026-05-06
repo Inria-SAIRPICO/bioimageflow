@@ -147,12 +147,12 @@ class SpotAnalysis(SubWorkflow):
 
     Outputs
     -------
-    overlaps : Path
-        CSV file with columns (reference_label, spot_label, overlap_count).
-    labeled_spots : Path
-        Label image of detected spots.
-    num_spots : int
-        Number of detected spots.
+    reference_label : int
+        Label value from the reference image.
+    spot_label : int
+        Label value from the detected spot image.
+    overlap_count : int
+        Number of pixels where the two labels overlap.
     """
 
     display_name = "Spot Analysis"
@@ -185,17 +185,17 @@ class SpotAnalysis(SubWorkflow):
         )] = 0.001
 
     class Outputs(IOModel):
-        overlaps: Annotated[Path, GUIMeta(
-            display_name="Overlaps CSV",
-            description="CSV table of (reference_label, spot_label, overlap_count) pairs produced by LabelOverlaps.",
+        reference_label: Annotated[int, GUIMeta(
+            display_name="Reference label",
+            description="Label value from the reference image.",
         )]
-        labeled_spots: Annotated[Path, ImageSpec(semantics={Semantic.LABEL}), GUIMeta(
-            display_name="Labeled spots",
-            description="Label image; each detected spot has a unique integer ID.",
+        spot_label: Annotated[int, GUIMeta(
+            display_name="Spot label",
+            description="Label value from the detected spot image.",
         )]
-        num_spots: Annotated[int, GUIMeta(
-            display_name="Spot count",
-            description="Number of detected spots.",
+        overlap_count: Annotated[int, GUIMeta(
+            display_name="Overlap count",
+            description="Number of pixels where the two labels overlap.",
         )]
 
     def build(self, inputs):  # type: ignore[override]
@@ -214,7 +214,7 @@ class SpotAnalysis(SubWorkflow):
         )
 
         return {
-            "overlaps": overlaps["overlaps"],
-            "labeled_spots": spots["labeled_spots"],
-            "num_spots": spots["num_spots"],
+            "reference_label": overlaps["reference_label"],
+            "spot_label": overlaps["spot_label"],
+            "overlap_count": overlaps["overlap_count"],
         }
