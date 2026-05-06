@@ -52,7 +52,8 @@ _fish_dir = str(Path(__file__).resolve().parent.parent / "fish_analysis")
 if _fish_dir not in sys.path:
     sys.path.insert(0, _fish_dir)
 
-from tools import AverageSpotsPerNucleus, DownloadImages  # noqa: E402
+from tools.average_spots_per_nucleus import AverageSpotsPerNucleus  # noqa: E402
+from tools.download_images import DownloadImages  # noqa: E402
 
 # Sub-workflows defined in this package
 _this_dir = str(Path(__file__).resolve().parent)

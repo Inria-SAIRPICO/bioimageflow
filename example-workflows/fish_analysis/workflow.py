@@ -46,7 +46,8 @@ from bioimageflow_common_tools import (
 )
 
 # Workflow-specific tools
-from tools import DownloadImages, AverageSpotsPerNucleus
+from tools.download_images import DownloadImages
+from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
