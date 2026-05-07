@@ -42,6 +42,7 @@ from bioimageflow.validation import (
 )
 
 logger = logging.getLogger("bioimageflow")
+_RegistryKey = tuple[str, str, str, str]
 
 
 @dataclass(frozen=True)
@@ -87,8 +88,8 @@ class ToolRegistry:
         self._store_path: Path = (
             store_path if store_path is not None else get_tool_store_path()
         )
-        self._classes: dict[str, type] = {}
-        self._metadata: dict[str, ToolMetadata] = {}
+        self._classes: dict[_RegistryKey, type] = {}
+        self._metadata: dict[_RegistryKey, ToolMetadata] = {}
 
     # -- install vs register ------------------------------------------------
 
@@ -171,8 +172,9 @@ class ToolRegistry:
                 seen.add(obj)
 
                 meta = self._build_metadata(obj)
-                self._classes[meta.class_name] = obj
-                self._metadata[meta.class_name] = meta
+                key = self._key(meta)
+                self._classes[key] = obj
+                self._metadata[key] = meta
                 discovered.append(meta)
 
         for cls, obj_module in unstamped.items():
@@ -248,10 +250,15 @@ class ToolRegistry:
                 continue
             seen.add(cls)
             meta = self._build_metadata(cls)
-            self._classes[meta.class_name] = cls
-            self._metadata[meta.class_name] = meta
+            key = self._key(meta)
+            self._classes[key] = cls
+            self._metadata[key] = meta
             discovered.append(meta)
         return discovered
+
+    @staticmethod
+    def _key(meta: ToolMetadata) -> _RegistryKey:
+        return (meta.package, meta.version, meta.module, meta.class_name)
 
     def _build_metadata(self, cls: type) -> ToolMetadata:
         canonical = getattr(cls, "_bif_canonical_module", cls.__module__)
@@ -282,19 +289,93 @@ class ToolRegistry:
 
     # -- lookups ------------------------------------------------------------
 
-    def get_class(self, class_name: str) -> type | None:
-        """Return the registered class, or ``None`` if not registered."""
-        return self._classes.get(class_name)
+    def get_class(
+        self,
+        class_name: str,
+        *,
+        package: str | None = None,
+        version: str | None = None,
+        module: str | None = None,
+    ) -> type | None:
+        """Return a registered class, or ``None`` if not registered.
 
-    def get_metadata(self, class_name: str) -> ToolMetadata | None:
-        """Return the registered :class:`ToolMetadata`, or ``None``."""
-        return self._metadata.get(class_name)
+        When several package versions expose the same class name, callers can
+        pass ``package`` / ``version`` / ``module`` to select the intended
+        class. A name-only lookup keeps the historical behavior and returns the
+        most recently registered matching class.
+        """
+        match = self._find_key(class_name, package=package, version=version, module=module)
+        if match is None:
+            return None
+        return self._classes[match]
+
+    def get_metadata(
+        self,
+        class_name: str,
+        *,
+        package: str | None = None,
+        version: str | None = None,
+        module: str | None = None,
+    ) -> ToolMetadata | None:
+        """Return registered :class:`ToolMetadata`, or ``None``."""
+        match = self._find_key(class_name, package=package, version=version, module=module)
+        if match is None:
+            return None
+        return self._metadata[match]
 
     def list_tools(self) -> list[ToolMetadata]:
         """Return all registered tool metadata, in insertion order."""
         return list(self._metadata.values())
 
-    def forget(self, class_name: str) -> None:
-        """Drop a class from the registry. No-op if it is not present."""
-        self._classes.pop(class_name, None)
-        self._metadata.pop(class_name, None)
+    def forget(
+        self,
+        class_name: str,
+        *,
+        package: str | None = None,
+        version: str | None = None,
+        module: str | None = None,
+    ) -> None:
+        """Drop matching classes from the registry. No-op if none match."""
+        for key in list(self._matching_keys(
+            class_name,
+            package=package,
+            version=version,
+            module=module,
+        )):
+            self._classes.pop(key, None)
+            self._metadata.pop(key, None)
+
+    def _find_key(
+        self,
+        class_name: str,
+        *,
+        package: str | None = None,
+        version: str | None = None,
+        module: str | None = None,
+    ) -> _RegistryKey | None:
+        matches = list(self._matching_keys(
+            class_name,
+            package=package,
+            version=version,
+            module=module,
+        ))
+        if not matches:
+            return None
+        return matches[-1]
+
+    def _matching_keys(
+        self,
+        class_name: str,
+        *,
+        package: str | None = None,
+        version: str | None = None,
+        module: str | None = None,
+    ) -> list[_RegistryKey]:
+        return [
+            key
+            for key in self._metadata
+            if key[3] == class_name
+            and (package is None or key[0] == package)
+            and (version is None or key[1] == version)
+            and (module is None or key[2] == module)
+        ]
