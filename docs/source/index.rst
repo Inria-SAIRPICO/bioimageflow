@@ -75,6 +75,7 @@ Features
    quickstart
    concepts/index
    tutorials/index
+   phase2/index
    phase3/index
 
 .. toctree::
