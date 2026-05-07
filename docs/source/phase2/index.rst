@@ -14,10 +14,10 @@ FISH Analysis
 
 ``example-workflows/fish_analysis`` still documents the CIL FISH pipeline with
 Atlas spot detection and Cellpose nuclei segmentation. The workflow imports
-Atlas from ``bioimageflow-spot-tools`` and Cellpose from
-``bioimageflow-segmentation-tools`` instead of removed
-``bioimageflow_common_tools`` exports. It still uses common tools for source,
-merge, channel extraction, connected components, and label-overlap utilities.
+Cellpose from ``bioimageflow-segmentation-tools`` instead of removed
+``bioimageflow_common_tools`` segmentation exports. It still uses common tools
+for source, merge, channel extraction, connected components, label-overlap
+utilities, and the current Atlas wrapper.
 
 Normal tests construct the full CIL graph, then execute
 ``build_synthetic_fish_workflow``. The synthetic fallback writes a small CYX
