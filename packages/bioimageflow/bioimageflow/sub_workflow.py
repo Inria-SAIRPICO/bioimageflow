@@ -390,6 +390,67 @@ def _build_iomodel(name: str, fields_config: dict[str, Any]) -> type[IOModel]:
     return type(name, (IOModel,), namespace)
 
 
+def _validate_config_interface(config: dict[str, Any]) -> None:
+    """Validate published config inputs/outputs before the DAG is built."""
+    config_name = config.get("name", "<unnamed>")
+    declared_inputs = set((config.get("inputs") or {}).keys())
+    declared_outputs = set((config.get("outputs") or {}).keys())
+    output_mapping = config.get("output_mapping", {})
+    if not isinstance(output_mapping, dict):
+        raise ValueError(
+            f"SubWorkflow config '{config_name}' output_mapping must be a dict"
+        )
+    mapped_outputs = set(output_mapping.keys())
+
+    missing_outputs = declared_outputs - mapped_outputs
+    if missing_outputs:
+        raise ValueError(
+            f"SubWorkflow config '{config_name}' missing output_mapping entries "
+            f"for published outputs: {sorted(missing_outputs)}"
+        )
+
+    extra_outputs = mapped_outputs - declared_outputs
+    if extra_outputs:
+        first = sorted(extra_outputs)[0]
+        raise ValueError(
+            f"SubWorkflow config '{config_name}' output_mapping references "
+            f"undeclared output '{first}'"
+        )
+
+    for output_name, mapping in output_mapping.items():
+        if (
+            not isinstance(mapping, dict)
+            or not isinstance(mapping.get("from_node"), str)
+            or not isinstance(mapping.get("column"), str)
+        ):
+            raise ValueError(
+                f"SubWorkflow config '{config_name}' output_mapping for "
+                f"'{output_name}' must define string 'from_node' and 'column'"
+            )
+
+    def visit_node_inputs(node_spec: dict[str, Any], path: str) -> None:
+        node_inputs = node_spec.get("inputs", {})
+        if isinstance(node_inputs, dict):
+            for ref in node_inputs.values():
+                if not isinstance(ref, dict) or "from_input" not in ref:
+                    continue
+                input_name = str(ref["from_input"])
+                if input_name not in declared_inputs:
+                    raise ValueError(
+                        f"SubWorkflow config '{config_name}' references undeclared "
+                        f"input '{input_name}' in node '{path}'"
+                    )
+
+        nested = node_spec.get("config")
+        if node_spec.get("type") == "sub_workflow" and isinstance(nested, dict):
+            _validate_config_interface(nested)
+
+    for node_spec in config.get("nodes", []):
+        if not isinstance(node_spec, dict):
+            continue
+        visit_node_inputs(node_spec, str(node_spec.get("name", "<unnamed>")))
+
+
 def _resolve_node_input(
     ref: Any,
     proxy: SubWorkflowInputProxy,
@@ -425,6 +486,7 @@ class _ConfigDrivenSubWorkflow(SubWorkflow):
     """A SubWorkflow whose internal DAG is defined by a config dict."""
 
     def __init__(self, config: dict[str, Any]) -> None:
+        _validate_config_interface(config)
         self._config = config
         self.display_name = config.get("display_name", config["name"])
         config_name = config["name"]

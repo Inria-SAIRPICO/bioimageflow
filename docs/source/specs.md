@@ -2950,6 +2950,14 @@ sw = SubWorkflow.from_config(config)
 
 `SubWorkflow.from_config(config)` returns a `_ConfigDrivenSubWorkflow` instance — a `SubWorkflow` subclass that stores the config and implements `build()` by interpreting it declaratively. All existing `SubWorkflow` machinery (`__call__`, `SubWorkflowNode`, flattening, caching, scoped names) is reused without modification.
 
+The config's `inputs` and `outputs` are the published interface of the
+sub-workflow. In GUI-created workflows, publishing a parameter adds an entry to
+`inputs` and rewrites the internal node field to `{"from_input": ...}`.
+Unpublishing removes that entry and restores the internal field to a local
+constant or connection. Publishing an output adds an entry to `outputs` and
+`output_mapping`; unpublishing removes both entries. Parent workflows only see
+these published fields on the outer `SubWorkflowNode`.
+
 #### Config Schema
 
 **Top-level keys:**
@@ -2996,6 +3004,15 @@ sw = SubWorkflow.from_config(config)
 - Raw value (`int`, `float`, `str`, `bool`, `list`) — constant binding passed directly to the tool.
 
 **Output mapping** values use only `{"from_node": ..., "column": ...}`.
+
+`SubWorkflow.from_config()` validates the published interface before building
+the DAG:
+
+- every `from_input` reference must name a declared config input;
+- every declared output must have an `output_mapping` entry;
+- `output_mapping` must not contain undeclared outputs;
+- each output mapping entry must contain string `from_node` and `column` values;
+- inline nested config sub-workflows are validated recursively.
 
 #### Nested Sub-Workflows
 

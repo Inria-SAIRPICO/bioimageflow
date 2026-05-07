@@ -237,7 +237,7 @@ class TestFromConfig:
             "inputs": {"x": {"type": "int"}},
             "outputs": {"y": {"type": "int"}},
             "nodes": [],
-            "output_mapping": {},
+            "output_mapping": {"y": {"from_node": "source", "column": "y"}},
         }
         sw = SubWorkflow.from_config(config)
         assert isinstance(sw, SubWorkflow)
@@ -589,6 +589,46 @@ class TestConfigSubWorkflowErrors:
             "output_mapping": {},
         }
         with pytest.raises(KeyError):
+            SubWorkflow.from_config(config)
+
+    def test_from_input_must_reference_declared_input(self):
+        """Published input refs must point at the config input interface."""
+        config = _single_seg_config()
+        config["nodes"][0]["inputs"]["input_image"] = {"from_input": "missing_image"}
+
+        with pytest.raises(ValueError, match="undeclared input 'missing_image'"):
+            SubWorkflow.from_config(config)
+
+    def test_declared_outputs_require_output_mapping(self):
+        """Every published output must map to an internal node output."""
+        config = _single_seg_config()
+        del config["output_mapping"]["mask"]
+
+        with pytest.raises(ValueError, match="missing output_mapping entries"):
+            SubWorkflow.from_config(config)
+
+    def test_output_mapping_cannot_publish_undeclared_output(self):
+        """The output mapping is exactly the published output interface."""
+        config = _single_seg_config()
+        config["output_mapping"]["extra"] = {"from_node": "seg", "column": "mask"}
+
+        with pytest.raises(ValueError, match="undeclared output 'extra'"):
+            SubWorkflow.from_config(config)
+
+    def test_output_mapping_entries_must_have_node_and_column(self):
+        """Published outputs must point to an internal node column reference."""
+        config = _single_seg_config()
+        config["output_mapping"]["mask"] = {"from_node": "seg"}
+
+        with pytest.raises(ValueError, match="from_node.*column"):
+            SubWorkflow.from_config(config)
+
+    def test_output_mapping_must_be_dict(self):
+        """The published output mapping must be a mapping object."""
+        config = _single_seg_config()
+        config["output_mapping"] = []
+
+        with pytest.raises(ValueError, match="output_mapping must be a dict"):
             SubWorkflow.from_config(config)
 
     def test_missing_from_node_raises(self, tmp_workspace):
