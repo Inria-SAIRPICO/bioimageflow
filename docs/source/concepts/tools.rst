@@ -3,6 +3,22 @@ Tools
 
 BioImageFlow has two tool types, each suited to different kinds of operations.
 
+Process boundaries
+------------------
+
+Choose the tool type by process boundary first:
+
+- Use :class:`~bioimageflow_core.ProcessingTool` for row-wise or batched work
+  that should run in an isolated worker environment.
+- Use :class:`~bioimageflow.DataFrameTool` for main-process dataframe
+  loading, filtering, merging, and aggregation.
+
+Tool-specific dependencies for ``ProcessingTool`` classes must be imported
+inside ``process_row`` or ``process_batch``. Module import must stay light so
+schemas can be inspected by the orchestrator, docs, tests, and GUIs without
+installing every worker dependency. Imports from the Python standard library
+and ``bioimageflow-core`` are safe at module level.
+
 ProcessingTool
 --------------
 

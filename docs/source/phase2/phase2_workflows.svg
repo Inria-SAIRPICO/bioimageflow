@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="260" viewBox="0 0 820 260" role="img" aria-labelledby="title desc">
+  <title id="title">Phase 2 workflow overview</title>
+  <desc id="desc">Four compact workflow diagrams for FISH, BBBC038, SAIRPICO, and OME normalization examples.</desc>
+  <defs>
+    <style>
+      .box{fill:#f7f8fb;stroke:#41516a;stroke-width:1.5;rx:6}
+      .heavy{fill:#fff4de;stroke:#8a5d12;stroke-width:1.5;rx:6}
+      .text{font:13px sans-serif;fill:#1d2733}
+      .title{font:bold 15px sans-serif;fill:#111827}
+      .arrow{stroke:#41516a;stroke-width:1.5;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#41516a"/>
+    </marker>
+  </defs>
+  <text class="title" x="30" y="32">FISH</text>
+  <rect class="box" x="30" y="50" width="120" height="38"/><text class="text" x="51" y="74">Read CYX</text>
+  <rect class="box" x="190" y="50" width="120" height="38"/><text class="text" x="207" y="74">Spots/Labels</text>
+  <rect class="box" x="350" y="50" width="120" height="38"/><text class="text" x="371" y="74">Summary</text>
+  <line class="arrow" x1="150" y1="69" x2="188" y2="69"/><line class="arrow" x1="310" y1="69" x2="348" y2="69"/>
+  <text class="title" x="30" y="128">BBBC038</text>
+  <rect class="box" x="30" y="146" width="120" height="38"/><text class="text" x="49" y="170">Synthetic</text>
+  <rect class="box" x="190" y="146" width="120" height="38"/><text class="text" x="211" y="170">Segment</text>
+  <rect class="box" x="350" y="146" width="120" height="38"/><text class="text" x="389" y="170">IoU</text>
+  <line class="arrow" x1="150" y1="165" x2="188" y2="165"/><line class="arrow" x1="310" y1="165" x2="348" y2="165"/>
+  <text class="title" x="520" y="32">SAIRPICO Smoke</text>
+  <rect class="heavy" x="520" y="50" width="120" height="38"/><text class="text" x="541" y="74">Median CLI</text>
+  <rect class="heavy" x="680" y="50" width="120" height="38"/><text class="text" x="692" y="74">RL Deconv CLI</text>
+  <line class="arrow" x1="640" y1="69" x2="678" y2="69"/>
+  <text class="title" x="520" y="128">OME Normalize</text>
+  <rect class="box" x="520" y="146" width="120" height="38"/><text class="text" x="542" y="170">Select YX</text>
+  <rect class="box" x="680" y="122" width="120" height="38"/><text class="text" x="706" y="146">OME-TIFF</text>
+  <rect class="box" x="680" y="174" width="120" height="38"/><text class="text" x="708" y="198">OME-Zarr</text>
+  <line class="arrow" x1="640" y1="158" x2="678" y2="143"/><line class="arrow" x1="640" y1="172" x2="678" y2="191"/>
+</svg>

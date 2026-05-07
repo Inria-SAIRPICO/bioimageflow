@@ -37,6 +37,23 @@ def tool_store(tmp_path):
         "    def process_row(self, arguments: Arguments):\n"
         "        return self.Outputs(result='ok')\n"
     )
+    pkg_dir_v2 = store / "dummy_tools" / "2.0.0" / "dummy_tools"
+    pkg_dir_v2.mkdir(parents=True)
+    (pkg_dir_v2 / "__init__.py").write_text(
+        "from .alpha import AlphaTool\n"
+    )
+    (pkg_dir_v2 / "alpha.py").write_text(
+        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "class AlphaTool(ProcessingTool):\n"
+        "    display_name = 'Alpha v2'\n"
+        "    tags = ['demo', 'v2']\n"
+        "    class Inputs(IOModel):\n"
+        "        value: int = 0\n"
+        "    class Outputs(IOModel):\n"
+        "        result: str\n"
+        "    def process_row(self, arguments: Arguments):\n"
+        "        return self.Outputs(result='ok-v2')\n"
+    )
     return store
 
 
@@ -82,11 +99,45 @@ class TestRegisterPackage:
         tools = reg.list_tools()
         assert any(t.class_name == "AlphaTool" for t in tools)
 
+    def test_register_keeps_same_class_name_from_multiple_versions(
+        self, tool_store
+    ) -> None:
+        reg = ToolRegistry(store_path=tool_store)
+        reg.register_package("dummy_tools", "1.0.0")
+        reg.register_package("dummy_tools", "2.0.0")
+
+        metas = [
+            meta
+            for meta in reg.list_tools()
+            if meta.package == "dummy_tools" and meta.class_name == "AlphaTool"
+        ]
+        assert [(meta.class_name, meta.version) for meta in metas] == [
+            ("AlphaTool", "1.0.0"),
+            ("AlphaTool", "2.0.0"),
+        ]
+        assert (
+            reg.get_metadata(
+                "AlphaTool", package="dummy_tools", version="1.0.0"
+            ).display_name
+            == "Alpha"
+        )
+        assert (
+            reg.get_metadata(
+                "AlphaTool", package="dummy_tools", version="2.0.0"
+            ).display_name
+            == "Alpha v2"
+        )
+        assert (
+            reg.get_class("AlphaTool")._bif_package_version
+            == "2.0.0"
+        )
+
 
 class TestForget:
     def test_forget_removes_class_and_metadata(self, tool_store) -> None:
         reg = ToolRegistry(store_path=tool_store)
         reg.register_package("dummy_tools", "1.0.0")
+        reg.register_package("dummy_tools", "2.0.0")
         assert reg.get_class("AlphaTool") is not None
         reg.forget("AlphaTool")
         assert reg.get_class("AlphaTool") is None

@@ -5,6 +5,28 @@ BioImageFlow distributes tools as standard Python packages. The versioned
 loading system allows multiple versions of the same package to coexist in a
 single process, enabling reproducible workflows and gradual migrations.
 
+Package boundary rules
+----------------------
+
+Use a package when a tool or sub-workflow is reused across projects,
+distributed independently, versioned, or carries non-trivial dependencies or
+runtime assets. Keep package boundaries explicit:
+
+- A package owns its tools, sub-workflows, tests, fixtures, documentation,
+  examples, and small runtime assets.
+- Package examples must import from that package, not from old in-repo or
+  workflow-local locations.
+- Each public tool and workflow exported by the package must have tests.
+- Package changes do not need backward compatibility shims during the
+  current migration. Update examples and downstream workflow docs to the new
+  package names instead of preserving old imports.
+- ``ProcessingTool`` modules may import only the standard library and
+  ``bioimageflow-core`` at module import time. Tool-specific dependencies
+  are imported inside ``process_row`` or ``process_batch``.
+- ``DataFrameTool`` modules belong to the main process and may import
+  ``bioimageflow``, pandas, and other main-process dependencies at module
+  import time.
+
 Package layout
 --------------
 
@@ -107,6 +129,9 @@ ProcessingTool
 
 Note that ``process_row`` must return a ``self.Outputs(...)`` instance, not a
 raw dict. See :doc:`custom_tool` for more details on writing tools.
+Tool-specific imports such as ``skimage`` or ``torch`` belong inside
+``process_row`` / ``process_batch`` so the package can be imported for schema
+inspection without the worker environment installed.
 
 SubWorkflow
 ^^^^^^^^^^^
@@ -148,6 +173,26 @@ Re-export tools for convenient access:
    from .segmenter import MySegmenter
    from .loader import ImageLoader
    from .pipeline import SegmentPipeline
+
+Testing requirements
+--------------------
+
+Every package must ship tests with the package source. For each public tool,
+cover:
+
+- schema serialization for ``Inputs`` and ``Outputs``;
+- construction-time validation for valid and invalid bindings;
+- one successful execution path with tiny synthetic or committed public
+  fixtures;
+- output template resolution and returned ``Outputs`` instances;
+- expected failures for invalid parameters, missing files, or unsupported
+  data.
+
+For each public sub-workflow, cover graph construction, output schema,
+``Workflow.to_dict`` / ``Workflow.from_dict`` round-trip when supported, and
+one end-to-end execution on public or synthetic data. Tests should run
+without network access unless the package explicitly tests a downloader, in
+which case mock the network boundary.
 
 Using versioned packages
 ------------------------

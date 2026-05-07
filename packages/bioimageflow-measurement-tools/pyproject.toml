@@ -1,0 +1,20 @@
+[project]
+name = "bioimageflow-measurement-tools"
+version = "0.1.0"
+description = "Lightweight measurement tools for BioImageFlow"
+requires-python = ">=3.10"
+dependencies = [
+    "bioimageflow-core>=0.1.4",
+    "bioimageflow>=0.1.4",
+    "imageio",
+    "numpy",
+    "pandas",
+]
+
+[tool.uv.sources]
+bioimageflow-core = { workspace = true }
+bioimageflow = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -4,20 +4,53 @@ from __future__ import annotations
 
 import sys
 import types
+import importlib
+import importlib.util
 from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
+import pytest
 
 from bioimageflow_core import Arguments
-from bioimageflow_common_tools import Cellpose3, StarDistSegmenter
-from bioimageflow_common_tools.cellpose_v3 import cellpose_v3_env
-from bioimageflow_common_tools.stardist_segmenter import stardist_env
+
+try:
+    segmentation_tools = importlib.import_module("bioimageflow_segmentation_tools")
+    cellpose_v3 = importlib.import_module("bioimageflow_segmentation_tools.cellpose_v3")
+    stardist_segmenter = importlib.import_module(
+        "bioimageflow_segmentation_tools.stardist_segmenter"
+    )
+except ModuleNotFoundError:
+    pytestmark = pytest.mark.skip(
+        reason="bioimageflow_segmentation_tools is owned by the segmentation package"
+    )
+    Cellpose3 = None
+    StarDistSegmenter = None
+    cellpose_v3_env = None
+    stardist_env = None
+else:
+    Cellpose3 = segmentation_tools.Cellpose3
+    StarDistSegmenter = segmentation_tools.StarDistSegmenter
+    cellpose_v3_env = cellpose_v3.cellpose_v3_env
+    stardist_env = stardist_segmenter.stardist_env
+
+
+def test_common_package_no_longer_contains_canonical_segmentation_modules() -> None:
+    import bioimageflow_common_tools as common_tools
+
+    assert not hasattr(common_tools, "Cellpose3")
+    assert not hasattr(common_tools, "CellposeSAM")
+    assert not hasattr(common_tools, "StarDistSegmenter")
+    assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_v3") is None
+    assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_sam") is None
+    assert (
+        importlib.util.find_spec("bioimageflow_common_tools.stardist_segmenter") is None
+    )
 
 
 class TestCellpose3:
     def test_environment_pins_cellpose_v3(self) -> None:
-        assert cellpose_v3_env.name == "cellpose-v3-3-1-1"
+        assert cellpose_v3_env.name == "segmentation-cellpose-v3-3-1-1"
         assert "cellpose==3.1.1.1" in cellpose_v3_env.dependencies["pip"]
         assert "packaging" in cellpose_v3_env.dependencies["pip"]
         assert Cellpose3.environment is cellpose_v3_env
@@ -67,7 +100,7 @@ class TestCellpose3:
 
 class TestStarDistSegmenter:
     def test_environment_pins_stardist(self) -> None:
-        assert stardist_env.name == "stardist"
+        assert stardist_env.name == "segmentation-stardist"
         assert "stardist==0.9.2" in stardist_env.dependencies["pip"]
         assert "tensorflow" in stardist_env.dependencies["pip"]
         assert StarDistSegmenter.environment is stardist_env

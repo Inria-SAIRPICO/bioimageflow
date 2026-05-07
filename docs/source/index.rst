@@ -8,6 +8,10 @@ BioImageFlow lets you declare image-processing tools, wire them into directed
 acyclic graphs, and execute them with automatic caching, type checking, and
 provenance tracking.
 
+Contributor guidance for reusable tool packages, workflow examples, and
+review checklists lives in :doc:`reference/tool_package_strategy` and
+:doc:`reference/agent_tool_workflow_playbook`.
+
 .. code-block:: python
 
    from pathlib import Path
@@ -71,6 +75,8 @@ Features
    quickstart
    concepts/index
    tutorials/index
+   phase2/index
+   phase3/index
 
 .. toctree::
    :maxdepth: 2

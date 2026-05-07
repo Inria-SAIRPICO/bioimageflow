@@ -16,11 +16,11 @@ Install from PyPI
 This installs both ``bioimageflow`` (the orchestrator) and ``bioimageflow-core``
 (the zero-dependency core).
 
-Common tools package
---------------------
+Companion tool packages
+-----------------------
 
 The documentation imports source and processing tools (``Files``, ``Generate``,
-``ConvertImage``, ``ExtractChannel``, the merge tools, ...) from a layered
+``ExtractChannel``, ``Mosaic``, the merge tools, ...) from a layered
 companion package, ``bioimageflow-common-tools``. Installing it alongside the
 core library lets every example in the docs run without copy-pasting helper
 classes:
@@ -33,6 +33,25 @@ The package is **not** part of the core surface; it is a curated set of basic
 tools built on top of ``bioimageflow`` and ``bioimageflow-core``. Workflow
 authors are free to use it directly, write their own tools following the same
 patterns, or mix both.
+
+Image IO, segmentation, measurement, restoration, spot analysis, tracking, and
+SAIRPICO wrappers live in separate optional companion packages so heavier domain
+dependencies do not become canonical common-tool exports. Install the packages
+needed by the workflows you run:
+
+.. code-block:: bash
+
+   pip install bioimageflow-io-tools
+   pip install bioimageflow-measurement-tools
+   pip install bioimageflow-segmentation-tools
+   pip install bioimageflow-sairpico-tools
+   pip install bioimageflow-spot-tools
+   pip install bioimageflow-restoration-tools
+   pip install bioimageflow-tracking-tools
+
+The tutorials that import ``bioimageflow_io_tools`` or
+``bioimageflow_segmentation_tools`` require those corresponding packages in
+addition to ``bioimageflow-common-tools``.
 
 Install for development
 -----------------------

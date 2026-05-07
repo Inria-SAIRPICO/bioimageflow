@@ -18,7 +18,7 @@ from bioimageflow_core import (
 )
 
 stardist_env = EnvironmentSpec(
-    name="stardist",
+    name="segmentation-stardist",
     dependencies={
         "python": "3.12",
         "pip": ["tensorflow", "stardist==0.9.2", "imageio", "numpy", "tifffile"],
@@ -62,34 +62,64 @@ class StarDistSegmenter(ProcessingTool):
                 group="general",
             ),
         ] = "2D_versatile_fluo"
-        channel: Annotated[int, GUIMeta(
-            display_name="Channel",
-            description=(
-                "Channel index to segment for channel-first images. Ignored for "
-                "2D grayscale images and for the H&E RGB model."
+        channel: Annotated[
+            int,
+            GUIMeta(
+                display_name="Channel",
+                description=(
+                    "Channel index to segment for channel-first images. Ignored for "
+                    "2D grayscale images and for the H&E RGB model."
+                ),
+                min=0,
+                max=512,
+                step=1,
+                group="channels",
             ),
-            min=0, max=512, step=1, group="channels",
-        )] = 0
-        prob_thresh: Annotated[float | None, GUIMeta(
-            display_name="Probability threshold",
-            description="Optional object probability threshold. Leave empty for the model default.",
-            min=0.0, max=1.0, step=0.05, group="advanced",
-        )] = None
-        nms_thresh: Annotated[float | None, GUIMeta(
-            display_name="NMS threshold",
-            description="Optional non-maximum suppression threshold. Leave empty for the model default.",
-            min=0.0, max=1.0, step=0.05, group="advanced",
-        )] = None
-        normalize_low: Annotated[float, GUIMeta(
-            display_name="Normalize low percentile",
-            description="Lower percentile used by csbdeep normalization.",
-            min=0.0, max=100.0, step=0.5, group="advanced",
-        )] = 1.0
-        normalize_high: Annotated[float, GUIMeta(
-            display_name="Normalize high percentile",
-            description="Upper percentile used by csbdeep normalization.",
-            min=0.0, max=100.0, step=0.5, group="advanced",
-        )] = 99.8
+        ] = 0
+        prob_thresh: Annotated[
+            float | None,
+            GUIMeta(
+                display_name="Probability threshold",
+                description="Optional object probability threshold. Leave empty for the model default.",
+                min=0.0,
+                max=1.0,
+                step=0.05,
+                group="advanced",
+            ),
+        ] = None
+        nms_thresh: Annotated[
+            float | None,
+            GUIMeta(
+                display_name="NMS threshold",
+                description="Optional non-maximum suppression threshold. Leave empty for the model default.",
+                min=0.0,
+                max=1.0,
+                step=0.05,
+                group="advanced",
+            ),
+        ] = None
+        normalize_low: Annotated[
+            float,
+            GUIMeta(
+                display_name="Normalize low percentile",
+                description="Lower percentile used by csbdeep normalization.",
+                min=0.0,
+                max=100.0,
+                step=0.5,
+                group="advanced",
+            ),
+        ] = 1.0
+        normalize_high: Annotated[
+            float,
+            GUIMeta(
+                display_name="Normalize high percentile",
+                description="Upper percentile used by csbdeep normalization.",
+                min=0.0,
+                max=100.0,
+                step=0.5,
+                group="advanced",
+            ),
+        ] = 99.8
 
     class Outputs(IOModel):
         mask: Annotated[
@@ -103,10 +133,13 @@ class StarDistSegmenter(ProcessingTool):
                 description="Label image where each detected object has a unique integer ID.",
             ),
         ] = Template("{input_image.stem}_stardist_mask{ext}")
-        object_count: Annotated[int, GUIMeta(
-            display_name="Object count",
-            description="Number of non-background labels detected in the mask.",
-        )]
+        object_count: Annotated[
+            int,
+            GUIMeta(
+                display_name="Object count",
+                description="Number of non-background labels detected in the mask.",
+            ),
+        ]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from csbdeep.utils import normalize  # type: ignore
