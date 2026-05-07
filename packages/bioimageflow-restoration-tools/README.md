@@ -1,6 +1,6 @@
 # BioImageFlow Restoration Tools
 
-Phase 3 tools for image restoration baselines and synthetic benchmarking.
+Tools for image restoration baselines and synthetic benchmarking.
 
 ## Tools
 
@@ -11,4 +11,4 @@ Install scikit-image separately for evaluation runs that need the full restorati
 
 ## Example
 
-See `example-workflows/phase3_restoration_benchmark/workflow.py`.
+See `example-workflows/restoration_benchmark/workflow.py`.

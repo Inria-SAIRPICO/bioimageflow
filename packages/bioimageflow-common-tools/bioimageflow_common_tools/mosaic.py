@@ -15,6 +15,7 @@ from bioimageflow_core import (
     SCALAR_IMAGE_SEMANTICS,
     Template,
 )
+from bioimageflow_core.types import Layout, Semantic
 
 
 class Mosaic(ProcessingTool):
@@ -60,10 +61,18 @@ class Mosaic(ProcessingTool):
         )] = None
 
     class Outputs(IOModel):
-        mosaic_path: Annotated[Path, GUIMeta(
+        
+        mosaic_path: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.PLANAR_CHANNEL},
+            ),
+            GUIMeta(
             display_name="Mosaic image",
             description="Composite mosaic image (grid of all input tiles).",
-        )] = Template("{node_name}_mosaic.png")
+            ),
+        ] = Template("{node_name}_mosaic.png")
         image_count: Annotated[int, GUIMeta(
             display_name="Image count",
             description="Number of input tiles assembled in the mosaic.",

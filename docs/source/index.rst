@@ -75,8 +75,8 @@ Features
    quickstart
    concepts/index
    tutorials/index
-   phase2/index
-   phase3/index
+   priority_workflows/index
+   specialized_tool_workflows/index
 
 .. toctree::
    :maxdepth: 2

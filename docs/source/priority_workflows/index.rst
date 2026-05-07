@@ -1,13 +1,13 @@
-Phase 2 Workflows
-=================
+Priority Workflows
+==================
 
-Phase 2 adds runnable workflow examples around package-split imports, public
-benchmark structure, SAIRPICO command wrappers, and OME output normalization.
-The default test path uses tiny synthetic fixtures and avoids public downloads
-or heavyweight binaries.
+These runnable workflow examples cover package-split imports, public benchmark
+structure, SAIRPICO command wrappers, and OME output normalization. The default
+test path uses tiny synthetic fixtures and avoids public downloads or
+heavyweight binaries.
 
-.. image:: phase2_workflows.svg
-   :alt: Phase 2 workflow overview
+.. image:: priority_workflows.svg
+   :alt: Priority workflow overview
 
 FISH Analysis
 -------------

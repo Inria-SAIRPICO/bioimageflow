@@ -20,8 +20,8 @@ def _write_labels(data_dir: Path) -> Path:
     return label_path
 
 
-def build_workflow(storage_path: str = "./phase3_tracking_results") -> tuple[Workflow, object]:
-    """Build the Phase 3 tracking workflow."""
+def build_workflow(storage_path: str = "./tracking_analysis_results") -> tuple[Workflow, object]:
+    """Build the tracking workflow."""
     storage = Path(storage_path)
     label_path = _write_labels(storage / "data")
     wf = Workflow(storage_path=str(storage / "bif"))

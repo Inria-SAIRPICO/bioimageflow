@@ -7,9 +7,9 @@ from bioimageflow_restoration_tools import BenchmarkRestoration
 
 
 def build_workflow(
-    storage_path: str = "./phase3_restoration_results",
+    storage_path: str = "./restoration_benchmark_results",
 ) -> tuple[Workflow, object]:
-    """Build the Phase 3 restoration benchmark workflow."""
+    """Build the restoration benchmark workflow."""
     storage = Path(storage_path)
     wf = Workflow(storage_path=str(storage / "bif"))
     with wf:

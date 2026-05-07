@@ -13,21 +13,21 @@ def _load_module(path: Path):
     return module
 
 
-def test_phase3_example_workflows_execute(tmp_path: Path) -> None:
+def test_specialized_example_workflows_execute(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     examples = [
         (
-            root / "example-workflows" / "phase3_puncta" / "workflow.py",
+            root / "example-workflows" / "puncta_analysis" / "workflow.py",
             "summary_csv",
             {"summary_csv", "label_count"},
         ),
         (
-            root / "example-workflows" / "phase3_restoration_benchmark" / "workflow.py",
+            root / "example-workflows" / "restoration_benchmark" / "workflow.py",
             "metrics_csv",
             {"clean_image", "degraded_image", "restored_image", "metrics_csv"},
         ),
         (
-            root / "example-workflows" / "phase3_tracking" / "workflow.py",
+            root / "example-workflows" / "tracking_analysis" / "workflow.py",
             "metrics_csv",
             {"metrics_csv", "track_count", "mean_track_length"},
         ),

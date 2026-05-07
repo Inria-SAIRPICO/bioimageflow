@@ -1,6 +1,6 @@
 # BioImageFlow Spot Tools
 
-Phase 3 tools for puncta and spot quantification.
+Tools for puncta and spot quantification.
 
 ## Tools
 
@@ -12,4 +12,4 @@ Big-FISH is optional evaluation-only support and is not a normal package depende
 
 ## Example
 
-See `example-workflows/phase3_puncta/workflow.py` for a synthetic puncta workflow.
+See `example-workflows/puncta_analysis/workflow.py` for a synthetic puncta workflow.

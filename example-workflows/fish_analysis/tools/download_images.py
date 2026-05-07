@@ -57,7 +57,7 @@ class DownloadImages(ProcessingTool):
             description="URL from which the file was downloaded.",
         )]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import requests
 
         output_dir = Path(arguments.output_dir)

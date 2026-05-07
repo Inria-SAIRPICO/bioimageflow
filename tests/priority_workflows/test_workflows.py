@@ -207,7 +207,10 @@ def test_sairpico_command_construction_without_binaries(
 
 
 def test_bbbc038_public_data_path_is_documented() -> None:
-    docs = (Path(__file__).resolve().parents[2] / "docs/source/phase2/index.rst").read_text()
+    docs = (
+        Path(__file__).resolve().parents[2]
+        / "docs/source/priority_workflows/index.rst"
+    ).read_text()
     assert "BBBC038" in docs
     assert "Broad Bioimage" in docs
     assert "Benchmark Collection" in docs

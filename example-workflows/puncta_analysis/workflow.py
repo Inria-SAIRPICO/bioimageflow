@@ -25,8 +25,8 @@ def _write_inputs(data_dir: Path) -> tuple[Path, Path]:
     return image_path, labels_path
 
 
-def build_workflow(storage_path: str = "./phase3_puncta_results") -> tuple[Workflow, object]:
-    """Build the Phase 3 puncta workflow."""
+def build_workflow(storage_path: str = "./puncta_analysis_results") -> tuple[Workflow, object]:
+    """Build the puncta analysis workflow."""
     storage = Path(storage_path)
     image_path, labels_path = _write_inputs(storage / "data")
     wf = Workflow(storage_path=str(storage / "bif"))

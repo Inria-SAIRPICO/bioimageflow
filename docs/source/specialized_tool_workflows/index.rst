@@ -1,11 +1,11 @@
-Phase 3 Tool Packages
-=====================
+Specialized Tool Workflows
+==========================
 
-Phase 3 adds three lightweight tool packages and matching synthetic workflows.
-The default test path avoids public data and heavyweight optional libraries.
+These lightweight tool packages ship with matching synthetic workflows. The
+default test path avoids public data and heavyweight optional libraries.
 
-.. image:: phase3_workflows.svg
-   :alt: Phase 3 workflow overview
+.. image:: specialized_tool_workflows.svg
+   :alt: Specialized tool workflow overview
 
 Spot Tools
 ----------
@@ -42,6 +42,6 @@ Example Workflows
 
 The synthetic examples live under ``example-workflows``:
 
-* ``phase3_puncta``
-* ``phase3_restoration_benchmark``
-* ``phase3_tracking``
+* ``puncta_analysis``
+* ``restoration_benchmark``
+* ``tracking_analysis``

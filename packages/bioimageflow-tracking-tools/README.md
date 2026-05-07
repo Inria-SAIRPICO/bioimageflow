@@ -1,6 +1,6 @@
 # BioImageFlow Tracking Tools
 
-Phase 3 tools for label-stack object extraction and lightweight tracking.
+Tools for label-stack object extraction and lightweight tracking.
 
 ## Tools
 
@@ -12,4 +12,4 @@ btrack and LapTrack remain optional heavy integrations and are not normal packag
 
 ## Example
 
-See `example-workflows/phase3_tracking/workflow.py`.
+See `example-workflows/tracking_analysis/workflow.py`.
