@@ -10,6 +10,8 @@ Integrators trees.
    errors
    logging
    environments
+   tool_package_strategy
+   agent_tool_workflow_playbook
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.
