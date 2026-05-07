@@ -13,6 +13,7 @@ dev = [
     "bioimageflow-io-tools",
     "bioimageflow-measurement-tools",
     "bioimageflow-segmentation-tools",
+    "bioimageflow-sairpico-tools",
     "furo>=2025.12.19",
     "imageio",
     "numpy",
@@ -38,6 +39,7 @@ bioimageflow-core = { workspace = true }
 bioimageflow-io-tools = { workspace = true }
 bioimageflow-measurement-tools = { workspace = true }
 bioimageflow-segmentation-tools = { workspace = true }
+bioimageflow-sairpico-tools = { workspace = true }
 
 [tool.pytest.ini_options]
 filterwarnings = []
