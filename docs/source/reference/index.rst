@@ -12,6 +12,7 @@ Integrators trees.
    environments
    tool_package_strategy
    agent_tool_workflow_playbook
+   segmentation_tools
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.

@@ -291,7 +291,7 @@ class TestMiniPipeline:
             ch_refs = ExtractChannel()(
                 input_image=files["path"], channel=1, name="ch_refs"
             )
-            # Re-tag as LABEL (simulating ConnectedComponents/CellposeSAM)
+            # Re-tag as LABEL (simulating segmentation label producers)
             labeled_spots = StubLabeler()(
                 input_image=ch_spots["output_image"], name="label_spots"
             )

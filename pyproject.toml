@@ -12,6 +12,7 @@ dev = [
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
     "bioimageflow-measurement-tools",
+    "bioimageflow-segmentation-tools",
     "furo>=2025.12.19",
     "imageio",
     "numpy",
@@ -23,6 +24,7 @@ dev = [
     "sphinx-copybutton>=0.5.2",
     "myst-parser>=4.0.0",
     "ruff>=0.15.7",
+    "scikit-image",
     "ipython>=8.38.0",
 ]
 
@@ -35,6 +37,7 @@ bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
 bioimageflow-io-tools = { workspace = true }
 bioimageflow-measurement-tools = { workspace = true }
+bioimageflow-segmentation-tools = { workspace = true }
 
 [tool.pytest.ini_options]
 filterwarnings = []
