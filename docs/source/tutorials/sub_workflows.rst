@@ -199,3 +199,19 @@ class on disk) can use :meth:`SubWorkflow.from_config`, which
 materialises a ``SubWorkflow`` from a JSON dict — see specs.md §14.11.
 Workflow-author scripts should write a normal subclass instead; the
 config form is targeted at platform code.
+
+Validation data
+---------------
+
+Reusable workflows must be validated on data that future maintainers can run.
+Use one of these sources:
+
+- Public example data with a stable license and a documented download path.
+- Small committed fixtures derived from public data.
+- Synthetic data generated inside the test, with deterministic seeds.
+
+Do not use private lab data, local absolute paths, or downloaded files that
+are not reproducible. A workflow test should build the graph, verify the
+public ``Inputs`` / ``Outputs`` contract, execute the smallest useful case,
+and assert on observable outputs rather than only checking that the workflow
+does not raise.

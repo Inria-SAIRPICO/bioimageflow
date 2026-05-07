@@ -64,6 +64,32 @@ Keep workflow-local tools small and explicit:
   of the tool behavior. Large models, binaries, downloaded datasets, or
   generated artifacts should be downloaded, declared as
   environment/package dependencies, or produced at runtime.
+- Add tests for every workflow-local tool before relying on it in a
+  workflow. At minimum, cover input validation, output schema, one tiny
+  successful execution, and expected failures for invalid parameters or
+  missing files.
+
+Authoring process
+^^^^^^^^^^^^^^^^^
+
+Use a test-first loop for each new tool:
+
+1. Write a failing test that describes the smallest useful behavior.
+2. Define ``Inputs`` and ``Outputs`` with serializable standard-library
+   types and BioImageFlow metadata only.
+3. Implement the simplest execution path using tiny committed fixtures or
+   synthetic arrays.
+4. Add failure tests for invalid inputs, missing dependencies, and
+   unsupported image types.
+5. Run the tool inside a one-node ``Workflow`` so cache paths, output
+   templates, and returned ``Outputs`` are exercised.
+
+Tool code must respect the process boundary. A ``ProcessingTool`` runs in
+its declared worker environment; put heavy or tool-specific imports inside
+``process_row`` or ``process_batch``. Module-level imports are limited to
+the Python standard library and ``bioimageflow-core``. Use
+``DataFrameTool`` only for main-process table operations that need pandas
+or whole-dataframe context.
 
 ProcessingTool
 --------------
@@ -103,6 +129,11 @@ Minimal example
            out = gaussian(img, sigma=arguments.sigma)
            imsave(str(arguments.blurred), out)
            return self.Outputs(blurred=arguments.blurred)
+
+The ``skimage`` imports are inside ``process_row`` because they belong to
+the worker environment declared by the tool. This keeps schema discovery,
+documentation generation, workflow loading, and GUI inspection from failing
+when the worker-only dependency is not installed in the main process.
 
 Anatomy:
 
@@ -404,3 +435,16 @@ Multiple tools can share the same environment:
 The framework validates that all tools sharing an environment name declare
 identical dependencies. Mismatches raise
 :class:`~bioimageflow_core.EnvironmentMismatchError`.
+
+Documentation and images
+------------------------
+
+Every reusable tool or workflow must have author-facing documentation and
+tests in the same change. Keep examples runnable with the current package
+layout and current public APIs; do not document legacy import paths.
+
+Use images sparingly and commit them under ``docs/images/`` when they are
+needed to explain a workflow, UI state, or expected output. Prefer small
+PNG or WebP files generated from public-domain, permissively licensed, or
+synthetic data. Do not commit private microscopy data, large raw images,
+generated cache directories, or screenshots that cannot be regenerated.
