@@ -77,7 +77,7 @@ bioimageflow-common-tools
 A third, **layered** package — ``bioimageflow_common_tools`` — ships the
 canonical source tools (``Files``, ``Generate``) and the basic processing
 tools used throughout the documentation (``ConvertImage``, ``ExtractChannel``,
-``CellposeSAM``, the merge tools, ...). It depends on ``bioimageflow`` and
+the merge tools, ...). It depends on ``bioimageflow`` and
 ``bioimageflow-core``; it is not imported by either of them.
 
 The docs use it freely so examples are short and runnable. Workflow authors

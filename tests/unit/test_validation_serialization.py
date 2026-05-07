@@ -613,7 +613,7 @@ def test_common_tool_serializes_to_json(tool_cls: type) -> None:
 
 
 def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths() -> None:
-    from bioimageflow_common_tools import Atlas, LabelOverlaps, Mosaic, StarDistSegmenter
+    from bioimageflow_common_tools import Atlas, LabelOverlaps, Mosaic
 
     atlas_inputs = serialize_input_schema(Atlas)
     atlas_outputs = serialize_output_schema(Atlas)
@@ -624,11 +624,6 @@ def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths()
     mosaic_outputs = serialize_output_schema(Mosaic)
     assert mosaic_inputs["input_image"]["type"] == "ImageFile"
     assert mosaic_outputs["mosaic_path"]["type"] == "Path"
-
-    stardist_inputs = serialize_input_schema(StarDistSegmenter)
-    stardist_outputs = serialize_output_schema(StarDistSegmenter)
-    assert stardist_inputs["input_image"]["type"] == "ImageFile"
-    assert stardist_outputs["mask"]["type"] == "ImageFile"
 
     label_outputs = serialize_output_schema(LabelOverlaps)
     assert label_outputs["reference_label"]["type"] == "int"

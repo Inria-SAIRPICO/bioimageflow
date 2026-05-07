@@ -48,8 +48,9 @@ that environment:
 .. code-block:: python
 
    from bioimageflow_core import GENERAL_ENV
+   from bioimageflow_segmentation_tools import Cellpose3
 
-   cellpose = CellposeSAM()                  # has its own EnvironmentSpec
+   cellpose = Cellpose3()                    # has its own EnvironmentSpec
    filter_tool = FilterByArea()              # uses GENERAL_ENV
 
    with Workflow(max_workers=4) as wf:

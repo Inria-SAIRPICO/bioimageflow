@@ -10,6 +10,7 @@ Integrators trees.
    errors
    logging
    environments
+   segmentation_tools
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.

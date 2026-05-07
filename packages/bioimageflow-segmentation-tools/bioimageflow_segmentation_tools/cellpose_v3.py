@@ -18,7 +18,7 @@ from bioimageflow_core import (
 )
 
 cellpose_v3_env = EnvironmentSpec(
-    name="cellpose-v3-3-1-1",
+    name="segmentation-cellpose-v3-3-1-1",
     dependencies={
         "python": "3.12",
         "pip": ["cellpose==3.1.1.1", "imageio", "numpy", "packaging", "tifffile"],
@@ -51,48 +51,84 @@ class Cellpose3(ProcessingTool):
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
-        diameter: Annotated[float, GUIMeta(
-            display_name="Object diameter",
-            description="Approximate object diameter in pixels. Set to 0 for Cellpose size estimation.",
-            min=0.0, max=500.0, step=0.5, group="general",
-        )] = 0.0
-        model_type: Annotated[str, GUIMeta(
-            display_name="Model",
-            description="Cellpose v3 pretrained model name, for example 'cyto3' or 'nuclei'.",
-            group="general",
-        )] = "cyto3"
-        channel: Annotated[int, GUIMeta(
-            display_name="Segmentation channel",
-            description=(
-                "Cellpose channel selector: 0 means grayscale/current image; "
-                "1 red, 2 green, 3 blue for RGB-like inputs."
+        diameter: Annotated[
+            float,
+            GUIMeta(
+                display_name="Object diameter",
+                description=(
+                    "Approximate object diameter in pixels. Set to 0 for "
+                    "Cellpose size estimation."
+                ),
+                min=0.0,
+                max=500.0,
+                step=0.5,
+                group="general",
             ),
-            min=0, max=3, step=1, group="channels",
-        )] = 0
-        nuclear_channel: Annotated[int, GUIMeta(
-            display_name="Nuclear channel",
-            description=(
-                "Optional nuclear channel selector for cytoplasm models. "
-                "Use 0 when no nuclear channel should be supplied."
+        ] = 0.0
+        model_type: Annotated[
+            str,
+            GUIMeta(
+                display_name="Model",
+                description="Cellpose v3 pretrained model name, for example 'cyto3' or 'nuclei'.",
+                group="general",
             ),
-            min=0, max=3, step=1, group="channels",
-        )] = 0
-        flow_threshold: Annotated[float, GUIMeta(
-            display_name="Flow threshold",
-            description=(
-                "Maximum allowed flow reconstruction error. Increase to keep "
-                "more ROIs; decrease to reject more ill-shaped ROIs."
+        ] = "cyto3"
+        channel: Annotated[
+            int,
+            GUIMeta(
+                display_name="Segmentation channel",
+                description=(
+                    "Cellpose channel selector: 0 means grayscale/current image; "
+                    "1 red, 2 green, 3 blue for RGB-like inputs."
+                ),
+                min=0,
+                max=3,
+                step=1,
+                group="channels",
             ),
-            min=0.0, max=1.0, step=0.05, group="advanced",
-        )] = 0.4
-        cellprob_threshold: Annotated[float, GUIMeta(
-            display_name="Cell probability threshold",
-            description=(
-                "Threshold for Cellpose's cell-probability output. Lower values "
-                "usually return more ROIs; higher values return fewer ROIs."
+        ] = 0
+        nuclear_channel: Annotated[
+            int,
+            GUIMeta(
+                display_name="Nuclear channel",
+                description=(
+                    "Optional nuclear channel selector for cytoplasm models. "
+                    "Use 0 when no nuclear channel should be supplied."
+                ),
+                min=0,
+                max=3,
+                step=1,
+                group="channels",
             ),
-            min=-6.0, max=6.0, step=0.5, group="advanced",
-        )] = 0.0
+        ] = 0
+        flow_threshold: Annotated[
+            float,
+            GUIMeta(
+                display_name="Flow threshold",
+                description=(
+                    "Maximum allowed flow reconstruction error. Increase to keep "
+                    "more ROIs; decrease to reject more ill-shaped ROIs."
+                ),
+                min=0.0,
+                max=1.0,
+                step=0.05,
+                group="advanced",
+            ),
+        ] = 0.4
+        cellprob_threshold: Annotated[
+            float,
+            GUIMeta(
+                display_name="Cell probability threshold",
+                description=(
+                    "Threshold for Cellpose's cell-probability output. Lower values "
+                    "usually return more ROIs; higher values return fewer ROIs."
+                ),
+                min=-6.0,
+                max=6.0,
+                step=0.5,
+                group="advanced",
+            ),
+        ] = 0.0
 
     class Outputs(IOModel):
         mask: Annotated[
@@ -106,10 +142,13 @@ class Cellpose3(ProcessingTool):
                 description="Label image where each detected object has a unique integer ID.",
             ),
         ] = Template("{input_image.stem}_cellpose3_mask{ext}")
-        cell_count: Annotated[int, GUIMeta(
-            display_name="Object count",
-            description="Number of non-background labels detected in the mask.",
-        )]
+        cell_count: Annotated[
+            int,
+            GUIMeta(
+                display_name="Object count",
+                description="Number of non-background labels detected in the mask.",
+            ),
+        ]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from cellpose import models  # type: ignore
