@@ -71,6 +71,7 @@ Features
    quickstart
    concepts/index
    tutorials/index
+   phase3/index
 
 .. toctree::
    :maxdepth: 2

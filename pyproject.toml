@@ -10,6 +10,9 @@ dependencies = [
 dev = [
     "bioimageflow",
     "bioimageflow-common-tools",
+    "bioimageflow-restoration-tools",
+    "bioimageflow-spot-tools",
+    "bioimageflow-tracking-tools",
     "furo>=2025.12.19",
     "imageio",
     "numpy",
@@ -31,9 +34,13 @@ members = ["packages/*"]
 bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
+bioimageflow-restoration-tools = { workspace = true }
+bioimageflow-spot-tools = { workspace = true }
+bioimageflow-tracking-tools = { workspace = true }
 
 [tool.pytest.ini_options]
 filterwarnings = []
 markers = [
     "wetlands: tests that execute real Wetlands worker processes",
+    "slow: optional public-data or heavy dependency tests",
 ]
