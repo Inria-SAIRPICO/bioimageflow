@@ -1,8 +1,6 @@
 from pathlib import Path
 
 import importlib.util
-import subprocess
-
 import imageio.v3 as iio
 import numpy as np
 import pandas as pd
@@ -104,8 +102,8 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     module = _load_module(_example("sairpico_restoration_smoke"))
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[object]) -> None:
+        command = [str(value) for value in command]
         calls.append(command)
         output = Path(command[command.index("-o") + 1])
         input_path = Path(command[command.index("-i") + 1])
@@ -119,7 +117,10 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
         else:
             output.touch()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setitem(module.MedianDenoising.process_row.__globals__, "_run", fake_run)
+    monkeypatch.setitem(
+        module.RichardsonLucyDeconvolution.process_row.__globals__, "_run", fake_run
+    )
 
     wf, terminal = module.build_workflow(storage_path=str(tmp_path / "sairpico"))
     assert {
@@ -142,11 +143,13 @@ def test_sairpico_command_construction_without_binaries(
 ) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
-        calls.append(command)
+    def fake_run(command: list[object]) -> None:
+        calls.append([str(value) for value in command])
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setitem(MedianDenoising.process_row.__globals__, "_run", fake_run)
+    monkeypatch.setitem(
+        RichardsonLucyDeconvolution.process_row.__globals__, "_run", fake_run
+    )
     image = tmp_path / "input.tif"
     image.touch()
 
