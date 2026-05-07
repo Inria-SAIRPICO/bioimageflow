@@ -50,7 +50,7 @@ def test_common_package_no_longer_contains_canonical_segmentation_modules() -> N
 
 class TestCellpose3:
     def test_environment_pins_cellpose_v3(self) -> None:
-        assert cellpose_v3_env.name == "cellpose-v3-3-1-1"
+        assert cellpose_v3_env.name == "segmentation-cellpose-v3-3-1-1"
         assert "cellpose==3.1.1.1" in cellpose_v3_env.dependencies["pip"]
         assert "packaging" in cellpose_v3_env.dependencies["pip"]
         assert Cellpose3.environment is cellpose_v3_env
@@ -100,7 +100,7 @@ class TestCellpose3:
 
 class TestStarDistSegmenter:
     def test_environment_pins_stardist(self) -> None:
-        assert stardist_env.name == "stardist"
+        assert stardist_env.name == "segmentation-stardist"
         assert "stardist==0.9.2" in stardist_env.dependencies["pip"]
         assert "tensorflow" in stardist_env.dependencies["pip"]
         assert StarDistSegmenter.environment is stardist_env

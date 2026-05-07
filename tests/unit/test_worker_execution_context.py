@@ -1,6 +1,7 @@
 """Worker-side forwarding of ExecutionContext."""
 
 import json
+import sys
 
 from bioimageflow_core.worker import run_process_batch, run_process_row
 
@@ -89,6 +90,10 @@ class BatchContextTool(ProcessingTool):
 
 
 def test_worker_loads_tool_package_with_relative_imports(tmp_path):
+    for module_name in list(sys.modules):
+        if module_name == "tools" or module_name.startswith("tools."):
+            sys.modules.pop(module_name, None)
+
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
     (tools_dir / "__init__.py").write_text("", encoding="utf-8")
