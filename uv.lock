@@ -19,6 +19,7 @@ members = [
     "bioimageflow",
     "bioimageflow-common-tools",
     "bioimageflow-core",
+    "bioimageflow-sairpico-tools",
     "bioimageflow-workspace",
 ]
 
@@ -140,6 +141,21 @@ version = "0.1.4"
 source = { editable = "packages/bioimageflow-core" }
 
 [[package]]
+name = "bioimageflow-sairpico-tools"
+version = "0.1.0"
+source = { editable = "packages/bioimageflow-sairpico-tools" }
+dependencies = [
+    { name = "bioimageflow" },
+    { name = "bioimageflow-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bioimageflow", editable = "packages/bioimageflow" },
+    { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+]
+
+[[package]]
 name = "bioimageflow-workspace"
 version = "0.0.1"
 source = { virtual = "." }
@@ -151,6 +167,7 @@ dependencies = [
 dev = [
     { name = "bioimageflow" },
     { name = "bioimageflow-common-tools" },
+    { name = "bioimageflow-sairpico-tools" },
     { name = "furo" },
     { name = "imageio" },
     { name = "ipython", version = "8.38.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -182,6 +199,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 dev = [
     { name = "bioimageflow", editable = "packages/bioimageflow" },
     { name = "bioimageflow-common-tools", editable = "packages/bioimageflow-common-tools" },
+    { name = "bioimageflow-sairpico-tools", editable = "packages/bioimageflow-sairpico-tools" },
     { name = "furo", specifier = ">=2025.12.19" },
     { name = "imageio" },
     { name = "ipython", specifier = ">=8.38.0" },
