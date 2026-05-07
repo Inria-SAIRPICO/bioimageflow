@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.node import Node
-from bioimageflow_common_tools import Files, Generate, Atlas, Mosaic, CrossJoin
+from bioimageflow_common_tools import CrossJoin, Files, Generate, Mosaic
+from bioimageflow_common_tools.atlas import Atlas
 
 
 def build_parameter_space_workflow(

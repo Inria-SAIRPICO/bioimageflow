@@ -1,0 +1,18 @@
+[project]
+name = "bioimageflow-io-tools"
+version = "0.1.0"
+description = "Lightweight image IO tools for BioImageFlow"
+requires-python = ">=3.10"
+dependencies = [
+    "bioimageflow-core>=0.1.4",
+    "imageio",
+    "numpy",
+    "tifffile",
+]
+
+[tool.uv.sources]
+bioimageflow-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

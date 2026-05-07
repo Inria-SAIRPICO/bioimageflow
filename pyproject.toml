@@ -10,6 +10,8 @@ dependencies = [
 dev = [
     "bioimageflow",
     "bioimageflow-common-tools",
+    "bioimageflow-io-tools",
+    "bioimageflow-measurement-tools",
     "furo>=2025.12.19",
     "imageio",
     "numpy",
@@ -31,6 +33,8 @@ members = ["packages/*"]
 bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
+bioimageflow-io-tools = { workspace = true }
+bioimageflow-measurement-tools = { workspace = true }
 
 [tool.pytest.ini_options]
 filterwarnings = []

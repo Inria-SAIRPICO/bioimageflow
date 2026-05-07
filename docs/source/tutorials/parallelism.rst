@@ -49,7 +49,7 @@ that environment:
 
    from bioimageflow_core import GENERAL_ENV
 
-   cellpose = CellposeSAM()                  # has its own EnvironmentSpec
+   cellpose = Cellpose3()                    # has its own EnvironmentSpec
    filter_tool = FilterByArea()              # uses GENERAL_ENV
 
    with Workflow(max_workers=4) as wf:

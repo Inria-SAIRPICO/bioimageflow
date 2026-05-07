@@ -14,7 +14,7 @@ that combination is also repeated twice.
 
 Pipeline topology (sub-workflows shown as boxes)::
 
-  DownloadImages → ConvertImage ─┬────────────────────────────────────────┐
+  DownloadImages → ReadImage ────┬────────────────────────────────────────┐
                                  │                                        │
                                  ├── ┌─SpotAnalysis(ch0, FOLS2)─────────┐ │
                                  │   │ SpotDetection → LabelOverlaps    │ │
@@ -24,7 +24,7 @@ Pipeline topology (sub-workflows shown as boxes)::
                                  │   │ SpotDetection → LabelOverlaps    │ │
                                  │   └──────────────────────────────────-┘ │
                                  │                                        │
-                                 └── CellposeSAM (ch2, nuclei) ──────────┘
+                                 └── Cellpose3 (ch2, nuclei) ────────────┘
                                                                    │
                               AverageSpotsPerNucleus(FOLS2 overlaps, CSF1R overlaps)
 
@@ -45,7 +45,8 @@ from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
-from bioimageflow_common_tools import CellposeSAM, ConvertImage
+from bioimageflow_io_tools import ReadImage
+from bioimageflow_segmentation_tools import Cellpose3
 
 # Workflow-specific tools (shared with the original fish_analysis)
 _fish_dir = str(Path(__file__).resolve().parent.parent / "fish_analysis")
@@ -107,16 +108,16 @@ def build_fish_workflow(
         )
 
         # -- 2. Preprocessing --
-        converted = ConvertImage()(
+        converted = ReadImage()(
             input_image=download["path"],
-            name="convert_image",
+            name="read_image",
         )
 
         # -- 3. Nuclei segmentation (channel 2) --
-        nuclei = CellposeSAM()(
+        nuclei = Cellpose3()(
             input_image=converted["output_image"],
             model_type="nuclei",
-            name="cellpose_nuclei",
+            name="cellpose3_nuclei",
         )
 
         # -- 4. Spot analysis for each channel --

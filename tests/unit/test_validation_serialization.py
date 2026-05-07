@@ -613,24 +613,23 @@ def test_common_tool_serializes_to_json(tool_cls: type) -> None:
 
 
 def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths() -> None:
-    from bioimageflow_common_tools import Atlas, LabelOverlaps, Mosaic, StarDistSegmenter
-
-    atlas_inputs = serialize_input_schema(Atlas)
-    atlas_outputs = serialize_output_schema(Atlas)
-    assert atlas_inputs["input_image"]["type"] == "ImageFile"
-    assert atlas_outputs["output_image"]["type"] == "ImageFile"
+    from bioimageflow_common_tools import LabelOverlaps, Mosaic
+    from bioimageflow_common_tools.connected_components import ConnectedComponents
 
     mosaic_inputs = serialize_input_schema(Mosaic)
     mosaic_outputs = serialize_output_schema(Mosaic)
     assert mosaic_inputs["input_image"]["type"] == "ImageFile"
     assert mosaic_outputs["mosaic_path"]["type"] == "Path"
 
-    stardist_inputs = serialize_input_schema(StarDistSegmenter)
-    stardist_outputs = serialize_output_schema(StarDistSegmenter)
-    assert stardist_inputs["input_image"]["type"] == "ImageFile"
-    assert stardist_outputs["mask"]["type"] == "ImageFile"
+    connected_components_inputs = serialize_input_schema(ConnectedComponents)
+    connected_components_outputs = serialize_output_schema(ConnectedComponents)
+    assert connected_components_inputs["input_image"]["type"] == "ImageFile"
+    assert connected_components_outputs["output_image"]["type"] == "ImageFile"
 
+    label_inputs = serialize_input_schema(LabelOverlaps)
     label_outputs = serialize_output_schema(LabelOverlaps)
+    assert label_inputs["label_image"]["type"] == "ImageFile"
+    assert label_inputs["reference_image"]["type"] == "ImageFile"
     assert label_outputs["reference_label"]["type"] == "int"
     assert label_outputs["spot_label"]["type"] == "int"
     assert label_outputs["overlap_count"]["type"] == "int"

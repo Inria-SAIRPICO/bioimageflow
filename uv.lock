@@ -19,6 +19,8 @@ members = [
     "bioimageflow",
     "bioimageflow-common-tools",
     "bioimageflow-core",
+    "bioimageflow-io-tools",
+    "bioimageflow-measurement-tools",
     "bioimageflow-workspace",
 ]
 
@@ -140,6 +142,50 @@ version = "0.1.4"
 source = { editable = "packages/bioimageflow-core" }
 
 [[package]]
+name = "bioimageflow-io-tools"
+version = "0.1.0"
+source = { editable = "packages/bioimageflow-io-tools" }
+dependencies = [
+    { name = "bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy" },
+    { name = "tifffile" },
+]
+
+[[package]]
+name = "bioimageflow-measurement-tools"
+version = "0.1.0"
+source = { editable = "packages/bioimageflow-measurement-tools" }
+dependencies = [
+    { name = "bioimageflow" },
+    { name = "bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bioimageflow", editable = "packages/bioimageflow" },
+    { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
+
+[[package]]
 name = "bioimageflow-workspace"
 version = "0.0.1"
 source = { virtual = "." }
@@ -151,6 +197,8 @@ dependencies = [
 dev = [
     { name = "bioimageflow" },
     { name = "bioimageflow-common-tools" },
+    { name = "bioimageflow-io-tools" },
+    { name = "bioimageflow-measurement-tools" },
     { name = "furo" },
     { name = "imageio" },
     { name = "ipython", version = "8.38.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -182,6 +230,8 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 dev = [
     { name = "bioimageflow", editable = "packages/bioimageflow" },
     { name = "bioimageflow-common-tools", editable = "packages/bioimageflow-common-tools" },
+    { name = "bioimageflow-io-tools", editable = "packages/bioimageflow-io-tools" },
+    { name = "bioimageflow-measurement-tools", editable = "packages/bioimageflow-measurement-tools" },
     { name = "furo", specifier = ">=2025.12.19" },
     { name = "imageio" },
     { name = "ipython", specifier = ">=8.38.0" },

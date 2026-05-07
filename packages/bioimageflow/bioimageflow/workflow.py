@@ -1296,6 +1296,8 @@ _LIBRARY_MODULE_PREFIXES = (
     "bioimageflow",
     "bioimageflow_core",
     "bioimageflow_common_tools",
+    "bioimageflow_io_tools",
+    "bioimageflow_measurement_tools",
 )
 _CUSTOM_TOOLS_PACKAGE = "tools"
 _CUSTOM_TOOL_EXCLUDED_DIRS = {"__pycache__", ".pytest_cache"}

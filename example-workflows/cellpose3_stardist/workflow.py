@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.node import Node
-from bioimageflow_common_tools import Cellpose3, ExtractChannel, Files, StarDistSegmenter
+from bioimageflow_common_tools import ExtractChannel, Files
+from bioimageflow_segmentation_tools import Cellpose3, StarDistSegmenter
 
 
 def build_segmentation_workflow(
