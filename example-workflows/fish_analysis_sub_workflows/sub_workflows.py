@@ -25,10 +25,10 @@ from bioimageflow.sub_workflow import SubWorkflow
 
 from bioimageflow_common_tools import (
     ExtractChannel,
-    Atlas,
     ConnectedComponents,
     LabelOverlaps,
 )
+from bioimageflow_common_tools.atlas import Atlas
 
 
 # ---------------------------------------------------------------------------

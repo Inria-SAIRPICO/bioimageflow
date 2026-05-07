@@ -20,7 +20,7 @@ Common tools package
 --------------------
 
 The documentation imports source and processing tools (``Files``, ``Generate``,
-``ConvertImage``, ``ExtractChannel``, the merge tools, ...) from a layered
+``ExtractChannel``, ``Mosaic``, the merge tools, ...) from a layered
 companion package, ``bioimageflow-common-tools``. Installing it alongside the
 core library lets every example in the docs run without copy-pasting helper
 classes:
@@ -33,6 +33,10 @@ The package is **not** part of the core surface; it is a curated set of basic
 tools built on top of ``bioimageflow`` and ``bioimageflow-core``. Workflow
 authors are free to use it directly, write their own tools following the same
 patterns, or mix both.
+
+Image IO and segmentation tools live in separate companion packages such as
+``bioimageflow-io-tools`` and ``bioimageflow-segmentation-tools`` so heavier
+domain dependencies do not become canonical common-tool exports.
 
 Install for development
 -----------------------

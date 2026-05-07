@@ -21,9 +21,9 @@ Output: average number of FOLS2 and CSF1R spots per nucleus per image.
 
 Pipeline topology:
 
-  DownloadImages → ConvertImage → ┬─ ExtractChannel(ch0) → Atlas → ConnectedComponents ─┐
+  DownloadImages → ReadImage ─┬─ ExtractChannel(ch0) → Atlas → ConnectedComponents ─┐
                                   ├─ ExtractChannel(ch1) → Atlas → ConnectedComponents ─┤
-                                  └─ ExtractChannel(ch2) → CellposeSAM ────────────────┤
+                                  └─ ExtractChannel(ch2) → Cellpose3 ──────────────────┤
                                                                                         │
                              LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────┤
                              LabelOverlaps(CSF1R spots vs nuclei) ◄─────────────────────┘
@@ -37,13 +37,13 @@ from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 
 from bioimageflow_common_tools import (
-    ConvertImage,
     ExtractChannel,
-    Atlas,
     ConnectedComponents,
-    CellposeSAM,
     LabelOverlaps,
 )
+from bioimageflow_common_tools.atlas import Atlas
+from bioimageflow_io_tools import ReadImage
+from bioimageflow_segmentation_tools import Cellpose3
 
 # Workflow-specific tools
 from tools.download_images import DownloadImages
@@ -86,9 +86,9 @@ def build_fish_workflow(
         )
 
         # -- 2. Preprocessing --
-        converted = ConvertImage()(
+        converted = ReadImage()(
             input_image=download["path"],
-            name="convert_image",
+            name="read_image",
         )
 
         # -- 3. Channel extraction (3 parallel branches) --
@@ -125,10 +125,10 @@ def build_fish_workflow(
         )
 
         # -- 5. Nuclei segmentation (channel 2) --
-        nuclei = CellposeSAM()(
+        nuclei = Cellpose3()(
             input_image=ch_nuclei["output_image"],
             model_type="nuclei",
-            name="cellpose_nuclei",
+            name="cellpose3_nuclei",
         )
 
         # -- 6. Spatial correlation --
