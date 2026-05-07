@@ -148,6 +148,47 @@ class TestBuildIOModel:
         assert isinstance(spec, ImageSpec)
         assert Semantic.INTENSITY in spec.semantics
 
+    def test_path_with_null_image_spec_is_plain_path(self):
+        """Path fields with null image_spec stay plain Path."""
+        cls = _build_iomodel("PathIO", {
+            "image": {"type": "Path", "image_spec": None},
+        })
+        ann = cls._get_all_annotations()
+        assert ann["image"] is Path
+
+    def test_image_file_with_missing_image_spec(self):
+        """ImageFile fields with missing image_spec use an empty ImageSpec."""
+        cls = _build_iomodel("ImgIO", {
+            "image": {"type": "ImageFile"},
+        })
+        ann = cls._get_all_annotations()
+        assert get_origin(ann["image"]) is Annotated
+        base, spec = get_args(ann["image"])
+        assert base is Path
+        assert isinstance(spec, ImageSpec)
+        assert spec.semantics == frozenset()
+        assert spec.layouts == frozenset()
+
+    def test_image_file_with_null_image_spec(self):
+        """ImageFile fields with null image_spec use an empty ImageSpec."""
+        cls = _build_iomodel("ImgIO", {
+            "image": {"type": "ImageFile", "image_spec": None},
+        })
+        ann = cls._get_all_annotations()
+        assert get_origin(ann["image"]) is Annotated
+        base, spec = get_args(ann["image"])
+        assert base is Path
+        assert isinstance(spec, ImageSpec)
+        assert spec.semantics == frozenset()
+        assert spec.layouts == frozenset()
+
+    def test_image_spec_must_be_dict_or_null(self):
+        """Malformed falsey image_spec values are not silently accepted."""
+        with pytest.raises(TypeError, match="image_spec must be a dict or null"):
+            _build_iomodel("BadIO", {
+                "image": {"type": "ImageFile", "image_spec": []},
+            })
+
     def test_image_spec_with_layouts(self):
         """image_spec with layouts produces correct ImageSpec."""
         cls = _build_iomodel("LayoutIO", {
@@ -252,6 +293,34 @@ class TestFromConfig:
         config = _single_seg_config()
         sw = SubWorkflow.from_config(config)
         assert sw._config == config  # type: ignore[attr-defined]
+
+    def test_gui_interface_accepts_image_file_alias_and_null_path_spec(self):
+        """GUI-style ImageFile and null Path image_spec build valid interfaces."""
+        config = {
+            "name": "gui_interface",
+            "inputs": {
+                "image": {"type": "Path", "image_spec": None},
+            },
+            "outputs": {
+                "mask": {"type": "ImageFile", "image_spec": None},
+            },
+            "nodes": [],
+            "output_mapping": {
+                "mask": {"from_node": "seg", "column": "mask"},
+            },
+        }
+
+        sw = SubWorkflow.from_config(config)
+
+        input_ann = sw.Inputs._get_all_annotations()["image"]
+        output_ann = sw.Outputs._get_all_annotations()["mask"]  # type: ignore[union-attr]
+        assert input_ann is Path
+        assert get_origin(output_ann) is Annotated
+        base, spec = get_args(output_ann)
+        assert base is Path
+        assert isinstance(spec, ImageSpec)
+        assert spec.semantics == frozenset()
+        assert spec.layouts == frozenset()
 
 
 # ===========================================================================

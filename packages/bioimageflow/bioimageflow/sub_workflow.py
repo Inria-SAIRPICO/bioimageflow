@@ -344,11 +344,16 @@ _TYPE_MAP: dict[str, type] = {
     "str": str,
     "bool": bool,
     "Path": Path,
+    "ImageFile": Path,
 }
 
 
-def _build_image_spec(spec_config: dict[str, Any]) -> ImageSpec:
+def _build_image_spec(spec_config: dict[str, Any] | None) -> ImageSpec:
     """Build an ImageSpec from a config dict."""
+    if spec_config is None:
+        spec_config = {}
+    if not isinstance(spec_config, dict):
+        raise TypeError("image_spec must be a dict or null")
     return ImageSpec(
         semantics={Semantic(s) for s in spec_config.get("semantics", [])},
         layouts={Layout(layout) for layout in spec_config.get("layouts", [])},
@@ -378,9 +383,14 @@ def _build_iomodel(name: str, fields_config: dict[str, Any]) -> type[IOModel]:
     namespace: dict[str, Any] = {"__annotations__": annotations}
 
     for field_name, field_def in fields_config.items():
-        base_type = _TYPE_MAP[field_def["type"]]
-        if "image_spec" in field_def:
-            spec = _build_image_spec(field_def["image_spec"])
+        field_type = field_def["type"]
+        base_type = _TYPE_MAP[field_type]
+        image_spec_config = field_def.get("image_spec")
+        if field_type == "ImageFile":
+            spec = _build_image_spec(image_spec_config)
+            annotations[field_name] = Annotated[base_type, spec]
+        elif image_spec_config is not None:
+            spec = _build_image_spec(image_spec_config)
             annotations[field_name] = Annotated[base_type, spec]
         else:
             annotations[field_name] = base_type

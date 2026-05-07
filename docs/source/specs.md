@@ -2974,11 +2974,13 @@ these published fields on the outer `SubWorkflowNode`.
 
 | Key          | Type   | Required | Description                                       |
 |-------------|--------|----------|---------------------------------------------------|
-| `type`       | `str`  | Yes      | One of: `"int"`, `"float"`, `"str"`, `"bool"`, `"Path"` |
-| `image_spec` | `dict` | No       | If present, wraps the type with `Annotated[type, ImageSpec(...)]` |
+| `type`       | `str`  | Yes      | One of: `"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`, `"ImageFile"` |
+| `image_spec` | `dict` or `null` | No | For `"Path"`, a dict wraps the type with `Annotated[Path, ImageSpec(...)]`; missing or `null` leaves it as plain `Path`. For `"ImageFile"`, missing or `null` uses an empty `ImageSpec` and produces `Annotated[Path, ImageSpec()]`. |
 | `default`    | any    | No       | Default value for the field                       |
 
-**`image_spec` dict:** `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}`. Values are lists of enum value strings (e.g., `"intensity"`, `"label"`, `"YX"`). All keys are optional; missing keys mean "any" (empty set).
+**`ImageFile` alias:** accepted for GUI schema round-trips. It is equivalent to a `Path` field carrying an `ImageSpec` annotation. If `image_spec` is missing or `null`, the annotation uses an empty `ImageSpec`.
+
+**`image_spec` dict:** `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}`. Values are lists of enum value strings (e.g., `"intensity"`, `"label"`, `"YX"`). All keys are optional; missing keys mean "any" (empty set). For a `"Path"` field, `image_spec: null` is treated the same as a missing `image_spec` key and does not create an image annotation.
 
 **Node definition:**
 
