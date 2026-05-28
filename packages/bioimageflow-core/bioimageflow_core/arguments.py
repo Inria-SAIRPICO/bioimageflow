@@ -13,7 +13,9 @@ class ExecutionContext:
     run_dir: Path
     assets_dir: Path
     work_dir: Path
-    rows_dir: Path | None = None
+    rows_dir: Path
+    row_dir: Path | None = None
+    batch_dir: Path | None = None
     row_index: str | None = None
 
     def to_dict(self) -> dict[str, str | None]:
@@ -22,7 +24,9 @@ class ExecutionContext:
             "run_dir": str(self.run_dir),
             "assets_dir": str(self.assets_dir),
             "work_dir": str(self.work_dir),
-            "rows_dir": str(self.rows_dir) if self.rows_dir is not None else None,
+            "rows_dir": str(self.rows_dir),
+            "row_dir": str(self.row_dir) if self.row_dir is not None else None,
+            "batch_dir": str(self.batch_dir) if self.batch_dir is not None else None,
             "row_index": self.row_index,
         }
 
@@ -33,7 +37,9 @@ class ExecutionContext:
             run_dir=Path(data["run_dir"]),
             assets_dir=Path(data["assets_dir"]),
             work_dir=Path(data["work_dir"]),
-            rows_dir=Path(data["rows_dir"]) if data.get("rows_dir") is not None else None,
+            rows_dir=Path(data["rows_dir"]),
+            row_dir=Path(data["row_dir"]) if data["row_dir"] is not None else None,
+            batch_dir=Path(data["batch_dir"]) if data["batch_dir"] is not None else None,
             row_index=data.get("row_index"),
         )
 

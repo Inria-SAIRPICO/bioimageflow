@@ -17,35 +17,11 @@ import importlib.util
 import inspect
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from bioimageflow_core.arguments import Arguments
+from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
-
-try:
-    from bioimageflow_core.arguments import ExecutionContext
-except ImportError:
-    @dataclass(frozen=True)
-    class ExecutionContext:  # type: ignore[no-redef]
-        """Fallback for existing Wetlands envs with an older core package."""
-
-        run_dir: Path
-        assets_dir: Path
-        work_dir: Path
-        rows_dir: Path | None = None
-        row_index: str | None = None
-
-        @classmethod
-        def from_dict(cls, data: dict[str, Any]) -> "ExecutionContext":
-            return cls(
-                run_dir=Path(data["run_dir"]),
-                assets_dir=Path(data["assets_dir"]),
-                work_dir=Path(data["work_dir"]),
-                rows_dir=Path(data["rows_dir"]) if data.get("rows_dir") is not None else None,
-                row_index=data.get("row_index"),
-            )
 
 
 # Per-file registries: file_path -> {class_name -> class}
