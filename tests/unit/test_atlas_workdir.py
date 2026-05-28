@@ -14,7 +14,19 @@ def test_atlas_reference_file_is_packaged():
     assert blobs_file.stat().st_size > 0
 
 
-def test_atlas_runs_external_commands_in_execution_work_dir(tmp_path, monkeypatch):
+def _execution_context(run_dir: Path) -> ExecutionContext:
+    return ExecutionContext(
+        run_dir=run_dir,
+        assets_dir=run_dir / "assets",
+        work_dir=run_dir / "work",
+        rows_dir=run_dir / "work" / "rows",
+        row_dir=run_dir / "work" / "rows" / "000000",
+        batch_dir=None,
+        row_index="0",
+    )
+
+
+def test_atlas_runs_external_command_in_execution_row_dir(tmp_path, monkeypatch):
     calls = []
 
     def fake_run(command, **kwargs):
@@ -23,13 +35,7 @@ def test_atlas_runs_external_commands_in_execution_work_dir(tmp_path, monkeypatc
     monkeypatch.setattr("bioimageflow_common_tools.atlas.subprocess.run", fake_run)
 
     output_path = tmp_path / "assets" / "detections.tif"
-    context = ExecutionContext(
-        run_dir=tmp_path,
-        assets_dir=tmp_path / "assets",
-        work_dir=tmp_path / "work" / "rows" / "000000",
-        rows_dir=tmp_path / "work" / "rows",
-        row_index="0",
-    )
+    context = _execution_context(tmp_path)
 
     result = Atlas().process_row(
         Arguments(
@@ -46,11 +52,11 @@ def test_atlas_runs_external_commands_in_execution_work_dir(tmp_path, monkeypatc
     assert Path(result.output_image) == output_path
     assert calls
     assert calls[-1][0][0] == "atlas"
-    assert calls[-1][1]["cwd"] == context.work_dir
+    assert calls[-1][1]["cwd"] == context.row_dir
     assert not (Path.cwd() / "LoG.tif").exists()
 
 
-def test_atlas_blobsref_fallback_uses_absolute_scratch_path(tmp_path, monkeypatch):
+def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypatch):
     calls = []
 
     def fake_run(command, **kwargs):
@@ -64,13 +70,7 @@ def test_atlas_blobsref_fallback_uses_absolute_scratch_path(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
 
     relative_root = Path("relative_run")
-    context = ExecutionContext(
-        run_dir=relative_root,
-        assets_dir=relative_root / "assets",
-        work_dir=relative_root / "work" / "rows" / "000000",
-        rows_dir=relative_root / "work" / "rows",
-        row_index="0",
-    )
+    context = _execution_context(relative_root)
 
     Atlas().process_row(
         Arguments(
@@ -86,10 +86,12 @@ def test_atlas_blobsref_fallback_uses_absolute_scratch_path(tmp_path, monkeypatc
 
     blobsref_call = calls[0]
     assert blobsref_call[0][0] == "blobsref"
-    assert Path(blobsref_call[0][2]).is_absolute()
-    assert Path(blobsref_call[0][2]).name == "blobs.txt"
-    assert blobsref_call[1]["cwd"] == context.work_dir
+    blobs_path = Path(blobsref_call[0][2])
+    expected_blobs_path = (context.work_dir / "atlas" / "blobs.txt").resolve()
+    assert blobs_path == expected_blobs_path
+    assert Path(blobsref_call[1]["cwd"]) == expected_blobs_path.parent
 
     atlas_call = calls[1]
     assert atlas_call[0][0] == "atlas"
     assert atlas_call[0][2] == blobsref_call[0][2]
+    assert atlas_call[1]["cwd"] == context.row_dir
