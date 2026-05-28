@@ -2238,19 +2238,25 @@ def _get_instance(tool_class_name):
         _instances[tool_class_name] = _tool_registry[tool_class_name]()
     return _instances[tool_class_name]
 
-def run_process_batch(tool_class_name, arguments_dicts):
+def run_process_batch(tool_class_name, arguments_dicts, context_dict=None):
     tool = _get_instance(tool_class_name)
     args_list = [Arguments(**d) for d in arguments_dicts]
-    results = tool.process_batch(args_list)
+    kwargs = {}
+    if context_dict is not None and _accepts_context(tool.process_batch):
+        kwargs["context"] = ExecutionContext.from_dict(context_dict)
+    results = tool.process_batch(args_list, **kwargs)
     # Auto-wrap list[Outputs] → list[list[Outputs]] for 1-to-1 batch tools
     if results and not isinstance(results[0], list):
         results = [[r] for r in results]
     return [[vars(out) for out in row_outputs] for row_outputs in results]
 
-def run_process_row(tool_class_name, arguments_dict):
+def run_process_row(tool_class_name, arguments_dict, context_dict=None):
     tool = _get_instance(tool_class_name)
     args = Arguments(**arguments_dict)
-    result = tool.process_row(args)
+    kwargs = {}
+    if context_dict is not None and _accepts_context(tool.process_row):
+        kwargs["context"] = ExecutionContext.from_dict(context_dict)
+    result = tool.process_row(args, **kwargs)
     # Normalize: single Outputs → list
     outputs = result if isinstance(result, list) else [result]
     return [vars(out) for out in outputs]

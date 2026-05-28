@@ -3,6 +3,8 @@
 import json
 import sys
 
+import pytest
+from bioimageflow_core import ExecutionContext
 from bioimageflow_core.worker import run_process_batch, run_process_row
 
 
@@ -110,6 +112,38 @@ class BatchContextTool(ProcessingTool):
         [{"seen": str(run_dir / "work" / "batch" / "a")}],
         [{"seen": str(run_dir / "work" / "batch" / "b")}],
     ]
+
+
+def test_execution_context_rejects_old_per_row_work_dir(tmp_path):
+    run_dir = tmp_path / "run"
+    rows_dir = run_dir / "work" / "rows"
+
+    with pytest.raises(ValueError, match="work_dir must be"):
+        ExecutionContext(
+            run_dir=run_dir,
+            assets_dir=run_dir / "assets",
+            work_dir=rows_dir / "000000",
+            rows_dir=rows_dir,
+            row_dir=rows_dir / "000000",
+            batch_dir=None,
+            row_index="0",
+        )
+
+
+def test_execution_context_rejects_old_batch_work_dir(tmp_path):
+    run_dir = tmp_path / "run"
+    work_dir = run_dir / "work"
+
+    with pytest.raises(ValueError, match="work_dir must be"):
+        ExecutionContext(
+            run_dir=run_dir,
+            assets_dir=run_dir / "assets",
+            work_dir=work_dir / "batch",
+            rows_dir=work_dir / "rows",
+            row_dir=None,
+            batch_dir=work_dir / "batch",
+            row_index=None,
+        )
 
 
 def test_worker_loads_tool_package_with_relative_imports(tmp_path):

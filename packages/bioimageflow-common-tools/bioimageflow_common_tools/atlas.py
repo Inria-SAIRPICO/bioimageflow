@@ -31,29 +31,35 @@ atlas_env = EnvironmentSpec(
 
 def _ensure_generated_blobs_file(work_dir: Path) -> Path:
     """Generate the Atlas reference once in the node-level work directory."""
-    atlas_work_dir = work_dir / "atlas"
+    atlas_work_dir = (work_dir / "atlas").resolve()
     atlas_work_dir.mkdir(parents=True, exist_ok=True)
     blobs_file = atlas_work_dir / "blobs.txt"
     if blobs_file.exists():
         return blobs_file.resolve()
 
     lock_dir = atlas_work_dir / ".blobsref.lock"
+    deadline = time.monotonic() + 300
     while True:
         try:
             lock_dir.mkdir()
             break
         except FileExistsError:
-            if blobs_file.exists():
+            if not lock_dir.exists() and blobs_file.exists():
                 return blobs_file.resolve()
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Timed out waiting for Atlas reference lock: {lock_dir}")
             time.sleep(0.05)
 
     try:
         if not blobs_file.exists():
+            tmp_file = atlas_work_dir / "blobs.txt.tmp"
+            tmp_file.unlink(missing_ok=True)
             subprocess.run(
-                ["blobsref", "-o", str(blobs_file.resolve())],
+                ["blobsref", "-o", str(tmp_file)],
                 check=True,
                 cwd=atlas_work_dir,
             )
+            tmp_file.replace(blobs_file)
     finally:
         lock_dir.rmdir()
 
