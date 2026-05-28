@@ -546,16 +546,18 @@ The `task` parameter also provides cooperative cancellation via `task.cancel_req
 class ExecutionContext:
     run_dir: Path       # storage_path/data/<node>/<timestamp>_<hash12>/
     assets_dir: Path    # run_dir/assets/
-    work_dir: Path      # per-row or batch scratch directory
-    rows_dir: Path | None = None  # run_dir/work/rows/
+    work_dir: Path      # shared node-level runtime directory, run_dir/work/
+    rows_dir: Path      # shared row scratch parent, run_dir/work/rows/
+    row_dir: Path | None = None    # private process_row scratch directory
+    batch_dir: Path | None = None  # private process_batch scratch directory
     row_index: str | None = None  # original input row index for process_row
 ```
 
-For `process_row`, `context.work_dir` is unique per input row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.work_dir` is `run_dir/work/batch/`; batch tools that need per-row scratch should create subdirectories under `context.rows_dir`.
+`context.work_dir` is shared by every call for the node and always points to `run_dir/work/`. `context.rows_dir` is the shared row scratch parent, `run_dir/work/rows/`. For `process_row`, `context.row_dir` is the private scratch directory for that row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.batch_dir` is the private batch scratch directory: `run_dir/work/batch/`.
 
-`work_dir` is for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.work_dir` to `subprocess.run()` or equivalent. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
+Runtime scratch directories are for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.row_dir` from `process_row` or `cwd=context.batch_dir` from `process_batch` to `subprocess.run()` or equivalent. Shared generated runtime resources that are reused across rows should be placed under `context.work_dir`, preferably in a tool-named child directory. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
 
-**Runtime path contract:** Before dispatch, the orchestrator converts the workflow storage root, every `ExecutionContext` directory, every generated `ProcessingTool` output path, and every path-typed `Arguments` value to an absolute runtime path. Relative user-supplied path constants are interpreted once in the orchestrator process, before the tool is called. DataFrame columns declared as path-typed outputs are also stored as absolute paths. Tool implementations may pass framework-provided path arguments directly to file I/O libraries or subprocesses, even when the subprocess runs with `cwd=context.work_dir`; tools must not call `resolve()` merely to compensate for framework-relative paths.
+**Runtime path contract:** Before dispatch, the orchestrator converts the workflow storage root, every `ExecutionContext` directory, every generated `ProcessingTool` output path, and every path-typed `Arguments` value to an absolute runtime path. Relative user-supplied path constants are interpreted once in the orchestrator process, before the tool is called. DataFrame columns declared as path-typed outputs are also stored as absolute paths. Tool implementations may pass framework-provided path arguments directly to file I/O libraries or subprocesses, even when the subprocess runs with `cwd=context.row_dir` or `cwd=context.batch_dir`; tools must not call `resolve()` merely to compensate for framework-relative paths.
 
 **Direct tool definition:**
 ```python
@@ -2146,7 +2148,7 @@ When `node.compute()` is called:
    2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations. Path-typed values are converted to absolute runtime paths in the orchestrator.
    3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow graph state. Generated output paths are absolute and point under the run's `assets/` directory.
    4. **Cache Check:** Compute the [signature hash](#61-signature-hash). If a cache hit exists, load cached results and skip to step 10.
-   5. **Execution Context:** Create the timestamp/hash run directory and its `assets/` and `work/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Context paths are runtime details and are not included in the signature hash.
+   5. **Execution Context:** Create the timestamp/hash run directory and its `assets/`, shared `work/`, `work/rows/`, per-row `work/rows/<safe_row_id>/`, and `work/batch/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Every context shares the same `work_dir` (`run_dir/work/`) and `rows_dir` (`run_dir/work/rows/`); row contexts receive a private `row_dir`, and the batch context receives a private `batch_dir`. Context paths are runtime details and are not included in the signature hash.
    6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
    7. **Environment Launch:** If not already running, create/reuse the Wetlands environment. If an environment with the same name already exists but its dependency hash differs, raise `EnvironmentMismatchError`.
    8. **Dispatch:** If `process_batch` was overridden, submit a single batch call via `env.submit()`. Otherwise, submit all `process_row` calls via `env.map_tasks()`. When `max_workers > 1`, rows execute in parallel across worker processes. When `max_workers == 1` (default), rows execute sequentially in a single worker (equivalent to the previous behavior). Results are always collected in submission order to preserve deterministic DataFrame construction.
@@ -2506,9 +2508,9 @@ The hash directory name is prefixed with a creation timestamp (`YYYYMMDD_HHMMSS`
 
 `assets/` is the only directory for files that are part of a tool's declared `Outputs`. `work/` is reserved for files that exist only to execute the tool: temporary images, implicit files created by external CLIs, unpacked models, and similar intermediates. Files in `work/` are not part of the tool output contract, are not exposed as DataFrame outputs unless a tool explicitly returns them, and are not included in the signature hash.
 
-Package-local `data/` directories are read-only static resources shipped with the tool package. Tools must not generate or mutate files in package `data/` at runtime. If a static resource is missing in a development checkout and must be generated as a fallback, the tool generates it under `ExecutionContext.work_dir`.
+Package-local `data/` directories are read-only static resources shipped with the tool package. Tools must not generate or mutate files in package `data/` at runtime. If a static resource is missing in a development checkout and must be generated as a fallback, the tool generates it under a tool-named child of `ExecutionContext.work_dir`.
 
-External command wrappers must avoid process-CWD pollution. If a binary writes implicit files such as `LoG.tif`, the wrapper passes `cwd=context.work_dir` to `subprocess.run()` or equivalent. The engine does not change the process working directory globally.
+External command wrappers must avoid process-CWD pollution. If a row-level binary writes implicit files such as `LoG.tif`, the wrapper passes `cwd=context.row_dir` to `subprocess.run()` or equivalent. Batch-level wrappers use `cwd=context.batch_dir`. Shared generated runtime resources go under `context.work_dir`, preferably in a tool-named child directory. The engine does not change the process working directory globally.
 
 ---
 
