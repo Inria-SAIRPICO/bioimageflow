@@ -25,22 +25,30 @@ from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, Proces
 def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionContext]:
     run_dir = Path("/tmp/bif_timeout_test")
     assets_dir = run_dir / "assets"
-    rows_dir = run_dir / "work" / "rows"
-    row_contexts = [
-        ExecutionContext(
-            run_dir=run_dir,
-            assets_dir=assets_dir,
-            work_dir=rows_dir / f"{i:06d}",
-            rows_dir=rows_dir,
-            row_index=str(i),
+    work_dir = run_dir / "work"
+    rows_dir = work_dir / "rows"
+    row_contexts = []
+    for i in range(count):
+        row_dir = rows_dir / f"{i:06d}"
+        row_contexts.append(
+            ExecutionContext(
+                run_dir=run_dir,
+                assets_dir=assets_dir,
+                work_dir=work_dir,
+                rows_dir=rows_dir,
+                row_dir=row_dir,
+                batch_dir=None,
+                row_index=str(i),
+            )
         )
-        for i in range(count)
-    ]
+
     batch_context = ExecutionContext(
         run_dir=run_dir,
         assets_dir=assets_dir,
-        work_dir=run_dir / "work" / "batch",
+        work_dir=work_dir,
         rows_dir=rows_dir,
+        row_dir=None,
+        batch_dir=work_dir / "batch",
     )
     return row_contexts, batch_context
 

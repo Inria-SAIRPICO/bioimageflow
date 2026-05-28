@@ -28,7 +28,7 @@ class RelativePathSource(DataFrameTool):
 
 
 class CwdSensitiveWrapper(ProcessingTool):
-    """Wrapper that passes framework paths to a subprocess with cwd=work_dir."""
+    """Wrapper that passes framework paths to a subprocess with cwd=row_dir."""
 
     environment = EnvironmentSpec(name="runtime-paths", dependencies={})
 
@@ -47,6 +47,10 @@ class CwdSensitiveWrapper(ProcessingTool):
         assert input_path.is_absolute()
         assert output_path.is_absolute()
         assert context.work_dir.is_absolute()
+        assert context.row_dir is not None
+        assert context.row_dir.is_absolute()
+        assert context.row_dir.parent == context.rows_dir
+        assert context.rows_dir.parent == context.work_dir
 
         subprocess.run(
             [
@@ -60,7 +64,7 @@ class CwdSensitiveWrapper(ProcessingTool):
                 str(output_path),
             ],
             check=True,
-            cwd=context.work_dir,
+            cwd=context.row_dir,
         )
         return self.Outputs(output_image=output_path)
 
