@@ -50,11 +50,53 @@ uv run ruff check .
 
 ## Integration Notes
 
-- Merge core first, then engine, then tools, then docs.
-- Do not keep backward-compatibility aliases for the old per-row `work_dir` behavior.
+- Merged core first, then engine, then tools, then docs into `context-option3`.
+- No backward-compatibility aliases were kept for the old per-row `work_dir` behavior.
+- `ExecutionContext.__post_init__` now rejects old-shaped contexts where `work_dir`
+  points at a row or batch directory.
+- Atlas fallback reference generation now uses `work/atlas/blobs.txt`, writes via
+  a temporary file plus atomic replace, and serializes parallel generation with a
+  lock directory.
+- The package-local `bioimageflow_common_tools/data/blobs.txt` fixture is tracked
+  because `bioimageflow-common-tools` already force-includes it in its package
+  metadata.
+
+## Verification
+
+Passed:
+
+```bash
+uv run pytest tests/unit/test_worker_execution_context.py \
+  tests/integration/test_execution_context.py \
+  tests/integration/test_runtime_paths.py \
+  tests/unit/test_atlas_workdir.py \
+  tests/unit/test_worker_timeout.py
+```
+
+Result: `28 passed`.
+
+Passed:
+
+```bash
+uv run ruff check .
+git diff --check
+```
+
+Full suite:
+
+```bash
+uv run pytest
+```
+
+Result: `814 passed, 1 failed`. The remaining failure is unrelated to this
+migration: `tests/unit/test_validation_serialization.py::test_common_tool_image_fields_use_imagefile_without_converting_plain_paths`
+expects `Mosaic.Outputs.mosaic_path` to serialize as `Path`, but the current
+clean branch declares it with `ImageSpec`, so it serializes as `ImageFile`.
+
+## Final Search
+
 - Search before final review:
 
 ```bash
 rg -n "context\\.work_dir|work_dir.*per-row|work_dir.*batch|ExecutionContext\\(" packages tests docs example-workflows
 ```
-
