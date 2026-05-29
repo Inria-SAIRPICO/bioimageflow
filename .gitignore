@@ -1,5 +1,6 @@
 .DS_Store
 .claude/worktrees/
+TODO.md
 bif_data/
 data/
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
@@ -10,4 +11,6 @@ data/
 __pycache__/
 docs/build/
 wetlands/
+wetlands-lib/
 packages/bioimageflow-common-tools/bioimageflow_common_tools/.vscode/
+packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
