@@ -2471,18 +2471,46 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
 The library runtime storage layout below is rooted at `Workflow.storage_path`.
 When the platform runs a saved workflow, it sets that root from the active
 workspace: `workspace/outputs/<workflow_id>/`. The workspace itself also
-contains the saved workflow tree and workspace-owned custom tools:
+contains the saved workflow tree, workflow-local custom tools, user data, and
+outputs:
 
 ```text
 workspace/
   workflows/
     <folder>/<workflow>/workflow.json
-  tools/
+    <folder>/<workflow>/tools/
   data/
   outputs/
     <workflow_id>/
       ... runtime storage layout below ...
 ```
+
+Workflow and folder ids are slash-separated paths relative to
+`workspace/workflows/`. A path segment may contain letters, numbers, spaces,
+underscores, and hyphens; it must not be empty or have leading/trailing
+whitespace. Only directories containing `workflow.json` are workflows; other
+JSON files under `workspace/workflows/` are not listed or opened.
+
+The Workflows panel presents this hierarchy as a classic tree. Folders and
+workflows are sorted alphabetically together within each folder. A single rename
+button targets the selected folder or workflow. Creating a workflow accepts an
+optional description. GUI-created custom tools live under the current workflow's
+`tools/` folder so a library workflow archive includes the custom tool sources
+used by that workflow. Reusable tools shared across workflows should be
+distributed as versioned tool packages. The Manage Tools dialog imports unknown
+GitHub/GitLab or `.zip` package sources from an inline footer labelled
+**Install tool package** below the package table; this is not a row-level action
+or separate modal because unknown sources are not listed before installation.
+The selected-workflow detail panel shows
+and edits that description, shows the workflow id and storage path, and can open
+the workflow folder in the system file browser. Dragging from anywhere on a workflow row can
+move it in the tree or create a SubWorkflowNode when dropped on the canvas;
+drops that would make a workflow contain itself directly or indirectly are
+rejected. Selecting a synthetic SubWorkflowNode must not query node result data
+for `tool_name=__sub_workflow__`; only real backend-executed nodes have node
+data endpoints. The tree's drop indicators must not shift neighboring rows
+while a drag is in progress.
+
 
 ```text
 /workflow_storage_root/
