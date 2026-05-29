@@ -613,13 +613,16 @@ def test_common_tool_serializes_to_json(tool_cls: type) -> None:
 
 
 def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths() -> None:
-    from bioimageflow_common_tools import LabelOverlaps, Mosaic
+    from bioimageflow_common_tools import Files, LabelOverlaps, Mosaic
     from bioimageflow_common_tools.connected_components import ConnectedComponents
 
     mosaic_inputs = serialize_input_schema(Mosaic)
     mosaic_outputs = serialize_output_schema(Mosaic)
     assert mosaic_inputs["input_image"]["type"] == "ImageFile"
-    assert mosaic_outputs["mosaic_path"]["type"] == "Path"
+    assert mosaic_outputs["mosaic_path"]["type"] == "ImageFile"
+
+    files_outputs = serialize_output_schema(Files)
+    assert files_outputs["path"]["type"] == "Path"
 
     connected_components_inputs = serialize_input_schema(ConnectedComponents)
     connected_components_outputs = serialize_output_schema(ConnectedComponents)
