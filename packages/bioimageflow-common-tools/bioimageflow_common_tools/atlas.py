@@ -2,6 +2,7 @@
 
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -26,6 +27,43 @@ atlas_env = EnvironmentSpec(
         "conda": ["bioimageit::atlas"],
     },
 )
+
+
+def _ensure_generated_blobs_file(work_dir: Path) -> Path:
+    """Generate the Atlas reference once in the node-level work directory."""
+    atlas_work_dir = (work_dir / "atlas").resolve()
+    atlas_work_dir.mkdir(parents=True, exist_ok=True)
+    blobs_file = atlas_work_dir / "blobs.txt"
+    if blobs_file.exists():
+        return blobs_file.resolve()
+
+    lock_dir = atlas_work_dir / ".blobsref.lock"
+    deadline = time.monotonic() + 300
+    while True:
+        try:
+            lock_dir.mkdir()
+            break
+        except FileExistsError:
+            if not lock_dir.exists() and blobs_file.exists():
+                return blobs_file.resolve()
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Timed out waiting for Atlas reference lock: {lock_dir}")
+            time.sleep(0.05)
+
+    try:
+        if not blobs_file.exists():
+            tmp_file = atlas_work_dir / "blobs.txt.tmp"
+            tmp_file.unlink(missing_ok=True)
+            subprocess.run(
+                ["blobsref", "-o", str(tmp_file)],
+                check=True,
+                cwd=atlas_work_dir,
+            )
+            tmp_file.replace(blobs_file)
+    finally:
+        lock_dir.rmdir()
+
+    return blobs_file.resolve()
 
 
 class Atlas(ProcessingTool):
@@ -106,17 +144,22 @@ class Atlas(ProcessingTool):
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
         if context is None:
             temp_dir = tempfile.TemporaryDirectory(prefix="bioimageflow_atlas_")
-            work_dir = Path(temp_dir.name)
+            temp_root = Path(temp_dir.name)
+            work_dir = temp_root / "work"
+            row_dir = temp_root / "row"
         else:
             work_dir = context.work_dir
+            if context.row_dir is None:
+                raise ValueError("Atlas.process_row requires context.row_dir.")
+            row_dir = context.row_dir
         work_dir.mkdir(parents=True, exist_ok=True)
+        row_dir.mkdir(parents=True, exist_ok=True)
 
         # Prefer the packaged Atlas reference. If a development checkout is
-        # missing it, generate the fallback in this row's scratch directory.
+        # missing it, generate a node-shared fallback reference under work.
         blobs_file = Path(__file__).parent.resolve() / "data" / "blobs.txt"
         if not blobs_file.exists():
-            blobs_file = (work_dir / "blobs.txt").resolve()
-            subprocess.run(["blobsref", "-o", str(blobs_file)], check=True, cwd=work_dir)
+            blobs_file = _ensure_generated_blobs_file(work_dir)
 
         try:
             print(f"Running Atlas spot detection on {input_path.name}...")
@@ -136,7 +179,7 @@ class Atlas(ProcessingTool):
             if arguments.verbose:
                 command.append("-v")
 
-            subprocess.run(command, check=True, cwd=work_dir)
+            subprocess.run(command, check=True, cwd=row_dir)
             print(f"Atlas: detection complete -> {output_path.name}")
 
             return self.Outputs(output_image=output_path)

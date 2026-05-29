@@ -37,6 +37,7 @@ from bioimageflow.storage import (
     get_batch_work_dir,
     get_hash_dir,
     get_node_dir,
+    get_work_dir,
     get_rows_work_dir,
 )
 from bioimageflow.template import get_output_templates, resolve_template
@@ -1279,28 +1280,35 @@ class DefaultEngine:
         aligned_index: list[Any],
     ) -> tuple[list[ExecutionContext], ExecutionContext]:
         """Create per-row and batch ProcessingTool execution contexts."""
+        work_dir = get_work_dir(run_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
         rows_dir = get_rows_work_dir(run_dir)
+        rows_dir.mkdir(parents=True, exist_ok=True)
         row_contexts: list[ExecutionContext] = []
         for position, row_index in enumerate(aligned_index):
-            work_dir = rows_dir / _safe_work_dir_name(position, row_index)
-            work_dir.mkdir(parents=True, exist_ok=True)
+            row_dir = rows_dir / _safe_work_dir_name(position, row_index)
+            row_dir.mkdir(parents=True, exist_ok=True)
             row_contexts.append(
                 ExecutionContext(
                     run_dir=run_dir,
                     assets_dir=assets_dir,
                     work_dir=work_dir,
                     rows_dir=rows_dir,
+                    row_dir=row_dir,
+                    batch_dir=None,
                     row_index=str(row_index),
                 )
             )
 
-        batch_work_dir = get_batch_work_dir(run_dir)
-        batch_work_dir.mkdir(parents=True, exist_ok=True)
+        batch_dir = get_batch_work_dir(run_dir)
+        batch_dir.mkdir(parents=True, exist_ok=True)
         batch_context = ExecutionContext(
             run_dir=run_dir,
             assets_dir=assets_dir,
-            work_dir=batch_work_dir,
+            work_dir=work_dir,
             rows_dir=rows_dir,
+            row_dir=None,
+            batch_dir=batch_dir,
             row_index=None,
         )
         return row_contexts, batch_context
