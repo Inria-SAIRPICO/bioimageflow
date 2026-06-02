@@ -1,5 +1,6 @@
 """SAIRPICO command-line wrappers."""
 
+import csv
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -44,6 +45,25 @@ hotspot_env = EnvironmentSpec(
         "conda": ["bioimageit::hotspot==1.0.0"],
         "channels": ["conda-forge", "bioimageit"],
     },
+)
+
+SAIRPICO_BINARIES = (
+    "simggaussian3dpsf",
+    "simggibsonlannipsf",
+    "simgrichardsonlucy2d",
+    "simgrichardsonlucy2dslice",
+    "simgrichardsonlucy3d",
+    "simgwiener2d",
+    "simgwiener2dslice",
+    "simgwiener3d",
+    "simgspitfiredeconv2d",
+    "simgspitfiredeconv2dslice",
+    "simgspitfiredeconv3d",
+    "simgmedian2d",
+    "simgmedian3d",
+    "simgmedian4d",
+    "denoise",
+    "hotSpotDetection",
 )
 
 
@@ -96,6 +116,18 @@ def _ensure_output_parent(path: Path) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     return output_path
+
+
+def _parse_csv_list(value: Any) -> list[str]:
+    if value is None:
+        return list(SAIRPICO_BINARIES)
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _argument(arguments: Arguments, name: str, default: Any) -> Any:
+    return getattr(arguments, name, default)
 
 
 def _deconvolution_suffix(deconvolution_type: str) -> str:
@@ -486,3 +518,178 @@ class HotspotDetection(ProcessingTool):
             "-pv", arguments.p_value,
         ])
         return self.Outputs(output_image=output_path)
+
+
+def _write_sairpico_environment_report(
+    *,
+    binaries: Any = None,
+    report_csv: Path = Path("sairpico_environment.csv"),
+) -> dict[str, Any]:
+    """Write a SAIRPICO binary availability report for package diagnostics."""
+    import shutil
+
+    rows = []
+    for binary in _parse_csv_list(binaries):
+        path = shutil.which(binary)
+        rows.append(
+            {
+                "binary": binary,
+                "available": bool(path),
+                "path": path or "",
+            }
+        )
+
+    output = _ensure_output_parent(report_csv)
+    with output.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["binary", "available", "path"])
+        writer.writeheader()
+        writer.writerows(rows)
+    available_count = sum(1 for row in rows if row["available"])
+    missing_count = len(rows) - available_count
+    return {
+        "report_csv": output,
+        "available_count": available_count,
+        "missing_count": missing_count,
+        "ready": missing_count == 0,
+    }
+
+
+def _write_sairpico_version_report(
+    *,
+    binaries: Any = None,
+    version_argument: str = "--version",
+    timeout_seconds: float = 5.0,
+    report_csv: Path = Path("sairpico_versions.csv"),
+) -> dict[str, Any]:
+    """Write a SAIRPICO CLI version report for package diagnostics."""
+    import subprocess
+
+    rows = []
+    for binary in _parse_csv_list(binaries):
+        command = [binary]
+        if version_argument:
+            command.append(str(version_argument))
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=float(timeout_seconds),
+            )
+            output = (completed.stdout or completed.stderr or "").strip()
+            rows.append(
+                {
+                    "binary": binary,
+                    "returncode": int(completed.returncode),
+                    "version": output.splitlines()[0] if output else "",
+                    "error": "",
+                }
+            )
+        except Exception as exc:
+            rows.append(
+                {
+                    "binary": binary,
+                    "returncode": -1,
+                    "version": "",
+                    "error": str(exc),
+                }
+            )
+
+    output = _ensure_output_parent(report_csv)
+    fieldnames = ["binary", "returncode", "version", "error"]
+    with output.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    reported_count = sum(
+        1 for row in rows
+        if row["returncode"] == 0 and row["version"]
+    )
+    return {
+        "report_csv": output,
+        "reported_count": reported_count,
+        "failed_count": len(rows) - reported_count,
+    }
+
+
+def _hotspot_components(mask: Any) -> list[list[tuple[int, int]]]:
+    import numpy as np
+
+    seen = np.zeros(mask.shape, dtype=bool)
+    components: list[list[tuple[int, int]]] = []
+    for y, x in np.argwhere(mask):
+        y = int(y)
+        x = int(x)
+        if seen[y, x]:
+            continue
+        stack = [(y, x)]
+        seen[y, x] = True
+        component = []
+        while stack:
+            cy, cx = stack.pop()
+            component.append((cy, cx))
+            for ny in range(max(0, cy - 1), min(mask.shape[0], cy + 2)):
+                for nx in range(max(0, cx - 1), min(mask.shape[1], cx + 2)):
+                    if mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+        components.append(component)
+    return components
+
+
+class HotspotToSpots(ProcessingTool):
+    """Convert thresholded hotspot images into spot coordinate tables."""
+
+    display_name = "Hotspot To Spots"
+    documentation = "Convert SAIRPICO hotspot image outputs to spot coordinate tables."
+    category = Category.SPOT_DETECTION
+    tags = ["sairpico", "hotspot", "spots"]
+    environment = hotspot_env
+
+    class Inputs(IOModel):
+        hotspot_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta("Hotspot image", "Thresholded or scored hotspot image."),
+        ]
+        threshold: float = 0.0
+
+    class Outputs(IOModel):
+        spots_csv: Annotated[Path, GUIMeta("Spots CSV")] = Template(
+            "{hotspot_image.stem}_spots.csv"
+        )
+        spot_count: Annotated[int, GUIMeta("Spot count")]
+
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import imageio.v3 as iio
+        import numpy as np
+
+        image = iio.imread(arguments.hotspot_image).astype(np.float32)
+        if image.ndim != 2:
+            raise ValueError("HotspotToSpots expects a 2D hotspot image.")
+        components = _hotspot_components(image > float(arguments.threshold))
+        rows = []
+        for spot_id, component in enumerate(components, start=1):
+            yy = np.asarray([yx[0] for yx in component], dtype=np.float32)
+            xx = np.asarray([yx[1] for yx in component], dtype=np.float32)
+            values = image[yy.astype(int), xx.astype(int)]
+            rows.append(
+                {
+                    "spot_id": spot_id,
+                    "y": float(yy.mean()),
+                    "x": float(xx.mean()),
+                    "intensity": float(values.max()),
+                    "score": float(values.mean()),
+                    "area": int(len(component)),
+                    "label": spot_id,
+                }
+            )
+
+        output = _ensure_output_parent(arguments.spots_csv)
+        fieldnames = ["spot_id", "y", "x", "intensity", "score", "area", "label"]
+        with output.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return self.Outputs(spots_csv=output, spot_count=len(rows))

@@ -85,8 +85,10 @@ BioImageFlow is split into two packages:
 Running tests
 -------------
 
+See :doc:`/reference/testing` for the regular and complete test workflow.
+
 .. code-block:: bash
 
-   uv run pytest                    # all tests
+   uv run pytest                    # regular tests
    uv run pytest tests/unit/        # unit tests only
    uv run pytest tests/integration/ # integration tests only

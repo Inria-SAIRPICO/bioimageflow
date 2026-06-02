@@ -133,12 +133,22 @@ source = { editable = "packages/bioimageflow-common-tools" }
 dependencies = [
     { name = "bioimageflow" },
     { name = "bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "bioimageflow", editable = "packages/bioimageflow" },
     { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pillow" },
 ]
 
 [[package]]
@@ -217,12 +227,17 @@ source = { editable = "packages/bioimageflow-sairpico-tools" }
 dependencies = [
     { name = "bioimageflow" },
     { name = "bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "bioimageflow", editable = "packages/bioimageflow" },
     { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+    { name = "imageio" },
+    { name = "numpy" },
 ]
 
 [[package]]

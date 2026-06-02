@@ -4,6 +4,7 @@ from .tools import CImgDenoising as CImgDenoising
 from .tools import GaussianPSF as GaussianPSF
 from .tools import GibsonLanniPSF as GibsonLanniPSF
 from .tools import HotspotDetection as HotspotDetection
+from .tools import HotspotToSpots as HotspotToSpots
 from .tools import MedianDenoising as MedianDenoising
 from .tools import RichardsonLucyDeconvolution as RichardsonLucyDeconvolution
 from .tools import SpitfireDeconvolution as SpitfireDeconvolution
@@ -14,6 +15,7 @@ __all__ = [
     "GaussianPSF",
     "GibsonLanniPSF",
     "HotspotDetection",
+    "HotspotToSpots",
     "MedianDenoising",
     "RichardsonLucyDeconvolution",
     "SpitfireDeconvolution",

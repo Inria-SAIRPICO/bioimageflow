@@ -10,6 +10,8 @@ Integrators trees.
    errors
    logging
    environments
+   testing
+   tool_packages
    tool_package_strategy
    agent_tool_workflow_playbook
    segmentation_tools

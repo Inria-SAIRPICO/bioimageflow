@@ -1,6 +1,10 @@
 """BioImageFlow Common Tools — reusable bioimage analysis tools."""
 
 from .files import Files as Files
+from .table import TableFromCsv as TableFromCsv
+from .table import WriteTable as WriteTable
+from .table import FilterTableRows as FilterTableRows
+from .table import SelectColumns as SelectColumns
 from .extract_channel import ExtractChannel as ExtractChannel
 from .connected_components import ConnectedComponents as ConnectedComponents
 from .label_overlaps import LabelOverlaps as LabelOverlaps

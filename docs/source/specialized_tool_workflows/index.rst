@@ -10,6 +10,10 @@ default test path avoids public data and heavyweight optional libraries.
 Spot Tools
 ----------
 
+Analysis question
+  Which puncta are present in an intensity image, which segmented object owns
+  each punctum, and what per-object summary should be reported?
+
 ``bioimageflow-spot-tools`` provides:
 
 * ``DetectSpots`` for LoG/DoG/local maxima puncta detection.
@@ -18,16 +22,42 @@ Spot Tools
 
 Big-FISH is intentionally optional and reserved for evaluation runs.
 
+Data and expected outputs
+  The normal example uses generated 2D puncta and label images. Expected
+  outputs are spot-coordinate CSV files, assigned spot CSV files, per-label
+  summary CSV files, and deterministic label counts.
+
+Test coverage
+  ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
+  package example workflow and verifies the summary artifact is written.
+
 Restoration Tools
 -----------------
+
+Analysis question
+  Does a restoration baseline improve a degraded synthetic microscopy-like
+  image according to reproducible quality metrics?
 
 ``bioimageflow-restoration-tools`` provides:
 
 * ``RestoreImage`` for a scikit-image restoration baseline, with a NumPy fallback.
 * ``BenchmarkRestoration`` for a synthetic blur/noise benchmark that writes metrics.
 
+Data and expected outputs
+  The normal example uses generated fixed-seed data. Expected outputs are clean,
+  degraded, restored images, a metrics CSV file, and higher restored PSNR than
+  degraded PSNR for the default example.
+
+Test coverage
+  ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
+  package example workflow and verifies the metrics artifact is written.
+
 Tracking Tools
 --------------
+
+Analysis question
+  Can segmented objects in a time-lapse label stack be linked into stable
+  tracks and summarized for quality control?
 
 ``bioimageflow-tracking-tools`` provides:
 
@@ -36,6 +66,15 @@ Tracking Tools
 * ``TrackMetrics`` for track length, displacement, speed, and area summaries.
 
 btrack and LapTrack remain optional for heavier evaluation environments.
+
+Data and expected outputs
+  The normal example uses a generated TYX label stack with two moving objects.
+  Expected outputs are object tables, linked track tables, track-count metrics,
+  and a deterministic mean track length.
+
+Test coverage
+  ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
+  package example workflow and verifies the metrics artifact is written.
 
 Example Workflows
 -----------------

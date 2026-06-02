@@ -48,8 +48,16 @@ bioimageflow-spot-tools = { workspace = true }
 bioimageflow-tracking-tools = { workspace = true }
 
 [tool.pytest.ini_options]
+testpaths = ["tests", "packages"]
+python_files = ["test_*.py"]
 filterwarnings = []
 markers = [
     "wetlands: tests that execute real Wetlands worker processes",
     "slow: optional public-data or heavy dependency tests",
+    "complete: optional complete tests that may use real binaries, public data, model runtimes, or longer workflows",
+    "public_data: tests that download or use public datasets",
+    "external_binary: tests that require non-Python command-line tools",
+    "sairpico_binary: tests that require real SAIRPICO command-line tools",
+    "model_runtime: tests that require optional model runtimes or model downloads",
+    "package_tools: tests owned by optional tool packages",
 ]

@@ -220,7 +220,7 @@ def check_compatibility(producer_spec: ImageSpec, consumer_spec: ImageSpec) -> b
     return True
 ```
 
-This check is used during [input binding](#45-input-binding-logic-graph-construction) to validate that a column reference's upstream type is compatible with the consuming input field's type.
+This check is used during [input binding](#46-input-binding-logic-graph-construction) to validate that a column reference's upstream type is compatible with the consuming input field's type.
 
 `SCALAR_IMAGE_SEMANTICS` is only a convenience set for consumers that accept
 several scalar image semantics. It does not change the compatibility relation:
@@ -271,7 +271,7 @@ Callers that want the Python-facing objects (raw `type`, raw `Connectable`) shou
 
 ### 2.5 Interface Type Constraints
 
-`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.4](#34-dataframetool)).
+`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
 
 **Runtime type resolution:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), but the orchestrator's Pydantic model builder resolves both to `Union[Path, str, SharedArray]` at validation time. This is necessary because caching may convert a `SharedArray` output to a file `Path` (see [Section 8.2](#82-lifecycle)), and the reverse can happen when shared memory is enabled. Tools should use `load_image()` which handles both transparently.
 
@@ -535,7 +535,7 @@ class MySegmenter(ProcessingTool):
         return self.Outputs(...)
 ```
 
-The `task` parameter also provides cooperative cancellation via `task.cancel_requested` (see [Cancellation](#cancellation)).
+The `task` parameter also provides cooperative cancellation via `task.cancel_requested` (see [Cancellation](#13-cancellation)).
 
 **Execution scratch context:** `process_row` and `process_batch` may declare an optional keyword-only `context: ExecutionContext` parameter. The engine injects it only when the method explicitly declares `context`; existing tools with `process_row(arguments)` or `process_batch(arguments_list)` are unchanged.
 
@@ -2945,7 +2945,7 @@ storage_path/data/
 
 `Workflow.export()` serializes `SubWorkflowNode` with its internal structure:
 
-```json
+```text
 {
   "name": "segment_and_measure_1",
   "type": "sub_workflow",
@@ -3106,7 +3106,7 @@ A node with `"type": "sub_workflow"` is treated as a nested sub-workflow rather 
 
 When `Workflow.export()` encounters a config-driven sub-workflow, it serializes the config dict directly:
 
-```json
+```text
 {
   "name": "spot_detection_1",
   "type": "sub_workflow",

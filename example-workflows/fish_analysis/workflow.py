@@ -186,7 +186,7 @@ def build_synthetic_fish_workflow(
             image[channel, y - 1 : y + 2, x - 1 : x + 2] += 2.0
 
     source = data_dir / "synthetic_fish_cyx.tif"
-    iio.imwrite(source, image)
+    iio.imwrite(source, image, photometric="minisblack")
 
     wf = Workflow(storage_path=str(storage / "bif"), use_wetlands=False)
     with wf:

@@ -43,52 +43,51 @@ def build_parameter_space_workflow(
         The workflow object and the terminal mosaic node.
     """
     wf = Workflow(storage_path=storage_path)
+    with wf:
+        # Step 1: List input images
+        images = Files()(
+            path=data_dir,
+            pattern=pattern,
+            name="input_images"
+        )
 
-    # Step 1: List input images
-    images = Files()(
-        path=data_dir,
-        pattern=pattern,
-        name="input_images"
-    )
+        # Step 2: Generate parameter value lists
+        sensitivity_params = Generate()(
+            column_name="sensitivity",
+            values=[0.001, 0.0001],
+            name="sensitivity_values"
+        )
+        size_params = Generate()(
+            column_name="size",
+            values=[30, 60, 120],
+            name="size_values"
+        )
 
-    # Step 2: Generate parameter value lists
-    sensitivity_params = Generate()(
-        column_name="sensitivity",
-        values=[0.001, 0.0001],
-        name="sensitivity_values"
-    )
-    size_params = Generate()(
-        column_name="size",
-        values=[30, 60, 120],
-        name="size_values"
-    )
+        # Step 3: Cartesian product of images and parameters
+        param_grid = CrossJoin()(
+            images,
+            sensitivity_params,
+            size_params,
+            name="parameter_grid"
+        )
+        # Note: order matters for CrossJoin; we pass images first so that the
+        # output includes columns: path, filename, sensitivity, and size.
 
-    # Step 3: Cartesian product of images and parameters
-    param_grid = CrossJoin()(
-        images,
-        sensitivity_params,
-        size_params,
-        name="parameter_grid"
-    )
-    # Note: order matters for CrossJoin; we pass images first so that the output
-    # includes columns: path, filename (from images), sensitivity, size
+        # Step 4: Atlas detection for each combination
+        detections = Atlas()(
+            input_image=param_grid["path"],
+            p_value=param_grid["sensitivity"],
+            gaussian_std=param_grid["size"],
+            name="atlas_detections"
+        )
 
-    # Step 4: Atlas detection for each combination
-    detections = Atlas()(
-        input_image=param_grid["path"],
-        p_value=param_grid["sensitivity"],
-        gaussian_std=param_grid["size"],
-        name="atlas_detections"
-    )
-    # Atlas produces output_image column with detection results
-
-    # Step 5: Mosaic of all detection results. Mosaic accepts scalar image
-    # semantics, so Atlas's binary detections can be visualized directly.
-    mosaic = Mosaic()(
-        input_image=detections["output_image"],
-        columns=6,  # arrange in a 6-column grid
-        name="results_mosaic"
-    )
+        # Step 5: Mosaic of all detection results. Mosaic accepts scalar image
+        # semantics, so Atlas's binary detections can be visualized directly.
+        mosaic = Mosaic()(
+            input_image=detections["output_image"],
+            columns=6,
+            name="results_mosaic"
+        )
 
     return wf, mosaic
 

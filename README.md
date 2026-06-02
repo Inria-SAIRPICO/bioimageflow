@@ -136,8 +136,10 @@ open _build/html/index.html
 
 ## Development
 
+The full test workflow is documented in `docs/source/reference/testing.md`.
+
 ```bash
-# Run all tests
+# Run regular tests
 uv run pytest
 
 # Run only unit tests
@@ -145,6 +147,9 @@ uv run pytest tests/unit/
 
 # Run only integration tests
 uv run pytest tests/integration/
+
+# Run opt-in complete tests
+uv run pytest -m complete --run-complete
 
 # Run the real Wetlands smoke tier
 uv run pytest -m wetlands tests/integration/test_wetlands_smoke.py

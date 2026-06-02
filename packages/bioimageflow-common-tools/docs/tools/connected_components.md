@@ -1,0 +1,40 @@
+# ConnectedComponents
+
+`ConnectedComponents` converts a binary foreground image into a label image.
+Every connected non-zero region receives a unique integer label.
+
+The input is `input_image`, a planar or volumetric binary image. Outputs are
+`output_image`, a UInt16 label image, and `num_labels`, the number of connected
+components. The core library is SimpleITK, which handles both IO and connected
+component labeling.
+
+Use it after thresholding, spot detection, or mask cleanup when instance labels
+are needed. Empty foreground produces a label count of zero. Missing files or
+unsupported formats fail through SimpleITK.
+
+## Dependencies and Core Libraries
+
+BioImageFlow core APIs, SimpleITK, and NumPy for counting labels.
+
+## Assumptions
+
+Non-zero pixels or voxels are foreground, and SimpleITK connectivity semantics
+are acceptable for the workflow.
+
+## Minimal Example
+
+```python
+from bioimageflow_core import Arguments
+from bioimageflow_common_tools import ConnectedComponents
+
+ConnectedComponents().process_row(Arguments(input_image="binary.tif"))
+```
+
+## Expected Results
+
+The output label image has one integer label per connected foreground component.
+
+## Failure Modes
+
+Unsupported formats, missing files, and SimpleITK write failures stop
+execution.

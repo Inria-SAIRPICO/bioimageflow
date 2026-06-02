@@ -7,21 +7,26 @@ import numpy as np
 
 from bioimageflow import Workflow
 from bioimageflow_common_tools import Collect
-from bioimageflow_io_tools import ReadImage, SelectDimensions, WriteOmeTiff, WriteOmeZarr
+from bioimageflow_io_tools import (
+    ConvertToOmeTiff,
+    ConvertToOmeZarr,
+    ReadImage,
+    SelectDimensions,
+)
 
 
 def _write_synthetic_input(data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     data = np.arange(2 * 3 * 16 * 18, dtype=np.uint16).reshape(2, 3, 16, 18)
     source = data_dir / "synthetic_czyx.tif"
-    iio.imwrite(source, data)
+    iio.imwrite(source, data, photometric="minisblack")
     return source
 
 
 def build_workflow(
     storage_path: str = "./ome_normalization_results",
 ) -> tuple[Workflow, object]:
-    """Build a tiny CZYX to selected OME-TIFF/OME-Zarr normalization graph."""
+    """Build a tiny CZYX to selected OME-TIFF/OME-Zarr conversion graph."""
     storage = Path(storage_path)
     source = _write_synthetic_input(storage / "data")
 
@@ -35,14 +40,14 @@ def build_workflow(
             z=2,
             name="select_channel_z",
         )
-        ome_tiff = WriteOmeTiff()(
+        ome_tiff = ConvertToOmeTiff()(
             input_image=selected["output_image"],
             dimension_order="YX",
-            name="write_ome_tiff",
+            name="convert_to_ome_tiff",
         )
-        ome_zarr = WriteOmeZarr()(
+        ome_zarr = ConvertToOmeZarr()(
             input_image=selected["output_image"],
-            name="write_ome_zarr",
+            name="convert_to_ome_zarr",
         )
         outputs = Collect()(ome_tiff, ome_zarr, name="collect_normalized_outputs")
     return wf, outputs

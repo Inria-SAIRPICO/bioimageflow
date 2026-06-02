@@ -16,6 +16,7 @@ BioImageFlow wrappers for the SAIRPICO command-line tools from
 - `MedianDenoising`: wraps `simgmedian2d`, `simgmedian3d`, and `simgmedian4d`.
 - `CImgDenoising`: wraps `denoise`.
 - `HotspotDetection`: wraps `hotSpotDetection`.
+- `HotspotToSpots`: converts hotspot images to spot coordinate tables.
 
 The legacy `lambda` deconvolution parameter is exposed as
 `regularization_lambda` in Python and BioImageFlow schemas, while the wrappers
@@ -37,7 +38,9 @@ The legacy SAIRPICO inventory listed platform selectors for these packages:
 - `cimgdenoising`: `osx-64`, `win-64`.
 - `hotspot`: `osx-64`, `osx-arm64`, `win-64`, `linux-64`.
 
-These are conda-backed command wrappers. Unit tests validate schemas and command
-construction without requiring the real binaries. Synthetic execution is limited
-to subprocess monkeypatching because the SAIRPICO binaries are not Python
-library calls and may not be available on every platform.
+These are conda-backed command wrappers. Unit tests validate schemas, command
+construction, diagnostic environment/version reports, and hotspot table
+conversion without requiring the real binaries. The environment/version checks
+are package diagnostics, not public BioImageFlow workflow tools. Synthetic CLI
+execution is limited to subprocess monkeypatching because the SAIRPICO binaries
+are not Python library calls and may not be available on every platform.

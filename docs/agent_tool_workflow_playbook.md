@@ -26,6 +26,8 @@ workflow examples, or authoring documentation.
 - Tests cover schema serialization, binding validation, one tiny successful
   execution, output template resolution, returned `Outputs`, and expected
   failure paths.
+- Regular and complete test tiers follow the central policy in
+  `docs/source/reference/testing.md`.
 
 ## Workflow Checklist
 
@@ -67,3 +69,5 @@ workflow examples, or authoring documentation.
   or document why it could not run.
 - For workflow branches, run or review the smallest fixture-backed workflow
   execution test and confirm slow/public-data tests are marked.
+- Confirm complete tests use `@pytest.mark.complete`, are skipped by default,
+  and document any required public data, binary, or model runtime resource.
