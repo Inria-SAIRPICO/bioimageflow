@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 
 class Category(str, Enum):
@@ -87,10 +87,10 @@ class BaseTool:
     """
     display_name: ClassVar[str] = ""
     documentation: ClassVar[str] = ""
-    category: ClassVar[Category | None] = None
+    category: ClassVar[Optional[Category]] = None
     tags: ClassVar[list[str]] = []
     Inputs: ClassVar[type[IOModel]] = IOModel
-    Outputs: ClassVar[type[IOModel] | None] = None
+    Outputs: ClassVar[Optional[type[IOModel]]] = None
 
     def __init__(self) -> None:
         pass
@@ -99,7 +99,7 @@ class BaseTool:
 class ProcessingTool(BaseTool):
     """Tool that processes data in an isolated Wetlands environment."""
     environment: ClassVar[Any]
-    Outputs: ClassVar[type[IOModel] | None]
+    Outputs: ClassVar[Optional[type[IOModel]]]
     resources: ClassVar[Any] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -119,8 +119,8 @@ class ProcessingTool(BaseTool):
     def __call__(
         self,
         *,
-        name: str | None = None,
-        output_templates: dict[str, str] | None = None,
+        name: Optional[str] = None,
+        output_templates: Optional[dict[str, str]] = None,
         **kwargs: Any,
     ) -> Any:
         """Create a graph node. No computation occurs."""

@@ -4,7 +4,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 from bioimageflow_core.types import SharedArray
 
@@ -28,6 +28,6 @@ def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[
         yield file_reader(Path(source))
 
 
-def save_image(destination: str | Path, data: Any, *, file_writer: Callable[[Path, Any], None]) -> None:
+def save_image(destination: Union[str, Path], data: Any, *, file_writer: Callable[[Path, Any], None]) -> None:
     """Save image data to disk using the provided writer."""
     file_writer(Path(destination), data)

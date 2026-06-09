@@ -18,7 +18,7 @@ import inspect
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
@@ -165,7 +165,7 @@ def run_process_batch(
     tool_file_path: str,
     tool_class_name: str,
     arguments_dicts: list[dict],
-    context_dict: dict | None = None,
+    context_dict: Optional[dict] = None,
     *,
     task=None,
 ) -> list[list[dict]]:

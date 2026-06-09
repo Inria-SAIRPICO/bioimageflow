@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from difflib import get_close_matches as _get_close_matches
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -14,9 +14,9 @@ class ExecutionContext:
     assets_dir: Path
     work_dir: Path
     rows_dir: Path
-    row_dir: Path | None = None
-    batch_dir: Path | None = None
-    row_index: str | None = None
+    row_dir: Optional[Path] = None
+    batch_dir: Optional[Path] = None
+    row_index: Optional[str] = None
 
     def __post_init__(self) -> None:
         expected_work_dir = self.run_dir / "work"
@@ -55,7 +55,7 @@ class ExecutionContext:
             if self.row_index is not None:
                 raise ValueError("ExecutionContext.row_index must be None when batch_dir is set.")
 
-    def to_dict(self) -> dict[str, str | None]:
+    def to_dict(self) -> dict[str, Optional[str]]:
         """Return a picklable representation for worker dispatch."""
         return {
             "run_dir": str(self.run_dir),
