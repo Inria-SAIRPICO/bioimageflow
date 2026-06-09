@@ -3,13 +3,13 @@
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Optional
 
 from bioimageflow_core.types import SharedArray
 
 
 @contextmanager
-def create_shared_output(data: Any, name: str | None = None) -> Generator[SharedArray, None, None]:
+def create_shared_output(data: Any, name: Optional[str] = None) -> Generator[SharedArray, None, None]:
     """
     Create a shared memory segment, copy data into it, and yield a SharedArray.
     Closes the local handle on exit but does NOT unlink (data persists).

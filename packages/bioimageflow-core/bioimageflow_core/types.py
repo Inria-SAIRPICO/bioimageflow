@@ -4,7 +4,7 @@ import warnings
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Tuple, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Optional, Tuple, get_args, get_origin
 
 
 class Semantic(str, Enum):
@@ -146,16 +146,16 @@ class GUIMeta:
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
     """
-    display_name: str | None = None
-    description: str | None = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
     connectable: Connectable = Connectable.NOT_BY_DEFAULT
-    min: float | None = None
-    max: float | None = None
-    step: float | None = None
-    group: str | None = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    group: Optional[str] = None
 
 
-def extract_gui_meta(annotation: Any) -> GUIMeta | None:
+def extract_gui_meta(annotation: Any) -> Optional[GUIMeta]:
     """Extract :class:`GUIMeta` from an ``Annotated`` type, or return ``None``."""
     if get_origin(annotation) is Annotated:
         for arg in get_args(annotation):
