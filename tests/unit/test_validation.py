@@ -97,7 +97,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
@@ -122,7 +122,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
@@ -145,7 +145,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
@@ -164,7 +164,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
@@ -187,7 +187,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())
@@ -208,7 +208,7 @@ class TestGetInputsSchema:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         schema = get_inputs_schema(Tool())

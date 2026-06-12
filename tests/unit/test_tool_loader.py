@@ -77,7 +77,7 @@ def tool_store(tmp_path):
             f"        value: int = 0{extra_field}\n"
             "    class Outputs(IOModel):\n"
             "        result: str\n"
-            "    def process_row(self, arguments: Arguments):\n"
+            "    def process_row(self, arguments: Arguments, *, context: object | None = None):\n"
             f"        return self.Outputs(result='{result_value}')\n"
         )
 
@@ -262,7 +262,7 @@ class TestGetToolPackageInfo:
                 pass
             class Outputs(IOModel):
                 result: str
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result="x")
 
         pkg, ver, canonical = get_tool_package_info(Stub)
@@ -414,7 +414,7 @@ class TestGetToolVersion:
                 pass
             class Outputs(IOModel):
                 result: str
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result="x")
 
         version = get_tool_version(Stub())

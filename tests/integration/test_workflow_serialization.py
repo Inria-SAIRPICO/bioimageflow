@@ -8,6 +8,7 @@ Covers:
 - Workflow custom tool source is serialized with exported workflow files
 """
 
+import importlib
 import json
 import zipfile
 import sys
@@ -140,7 +141,9 @@ class TestWorkflowExport:
         _write_workflow_tools_package(tmp_workspace)
         sys.path.insert(0, str(tmp_workspace))
         try:
-            from tools import LocalAnnotate, LocalSource
+            tools_module = importlib.import_module("tools")
+            LocalAnnotate = getattr(tools_module, "LocalAnnotate")
+            LocalSource = getattr(tools_module, "LocalSource")
 
             with Workflow(storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
@@ -164,7 +167,9 @@ class TestWorkflowExport:
         _write_workflow_tools_package(tmp_workspace)
         sys.path.insert(0, str(tmp_workspace))
         try:
-            from tools import LocalAnnotate, LocalSource
+            tools_module = importlib.import_module("tools")
+            LocalAnnotate = getattr(tools_module, "LocalAnnotate")
+            LocalSource = getattr(tools_module, "LocalSource")
 
             with Workflow(storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
@@ -190,7 +195,9 @@ class TestWorkflowExport:
         _write_workflow_tools_package(tmp_workspace)
         sys.path.insert(0, str(tmp_workspace))
         try:
-            from tools import LocalAnnotate, LocalSource
+            tools_module = importlib.import_module("tools")
+            LocalAnnotate = getattr(tools_module, "LocalAnnotate")
+            LocalSource = getattr(tools_module, "LocalSource")
 
             with Workflow(storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
@@ -256,7 +263,9 @@ class TestWorkflowImport:
         _write_workflow_tools_package(tmp_workspace)
         sys.path.insert(0, str(tmp_workspace))
         try:
-            from tools import LocalAnnotate, LocalSource
+            tools_module = importlib.import_module("tools")
+            LocalAnnotate = getattr(tools_module, "LocalAnnotate")
+            LocalSource = getattr(tools_module, "LocalSource")
 
             with Workflow(storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()

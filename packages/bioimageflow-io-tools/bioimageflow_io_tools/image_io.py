@@ -738,7 +738,7 @@ def _pixel_sizes_from_ome_xml(ome_xml: str) -> dict[str, float | None]:
         return pixel_sizes
     for axis in pixel_sizes:
         value = pixels.attrib.get(f"PhysicalSize{axis}")
-        pixel_sizes[axis] = float(value) if value not in {None, ""} else None
+        pixel_sizes[axis] = float(value) if value else None
     return pixel_sizes
 
 

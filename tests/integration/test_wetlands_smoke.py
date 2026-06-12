@@ -8,6 +8,7 @@ test_wetlands_task_api.py.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from importlib.metadata import version
 from pathlib import Path
 
@@ -24,13 +25,15 @@ pytestmark = pytest.mark.wetlands
 
 
 @pytest.fixture(autouse=True)
-def _disable_wetlands() -> None:
+def _disable_wetlands() -> Iterator[None]:
     """Override the integration conftest patch that disables Wetlands."""
     yield
 
 
 @pytest.fixture(autouse=True)
-def _isolated_wetlands_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolated_wetlands_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
     home = Path(os.environ.get("BIOIMAGEFLOW_HOME", tmp_path / "bioimageflow-home"))
     wetlands_root = Path(os.environ.get("BIOIMAGEFLOW_WETLANDS", home / "wetlands"))
     tool_store = Path(os.environ.get("BIOIMAGEFLOW_TOOL_STORE", home / "tool_packages"))

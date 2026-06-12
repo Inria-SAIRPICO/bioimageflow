@@ -64,7 +64,7 @@ class TestEnvironmentMismatch:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=1.0)
 
         class ToolV2(ProcessingTool):
@@ -77,7 +77,7 @@ class TestEnvironmentMismatch:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=2.0)
 
         from .conftest import FileLoader

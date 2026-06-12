@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_restoration_tools import BenchmarkRestoration
 
 
@@ -10,7 +11,7 @@ def build_workflow(
     storage_path: str = "./restoration_benchmark_results",
     use_wetlands: bool = True,
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build the restoration benchmark workflow."""
     storage = Path(storage_path)
     wf = Workflow(

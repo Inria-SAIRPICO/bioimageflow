@@ -286,7 +286,7 @@ class _SchemaTool(ProcessingTool):
         ] = Template("{input_image.stem}_mask{ext}")
         cell_count: int
 
-    def process_row(self, arguments):  # type: ignore[override]
+    def process_row(self, arguments, *, context: object | None = None):  # type: ignore[override]
         return self.Outputs(mask=Path("x"), cell_count=0)
 
 
@@ -324,7 +324,7 @@ class _ImageFieldGuiTool(ProcessingTool):
             ),
         ] = Template("{input_image.stem}_mask{ext}")
 
-    def process_row(self, arguments):  # type: ignore[override]
+    def process_row(self, arguments, *, context: object | None = None):  # type: ignore[override]
         return self.Outputs(mask=Path("x"))
 
 
@@ -437,7 +437,7 @@ class TestSerializeInputSchema:
             class Outputs(IOModel):
                 out: int
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(out=0)
 
         schema = serialize_input_schema(OptTool)
@@ -515,7 +515,7 @@ class TestSerializeOutputSchema:
             class Outputs(IOModel):
                 status: str = Template("{input_image.stem}.txt")  # type: ignore[assignment]
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(status="ok")
 
         with pytest.raises(TypeError, match="Template default.*path output"):
@@ -531,7 +531,7 @@ class TestSerializeOutputSchema:
             class Outputs(IOModel):
                 mask: Path = "mask.tif"  # type: ignore[assignment]
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(mask=Path("mask.tif"))
 
         with pytest.raises(TypeError, match="must be declared with Template"):
@@ -547,7 +547,7 @@ class TestSerializeOutputSchema:
             class Outputs(IOModel):
                 mask: Path = Path("mask.tif")
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(mask=Path("mask.tif"))
 
         with pytest.raises(TypeError, match="must be declared with Template"):
@@ -563,7 +563,7 @@ class TestSerializeOutputSchema:
             class Outputs(IOModel):
                 mask: Path = Template("mask.tif")
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(mask=Path("mask.tif"))
 
         schema = serialize_output_schema(StaticTemplateOutput)

@@ -7,8 +7,8 @@ from pathlib import Path
 CORE_PACKAGE = Path(__file__).parents[2] / "packages" / "bioimageflow-core" / "bioimageflow_core"
 
 
-def _annotation_nodes(tree: ast.AST) -> list[ast.AST]:
-    annotations: list[ast.AST] = []
+def _annotation_nodes(tree: ast.AST) -> list[ast.expr]:
+    annotations: list[ast.expr] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.AnnAssign):
             annotations.append(node.annotation)

@@ -34,8 +34,9 @@ class RowContextTool(ProcessingTool):
         self,
         arguments: Arguments,
         *,
-        context: ExecutionContext,
+        context: ExecutionContext | None = None,
     ) -> Any:
+        assert context is not None
         output_path = Path(arguments.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("output")
@@ -76,8 +77,9 @@ class BatchContextTool(ProcessingTool):
         self,
         arguments_list: list[Arguments],
         *,
-        context: ExecutionContext,
+        context: ExecutionContext | None = None,
     ) -> Any:
+        assert context is not None
         assert context.batch_dir is not None
         assert context.rows_dir is not None
         assert context.batch_dir.parent == context.work_dir

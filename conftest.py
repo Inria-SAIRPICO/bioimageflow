@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -50,7 +51,7 @@ def pytest_collection_modifyitems(
 def complete_wetlands_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, Any]:
+) -> Iterator[dict[str, Any]]:
     """Return an isolated Wetlands config for complete portability tests."""
     from bioimageflow.env_manager import _reset_shared_manager
 

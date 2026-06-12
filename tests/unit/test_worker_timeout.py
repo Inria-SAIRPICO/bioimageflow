@@ -111,7 +111,7 @@ class _StubTool(ProcessingTool):
     class Outputs(IOModel):
         value: float = 0.0
 
-    def process_row(self, arguments):
+    def process_row(self, arguments, *, context: object | None = None):
         return self.Outputs()
 
 
@@ -232,7 +232,7 @@ class TestWorkerTimeoutErrorRaised:
         engine, stub = self._make_engine_with_stub()
 
         class _BatchTool(_StubTool):
-            def process_batch(self, arguments_list):
+            def process_batch(self, arguments_list, *, context: object | None = None):
                 return []
 
         tool = _BatchTool()

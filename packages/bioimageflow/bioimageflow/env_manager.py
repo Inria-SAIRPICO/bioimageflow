@@ -17,7 +17,7 @@ from bioimageflow_core.environment import EnvironmentSpec, EnvironmentMismatchEr
 from bioimageflow.cache import compute_env_hash
 from bioimageflow.paths import get_wetlands_path
 
-from wetlands._internal.dependency_manager import Dependencies
+from wetlands._internal.dependency_manager import Dependency, Dependencies, LocalDependency
 import threading
 
 logger = logging.getLogger("bioimageflow")
@@ -224,9 +224,13 @@ class WetlandsEnvManager:
         local_deps = list(deps.get("local", []))
         if not _has_bioimageflow_core_dependency(pip_deps, local_deps):
             if _is_local_dependency(self._bioimageflow_core_dependency):
-                local_deps.append(self._bioimageflow_core_dependency)
+                local_deps.append(
+                    cast(LocalDependency, self._bioimageflow_core_dependency)
+                )
             else:
-                pip_deps.append(self._bioimageflow_core_dependency)
+                pip_deps.append(
+                    cast(str | Dependency, self._bioimageflow_core_dependency)
+                )
         deps["pip"] = pip_deps
         if local_deps:
             deps["local"] = local_deps

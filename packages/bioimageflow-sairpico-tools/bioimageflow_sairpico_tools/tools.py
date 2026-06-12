@@ -101,6 +101,21 @@ PsfImage = Annotated[
     ),
 ]
 
+OptionalPsfImage = Annotated[
+    Path | None,
+    ImageSpec(
+        semantics={Semantic.INTENSITY},
+        layouts={Layout.VOLUMETRIC},
+        formats=LEGACY_IMAGE_FORMATS,
+    ),
+    GUIMeta(
+        display_name="PSF image",
+        description="3D point-spread-function image used for 3D deconvolution.",
+        connectable=Connectable.NOT_BY_DEFAULT,
+        group="psf",
+    ),
+]
+
 
 def _run(command: list[Any]) -> None:
     import subprocess
@@ -244,7 +259,7 @@ class RichardsonLucyDeconvolution(ProcessingTool):
             GUIMeta("Mode", "Choose 2D, 2D Slice, or 3D deconvolution.", group="general"),
         ] = "2D"
         sigma: Annotated[float, GUIMeta("Sigma", "Gaussian PSF width for 2D modes.", min=0.0, group="psf")] = 1.5
-        psf_image: PsfImage = None
+        psf_image: OptionalPsfImage = None
         niter: Annotated[int, GUIMeta("Iterations", "Number of iterations.", min=1, step=1, group="advanced")] = 15
         regularization_lambda: Annotated[
             float,
@@ -292,7 +307,7 @@ class WienerDeconvolution(ProcessingTool):
             GUIMeta("Mode", "Choose 2D, 2D Slice, or 3D deconvolution.", group="general"),
         ] = "2D"
         sigma: Annotated[float, GUIMeta("Sigma", "Gaussian PSF width for 2D modes.", min=0.0, group="psf")] = 1.5
-        psf_image: PsfImage = None
+        psf_image: OptionalPsfImage = None
         regularization_lambda: Annotated[
             float,
             GUIMeta("Regularization lambda", "Regularization parameter passed as -lambda.", min=0.0, group="advanced"),
@@ -339,7 +354,7 @@ class SpitfireDeconvolution(ProcessingTool):
             GUIMeta("Mode", "Choose 2D, 2D Slice, or 3D deconvolution.", group="general"),
         ] = "2D"
         sigma: Annotated[float, GUIMeta("Sigma", "Gaussian PSF width for 2D modes.", min=0.0, group="psf")] = 1.5
-        psf_image: PsfImage = None
+        psf_image: OptionalPsfImage = None
         regularization: Annotated[float, GUIMeta("Regularization", "Regularization parameter as pow(2, -x).", group="advanced")] = 12.0
         weighting: Annotated[float, GUIMeta("Weighting", "SPITFIR(e) weighting parameter.", min=0.0, max=1.0, group="advanced")] = 0.6
         method: Annotated[Literal["HV", "SV"], GUIMeta("Method", "Regularization method.", group="advanced")] = "HV"

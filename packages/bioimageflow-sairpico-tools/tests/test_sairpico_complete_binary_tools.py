@@ -285,7 +285,7 @@ TEMPORARILY_UNAVAILABLE_PACKAGE_REASON = (
 )
 
 
-def _parametrize_binary_tool_case(case: BinaryToolCase) -> pytest.ParameterSet:
+def _parametrize_binary_tool_case(case: BinaryToolCase) -> object:
     if case.id in TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS:
         return pytest.param(
             case,

@@ -1,7 +1,7 @@
 """Spot table filtering, rendering, colocalization, and quality metrics."""
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
@@ -101,7 +101,7 @@ class FilterSpots(DataFrameTool):
         min_radius: float | None = None
         max_radius: float | None = None
         mask_image: Annotated[
-            Path,
+            Path | None,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
             GUIMeta("Mask image", "Optional nonzero mask for spot positions."),
         ] = None
@@ -145,7 +145,7 @@ class FilterSpots(DataFrameTool):
                 raise ValueError(
                     f"FilterSpots input table is missing required column {column!r}."
                 )
-            values = pd.to_numeric(df[column])
+            values = cast(pd.Series, pd.to_numeric(df[column]))
             if minimum is not None:
                 keep &= values >= float(minimum)
             if maximum is not None:
@@ -187,7 +187,7 @@ class RenderSpots(ProcessingTool):
         x: Annotated[float, GUIMeta("X", connectable=Connectable.BY_DEFAULT)]
         image_shape: str = "256,256"
         reference_image: Annotated[
-            Path,
+            Path | None,
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta("Reference image", "Optional image used for output shape."),
         ] = None
@@ -276,7 +276,7 @@ class SpotsToLabels(ProcessingTool):
         y: Annotated[float | None, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)] = None
         x: Annotated[float | None, GUIMeta("X", connectable=Connectable.BY_DEFAULT)] = None
         mask_image: Annotated[
-            Path,
+            Path | None,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
             GUIMeta("Spot mask"),
         ] = None
@@ -445,7 +445,11 @@ class SpotColocalization(DataFrameTool):
             "distance",
             "matched_count",
         ]
-        return pd.DataFrame(output_rows, columns=columns, index=output_index)
+        return pd.DataFrame(
+            output_rows,
+            columns=pd.Index(columns),
+            index=pd.Index(output_index),
+        )
 
     @staticmethod
     def _validate_spot_table(df: Any, role: str, group_by: str | None) -> None:

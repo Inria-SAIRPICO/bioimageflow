@@ -115,22 +115,19 @@ class TestRegisterPackage:
             ("AlphaTool", "1.0.0"),
             ("AlphaTool", "2.0.0"),
         ]
-        assert (
-            reg.get_metadata(
-                "AlphaTool", package="dummy_tools", version="1.0.0"
-            ).display_name
-            == "Alpha"
+        alpha_v1 = reg.get_metadata(
+            "AlphaTool", package="dummy_tools", version="1.0.0"
         )
-        assert (
-            reg.get_metadata(
-                "AlphaTool", package="dummy_tools", version="2.0.0"
-            ).display_name
-            == "Alpha v2"
+        alpha_v2 = reg.get_metadata(
+            "AlphaTool", package="dummy_tools", version="2.0.0"
         )
-        assert (
-            reg.get_class("AlphaTool")._bif_package_version
-            == "2.0.0"
-        )
+        alpha_cls = reg.get_class("AlphaTool")
+        assert alpha_v1 is not None
+        assert alpha_v2 is not None
+        assert alpha_cls is not None
+        assert alpha_v1.display_name == "Alpha"
+        assert alpha_v2.display_name == "Alpha v2"
+        assert alpha_cls._bif_package_version == "2.0.0"
 
 
 class TestForget:

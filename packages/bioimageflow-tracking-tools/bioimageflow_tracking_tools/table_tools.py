@@ -317,7 +317,7 @@ class TrackSummary(DataFrameTool):
             "mean_speed",
             "track_count",
         ]
-        return pd.DataFrame(summaries, columns=columns)
+        return pd.DataFrame(summaries, columns=pd.Index(columns))
 
 
 class TrackQualityMetrics(DataFrameTool):

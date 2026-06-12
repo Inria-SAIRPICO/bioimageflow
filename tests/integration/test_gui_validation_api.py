@@ -302,7 +302,7 @@ class _BadConstraintTool(ProcessingTool):
     class Outputs(IOModel):
         result: Path = Template("{diameter}.txt")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         p = Path(arguments.result)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x")

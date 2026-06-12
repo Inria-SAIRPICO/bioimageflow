@@ -186,7 +186,7 @@ class TestDevMode:
                 )
                 cell_count: int
 
-            def process_row(self, arguments: Arguments):
+            def process_row(self, arguments: Arguments, *, context: object | None = None):
                 # Different source code than StubSegmenter
                 mask_path = Path(arguments.mask)
                 mask_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,7 +229,7 @@ class TestEnvironmentDependencyChange:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=1.0)
 
         load = FileLoader()
@@ -256,7 +256,7 @@ class TestEnvironmentDependencyChange:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=2.0)
 
         events: list[Any] = []

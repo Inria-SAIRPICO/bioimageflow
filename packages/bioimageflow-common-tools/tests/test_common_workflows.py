@@ -199,7 +199,7 @@ class TestMosaic:
                     ImageSpec(semantics={Semantic.BINARY}),
                 ] = Template("binary.tif")
 
-            def process_row(self, arguments: Any) -> Any:
+            def process_row(self, arguments: Any, *, context: object | None = None) -> Any:
                 raise AssertionError("graph construction test only")
 
         with Workflow(storage_path=str(tmp_path / "bif"), use_wetlands=False):
@@ -269,7 +269,7 @@ class TestMiniPipeline:
                     ),
                 ] = Template("{input_image.stem}_labeled{ext}")
 
-            def process_row(self, arguments: Any) -> Any:
+            def process_row(self, arguments: Any, *, context: object | None = None) -> Any:
                 import shutil
                 out = Path(arguments.output_image)
                 out.parent.mkdir(parents=True, exist_ok=True)

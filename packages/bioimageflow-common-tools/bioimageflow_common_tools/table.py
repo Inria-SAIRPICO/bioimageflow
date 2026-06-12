@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import pandas as pd
 
@@ -60,7 +60,7 @@ def _coerce_value_for_series(series: pd.Series, value: str) -> Any:
 
 def _numeric_series_and_value(series: pd.Series, value: str) -> tuple[pd.Series, Any]:
     try:
-        return pd.to_numeric(series), pd.to_numeric(value)
+        return cast(pd.Series, pd.to_numeric(series)), pd.to_numeric(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(
             f"Operator requires numeric values for column '{series.name}'."
@@ -176,7 +176,7 @@ class FilterTableRows(DataFrameTool):
         if operator not in _FILTER_OPERATORS:
             raise ValueError(f"Unsupported operator '{operator}'.")
 
-        series = df[column]
+        series = cast(pd.Series, df[column])
         if operator == "contains":
             mask = series.astype(str).str.contains(value, regex=False, na=False)
         elif operator == "in":

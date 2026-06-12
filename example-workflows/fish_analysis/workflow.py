@@ -36,6 +36,7 @@ from pathlib import Path
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
+from bioimageflow.node import Node
 
 from bioimageflow_common_tools import Collect, ExtractChannel, ConnectedComponents, LabelOverlaps
 from bioimageflow_common_tools.atlas import Atlas
@@ -165,7 +166,7 @@ def build_synthetic_fish_workflow(
     storage_path: str = "./fish_synthetic_results",
     use_wetlands: bool = False,
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build a lightweight FISH-like workflow for tests and examples.
 
     This graph keeps the same high-level shape as the CIL workflow but replaces

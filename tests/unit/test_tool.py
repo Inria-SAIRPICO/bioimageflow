@@ -86,7 +86,7 @@ class TestProcessingToolValidation:
             class Outputs(IOModel):
                 result: str
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result="ok")
 
         assert Good.display_name == "Good Row"
@@ -99,7 +99,7 @@ class TestProcessingToolValidation:
             class Outputs(IOModel):
                 result: str
 
-            def process_batch(self, arguments_list):
+            def process_batch(self, arguments_list, *, context: object | None = None):
                 return [self.Outputs(result="ok")]
 
         assert Good.display_name == "Good Batch"

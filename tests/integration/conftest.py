@@ -113,7 +113,7 @@ class StubSegmenter(ProcessingTool):
         )
         cell_count: int
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         mask_path = Path(arguments.mask)
         mask_path.parent.mkdir(parents=True, exist_ok=True)
         mask_path.write_text("STUB_MASK_DATA")
@@ -134,7 +134,7 @@ class StubStats(ProcessingTool):
         mean_intensity: float
         area: int
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         return self.Outputs(mean_intensity=128.5, area=1024)
 
 
@@ -153,7 +153,7 @@ class StubTiler(ProcessingTool):
             "{input_image.stem}_tile_{row_index}.png"
         )
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         base = Path(arguments.tile)
         results = []
         for i in range(arguments.tile_count):
@@ -177,7 +177,7 @@ class StubBatchProcessor(ProcessingTool):
     class Outputs(IOModel):
         embedding: Path = Template("{input_image.stem}_embed_{row_index}.npy")
 
-    def process_batch(self, arguments_list: list[Any]) -> Any:
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
         results = []
         for args in arguments_list:
             out_path = Path(args.embedding)
@@ -199,7 +199,7 @@ class StubBatchExploder(ProcessingTool):
     class Outputs(IOModel):
         crop: Path = Template("{input_image.stem}_crop_{row_index}.png")
 
-    def process_batch(self, arguments_list: list[Any]) -> Any:
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
         results = []
         for args in arguments_list:
             base = Path(args.crop)
@@ -226,7 +226,7 @@ class StubSourceProcessingTool(ProcessingTool):
         path: Path
         metadata: str
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         directory = Path(arguments.directory)
         results = []
         for f in sorted(directory.glob("*")):
@@ -253,7 +253,7 @@ class StubRegistration(ProcessingTool):
             Path, ImageSpec(semantics={Semantic.DISPLACEMENT})
         ] = Template("{fixed.stem}_disp_{row_index}.tif")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         reg_path = Path(arguments.registered)
         disp_path = Path(arguments.displacement)
         for p in (reg_path, disp_path):
@@ -274,7 +274,7 @@ class StubSharedMemoryTool(ProcessingTool):
     class Outputs(IOModel):
         result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         import numpy as np
         from bioimageflow_core.shm import create_shared_output
 
@@ -295,7 +295,7 @@ class StubSharedMemoryConsumer(ProcessingTool):
     class Outputs(IOModel):
         num_labels: int
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         from bioimageflow_core.io import load_image
 
         def noop_reader(p: Path) -> Any:
@@ -330,7 +330,7 @@ class CellposeSegmenter(CellposeBase):
         )
         cell_count: int
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         mask_path = Path(arguments.mask)
         mask_path.parent.mkdir(parents=True, exist_ok=True)
         mask_path.write_text("CELLPOSE_MASK")
@@ -350,7 +350,7 @@ class CellposeTrain(CellposeBase):
     class Outputs(IOModel):
         model_path: Path = Template("{node_name}_model")
 
-    def process_batch(self, arguments_list: list[Any]) -> Any:
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
         results = []
         for args in arguments_list:
             out = Path(args.model_path)
@@ -373,7 +373,7 @@ class StardistSegmenter(ProcessingTool):
             "{input_image.stem}_stardist_{row_index}.png"
         )
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         mask_path = Path(arguments.mask)
         mask_path.parent.mkdir(parents=True, exist_ok=True)
         mask_path.write_text("STARDIST_MASK")

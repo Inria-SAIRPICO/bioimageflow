@@ -11,6 +11,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_common_tools import Collect
 from bioimageflow_sairpico_tools import MedianDenoising, RichardsonLucyDeconvolution
 
@@ -28,7 +29,7 @@ def build_workflow(
     storage_path: str = "./sairpico_restoration_smoke_results",
     use_wetlands: bool = False,
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build a SAIRPICO denoise plus deconvolution smoke graph."""
     storage = Path(storage_path)
     image_path = _write_synthetic_input(storage / "data")

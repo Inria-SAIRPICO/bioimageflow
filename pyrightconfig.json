@@ -1,9 +1,36 @@
 {
   "venvPath": ".",
   "venv": ".venv",
+  "include": [
+    "conftest.py",
+    "docs/source",
+    "example-workflows",
+    "packages",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    "**/.venv",
+    "**/wetlands",
+    "**/bif",
+    "**/results",
+    "**/data",
+    ".worktrees",
+    "docs/_build"
+  ],
   "extraPaths": [
     "packages/bioimageflow-core",
     "packages/bioimageflow-common-tools",
-    "packages/bioimageflow"
+    "packages/bioimageflow-io-tools",
+    "packages/bioimageflow-measurement-tools",
+    "packages/bioimageflow-restoration-tools",
+    "packages/bioimageflow-sairpico-tools",
+    "packages/bioimageflow-segmentation-tools",
+    "packages/bioimageflow-spot-tools",
+    "packages/bioimageflow-tracking-tools",
+    "packages/bioimageflow",
+    "example-workflows/fish_analysis"
   ]
 }

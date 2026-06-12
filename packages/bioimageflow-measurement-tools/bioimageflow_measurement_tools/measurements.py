@@ -485,7 +485,11 @@ class AggregatePerImage(DataFrameTool):
         stats = _requested_stats(getattr(arguments, "stats", "count,mean,min,max,sum"))
         result = table.groupby(group_by, dropna=False)[columns].agg(stats)
         result.columns = [f"{column}_{stat}" for column, stat in result.columns]
-        result.insert(0, "object_count", table.groupby(group_by, dropna=False).size())
+        result.insert(
+            0,
+            "object_count",
+            table.groupby(group_by, dropna=False).size().to_numpy(),
+        )
         return result.reset_index()
 
 

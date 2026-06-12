@@ -47,8 +47,8 @@ def test_augment_dependencies_injects_configured_local_core_dependency() -> None
 
     augmented = manager._augment_dependencies({"python": "3.9", "pip": ["numpy"]})
 
-    assert augmented["pip"] == ["numpy"]
-    assert augmented["local"] == [dependency]
+    assert augmented.get("pip") == ["numpy"]
+    assert augmented.get("local") == [dependency]
 
 
 @pytest.mark.parametrize(
@@ -82,8 +82,8 @@ def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
     augmented = manager._augment_dependencies(dependencies)
 
     if isinstance(existing_dependency, dict):
-        assert augmented["pip"] == ["numpy"]
-        assert augmented["local"] == [existing_dependency]
+        assert augmented.get("pip") == ["numpy"]
+        assert augmented.get("local") == [existing_dependency]
     else:
-        assert augmented["pip"] == ["numpy", existing_dependency]
+        assert augmented.get("pip") == ["numpy", existing_dependency]
         assert "local" not in augmented

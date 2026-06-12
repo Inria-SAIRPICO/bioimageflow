@@ -6,6 +6,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_tracking_tools import LabelsToObjects, LinkObjects, TrackMetrics
 
 
@@ -24,7 +25,7 @@ def build_workflow(
     storage_path: str = "./tracking_analysis_results",
     use_wetlands: bool = True,
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build the tracking workflow."""
     storage = Path(storage_path)
     label_path = _write_labels(storage / "data")

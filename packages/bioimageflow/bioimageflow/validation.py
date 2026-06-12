@@ -86,11 +86,19 @@ def is_path_type(annotation: Any) -> bool:
     """Check if an annotation is Path-based (Path or Annotated[Path, ...])."""
     from pathlib import Path
 
-    if annotation is Path:
+    inner = _unwrap_optional(annotation)
+    if inner is Path:
         return True
-    if get_origin(annotation) is Annotated:
-        base = get_args(annotation)[0]
-        return base is Path
+    origin = get_origin(inner)
+    if origin is Union or origin is UnionType:
+        return Path in get_args(inner)
+    if get_origin(inner) is Annotated:
+        base = _unwrap_optional(get_args(inner)[0])
+        if base is Path:
+            return True
+        origin = get_origin(base)
+        if origin is Union or origin is UnionType:
+            return Path in get_args(base)
     return False
 
 
@@ -496,8 +504,12 @@ def _display_type_name(annotation: Any) -> str:
     # recognize them before generic Annotated-unwrapping collapses them to the
     # base type.
     if get_origin(annotation) is Annotated and extract_image_spec(annotation) is not None:
-        base = get_args(annotation)[0]
-        if base is Path:
+        base = _unwrap_optional(get_args(annotation)[0])
+        base_origin = get_origin(base)
+        if base is Path or (
+            (base_origin is Union or base_origin is UnionType)
+            and Path in get_args(base)
+        ):
             return "ImageFile"
         base_name = getattr(base, "__name__", None)
         if base_name == "SharedArray":

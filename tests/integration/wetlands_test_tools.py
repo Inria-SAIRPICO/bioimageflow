@@ -51,7 +51,7 @@ class SimpleRowTool(ProcessingTool):
         output_path: Path = Template("{input_path.stem}_out_{row_index}.txt")
         value: float
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         out = Path(arguments.output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(f"processed:{arguments.input_path}")
@@ -70,7 +70,7 @@ class SlowRowTool(ProcessingTool):
         output_path: Path = Template("{input_path.stem}_slow_{row_index}.txt")
         elapsed: float
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         t0 = time.monotonic()
         time.sleep(0.3)
         out = Path(arguments.output_path)
@@ -90,7 +90,7 @@ class ErrorRowTool(ProcessingTool):
     class Outputs(IOModel):
         result: float
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         raise RuntimeError("Intentional test error")
 
 
@@ -109,7 +109,7 @@ class GpuTool(ProcessingTool):
         output_path: Path = Template("{input_path.stem}_gpu_{row_index}.txt")
         value: float
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         out = Path(arguments.output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("gpu_processed")
@@ -129,7 +129,7 @@ class ProgressReportingTool(ProcessingTool):
     class Outputs(IOModel):
         output_path: Path = Template("{input_path.stem}_prog_{row_index}.txt")
 
-    def process_row(self, arguments: Arguments, *, task=None) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None, task=None) -> Any:
         steps = 5
         for i in range(steps):
             if task is not None:
@@ -155,7 +155,7 @@ class BatchTool(ProcessingTool):
         output_path: Path = Template("{input_path.stem}_batch_{row_index}.txt")
         value: float
 
-    def process_batch(self, arguments_list: list[Any], *, task=None) -> Any:
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None, task=None) -> Any:
         results = []
         for i, args in enumerate(arguments_list):
             if task is not None:
@@ -184,7 +184,7 @@ class CancellableRowTool(ProcessingTool):
     class Outputs(IOModel):
         output_path: Path = Template("{input_path.stem}_cancel_{row_index}.txt")
 
-    def process_row(self, arguments: Arguments) -> Any:
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         # Sleep long enough for cancellation to arrive
         time.sleep(5)
         out = Path(arguments.output_path)

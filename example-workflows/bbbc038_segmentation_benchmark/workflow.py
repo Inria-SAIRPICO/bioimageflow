@@ -12,6 +12,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_measurement_tools import LabelBenchmark
 from bioimageflow_segmentation_tools import ThresholdSegment
 
@@ -37,7 +38,7 @@ def _write_synthetic_bbbc038_fixture(data_dir: Path) -> tuple[Path, Path]:
 
 def build_workflow(
     storage_path: str = "./bbbc038_segmentation_results",
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build the synthetic BBBC038-style benchmark workflow."""
     storage = Path(storage_path)
     image_path, reference_path = _write_synthetic_bbbc038_fixture(storage / "data")

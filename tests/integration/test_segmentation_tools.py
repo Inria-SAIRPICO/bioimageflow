@@ -7,6 +7,7 @@ import types
 import importlib
 import importlib.util
 from pathlib import Path
+from typing import Any, cast
 
 import imageio.v3 as iio
 import numpy as np
@@ -50,10 +51,14 @@ def test_common_package_no_longer_contains_canonical_segmentation_modules() -> N
 
 class TestCellpose3:
     def test_environment_pins_cellpose_v3(self) -> None:
-        assert cellpose_v3_env.name == "segmentation-cellpose-v3-3-1-1"
-        assert "cellpose==3.1.1.1" in cellpose_v3_env.dependencies["pip"]
-        assert "packaging" in cellpose_v3_env.dependencies["pip"]
-        assert Cellpose3.environment is cellpose_v3_env
+        env = cellpose_v3_env
+        tool_cls = Cellpose3
+        assert env is not None
+        assert tool_cls is not None
+        assert env.name == "segmentation-cellpose-v3-3-1-1"
+        assert "cellpose==3.1.1.1" in env.dependencies["pip"]
+        assert "packaging" in env.dependencies["pip"]
+        assert tool_cls.environment is env
 
     def test_process_row_writes_mask(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         image_path = tmp_path / "input.tif"
@@ -74,11 +79,14 @@ class TestCellpose3:
                 masks[5:7, 5:7] = 2
                 return masks, None, None, None
 
-        fake_cellpose = types.ModuleType("cellpose")
+        tool_cls = Cellpose3
+        assert tool_cls is not None
+
+        fake_cellpose = cast(Any, types.ModuleType("cellpose"))
         fake_cellpose.models = types.SimpleNamespace(Cellpose=FakeCellpose)
         monkeypatch.setitem(sys.modules, "cellpose", fake_cellpose)
 
-        result = Cellpose3().process_row(
+        result = tool_cls().process_row(
             Arguments(
                 input_image=image_path,
                 mask=mask_path,
@@ -100,10 +108,14 @@ class TestCellpose3:
 
 class TestStarDistSegmenter:
     def test_environment_pins_stardist(self) -> None:
-        assert stardist_env.name == "segmentation-stardist"
-        assert "stardist==0.9.2" in stardist_env.dependencies["pip"]
-        assert "tensorflow" in stardist_env.dependencies["pip"]
-        assert StarDistSegmenter.environment is stardist_env
+        env = stardist_env
+        tool_cls = StarDistSegmenter
+        assert env is not None
+        assert tool_cls is not None
+        assert env.name == "segmentation-stardist"
+        assert "stardist==0.9.2" in env.dependencies["pip"]
+        assert "tensorflow" in env.dependencies["pip"]
+        assert tool_cls.environment is env
 
     def test_process_row_writes_mask(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         image_path = tmp_path / "input.tif"
@@ -132,11 +144,14 @@ class TestStarDistSegmenter:
                 labels[3:5, 3:5] = 3
                 return labels, {}
 
+        tool_cls = StarDistSegmenter
+        assert tool_cls is not None
+
         fake_csbdeep = types.ModuleType("csbdeep")
-        fake_csbdeep_utils = types.ModuleType("csbdeep.utils")
+        fake_csbdeep_utils = cast(Any, types.ModuleType("csbdeep.utils"))
         fake_csbdeep_utils.normalize = fake_normalize
         fake_stardist = types.ModuleType("stardist")
-        fake_stardist_models = types.ModuleType("stardist.models")
+        fake_stardist_models = cast(Any, types.ModuleType("stardist.models"))
         fake_stardist_models.StarDist2D = FakeStarDist2D
 
         monkeypatch.setitem(sys.modules, "csbdeep", fake_csbdeep)
@@ -144,7 +159,7 @@ class TestStarDistSegmenter:
         monkeypatch.setitem(sys.modules, "stardist", fake_stardist)
         monkeypatch.setitem(sys.modules, "stardist.models", fake_stardist_models)
 
-        result = StarDistSegmenter().process_row(
+        result = tool_cls().process_row(
             Arguments(
                 input_image=image_path,
                 mask=mask_path,
@@ -165,11 +180,15 @@ class TestStarDistSegmenter:
         assert iio.imread(mask_path).max() == 3
 
     def test_prepare_image_handles_channel_first_he_rgb(self) -> None:
+        tool_cls = StarDistSegmenter
+        assert tool_cls is not None
         image = np.zeros((3, 8, 9), dtype=np.uint8)
-        prepared = StarDistSegmenter._prepare_image(image, "2D_versatile_he", 0)
+        prepared = tool_cls._prepare_image(image, "2D_versatile_he", 0)
         assert prepared.shape == (8, 9, 3)
 
     def test_prepare_image_handles_channel_last_fluorescence(self) -> None:
+        tool_cls = StarDistSegmenter
+        assert tool_cls is not None
         image = np.zeros((8, 9, 3), dtype=np.uint8)
-        prepared = StarDistSegmenter._prepare_image(image, "2D_versatile_fluo", 2)
+        prepared = tool_cls._prepare_image(image, "2D_versatile_fluo", 2)
         assert prepared.shape == (8, 9)

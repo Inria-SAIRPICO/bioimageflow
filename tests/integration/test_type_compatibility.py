@@ -10,7 +10,7 @@ Covers:
 
 import warnings
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, get_args
 
 import pytest
 
@@ -39,7 +39,7 @@ class TestImageSpecCreation:
             ),
         ]
         # The annotation should carry an ImageSpec
-        spec = ann.__metadata__[0]
+        spec = get_args(ann)[1]
         assert isinstance(spec, ImageSpec)
         assert Semantic.INTENSITY in spec.semantics
         assert Layout.VOLUMETRIC in spec.layouts
@@ -48,20 +48,20 @@ class TestImageSpecCreation:
 
     def test_annotated_path_with_semantics(self):
         ann = Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        spec = ann.__metadata__[0]
+        spec = get_args(ann)[1]
         assert spec.semantics == {Semantic.LABEL}
         assert spec.layouts == set()  # Wildcard
 
     def test_annotated_path_wildcard(self):
         ann = Annotated[Path, ImageSpec()]
-        spec = ann.__metadata__[0]
+        spec = get_args(ann)[1]
         assert spec.semantics == set()
         assert spec.layouts == set()
         assert spec.dtypes == set()
 
     def test_image_shared_has_memory_format(self):
         ann = ImageShared(semantics=Semantic.PROBABILITY)
-        spec = ann.__metadata__[0]
+        spec = get_args(ann)[1]
         assert "memory" in spec.formats
 
     def test_annotated_path_with_set_of_semantics(self):
@@ -69,21 +69,23 @@ class TestImageSpecCreation:
             Path,
             ImageSpec(semantics={Semantic.INTENSITY, Semantic.PROBABILITY}),
         ]
-        spec = ann.__metadata__[0]
+        spec = get_args(ann)[1]
         assert len(spec.semantics) == 2
 
     def test_annotated_path_with_gui_meta(self):
         gui = GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT)
         ann = Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), gui]
-        assert ann.__metadata__[0].semantics == {Semantic.INTENSITY}
-        assert ann.__metadata__[1] is gui
+        metadata = get_args(ann)[1:]
+        assert metadata[0].semantics == {Semantic.INTENSITY}
+        assert metadata[1] is gui
 
     def test_image_shared_with_gui_meta(self):
         gui = GUIMeta(display_name="Shared image", connectable=Connectable.BY_DEFAULT)
         ann = ImageShared(semantics=Semantic.LABEL, gui=gui)
-        assert ann.__metadata__[0].semantics == {Semantic.LABEL}
-        assert "memory" in ann.__metadata__[0].formats
-        assert ann.__metadata__[1] is gui
+        metadata = get_args(ann)[1:]
+        assert metadata[0].semantics == {Semantic.LABEL}
+        assert "memory" in metadata[0].formats
+        assert metadata[1] is gui
 
 
 class TestLayoutEnum:

@@ -121,7 +121,7 @@ class TestFailureAndCancellation:
             class Outputs(IOModel):
                 result: int
 
-            def process_row(self, arguments: Arguments) -> Any:
+            def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
                 raise RuntimeError(f"boom for {arguments.mask}")
 
         storage = tmp_workspace / "results"
@@ -184,7 +184,7 @@ class TestFailureAndCancellation:
             class Outputs(IOModel):
                 mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
 
-            def process_row(self, arguments: Arguments) -> Any:
+            def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
                 Path(arguments.mask).parent.mkdir(parents=True, exist_ok=True)
                 Path(arguments.mask).write_text("partial")
                 raise WorkflowCancelledError("cancelled inside row")

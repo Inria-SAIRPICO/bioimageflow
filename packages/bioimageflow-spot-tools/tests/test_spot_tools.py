@@ -21,6 +21,10 @@ from bioimageflow_spot_tools import (
 pytestmark = pytest.mark.package_tools
 
 
+def _index(values: list[str]) -> pd.Index:
+    return pd.Index(values)
+
+
 def _spot_image(path: Path) -> Path:
     image = np.zeros((48, 48), dtype=np.float32)
     for y, x, value in [(12, 10, 12.0), (18, 35, 9.0), (34, 24, 11.0)]:
@@ -94,7 +98,7 @@ def test_assign_spots_to_labels_and_summarize(tmp_path: Path) -> None:
             {"label": row.label, "intensity": row.intensity}
             for row in assigned
         ],
-        index=[f"spot::{index}" for index in range(len(assigned))],
+        index=_index([f"spot::{index}" for index in range(len(assigned))]),
     )
     summary = SpotSummary().transform(
         assigned_table,
@@ -166,7 +170,7 @@ def test_filter_spots_uses_numeric_thresholds_and_mask(tmp_path: Path) -> None:
             "radius": [1.0, 2.0, 5.0],
             "source": ["a", "b", "c"],
         },
-        index=["image::0", "image::1", "image::2"],
+        index=_index(["image::0", "image::1", "image::2"]),
     )
     result = FilterSpots().transform(
         rows,
@@ -242,7 +246,7 @@ def test_spot_colocalization_matches_nearest_available_spots() -> None:
             "y": [5.0, 20.0, 10.0],
             "x": [5.0, 20.0, 10.0],
         },
-        index=["image_a::0", "image_a::1", "image_b::0"],
+        index=_index(["image_a::0", "image_a::1", "image_b::0"]),
     )
     query = pd.DataFrame(
         {
@@ -250,7 +254,7 @@ def test_spot_colocalization_matches_nearest_available_spots() -> None:
             "y": [6.0, 28.0, 10.0],
             "x": [5.0, 20.0, 11.5],
         },
-        index=["image_a::0", "image_a::1", "image_b::0"],
+        index=_index(["image_a::0", "image_a::1", "image_b::0"]),
     )
 
     result = SpotColocalization().merge_dataframes(
@@ -275,7 +279,7 @@ def test_spot_colocalization_can_group_by_image_column() -> None:
             "y": [4.0, 20.0],
             "x": [4.0, 20.0],
         },
-        index=["ref_0", "ref_1"],
+        index=_index(["ref_0", "ref_1"]),
     )
     query = pd.DataFrame(
         {
@@ -284,7 +288,7 @@ def test_spot_colocalization_can_group_by_image_column() -> None:
             "y": [20.5, 4.5],
             "x": [20.0, 4.0],
         },
-        index=["query_0", "query_1"],
+        index=_index(["query_0", "query_1"]),
     )
 
     result = SpotColocalization().merge_dataframes(
@@ -303,10 +307,13 @@ def test_spot_colocalization_rejects_malformed_coordinates() -> None:
     with pytest.raises(ValueError, match="missing required column.*'x'"):
         SpotColocalization().merge_dataframes(
             [
-                pd.DataFrame({"spot_id": [1], "y": [5.0]}, index=["image::0"]),
+                pd.DataFrame(
+                    {"spot_id": [1], "y": [5.0]},
+                    index=_index(["image::0"]),
+                ),
                 pd.DataFrame(
                     {"spot_id": [2], "y": [5.0], "x": [5.0]},
-                    index=["image::0"],
+                    index=_index(["image::0"]),
                 ),
             ],
             Arguments(max_distance=2.0),
@@ -319,11 +326,11 @@ def test_spot_colocalization_rejects_unrelated_index_lineage() -> None:
             [
                 pd.DataFrame(
                     {"spot_id": [1], "y": [5.0], "x": [5.0]},
-                    index=["reference_image::0"],
+                    index=_index(["reference_image::0"]),
                 ),
                 pd.DataFrame(
                     {"spot_id": [2], "y": [5.0], "x": [5.0]},
-                    index=["query_image::0"],
+                    index=_index(["query_image::0"]),
                 ),
             ],
             Arguments(max_distance=2.0),
@@ -345,7 +352,7 @@ def test_spot_quality_metrics_reports_snr_and_nearest_neighbor(tmp_path: Path) -
             "intensity": [11.0, 7.0],
             "channel": ["gfp", "gfp"],
         },
-        index=["image::0", "image::1"],
+        index=_index(["image::0", "image::1"]),
     )
     result = SpotQualityMetrics().transform(
         spots,
@@ -367,7 +374,7 @@ def test_spot_quality_metrics_rejects_out_of_bounds_coordinates(tmp_path: Path) 
         SpotQualityMetrics().transform(
             pd.DataFrame(
                 {"spot_id": [1], "y": [15], "x": [5], "intensity": [2.0]},
-                index=["image::0"],
+                index=_index(["image::0"]),
             ),
             Arguments(image=str(image_path), radius=1),
         )

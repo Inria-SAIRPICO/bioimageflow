@@ -175,7 +175,7 @@ class TestTypeIncompatibility:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=0.0)
 
         load = FileLoader()
@@ -205,7 +205,7 @@ class TestWorkerExceptions:
             class Outputs(IOModel):
                 result: float
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 raise ValueError("Intentional failure in worker")
 
         load = FileLoader()

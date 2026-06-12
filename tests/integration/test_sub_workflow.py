@@ -15,6 +15,7 @@ Covers:
 """
 
 from pathlib import Path
+import importlib
 import sys
 
 import pandas as pd
@@ -555,7 +556,9 @@ class TestSubWorkflowSerialization:
         _clear_tools_modules()
         sys.path.insert(0, str(tmp_workspace))
         try:
-            from tools import LocalFileLoader, LocalSegmentOnly
+            tools_module = importlib.import_module("tools")
+            LocalFileLoader = getattr(tools_module, "LocalFileLoader")
+            LocalSegmentOnly = getattr(tools_module, "LocalSegmentOnly")
 
             load = LocalFileLoader()
             seg = LocalSegmentOnly()

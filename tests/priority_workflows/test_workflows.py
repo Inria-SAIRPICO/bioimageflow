@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import importlib.util
 import sys
@@ -11,7 +12,7 @@ from bioimageflow_core import Arguments
 from bioimageflow_sairpico_tools import MedianDenoising, RichardsonLucyDeconvolution
 
 
-def _load_module(path: Path):
+def _load_module(path: Path) -> Any:
     spec = importlib.util.spec_from_file_location(path.parent.name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -25,7 +26,7 @@ def _example(name: str) -> Path:
     return root / "example-workflows" / name / "workflow.py"
 
 
-def _force_local_execution(wf: object) -> None:
+def _force_local_execution(wf: Any) -> None:
     wf.use_wetlands = False
 
 
@@ -42,8 +43,8 @@ def _write_multichannel_input(data_dir: Path) -> Path:
 
 
 def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
-    cellpose_module = types.ModuleType("cellpose")
-    cellpose_models_module = types.ModuleType("cellpose.models")
+    cellpose_module = cast(Any, types.ModuleType("cellpose"))
+    cellpose_models_module = cast(Any, types.ModuleType("cellpose.models"))
 
     class FakeCellpose:
         def __init__(self, model_type: str) -> None:
@@ -60,15 +61,15 @@ def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "cellpose", cellpose_module)
     monkeypatch.setitem(sys.modules, "cellpose.models", cellpose_models_module)
 
-    csbdeep_module = types.ModuleType("csbdeep")
-    csbdeep_utils_module = types.ModuleType("csbdeep.utils")
+    csbdeep_module = cast(Any, types.ModuleType("csbdeep"))
+    csbdeep_utils_module = cast(Any, types.ModuleType("csbdeep.utils"))
     csbdeep_utils_module.normalize = lambda image, *_args, **_kwargs: image
     csbdeep_module.utils = csbdeep_utils_module
     monkeypatch.setitem(sys.modules, "csbdeep", csbdeep_module)
     monkeypatch.setitem(sys.modules, "csbdeep.utils", csbdeep_utils_module)
 
-    stardist_module = types.ModuleType("stardist")
-    stardist_models_module = types.ModuleType("stardist.models")
+    stardist_module = cast(Any, types.ModuleType("stardist"))
+    stardist_models_module = cast(Any, types.ModuleType("stardist.models"))
 
     class FakeStarDist2D:
         @classmethod
@@ -235,9 +236,9 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     calls: list[list[str]] = []
 
     def fake_run(command: list[object], **_: object) -> None:
-        command = [str(value) for value in command]
-        calls.append(command)
-        output = Path(command[command.index("-o") + 1])
+        command_parts = [str(value) for value in command]
+        calls.append(command_parts)
+        output = Path(command_parts[command_parts.index("-o") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.eye(16, dtype=np.uint8) * 255)
 
@@ -284,10 +285,10 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     calls: list[list[str]] = []
 
     def fake_run(command: list[object]) -> None:
-        command = [str(value) for value in command]
-        calls.append(command)
-        output = Path(command[command.index("-o") + 1])
-        input_path = Path(command[command.index("-i") + 1])
+        command_parts = [str(value) for value in command]
+        calls.append(command_parts)
+        output = Path(command_parts[command_parts.index("-o") + 1])
+        input_path = Path(command_parts[command_parts.index("-i") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
         if input_path.exists():
             iio.imwrite(
@@ -419,4 +420,3 @@ def test_example_workflow_documentation_records_review_contract() -> None:
         assert "Data" in text
         assert "Expected" in text
         assert "Test" in text
-

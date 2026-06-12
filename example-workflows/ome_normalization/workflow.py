@@ -6,6 +6,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_common_tools import Collect
 from bioimageflow_io_tools import (
     ConvertToOmeTiff,
@@ -25,7 +26,7 @@ def _write_synthetic_input(data_dir: Path) -> Path:
 
 def build_workflow(
     storage_path: str = "./ome_normalization_results",
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build a tiny CZYX to selected OME-TIFF/OME-Zarr conversion graph."""
     storage = Path(storage_path)
     source = _write_synthetic_input(storage / "data")

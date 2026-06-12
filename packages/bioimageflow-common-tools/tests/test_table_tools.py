@@ -36,6 +36,7 @@ def test_select_columns_resolves_schema_from_upstream_columns():
         {"columns": "score,sample", "rename_mapping": "score:value"},
     )
 
+    assert schema is not None
     assert list(schema) == ["value", "sample"]
     assert schema["value"]["type"] == "int"
 

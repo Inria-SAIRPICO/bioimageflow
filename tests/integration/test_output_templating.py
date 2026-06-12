@@ -35,7 +35,7 @@ class StubDefaultTemplate(ProcessingTool):
         result: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
         # No default → uses default template: {node_name}_{row_index}{ext}
 
-    def process_row(self, arguments: Arguments):
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
         Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
         Path(arguments.result).write_text("DATA")
         return self.Outputs(result=arguments.result)
@@ -54,7 +54,7 @@ class StubCustomTemplate(ProcessingTool):
             "{input_image.stem}_seg_{row_index}.png"
         )
 
-    def process_row(self, arguments: Arguments):
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
         Path(arguments.mask).parent.mkdir(parents=True, exist_ok=True)
         Path(arguments.mask).write_text("DATA")
         return self.Outputs(mask=arguments.mask)
@@ -74,7 +74,7 @@ class StubMultiInput(ProcessingTool):
             "{image_a.stem}_vs_{image_b.stem}_{row_index}.tif"
         )
 
-    def process_row(self, arguments: Arguments):
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
         Path(arguments.diff).parent.mkdir(parents=True, exist_ok=True)
         Path(arguments.diff).write_text("DIFF")
         return self.Outputs(diff=arguments.diff)
@@ -175,7 +175,7 @@ class TestColumnTemplate:
                     "{column:patient}_{row_index}.png"
                 )
 
-            def process_row(self, arguments: Arguments):
+            def process_row(self, arguments: Arguments, *, context: object | None = None):
                 Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
                 Path(arguments.result).write_text("DATA")
                 return self.Outputs(result=arguments.result)
@@ -219,7 +219,7 @@ class TestTimestampTemplate:
                     "{node_name}_{timestamp}_{row_index}.png"
                 )
 
-            def process_row(self, arguments: Arguments):
+            def process_row(self, arguments: Arguments, *, context: object | None = None):
                 Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
                 Path(arguments.result).write_text("DATA")
                 return self.Outputs(result=arguments.result)
@@ -258,7 +258,7 @@ class TestTemplateErrors:
                     "{nonexistent_field.stem}_out.png"
                 )
 
-            def process_row(self, arguments):
+            def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=arguments.result)
 
         load = FileLoader()

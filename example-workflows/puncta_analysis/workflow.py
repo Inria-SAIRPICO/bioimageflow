@@ -6,6 +6,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
+from bioimageflow.node import Node
 from bioimageflow_spot_tools import AssignSpotsToLabels, DetectSpots, SpotSummary
 
 
@@ -29,7 +30,7 @@ def build_workflow(
     storage_path: str = "./puncta_analysis_results",
     use_wetlands: bool = True,
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, object]:
+) -> tuple[Workflow, Node]:
     """Build the puncta analysis workflow."""
     storage = Path(storage_path)
     image_path, labels_path = _write_inputs(storage / "data")

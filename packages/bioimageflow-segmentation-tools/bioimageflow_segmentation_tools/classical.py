@@ -96,9 +96,10 @@ def _write_labels(path: Path, labels: Any) -> None:
 
 
 def _label_skimage(mask: Any) -> Any:
+    import numpy as np
     from skimage import measure
 
-    return measure.label(mask).astype("uint32", copy=False)
+    return np.asarray(measure.label(mask)).astype("uint32", copy=False)
 
 
 def _distance_transform(mask: Any) -> Any:
@@ -134,9 +135,11 @@ def _distance_watershed(mask: Any, min_distance: int) -> tuple[Any, int]:
     for marker_label, coordinate in enumerate(peak_coordinates, start=1):
         markers[tuple(int(value) for value in coordinate)] = marker_label
     if markers.max() == 0:
-        markers = measure.label(foreground).astype("uint32", copy=False)
+        markers = np.asarray(measure.label(foreground)).astype("uint32", copy=False)
 
-    labels = watershed(-distance, markers, mask=foreground).astype("uint32", copy=False)
+    labels = np.asarray(watershed(-distance, markers, mask=foreground)).astype(
+        "uint32", copy=False
+    )
     return labels, int(labels.max())
 
 
@@ -399,7 +402,7 @@ class WatershedSegment(ProcessingTool):
             ),
         ]
         markers_image: Annotated[
-            Path,
+            Path | str | None,
             ImageSpec(
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
@@ -450,7 +453,9 @@ class WatershedSegment(ProcessingTool):
         foreground = image >= arguments.threshold
         markers_value = getattr(arguments, "markers_image", "")
         if markers_value is None or str(markers_value) == "":
-            markers = measure.label(foreground).astype("uint32", copy=False)
+            markers = np.asarray(measure.label(foreground)).astype(
+                "uint32", copy=False
+            )
         else:
             markers = iio.imread(str(markers_value))
             if markers.shape != foreground.shape:
@@ -640,7 +645,7 @@ class FilterLabels(ProcessingTool):
             GUIMeta(display_name="Remove border-touching labels"),
         ] = False
         intensity_image: Annotated[
-            Path,
+            Path | str | None,
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta(
                 display_name="Intensity image",

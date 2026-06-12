@@ -224,7 +224,7 @@ class RichardsonLucyRestoration(ProcessingTool):
     class Inputs(IOModel):
         input_image: IntensityImage
         psf_image: Annotated[
-            Path,
+            Path | None,
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta("PSF image", connectable=Connectable.NOT_BY_DEFAULT),
         ] = None

@@ -89,4 +89,4 @@ class TrackMetrics(DataFrameTool):
             "track_count",
             "mean_track_length",
         ]
-        return pd.DataFrame(rows, columns=columns)
+        return pd.DataFrame(rows, columns=pd.Index(columns))
