@@ -1,4 +1,5 @@
 .DS_Store
+.worktrees/
 .claude/worktrees/
 TODO.md
 bif_data/
