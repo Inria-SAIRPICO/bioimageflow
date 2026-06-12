@@ -5,7 +5,7 @@ description = "SAIRPICO command-line tool wrappers for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.1.4",
+    "bioimageflow-core>=0.1.5",
     "bioimageflow>=0.1.4",
     "imageio",
     "numpy",

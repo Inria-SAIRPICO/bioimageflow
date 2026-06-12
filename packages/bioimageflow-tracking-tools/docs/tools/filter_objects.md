@@ -1,44 +1,35 @@
 # FilterObjects
 
-`FilterObjects` filters object tables by area, frame, intensity, and position.
+`FilterObjects` filters object dataframe rows by area, frame, intensity, and position.
 
-## Inputs
-
-- `objects_csv`: table with object rows.
-- Optional `min_*` and `max_*` filters for `area`, `frame`, `intensity`, `y`,
-  and `x`.
-
-## Outputs
-
-- `filtered_objects_csv`.
-- `object_count`.
+The tool is a `DataFrameTool`: pass an upstream object dataframe positionally, then configure threshold fields.
+The input dataframe must contain `frame`, `label`, `y`, `x`, and `area`; optional `intensity` is used only when intensity thresholds are requested.
+The output preserves input columns for kept rows and adds `object_count`.
+No filtered objects CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling and package-local numeric table validation helpers.
-
-## Assumptions
-
-Object rows use one row per detected object and numeric columns for selected
-filters. Missing optional filter columns are ignored.
+BioImageFlow core APIs and package-local numeric helpers.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_tracking_tools import FilterObjects
 
-FilterObjects().process_row(
-    Arguments(objects_csv="objects.csv", min_area=20, filtered_objects_csv="kept.csv")
-)
+objects = pd.DataFrame([
+    {"frame": 0, "label": 1, "y": 4.0, "x": 4.0, "area": 16},
+])
+
+filtered = FilterObjects().transform(objects, Arguments(min_area=10))
 ```
 
 ## Expected Results
 
-Synthetic tables keep only rows within requested area, frame, intensity, and
-position ranges.
+Rows inside all requested thresholds pass through as dataframe rows.
 
 ## Failure Modes
 
-Unreadable CSV files, invalid numeric filter values, and CSV write failures
-raise errors.
+Missing required numeric fields or invalid numeric filter values raise errors.

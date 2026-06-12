@@ -1,14 +1,14 @@
 [project]
 name = "bioimageflow"
-version = "0.1.4"
+version = "0.1.5"
 description = "Python library for orchestrating bioimage analysis workflows"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.1.4",
+    "bioimageflow-core>=0.1.5",
     "pandas",
     "pyarrow",
     "pydantic",
-    "wetlands>=1.0.1",
+    "wetlands>=1.0.8",
 ]
 
 [tool.uv.sources]

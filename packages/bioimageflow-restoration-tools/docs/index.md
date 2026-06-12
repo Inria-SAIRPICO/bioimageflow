@@ -13,8 +13,7 @@ restoration tools live in `bioimageflow-sairpico-tools`.
 
 - [RestoreImage](#restoreimage): apply a TV, bilateral, Gaussian, or
   unsharp-style restoration baseline.
-- [BenchmarkRestoration](#benchmarkrestoration): generate a synthetic
-  clean/degraded/restored benchmark and metrics CSV.
+- [BenchmarkRestoration](#benchmarkrestoration): generate a synthetic clean/degraded/restored benchmark and dataframe metrics.
 - [GaussianDenoise](#gaussiandenoise): Gaussian smoothing baseline.
 - [MedianDenoise](#mediandenoise): median denoising baseline.
 - [BackgroundSubtract](#backgroundsubtract): subtract a smoothed background

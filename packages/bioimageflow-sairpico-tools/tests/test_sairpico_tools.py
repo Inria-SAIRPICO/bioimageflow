@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from bioimageflow import Workflow
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments, ProcessingTool
 
@@ -102,6 +103,24 @@ def test_legacy_input_image_formats_are_declared() -> None:
         schema = serialize_input_schema(tool_cls)
         assert schema["input_image"]["type"] == "ImageFile"
         assert schema["input_image"]["image_spec"]["formats"] == ["png", "tif", "tiff"]
+
+
+def test_output_image_override_uses_output_template_not_input_binding(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "input.tif"
+    output_path = tmp_path / "median.tif"
+    iio.imwrite(input_path, np.zeros((8, 8), dtype=np.uint16))
+
+    with Workflow(storage_path=tmp_path / "results", use_wetlands=False):
+        node = MedianDenoising()(
+            input_image=input_path,
+            denoising_type="2D",
+            output_templates={"output_image": str(output_path)},
+            name="median",
+        )
+
+    assert node.output_templates == {"output_image": str(output_path)}
 
 
 def test_importing_package_does_not_import_subprocess() -> None:
@@ -502,10 +521,12 @@ def test_hotspot_to_spots_converts_components_to_coordinate_table(tmp_path: Path
     result = HotspotToSpots().process_row(Arguments(
         hotspot_image=hotspot_path,
         threshold=1.0,
-        spots_csv=tmp_path / "spots.csv",
     ))
 
-    table = pd.read_csv(result.spots_csv).sort_values("spot_id")
-    assert result.spot_count == 2
-    assert table["area"].tolist() == [4, 1]
-    assert table[["y", "x"]].round(2).values.tolist() == [[2.5, 2.5], [8.0, 9.0]]
+    assert result[0].spot_count == 2
+    assert [row.intensity for row in result] == [5.0, 9.0]
+    assert [row.area for row in result] == [4, 1]
+    assert [(round(row.y, 2), round(row.x, 2)) for row in result] == [
+        (2.5, 2.5),
+        (8.0, 9.0),
+    ]

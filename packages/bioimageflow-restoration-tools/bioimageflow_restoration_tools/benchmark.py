@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
 from bioimageflow_core import (
     Arguments,
@@ -67,10 +66,10 @@ def _psnr(reference: "Any", image: "Any") -> float:
 
 
 class BenchmarkRestoration(ProcessingTool):
-    """Generate a synthetic blurred/noisy image, restore it, and write metrics."""
+    """Generate a synthetic blurred/noisy image, restore it, and return metrics."""
 
     display_name = "Benchmark Restoration"
-    documentation = "Create a synthetic blur/noise restoration benchmark and PSNR table."
+    documentation = "Create a synthetic blur/noise restoration benchmark and PSNR/MSE dataframe metrics."
     category = Category.RESTORATION
     tags = ["restoration", "benchmark", "synthetic"]
     environment = GENERAL_ENV
@@ -97,9 +96,9 @@ class BenchmarkRestoration(ProcessingTool):
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta(display_name="Restored image"),
         ] = Template("restored.tif")
-        metrics_csv: Annotated[Path, GUIMeta(display_name="Benchmark metrics")] = (
-            Template("metrics.csv")
-        )
+        mse_degraded: Annotated[float, GUIMeta(display_name="Degraded MSE")]
+        mse_restored: Annotated[float, GUIMeta(display_name="Restored MSE")]
+        degraded_psnr: Annotated[float, GUIMeta(display_name="Degraded PSNR")]
         restored_psnr: Annotated[float, GUIMeta(display_name="Restored PSNR")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -123,8 +122,7 @@ class BenchmarkRestoration(ProcessingTool):
         clean_path = Path(arguments.clean_image)
         degraded_path = Path(arguments.degraded_image)
         restored_path = Path(arguments.restored_image)
-        metrics_path = Path(arguments.metrics_csv)
-        for path in [clean_path, degraded_path, restored_path, metrics_path]:
+        for path in [clean_path, degraded_path, restored_path]:
             path.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(clean_path, clean)
         iio.imwrite(degraded_path, degraded)
@@ -136,14 +134,12 @@ class BenchmarkRestoration(ProcessingTool):
             "degraded_psnr": _psnr(clean, degraded),
             "restored_psnr": _psnr(clean, restored),
         }
-        with metrics_path.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(metrics))
-            writer.writeheader()
-            writer.writerow(metrics)
         return self.Outputs(
             clean_image=clean_path,
             degraded_image=degraded_path,
             restored_image=restored_path,
-            metrics_csv=metrics_path,
+            mse_degraded=float(metrics["mse_degraded"]),
+            mse_restored=float(metrics["mse_restored"]),
+            degraded_psnr=float(metrics["degraded_psnr"]),
             restored_psnr=float(metrics["restored_psnr"]),
         )

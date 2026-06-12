@@ -85,8 +85,10 @@ Move or re-home later:
 - `Atlas` should eventually belong to `bioimageflow-spot-tools`, but can stay
   temporarily in common to keep the current FISH example working.
 
-For compatibility, `bioimageflow_common_tools` can re-export migrated tools for
-one or two releases, but the canonical package should be domain-specific.
+Backward compatibility is not a constraint for the example workflows in this
+strategy. They should be updated to import tools from the canonical
+domain-specific packages instead of relying on legacy forwarding from
+`bioimageflow_common_tools`.
 
 ### `bioimageflow-sairpico-tools`
 
@@ -148,8 +150,11 @@ Core libraries and binaries:
 Candidate tools:
 
 - `ReadImage`: read common image formats with `bioio` plus selected plugins.
-- `WriteOmeTiff`: write OME-TIFF with explicit dimension order and metadata.
-- `WriteOmeZarr`: write chunked OME-Zarr.
+- `ConvertImageFormat`: convert common image files, OME-TIFF, and lightweight
+  OME-Zarr, with optional scene/channel/Z/T selection.
+- `ConvertToOmeTiff`: convert an image file to OME-TIFF with explicit
+  dimension order and metadata.
+- `ConvertToOmeZarr`: convert an image file to chunked OME-Zarr.
 - `SelectScene`: extract one scene from multi-scene files.
 - `SelectTimepoint`, `SelectZRange`, `SelectChannel`: explicit dimension
   subsetting tools.
@@ -283,9 +288,10 @@ Candidate tools:
 - `DoGSpotDetection`: Difference-of-Gaussian spot detection.
 - `LocalMaximaSpotDetection`: maxima detection with absolute or adaptive
   thresholds.
-- `AtlasSpotDetection`: move or re-export the current `Atlas` wrapper.
-- `HotSpotDetection`: either re-export from `bioimageflow-sairpico-tools` or
-  keep in SAIRPICO only.
+- `AtlasSpotDetection`: move or replace the current `Atlas` wrapper under spot
+  package ownership once the validation workflow is stable.
+- `HotSpotDetection`: either keep in `bioimageflow-sairpico-tools` only or add
+  a spot-package bridge with explicit SAIRPICO ownership and tests.
 - `AssignSpotsToLabels`: assign spot coordinates or spot labels to nuclei or
   cell labels.
 - `SpotsPerObjectSummary`: per-image and per-object spot counts.
@@ -312,9 +318,10 @@ Expected results:
 
 Package priority:
 
-- Priority: after the first wave.
-- The first FISH workflow can use `Atlas`, SAIRPICO `HotSpotDetection`, or a
-  simple LoG detector before this package exists.
+- Priority: specialized package, already part of the package split.
+- The first FISH workflow can use `Atlas`, SAIRPICO `HotSpotDetection`, or the
+  spot package's public-library tools while the package grows toward richer
+  LoG/DoG/local-maxima coverage.
 - Big-FISH should be kept in an "evaluate" state until it has a working pinned
   environment and a useful validation workflow.
 
@@ -396,20 +403,23 @@ Relationship to `bioimageflow-sairpico-tools`:
 - General restoration wrappers belong here because they are public-library
   based and may be useful outside SAIRPICO workflows.
 
-### Later Packages
+### Specialized Growth Packages
 
-These are valuable, but should not be first-wave packages:
+These packages now exist with synthetic tests and baseline P0 tools. They should
+grow from proven workflow needs, not from library cataloguing:
 
 - `bioimageflow-spot-tools`: `scikit-image`, `scipy`, `Atlas`, optional
-  `big-fish`. Useful for FISH and puncta workflows, but should not be first
-  wave because the current FISH example can be demonstrated without building a
-  Big-FISH-centered package.
-- `bioimageflow-restoration-tools`: `scikit-image`, `careamics`, `n2v`,
-  `csbdeep`. Valuable, but learned restoration brings model and dataset
-  management questions.
+  `big-fish`. Useful for FISH and puncta workflows. Growth should focus first
+  on robust public-library spot tables, rendering, QC, and assignment before a
+  Big-FISH commitment.
+- `bioimageflow-restoration-tools`: `scikit-image`, `scipy`, `numpy`,
+  `careamics`, `n2v`, `csbdeep`. Current baselines are public-library tools;
+  learned restoration should wait for public-data benchmarks and model
+  lifecycle rules.
 - `bioimageflow-tracking-tools`: `btrack`, `laptrack`, `trackpy`, possibly
-  `ultrack`. Valuable, but tracking validation requires time-lapse public
-  ground truth and metrics.
+  `ultrack`. Current baselines cover table validation, rendering, summaries,
+  and QC. Algorithmic linking should grow only when time-lapse public ground
+  truth and metrics are clear.
 - `bioimageflow-registration-tools`: `pystackreg`, SimpleITK, ITKElastix,
   ANTsPy. Important for time-lapse, multimodal, and atlas workflows.
 - `bioimageflow-stitching-tools`: ASHLAR, BigStitcher / ImageJ integration,
@@ -450,7 +460,7 @@ Why it is valuable:
   branches, then branches rejoin for spatial assignment and summary.
 - It produces both image artifacts and final tables, which is important for
   GUIs and provenance.
-- It avoids making Big-FISH a first-wave dependency. The first version can use
+- It avoids making Big-FISH an initial dependency. The first version can use
   `Atlas`, a simple LoG detector, or SAIRPICO `HotSpotDetection`.
 
 Candidate graph:
@@ -599,8 +609,8 @@ Candidate graph:
 Files or DownloadPublicImage
   -> ReadImage
   -> SelectScene / SelectChannel / SelectTimepoint / SelectZRange
-  -> WriteOmeTiff
-  -> WriteOmeZarr
+  -> ConvertToOmeTiff
+  -> ConvertToOmeZarr
   -> ReadImage
   -> CompareImageMetadata
 ```
@@ -627,7 +637,7 @@ Validation:
 ## Later Workflows
 
 Later workflows should use the later packages. They are valuable, but they have
-more dependency, data, or validation risk than the first-wave workflows.
+more dependency, data, or validation risk than the initial workflows.
 
 | Workflow | Packages needed | Public data | Why later | Expected output |
 |----------|-----------------|-------------|-----------|-----------------|
@@ -657,24 +667,29 @@ Examples:
   with spatial omics measurements, build neighborhood graphs, and compute
   enrichment or co-occurrence statistics.
 
-## First-Wave Implementation Plan
+## Current Implementation and Growth Plan
 
-### Phase 1: stabilize the package boundary
+### Stabilized Package Boundary
 
-1. Keep `bioimageflow-common-tools` focused on glue tools and lightweight
-   image primitives.
-2. Create `bioimageflow-io-tools` with a small first set of readers, writers,
-   and dimension-selection tools.
-3. Create `bioimageflow-sairpico-tools` with wrappers for the SAIRPICO legacy
-   tools.
-4. Create `bioimageflow-segmentation-tools` and move Cellpose/StarDist wrappers
-   there, with compatibility re-exports from common if needed.
-5. Create `bioimageflow-measurement-tools` with `RegionProperties`,
-   `IntensityProperties`, `CountLabels`, and `SummarizeTable`.
-6. Keep `Atlas` temporarily in common, or re-export it from common, until
-   `bioimageflow-spot-tools` is justified by a broader spot workflow.
+1. `bioimageflow-common-tools` is focused on glue tools, table operations,
+   simple channel extraction, connected components, label overlaps, mosaics,
+   and legacy module-level wrappers that existing workflows still import.
+2. `bioimageflow-io-tools` owns the lightweight reader, dimension-selection,
+   OME-TIFF converter, and OME-Zarr converter.
+3. `bioimageflow-sairpico-tools` owns wrappers for the SAIRPICO legacy command
+   line tools.
+4. `bioimageflow-segmentation-tools` owns Cellpose, StarDist, threshold,
+   watershed, and label-postprocessing tools.
+5. `bioimageflow-measurement-tools` owns region, intensity, count, table
+   summary, and label benchmark measurements.
+6. `bioimageflow-spot-tools`, `bioimageflow-restoration-tools`, and
+   `bioimageflow-tracking-tools` exist as specialized packages with synthetic
+   demo workflows and package-local tests.
+7. `Atlas` remains a legacy module-level common-tools wrapper for existing FISH
+   examples; the growth target is to migrate or wrap that behavior under
+   `bioimageflow-spot-tools`.
 
-### Make workflows demonstrable
+### Demonstrable Workflows
 
 1. Update the existing FISH example so it uses package boundaries explicitly
    without requiring a Big-FISH-based package.
@@ -688,12 +703,13 @@ Examples:
 
 ### Expand cautiously
 
-1. Add `bioimageflow-spot-tools` around LoG/DoG/local maxima, Atlas, and
-   optional Big-FISH evaluation.
-2. Add `bioimageflow-restoration-tools` only after validation data and metrics
-   are settled.
-3. Add `bioimageflow-tracking-tools` with one tracker first, preferably btrack
-   or LapTrack, then expand only if workflows need it.
+1. Grow `bioimageflow-spot-tools` from LoG/DoG/local maxima toward Atlas and
+   optional Big-FISH evaluation only when workflows justify the maintenance
+   cost.
+2. Grow `bioimageflow-restoration-tools` from synthetic scikit-image baselines
+   toward public-data restoration benchmarks before adding heavier algorithms.
+3. Grow `bioimageflow-tracking-tools` from nearest-neighbor linking toward
+   btrack or LapTrack only when the demo data and expected metrics are clear.
 4. Defer GPU, Java/ImageJ, stitching, and large foundation-model packages until
    the packaging and validation pattern is proven.
 
@@ -758,7 +774,7 @@ Environment design:
 - Use one shared environment per heavy dependency family:
   `bioio`, `cellpose`, `stardist`, `sairpico-simglib`,
   `sairpico-hotspot`, `sairpico-cimgdenoising`.
-- Treat `bigfish` as an optional evaluation environment, not as a first-wave
+- Treat `bigfish` as an optional evaluation environment, not as an initial
   dependency.
 - Pin versions for workflow packages. Avoid unbounded dependency ranges in
   tool environments.
@@ -776,7 +792,7 @@ Documentation:
 
 Build around workflows, not libraries.
 
-First-wave packages should be:
+Current core packages are:
 
 1. `bioimageflow-common-tools`
 2. `bioimageflow-io-tools`
@@ -787,8 +803,7 @@ First-wave packages should be:
 The first workflows to make real should be:
 
 1. FISH spot counting per nucleus on public CIL images, using existing Atlas,
-   a simple LoG detector, or SAIRPICO HotSpot before committing to a spot
-   package.
+   SAIRPICO HotSpot, and the implemented spot table/rendering/QC package tools.
 2. Nucleus segmentation benchmark on BBBC038.
 3. SAIRPICO deconvolution/denoising smoke workflow on synthetic and public
    microscopy data.

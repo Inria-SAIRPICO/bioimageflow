@@ -33,8 +33,7 @@ image, extracts marker/nuclei channels, segments nuclei by thresholding, detects
 spots with ``bioimageflow-spot-tools``, assigns them to labels, and summarizes
 spot counts.
 
-Expected outputs include per-label spot assignment CSV files and a summary table
-with ``spot_count`` aggregates.
+Expected outputs include per-label spot assignment dataframe rows and a summary table with ``spot_count`` aggregates.
 
 Test coverage
   Normal tests construct the public-data graph and execute the synthetic

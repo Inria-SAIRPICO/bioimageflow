@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
 from bioimageflow_core import (
     Arguments,
@@ -15,7 +14,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 
@@ -29,14 +27,24 @@ class AssignSpotsToLabels(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        spots_csv: Annotated[
-            Path,
+        spot_id: Annotated[
+            int,
             GUIMeta(
-                display_name="Spots CSV",
-                description="Spot table with y and x columns.",
+                display_name="Spot ID",
+                description="Spot identifier from a spot detection table.",
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
+        y: Annotated[float, GUIMeta(display_name="Y", connectable=Connectable.BY_DEFAULT)]
+        x: Annotated[float, GUIMeta(display_name="X", connectable=Connectable.BY_DEFAULT)]
+        intensity: Annotated[
+            float,
+            GUIMeta(display_name="Intensity", connectable=Connectable.BY_DEFAULT),
+        ]
+        score: Annotated[
+            float,
+            GUIMeta(display_name="Score", connectable=Connectable.BY_DEFAULT),
+        ] = 0.0
         label_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
@@ -48,36 +56,27 @@ class AssignSpotsToLabels(ProcessingTool):
         ]
 
     class Outputs(IOModel):
-        assigned_spots_csv: Annotated[Path, GUIMeta(display_name="Assigned spots")] = (
-            Template("{spots_csv.stem}_assigned.csv")
-        )
+        spot_id: Annotated[int, GUIMeta(display_name="Spot ID")]
+        y: Annotated[float, GUIMeta(display_name="Y")]
+        x: Annotated[float, GUIMeta(display_name="X")]
+        intensity: Annotated[float, GUIMeta(display_name="Intensity")]
+        score: Annotated[float, GUIMeta(display_name="Score")]
+        label: Annotated[int, GUIMeta(display_name="Assigned label")]
         assigned_count: Annotated[int, GUIMeta(display_name="Assigned spot count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
         labels = iio.imread(arguments.label_image)
-        with Path(arguments.spots_csv).open(newline="") as handle:
-            rows = list(csv.DictReader(handle))
-        assigned_count = 0
-        for row in rows:
-            y = int(float(row["y"]))
-            x = int(float(row["x"]))
-            label = int(labels[y, x]) if 0 <= y < labels.shape[0] and 0 <= x < labels.shape[1] else 0
-            row["label"] = label
-            if label > 0:
-                assigned_count += 1
-
-        output = Path(
-            getattr(arguments, "assigned_spots_csv", getattr(arguments, "output_csv", ""))
-        )
-        output.parent.mkdir(parents=True, exist_ok=True)
-        fieldnames = ["spot_id", "y", "x", "intensity", "score", "label"]
-        with output.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
+        y = int(float(arguments.y))
+        x = int(float(arguments.x))
+        label = int(labels[y, x]) if 0 <= y < labels.shape[0] and 0 <= x < labels.shape[1] else 0
         return self.Outputs(
-            assigned_spots_csv=output,
-            assigned_count=assigned_count,
+            spot_id=int(arguments.spot_id),
+            y=float(arguments.y),
+            x=float(arguments.x),
+            intensity=float(arguments.intensity),
+            score=float(getattr(arguments, "score", 0.0)),
+            label=label,
+            assigned_count=1 if label > 0 else 0,
         )

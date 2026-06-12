@@ -24,12 +24,12 @@ Big-FISH is intentionally optional and reserved for evaluation runs.
 
 Data and expected outputs
   The normal example uses generated 2D puncta and label images. Expected
-  outputs are spot-coordinate CSV files, assigned spot CSV files, per-label
-  summary CSV files, and deterministic label counts.
+  outputs are spot-coordinate dataframe rows, assigned spot dataframe rows,
+  per-label summary dataframe rows, and deterministic label counts.
 
 Test coverage
   ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
-  package example workflow and verifies the summary artifact is written.
+  package example workflow and verifies the summary dataframe is non-empty.
 
 Restoration Tools
 -----------------
@@ -41,16 +41,16 @@ Analysis question
 ``bioimageflow-restoration-tools`` provides:
 
 * ``RestoreImage`` for a scikit-image restoration baseline, with a NumPy fallback.
-* ``BenchmarkRestoration`` for a synthetic blur/noise benchmark that writes metrics.
+* ``BenchmarkRestoration`` for a synthetic blur/noise benchmark that returns dataframe metrics.
 
 Data and expected outputs
   The normal example uses generated fixed-seed data. Expected outputs are clean,
-  degraded, restored images, a metrics CSV file, and higher restored PSNR than
-  degraded PSNR for the default example.
+  degraded, restored images, dataframe metric columns, and higher restored PSNR
+  than degraded PSNR for the default example.
 
 Test coverage
   ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
-  package example workflow and verifies the metrics artifact is written.
+  package example workflow and verifies the metric dataframe is non-empty.
 
 Tracking Tools
 --------------
@@ -69,12 +69,12 @@ btrack and LapTrack remain optional for heavier evaluation environments.
 
 Data and expected outputs
   The normal example uses a generated TYX label stack with two moving objects.
-  Expected outputs are object tables, linked track tables, track-count metrics,
-  and a deterministic mean track length.
+  Expected outputs are object dataframe rows, linked track dataframe rows,
+  track-count metrics, and a deterministic mean track length.
 
 Test coverage
   ``tests/specialized_tool_workflows/test_example_workflows.py`` executes the
-  package example workflow and verifies the metrics artifact is written.
+  package example workflow and verifies the metrics dataframe is non-empty.
 
 Example Workflows
 -----------------

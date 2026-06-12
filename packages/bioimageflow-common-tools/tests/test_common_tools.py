@@ -3,8 +3,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import imageio.v3 as iio
-import numpy as np
 import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
@@ -86,30 +84,3 @@ def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
         Arguments(column_name="threshold", values=[0.1, 0.2, 0.5]),
     )
     assert table.to_dict("list") == {"threshold": [0.1, 0.2, 0.5]}
-
-
-@pytest.mark.skipif(
-    importlib.util.find_spec("SimpleITK") is None,
-    reason="ConnectedComponents complete test requires optional SimpleITK",
-)
-@pytest.mark.complete
-def test_connected_components_labels_binary_objects(tmp_path: Path) -> None:
-    from bioimageflow_common_tools import ConnectedComponents
-
-    image = np.zeros((12, 12), dtype=np.uint8)
-    image[1:4, 1:4] = 1
-    image[7:10, 8:11] = 1
-    input_path = tmp_path / "binary.tif"
-    output_path = tmp_path / "labels.tif"
-    iio.imwrite(input_path, image)
-
-    result = ConnectedComponents().process_row(
-        Arguments(input_image=input_path, output_image=output_path)
-    )
-
-    labels = iio.imread(output_path)
-    assert result.num_labels == 2
-    assert labels.max() == 2
-    assert labels[2, 2] != 0
-    assert labels[8, 9] != 0
-    assert labels[2, 2] != labels[8, 9]

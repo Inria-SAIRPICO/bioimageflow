@@ -20,19 +20,30 @@ def _write_labels(data_dir: Path) -> Path:
     return label_path
 
 
-def build_workflow(storage_path: str = "./tracking_analysis_results") -> tuple[Workflow, object]:
+def build_workflow(
+    storage_path: str = "./tracking_analysis_results",
+    use_wetlands: bool = True,
+    wetlands_config: dict | None = None,
+) -> tuple[Workflow, object]:
     """Build the tracking workflow."""
     storage = Path(storage_path)
     label_path = _write_labels(storage / "data")
-    wf = Workflow(storage_path=str(storage / "bif"))
+    wf = Workflow(
+        storage_path=str(storage / "bif"),
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         objects = LabelsToObjects()(label_image=label_path, name="labels_to_objects")
         tracks = LinkObjects()(
-            objects_csv=objects["objects_csv"],
+            objects,
             max_distance=8.0,
             name="link_objects",
         )
-        metrics = TrackMetrics()(tracks_csv=tracks["tracks_csv"], name="track_metrics")
+        metrics = TrackMetrics()(
+            tracks,
+            name="track_metrics",
+        )
     return wf, metrics
 
 

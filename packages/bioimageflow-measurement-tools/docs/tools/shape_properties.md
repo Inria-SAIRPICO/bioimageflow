@@ -25,7 +25,7 @@ rows = ShapeProperties().process_row(Arguments(label_image="labels.tif"))
 
 ## Outputs
 
-- `properties_csv`: one row per non-zero label.
+- one dataframe row per non-zero label.
 - `object_count`: number of measured objects.
 - table columns: `label`, `area`, pixel-edge `perimeter`, `bbox_area`,
   `extent`, `aspect_ratio`, and `equivalent_diameter`.

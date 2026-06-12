@@ -1,45 +1,47 @@
 # SpotColocalization
 
-`SpotColocalization` greedily matches reference and query spot tables within a
-distance threshold.
+`SpotColocalization` is a dataframe tool that matches spots from two upstream spot tables with a nearest-neighbor distance threshold.
 
-## Inputs
+Pass the reference spot table as the first positional input and the query spot table as the second positional input.
+Both tables must contain `spot_id`, `y`, and `x` columns.
+By default, spots are matched independently per BioImageFlow index-lineage root, using the standard `::` row-expansion separator to recover the parent image or field.
+Set `group_by` to an image id, image path, or unique-name column when the two tables do not share lineage-compatible indices.
 
-- `reference_spots_csv`: first spot table.
-- `query_spots_csv`: second spot table.
-- `max_distance`: maximum Euclidean distance for a match.
-
-## Outputs
-
-- `matches_csv`: reference spot ID, query spot ID, and distance.
-- `matched_count`.
+Inputs are `max_distance` and optional `group_by`.
+Outputs are match rows with `group`, `reference_spot_id`, `query_spot_id`, `distance`, and `matched_count`.
+No matches CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling and NumPy Euclidean-distance calculations.
-
-## Assumptions
-
-Both tables use pixel-space `y` and `x` coordinates. Matching is greedy and each
-query spot can be used once.
+BioImageFlow dataframe APIs, Pandas dataframe handling, and NumPy Euclidean-distance calculations.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_spot_tools import SpotColocalization
 
-SpotColocalization().process_row(
-    Arguments(reference_spots_csv="a.csv", query_spots_csv="b.csv", matches_csv="matches.csv")
+reference = pd.DataFrame(
+    {"spot_id": [1], "y": [5.0], "x": [5.0]},
+    index=["image_0::0"],
+)
+query = pd.DataFrame(
+    {"spot_id": [7], "y": [6.0], "x": [5.0]},
+    index=["image_0::0"],
+)
+
+matches = SpotColocalization().merge_dataframes(
+    [reference, query],
+    Arguments(max_distance=2.0),
 )
 ```
 
 ## Expected Results
 
-Synthetic spot pairs within the distance threshold produce deterministic
-one-to-one matches.
+The output dataframe contains one row per matched reference/query pair and repeats `matched_count` for each group.
 
 ## Failure Modes
 
-Missing coordinates, unreadable CSV files, invalid distances, and CSV write
-failures raise errors.
+Missing spot columns, malformed numeric values, invalid distances, or unrelated input groups raise errors.

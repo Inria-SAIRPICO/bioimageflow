@@ -1,44 +1,36 @@
 # TrackSummary
 
-`TrackSummary` computes per-track duration, displacement, speed, and frame
-bounds.
+`TrackSummary` computes per-track duration, displacement, speed, and frame bounds from track dataframe rows.
 
-## Inputs
-
-- `tracks_csv`: linked track table.
-
-## Outputs
-
-- `summary_csv`: one row per track.
-- `track_count`.
+The tool is a `DataFrameTool`: pass an upstream track dataframe positionally.
+The input dataframe must contain `track_id`, `frame`, `y`, and `x`.
+Outputs are one row per track with `track_length`, `duration`, `start_frame`, `end_frame`, `displacement`, `mean_speed`, and `track_count`.
+No summary CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling, NumPy distance calculations, and package-local numeric
-table validation helpers.
-
-## Assumptions
-
-The table contains numeric `track_id`, `frame`, `y`, and `x` fields. Rows are
-sorted by frame within each track before summary metrics are computed.
+BioImageFlow core APIs, NumPy distance calculations, and package-local numeric helpers.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_tracking_tools import TrackSummary
 
-TrackSummary().process_row(
-    Arguments(tracks_csv="tracks.csv", summary_csv="track_summary.csv")
-)
+tracks = pd.DataFrame([
+    {"track_id": 1, "frame": 0, "y": 0.0, "x": 0.0},
+    {"track_id": 1, "frame": 1, "y": 0.0, "x": 2.0},
+])
+
+summary = TrackSummary().transform(tracks, Arguments())
 ```
 
 ## Expected Results
 
-Synthetic tracks produce exact duration, displacement, speed, start-frame, and
-end-frame values.
+The output dataframe has one row per track with duration and displacement metrics.
 
 ## Failure Modes
 
-Missing required numeric fields, unreadable CSV files, and CSV write failures
-raise errors.
+Missing required numeric fields and malformed numeric values raise errors.

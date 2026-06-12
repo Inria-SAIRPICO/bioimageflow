@@ -1,40 +1,21 @@
 from __future__ import annotations
 
-import importlib.util
 import os
-import shutil
 from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
-import pandas as pd
 import pytest
 
 from tests.priority_workflows.test_workflows import _load_module
 
 
-pytestmark = pytest.mark.complete
+pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
 
 
 def _example(name: str) -> Path:
     root = Path(__file__).resolve().parents[2]
     return root / "example-workflows" / name / "workflow.py"
-
-
-def _require_commands(*commands: str) -> None:
-    missing = [command for command in commands if shutil.which(command) is None]
-    if missing:
-        pytest.skip(f"missing required command(s): {', '.join(missing)}")
-
-
-def _require_modules(*module_names: str) -> None:
-    missing = [
-        module_name
-        for module_name in module_names
-        if importlib.util.find_spec(module_name) is None
-    ]
-    if missing:
-        pytest.skip(f"missing required Python module(s): {', '.join(missing)}")
 
 
 def _write_multichannel_input(data_dir: Path) -> None:
@@ -50,8 +31,8 @@ def _write_multichannel_input(data_dir: Path) -> None:
 @pytest.mark.model_runtime
 def test_cellpose_stardist_workflow_executes_with_real_model_runtimes(
     tmp_path: Path,
+    complete_wetlands_config: dict,
 ) -> None:
-    _require_modules("cellpose", "csbdeep", "stardist")
     data_dir = tmp_path / "cellpose_stardist" / "data"
     _write_multichannel_input(data_dir)
 
@@ -59,8 +40,9 @@ def test_cellpose_stardist_workflow_executes_with_real_model_runtimes(
     wf, cellpose, stardist = module.build_segmentation_workflow(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "cellpose_stardist" / "bif"),
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
     )
-    wf.use_wetlands = False
 
     result = wf.compute(cellpose, stardist)
 
@@ -75,8 +57,8 @@ def test_cellpose_stardist_workflow_executes_with_real_model_runtimes(
 @pytest.mark.external_binary
 def test_parameter_space_workflow_executes_with_real_atlas_binary(
     tmp_path: Path,
+    complete_wetlands_config: dict,
 ) -> None:
-    _require_commands("atlas")
     data_dir = tmp_path / "atlas_parameter_sweep" / "data"
     data_dir.mkdir(parents=True)
     image = np.zeros((24, 24), dtype=np.uint16)
@@ -88,8 +70,9 @@ def test_parameter_space_workflow_executes_with_real_atlas_binary(
     wf, terminal = module.build_parameter_space_workflow(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"),
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
     )
-    wf.use_wetlands = False
 
     result = wf.compute(terminal)
 
@@ -100,11 +83,23 @@ def test_parameter_space_workflow_executes_with_real_atlas_binary(
 
 @pytest.mark.external_binary
 @pytest.mark.sairpico_binary
-def test_sairpico_workflow_executes_with_real_binaries(tmp_path: Path) -> None:
-    _require_commands("simgmedian2d", "simgrichardsonlucy2d")
-
+@pytest.mark.skip(
+    reason=(
+        "Temporarily disabled while SAIRPICO conda packages are being rebuilt for "
+        "this platform. Re-enable when simglib/serpico-spitfire are available by "
+        "removing this skip marker."
+    )
+)
+def test_sairpico_workflow_executes_with_real_binaries(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
     module = _load_module(_example("sairpico_restoration_smoke"))
-    wf, terminal = module.build_workflow(storage_path=str(tmp_path / "sairpico"))
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / "sairpico"),
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
+    )
 
     result = wf.compute(terminal)
 
@@ -118,18 +113,18 @@ def test_sairpico_workflow_executes_with_real_binaries(tmp_path: Path) -> None:
 @pytest.mark.model_runtime
 def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
     tmp_path: Path,
+    complete_wetlands_config: dict,
 ) -> None:
     if os.environ.get("BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS") != "1":
         pytest.skip("set BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS=1 to download CIL data")
-    _require_commands("atlas")
-    _require_modules("cellpose", "SimpleITK")
 
     module = _load_module(_example("fish_analysis"))
     wf, terminal = module.build_fish_workflow(
         storage_path=str(tmp_path / "fish_public" / "bif"),
         data_dir=str(tmp_path / "fish_public" / "data"),
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
     )
-    wf.use_wetlands = False
 
     result = wf.compute(terminal)
 
@@ -141,23 +136,27 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
 @pytest.mark.parametrize(
     ("workflow_name", "artifact_column"),
     [
-        ("puncta_analysis", "summary_csv"),
-        ("restoration_benchmark", "metrics_csv"),
-        ("tracking_analysis", "metrics_csv"),
+        ("puncta_analysis", None),
+        ("restoration_benchmark", "restored_image"),
+        ("tracking_analysis", None),
     ],
 )
 def test_specialized_workflow_acceptance_smoke(
     tmp_path: Path,
     workflow_name: str,
     artifact_column: str,
+    complete_wetlands_config: dict,
 ) -> None:
     module = _load_module(_example(workflow_name))
-    wf, terminal = module.build_workflow(storage_path=str(tmp_path / workflow_name))
-    wf.use_wetlands = False
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / workflow_name),
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
+    )
 
     result = wf.compute(terminal)
 
-    artifact = Path(result.iloc[0][artifact_column])
-    assert artifact.exists()
-    if artifact.suffix == ".csv":
-        assert not pd.read_csv(artifact).empty
+    assert not result.empty
+    if artifact_column is not None:
+        artifact = Path(result.iloc[0][artifact_column])
+        assert artifact.exists()

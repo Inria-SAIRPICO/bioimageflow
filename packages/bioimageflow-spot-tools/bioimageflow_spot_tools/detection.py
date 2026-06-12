@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
 from bioimageflow_core import (
     Arguments,
@@ -143,9 +142,11 @@ class DetectSpots(ProcessingTool):
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
             GUIMeta(display_name="Spot labels"),
         ] = Template("{input_image.stem}_spots.tif")
-        spots_csv: Annotated[Path, GUIMeta(display_name="Spot table")] = Template(
-            "{input_image.stem}_spots.csv"
-        )
+        spot_id: Annotated[int, GUIMeta(display_name="Spot ID")]
+        y: Annotated[float, GUIMeta(display_name="Y")]
+        x: Annotated[float, GUIMeta(display_name="X")]
+        intensity: Annotated[float, GUIMeta(display_name="Intensity")]
+        score: Annotated[float, GUIMeta(display_name="Score")]
         spot_count: Annotated[int, GUIMeta(display_name="Spot count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -180,18 +181,17 @@ class DetectSpots(ProcessingTool):
             )
 
         output_labels = Path(arguments.output_labels)
-        spots_csv = Path(arguments.spots_csv)
         output_labels.parent.mkdir(parents=True, exist_ok=True)
-        spots_csv.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output_labels, labels)
-        with spots_csv.open("w", newline="") as handle:
-            writer = csv.DictWriter(
-                handle, fieldnames=["spot_id", "y", "x", "intensity", "score"]
+        return [
+            self.Outputs(
+                output_labels=output_labels,
+                spot_id=int(row["spot_id"]),
+                y=float(row["y"]),
+                x=float(row["x"]),
+                intensity=float(row["intensity"]),
+                score=float(row["score"]),
+                spot_count=len(rows),
             )
-            writer.writeheader()
-            writer.writerows(rows)
-        return self.Outputs(
-            output_labels=output_labels,
-            spots_csv=spots_csv,
-            spot_count=len(rows),
-        )
+            for row in rows
+        ]

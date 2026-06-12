@@ -2,8 +2,8 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
+from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -17,21 +17,6 @@ from bioimageflow_core import (
     Semantic,
     Template,
 )
-
-
-def _read_rows(path: Path) -> list[dict[str, str]]:
-    with Path(path).open(newline="") as handle:
-        return list(csv.DictReader(handle))
-
-
-def _write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> Path:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    return output
 
 
 def _float(row: dict[str, Any], column: str, default: float | None = None) -> float:
@@ -100,20 +85,15 @@ def _draw_disk(image: Any, y: float, x: float, radius: int, value: int) -> None:
                 image[yy, xx] = value
 
 
-class FilterSpots(ProcessingTool):
+class FilterSpots(DataFrameTool):
     """Filter spot tables by numeric columns and optional binary masks."""
 
     display_name = "Filter Spots"
     documentation = "Filter spot coordinate tables by intensity, score, radius, and mask."
     category = Category.SPOT_DETECTION
     tags = ["spots", "filter", "puncta"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        spots_csv: Annotated[
-            Path,
-            GUIMeta("Spots CSV", "Spot table with y and x columns.", connectable=Connectable.BY_DEFAULT),
-        ]
         min_intensity: float | None = None
         max_intensity: float | None = None
         min_score: float | None = None
@@ -126,57 +106,70 @@ class FilterSpots(ProcessingTool):
             GUIMeta("Mask image", "Optional nonzero mask for spot positions."),
         ] = None
 
-    class Outputs(IOModel):
-        filtered_spots_csv: Annotated[Path, GUIMeta("Filtered spots CSV")] = Template(
-            "{spots_csv.stem}_filtered.csv"
-        )
+    class Outputs(Passthrough):
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        import imageio.v3 as iio
+    def merge_dataframes(self, dfs: list[Any], arguments: Arguments) -> Any:
+        if len(dfs) != 1:
+            raise ValueError("FilterSpots requires exactly one upstream spot table.")
+        return dfs[0].copy()
 
-        rows = _read_rows(arguments.spots_csv)
+    def transform(self, df: Any, arguments: Arguments) -> Any:
+        import imageio.v3 as iio
+        import pandas as pd
+
         mask_image = _argument(arguments, "mask_image", None)
         mask = iio.imread(mask_image) if mask_image is not None else None
+        keep = pd.Series(True, index=df.index)
+        checks = [
+            (
+                "intensity",
+                _argument(arguments, "min_intensity", None),
+                _argument(arguments, "max_intensity", None),
+            ),
+            (
+                "score",
+                _argument(arguments, "min_score", None),
+                _argument(arguments, "max_score", None),
+            ),
+            (
+                "radius",
+                _argument(arguments, "min_radius", None),
+                _argument(arguments, "max_radius", None),
+            ),
+        ]
+        for column, minimum, maximum in checks:
+            if minimum is None and maximum is None:
+                continue
+            if column not in df.columns:
+                raise ValueError(
+                    f"FilterSpots input table is missing required column {column!r}."
+                )
+            values = pd.to_numeric(df[column])
+            if minimum is not None:
+                keep &= values >= float(minimum)
+            if maximum is not None:
+                keep &= values <= float(maximum)
 
-        def keep(row: dict[str, str]) -> bool:
-            checks = [
-                (
-                    "intensity",
-                    _argument(arguments, "min_intensity", None),
-                    _argument(arguments, "max_intensity", None),
-                ),
-                (
-                    "score",
-                    _argument(arguments, "min_score", None),
-                    _argument(arguments, "max_score", None),
-                ),
-                (
-                    "radius",
-                    _argument(arguments, "min_radius", None),
-                    _argument(arguments, "max_radius", None),
-                ),
-            ]
-            for column, minimum, maximum in checks:
-                if column not in row or row[column] in {"", None}:
-                    continue
-                value = float(row[column])
-                if minimum is not None and value < float(minimum):
-                    return False
-                if maximum is not None and value > float(maximum):
-                    return False
-            if mask is not None:
-                y_float, x_float = _spot_coordinate(row, shape=mask.shape[:2])
+        if mask is not None:
+            missing = {"y", "x"} - set(df.columns)
+            if missing:
+                raise ValueError(
+                    "FilterSpots input table is missing required column(s): "
+                    + ", ".join(repr(column) for column in sorted(missing))
+                    + "."
+                )
+            mask_keep = []
+            for _, row in df.iterrows():
+                y_float, x_float = _spot_coordinate(row.to_dict(), shape=mask.shape[:2])
                 y = int(round(y_float))
                 x = int(round(x_float))
-                if mask[y, x] == 0:
-                    return False
-            return True
+                mask_keep.append(mask[y, x] != 0)
+            keep &= pd.Series(mask_keep, index=df.index)
 
-        filtered = [row for row in rows if keep(row)]
-        fieldnames = list(rows[0]) if rows else ["spot_id", "y", "x"]
-        output = _write_rows(arguments.filtered_spots_csv, filtered, fieldnames)
-        return self.Outputs(filtered_spots_csv=output, spot_count=len(filtered))
+        filtered = df.loc[keep].copy()
+        filtered["spot_count"] = len(filtered)
+        return filtered
 
 
 class RenderSpots(ProcessingTool):
@@ -189,7 +182,9 @@ class RenderSpots(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        spots_csv: Annotated[Path, GUIMeta("Spots CSV", connectable=Connectable.BY_DEFAULT)]
+        spot_id: Annotated[int, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)]
+        y: Annotated[float, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)]
+        x: Annotated[float, GUIMeta("X", connectable=Connectable.BY_DEFAULT)]
         image_shape: str = "256,256"
         reference_image: Annotated[
             Path,
@@ -204,17 +199,29 @@ class RenderSpots(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
             GUIMeta("Rendered spots"),
-        ] = Template("{spots_csv.stem}_rendered.tif")
+        ] = Template("rendered_spots.tif")
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+        *,
+        context: Any = None,
+    ) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
-        rows = _read_rows(arguments.spots_csv)
+        if not arguments_list:
+            return []
+        arguments = arguments_list[0]
         shape = _shape_from_arguments(arguments)
         image = np.zeros(shape, dtype=np.uint16)
-        for index, row in enumerate(rows, start=1):
+        for index, row_arguments in enumerate(arguments_list, start=1):
+            row = {
+                "spot_id": _argument(row_arguments, "spot_id", index),
+                "y": _argument(row_arguments, "y", None),
+                "x": _argument(row_arguments, "x", None),
+            }
             value = _int_id(row, "spot_id", index) if _argument(arguments, "label_mode", True) else 1
             y, x = _spot_coordinate(row, shape=shape)
             _draw_disk(
@@ -227,7 +234,7 @@ class RenderSpots(ProcessingTool):
         output = Path(arguments.output_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, image)
-        return self.Outputs(output_image=output, spot_count=len(rows))
+        return [[self.Outputs(output_image=output, spot_count=len(arguments_list))]]
 
 
 def _components(mask: Any) -> list[list[tuple[int, int]]]:
@@ -265,7 +272,9 @@ class SpotsToLabels(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        spots_csv: Annotated[Path, GUIMeta("Spots CSV")] = None
+        spot_id: Annotated[int | None, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)] = None
+        y: Annotated[float | None, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)] = None
+        x: Annotated[float | None, GUIMeta("X", connectable=Connectable.BY_DEFAULT)] = None
         mask_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
@@ -282,12 +291,19 @@ class SpotsToLabels(ProcessingTool):
         ] = Template("spots_labels.tif")
         label_count: Annotated[int, GUIMeta("Label count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+        *,
+        context: Any = None,
+    ) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
+        if not arguments_list:
+            return []
+        arguments = arguments_list[0]
         mask_image = _argument(arguments, "mask_image", None)
-        spots_csv = _argument(arguments, "spots_csv", None)
         if mask_image is not None:
             mask = iio.imread(mask_image) > 0
             labels = np.zeros(mask.shape, dtype=np.uint16)
@@ -296,8 +312,15 @@ class SpotsToLabels(ProcessingTool):
                 for y, x in component:
                     labels[y, x] = label
             label_count = len(components)
-        elif spots_csv is not None:
-            rows = _read_rows(spots_csv)
+        else:
+            rows = [
+                {
+                    "spot_id": _argument(row_arguments, "spot_id", index),
+                    "y": _argument(row_arguments, "y", None),
+                    "x": _argument(row_arguments, "x", None),
+                }
+                for index, row_arguments in enumerate(arguments_list, start=1)
+            ]
             shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
             labels = np.zeros(shape, dtype=np.uint16)
             for index, row in enumerate(rows, start=1):
@@ -311,108 +334,196 @@ class SpotsToLabels(ProcessingTool):
                     value,
                 )
             label_count = len(rows)
-        else:
-            raise ValueError("SpotsToLabels requires spots_csv or mask_image.")
 
         output = Path(arguments.label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
-        return self.Outputs(label_image=output, label_count=label_count)
+        return [[self.Outputs(label_image=output, label_count=label_count)]]
 
 
-class SpotColocalization(ProcessingTool):
+class SpotColocalization(DataFrameTool):
     """Match two spot tables with a nearest-neighbor distance threshold."""
 
     display_name = "Spot Colocalization"
     documentation = "Match spots between channels within a distance threshold."
     category = Category.COLOCALIZATION
     tags = ["spots", "colocalization", "matching"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        reference_spots_csv: Annotated[Path, GUIMeta("Reference spots CSV")]
-        query_spots_csv: Annotated[Path, GUIMeta("Query spots CSV")]
+        group_by: Annotated[
+            str | None,
+            GUIMeta(
+                "Group by",
+                "Optional column used to match spots independently per image or field.",
+            ),
+        ] = None
         max_distance: float = 2.0
 
     class Outputs(IOModel):
-        matches_csv: Annotated[Path, GUIMeta("Matches CSV")] = Template("spot_matches.csv")
+        group: Annotated[str, GUIMeta("Group")]
+        reference_spot_id: Annotated[int, GUIMeta("Reference spot ID")]
+        query_spot_id: Annotated[int, GUIMeta("Query spot ID")]
+        distance: Annotated[float, GUIMeta("Distance")]
         matched_count: Annotated[int, GUIMeta("Matched spots")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def merge_dataframes(
+        self,
+        dfs: list[Any],
+        arguments: Arguments,
+    ) -> Any:
         import numpy as np
+        import pandas as pd
 
-        reference = _read_rows(arguments.reference_spots_csv)
-        query = _read_rows(arguments.query_spots_csv)
-        used_query: set[int] = set()
-        matches = []
-        for reference_index, ref in enumerate(reference, start=1):
-            best_index = None
-            best_distance = float("inf")
-            for query_index, candidate in enumerate(query, start=1):
-                if query_index in used_query:
-                    continue
-                distance = float(
-                    np.hypot(
-                        _float(ref, "y") - _float(candidate, "y"),
-                        _float(ref, "x") - _float(candidate, "x"),
-                    )
-                )
-                if distance <= float(arguments.max_distance) and distance < best_distance:
-                    best_index = query_index
-                    best_distance = distance
-            if best_index is None:
-                continue
-            used_query.add(best_index)
-            query_row = query[best_index - 1]
-            matches.append(
-                {
-                    "reference_spot_id": _int_id(ref, "spot_id", reference_index),
-                    "query_spot_id": _int_id(query_row, "spot_id", best_index),
-                    "distance": best_distance,
-                }
+        if len(dfs) != 2:
+            raise ValueError(
+                "SpotColocalization requires exactly two upstream spot tables: "
+                "reference first, query second."
             )
-        output = _write_rows(
-            arguments.matches_csv,
-            matches,
-            ["reference_spot_id", "query_spot_id", "distance"],
-        )
-        return self.Outputs(matches_csv=output, matched_count=len(matches))
+
+        reference_df, query_df = (df.copy() for df in dfs)
+        group_by = _argument(arguments, "group_by", None)
+        max_distance = float(_argument(arguments, "max_distance", 2.0))
+
+        self._validate_spot_table(reference_df, "reference", group_by)
+        self._validate_spot_table(query_df, "query", group_by)
+
+        reference_groups = self._group_spots(reference_df, group_by)
+        query_groups = self._group_spots(query_df, group_by)
+        shared_groups = sorted(set(reference_groups) & set(query_groups))
+        if not shared_groups and (len(reference_df) > 0 or len(query_df) > 0):
+            raise ValueError(
+                "SpotColocalization found no shared groups between reference and "
+                "query tables. Provide group_by when the tables do not share "
+                "BioImageFlow index lineage."
+            )
+
+        output_rows: list[dict[str, Any]] = []
+        output_index: list[str] = []
+        for group in shared_groups:
+            reference_rows = reference_groups[group]
+            query_rows = query_groups[group]
+            used_query: set[int] = set()
+            group_matches: list[dict[str, Any]] = []
+            for reference_index, ref in enumerate(reference_rows, start=1):
+                best_index = None
+                best_distance = float("inf")
+                for query_index, candidate in enumerate(query_rows, start=1):
+                    if query_index in used_query:
+                        continue
+                    distance = float(
+                        np.hypot(
+                            _float(ref, "y") - _float(candidate, "y"),
+                            _float(ref, "x") - _float(candidate, "x"),
+                        )
+                    )
+                    if distance <= max_distance and distance < best_distance:
+                        best_index = query_index
+                        best_distance = distance
+                if best_index is None:
+                    continue
+                used_query.add(best_index)
+                query_row = query_rows[best_index - 1]
+                group_matches.append(
+                    {
+                        "group": group,
+                        "reference_spot_id": _int_id(ref, "spot_id", reference_index),
+                        "query_spot_id": _int_id(query_row, "spot_id", best_index),
+                        "distance": best_distance,
+                    }
+                )
+
+            matched_count = len(group_matches)
+            for match_index, match in enumerate(group_matches):
+                match["matched_count"] = matched_count
+                output_rows.append(match)
+                output_index.append(f"{group}::{match_index}")
+
+        columns = [
+            "group",
+            "reference_spot_id",
+            "query_spot_id",
+            "distance",
+            "matched_count",
+        ]
+        return pd.DataFrame(output_rows, columns=columns, index=output_index)
+
+    @staticmethod
+    def _validate_spot_table(df: Any, role: str, group_by: str | None) -> None:
+        required = {"spot_id", "y", "x"}
+        if group_by is not None:
+            required.add(group_by)
+        missing = sorted(required - set(df.columns))
+        if missing:
+            raise ValueError(
+                f"SpotColocalization {role} table is missing required "
+                f"column(s): {', '.join(repr(column) for column in missing)}."
+            )
+
+    @staticmethod
+    def _group_spots(df: Any, group_by: str | None) -> dict[str, list[dict[str, Any]]]:
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for index, row in df.iterrows():
+            if group_by is None:
+                group = str(index).split("::", 1)[0]
+            else:
+                group = str(row[group_by])
+            groups.setdefault(group, []).append(row.to_dict())
+        return groups
 
 
-class SpotQualityMetrics(ProcessingTool):
+class SpotQualityMetrics(DataFrameTool):
     """Compute local spot quality metrics from an image and spot table."""
 
     display_name = "Spot Quality Metrics"
     documentation = "Compute SNR, local background, and nearest-neighbor distances."
     category = Category.MEASUREMENT
     tags = ["spots", "quality", "snr"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        spots_csv: Annotated[Path, GUIMeta("Spots CSV", connectable=Connectable.BY_DEFAULT)]
         image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
-            GUIMeta("Intensity image", connectable=Connectable.BY_DEFAULT),
+            GUIMeta("Intensity image"),
         ]
         radius: int = 2
 
-    class Outputs(IOModel):
-        metrics_csv: Annotated[Path, GUIMeta("Spot quality metrics")] = Template(
-            "{spots_csv.stem}_quality.csv"
-        )
+    class Outputs(Passthrough):
+        local_background: Annotated[float, GUIMeta("Local background")]
+        snr: Annotated[float, GUIMeta("SNR")]
+        nearest_neighbor_distance: Annotated[float, GUIMeta("Nearest neighbor distance")]
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def merge_dataframes(self, dfs: list[Any], arguments: Arguments) -> Any:
+        if len(dfs) != 1:
+            raise ValueError(
+                "SpotQualityMetrics requires exactly one upstream spot table."
+            )
+        return dfs[0].copy()
+
+    def transform(self, df: Any, arguments: Arguments) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
-        rows = _read_rows(arguments.spots_csv)
+        missing = {"y", "x"} - set(df.columns)
+        if missing:
+            raise ValueError(
+                "SpotQualityMetrics input table is missing required column(s): "
+                + ", ".join(repr(column) for column in sorted(missing))
+                + "."
+            )
+
+        result = df.copy()
+        if "spot_id" not in result.columns:
+            result["spot_id"] = range(1, len(result) + 1)
         image = iio.imread(arguments.image).astype(np.float32)
-        coordinates = [_spot_coordinate(row, shape=image.shape[:2]) for row in rows]
+        coordinates = [
+            _spot_coordinate(row.to_dict(), shape=image.shape[:2])
+            for _, row in result.iterrows()
+        ]
         metrics = []
         radius = max(1, int(_argument(arguments, "radius", 2)))
-        for index, row in enumerate(rows, start=1):
+        for index, (_, row) in enumerate(result.iterrows(), start=1):
+            row_dict = row.to_dict()
             y_float, x_float = coordinates[index - 1]
             y = int(round(y_float))
             x = int(round(x_float))
@@ -423,7 +534,7 @@ class SpotQualityMetrics(ProcessingTool):
             window = image[y0:y1, x0:x1]
             background = float(np.median(window)) if window.size else 0.0
             noise = float(np.std(window)) if window.size else 0.0
-            intensity = _float(row, "intensity", float(image[y, x]))
+            intensity = _float(row_dict, "intensity", float(image[y, x]))
             distances = [
                 float(np.hypot(y - other_y, x - other_x))
                 for other_y, other_x in coordinates
@@ -432,13 +543,17 @@ class SpotQualityMetrics(ProcessingTool):
             nearest = min(distances) if distances else 0.0
             metrics.append(
                 {
-                    **row,
                     "local_background": background,
                     "snr": (intensity - background) / (noise if noise > 0 else 1.0),
                     "nearest_neighbor_distance": nearest,
                 }
             )
-        fieldnames = list(rows[0]) if rows else ["spot_id", "y", "x"]
-        fieldnames += ["local_background", "snr", "nearest_neighbor_distance"]
-        output = _write_rows(arguments.metrics_csv, metrics, fieldnames)
-        return self.Outputs(metrics_csv=output, spot_count=len(metrics))
+        result["local_background"] = [
+            metric["local_background"] for metric in metrics
+        ]
+        result["snr"] = [metric["snr"] for metric in metrics]
+        result["nearest_neighbor_distance"] = [
+            metric["nearest_neighbor_distance"] for metric in metrics
+        ]
+        result["spot_count"] = len(result)
+        return result

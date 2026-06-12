@@ -5,19 +5,16 @@ extract object centroids from label movies, link objects frame-to-frame, and
 compute track summaries. It is intended for demonstrative workflows and fast
 tests before heavier btrack or LapTrack integrations are justified.
 
-Core libraries are imageio, NumPy, csv, and BioImageFlow core APIs. The current
-linker is greedy nearest-neighbor, so it is transparent and deterministic but
-not suitable for crowded, crossing, or division-heavy movies.
+Core libraries are imageio, NumPy, and BioImageFlow core APIs.
+The current linker is greedy nearest-neighbor, so it is transparent and deterministic but not suitable for crowded, crossing, or division-heavy movies.
 
 ## Tools
 
-- [LabelsToObjects](#labelstoobjects): convert labels into object
-  centroid tables.
+- [LabelsToObjects](#labelstoobjects): convert labels into object centroid dataframe rows.
 - [LinkObjects](#linkobjects): greedy nearest-neighbor frame linking.
 - [TrackMetrics](#trackmetrics): track length, displacement, speed, and
   area summaries.
-- [FilterObjects](#filterobjects): filter object tables by area, frame,
-  intensity, and position.
+- [FilterObjects](#filterobjects): filter object dataframe rows by area, frame, intensity, and position.
 - [TracksToLabels](#trackstolabels): render track IDs into label stacks.
 - [TrackTableValidate](#tracktablevalidate): validate required columns and
   duplicate track frames.
@@ -28,8 +25,7 @@ not suitable for crowded, crossing, or division-heavy movies.
 
 ## Demo Workflow
 
-- [Tracking analysis workflow](#tracking-analysis-workflow): convert label
-  movies to object tables, links, and metrics.
+- [Tracking analysis workflow](#tracking-analysis-workflow): convert label movies to object rows, links, and metrics.
 
 ## Tests and Demo Data
 

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
 from bioimageflow_core import (
     Arguments,
@@ -15,7 +14,6 @@ from bioimageflow_core import (
     Layout,
     ProcessingTool,
     Semantic,
-    Template,
 )
 
 
@@ -43,9 +41,11 @@ class LabelsToObjects(ProcessingTool):
         ]
 
     class Outputs(IOModel):
-        objects_csv: Annotated[Path, GUIMeta(display_name="Objects CSV")] = Template(
-            "{label_image.stem}_objects.csv"
-        )
+        frame: Annotated[int, GUIMeta(display_name="Frame")]
+        label: Annotated[int, GUIMeta(display_name="Label")]
+        y: Annotated[float, GUIMeta(display_name="Y")]
+        x: Annotated[float, GUIMeta(display_name="X")]
+        area: Annotated[int, GUIMeta(display_name="Area")]
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -71,12 +71,14 @@ class LabelsToObjects(ProcessingTool):
                         "area": int(yy.size),
                     }
                 )
-        output = Path(arguments.objects_csv)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w", newline="") as handle:
-            writer = csv.DictWriter(
-                handle, fieldnames=["frame", "label", "y", "x", "area"]
+        return [
+            self.Outputs(
+                frame=int(row["frame"]),
+                label=int(row["label"]),
+                y=float(row["y"]),
+                x=float(row["x"]),
+                area=int(row["area"]),
+                object_count=len(rows),
             )
-            writer.writeheader()
-            writer.writerows(rows)
-        return self.Outputs(objects_csv=output, object_count=len(rows))
+            for row in rows
+        ]

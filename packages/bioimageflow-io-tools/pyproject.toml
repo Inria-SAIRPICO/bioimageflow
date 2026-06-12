@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Lightweight image IO tools for BioImageFlow"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.1.4",
+    "bioimageflow-core>=0.1.5",
     "imageio",
     "numpy",
     "tifffile",

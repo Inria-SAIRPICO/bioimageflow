@@ -25,11 +25,19 @@ def _write_inputs(data_dir: Path) -> tuple[Path, Path]:
     return image_path, labels_path
 
 
-def build_workflow(storage_path: str = "./puncta_analysis_results") -> tuple[Workflow, object]:
+def build_workflow(
+    storage_path: str = "./puncta_analysis_results",
+    use_wetlands: bool = True,
+    wetlands_config: dict | None = None,
+) -> tuple[Workflow, object]:
     """Build the puncta analysis workflow."""
     storage = Path(storage_path)
     image_path, labels_path = _write_inputs(storage / "data")
-    wf = Workflow(storage_path=str(storage / "bif"))
+    wf = Workflow(
+        storage_path=str(storage / "bif"),
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         detected = DetectSpots()(
             input_image=image_path,
@@ -39,14 +47,15 @@ def build_workflow(storage_path: str = "./puncta_analysis_results") -> tuple[Wor
             name="detect_puncta",
         )
         assigned = AssignSpotsToLabels()(
-            spots_csv=detected["spots_csv"],
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            intensity=detected["intensity"],
+            score=detected["score"],
             label_image=labels_path,
             name="assign_to_labels",
         )
-        summary = SpotSummary()(
-            assigned_spots_csv=assigned["assigned_spots_csv"],
-            name="summarize_puncta",
-        )
+        summary = SpotSummary()(assigned, name="summarize_puncta")
     return wf, summary
 
 

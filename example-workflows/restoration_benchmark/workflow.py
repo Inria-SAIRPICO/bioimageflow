@@ -8,10 +8,16 @@ from bioimageflow_restoration_tools import BenchmarkRestoration
 
 def build_workflow(
     storage_path: str = "./restoration_benchmark_results",
+    use_wetlands: bool = True,
+    wetlands_config: dict | None = None,
 ) -> tuple[Workflow, object]:
     """Build the restoration benchmark workflow."""
     storage = Path(storage_path)
-    wf = Workflow(storage_path=str(storage / "bif"))
+    wf = Workflow(
+        storage_path=str(storage / "bif"),
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         benchmark = BenchmarkRestoration()(
             image_size=64,

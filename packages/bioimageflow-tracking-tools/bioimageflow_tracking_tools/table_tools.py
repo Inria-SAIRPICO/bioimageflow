@@ -2,8 +2,8 @@
 
 from pathlib import Path
 from typing import Annotated, Any
-import csv
 
+from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -19,19 +19,13 @@ from bioimageflow_core import (
 )
 
 
-def _read_rows(path: Path) -> list[dict[str, str]]:
-    with Path(path).open(newline="") as handle:
-        return list(csv.DictReader(handle))
-
-
-def _write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> Path:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    return output
+def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
+    missing = sorted(columns - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"{tool_name} input table is missing required column(s): "
+            f"{', '.join(repr(column) for column in missing)}."
+        )
 
 
 def _float(row: dict[str, Any], column: str, default: float | None = None) -> float:
@@ -52,17 +46,15 @@ def _argument(arguments: Arguments, name: str, default: Any) -> Any:
     return getattr(arguments, name, default)
 
 
-class FilterObjects(ProcessingTool):
+class FilterObjects(DataFrameTool):
     """Filter object tables by area, frame, intensity, and position."""
 
     display_name = "Filter Objects"
     documentation = "Filter object tables by area, frame, intensity, and position."
     category = Category.TRACKING
     tags = ["tracking", "objects", "filter"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        objects_csv: Annotated[Path, GUIMeta("Objects CSV", connectable=Connectable.BY_DEFAULT)]
         min_area: float | None = None
         max_area: float | None = None
         min_frame: int | None = None
@@ -74,41 +66,41 @@ class FilterObjects(ProcessingTool):
         min_x: float | None = None
         max_x: float | None = None
 
-    class Outputs(IOModel):
-        filtered_objects_csv: Annotated[Path, GUIMeta("Filtered objects CSV")] = Template(
-            "{objects_csv.stem}_filtered.csv"
-        )
+    class Outputs(Passthrough):
         object_count: Annotated[int, GUIMeta("Object count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        rows = _read_rows(arguments.objects_csv)
-
-        def keep(row: dict[str, str]) -> bool:
-            checks = [
-                ("area", _argument(arguments, "min_area", None), _argument(arguments, "max_area", None)),
-                ("frame", _argument(arguments, "min_frame", None), _argument(arguments, "max_frame", None)),
-                (
-                    "intensity",
-                    _argument(arguments, "min_intensity", None),
-                    _argument(arguments, "max_intensity", None),
-                ),
-                ("y", _argument(arguments, "min_y", None), _argument(arguments, "max_y", None)),
-                ("x", _argument(arguments, "min_x", None), _argument(arguments, "max_x", None)),
-            ]
-            for column, minimum, maximum in checks:
-                if column not in row or row[column] in {"", None}:
+    def transform(self, df: Any, arguments: Any) -> Any:
+        _require_columns(df, {"frame", "label", "y", "x", "area"}, "FilterObjects")
+        mask = None
+        checks = [
+            ("area", _argument(arguments, "min_area", None), _argument(arguments, "max_area", None)),
+            ("frame", _argument(arguments, "min_frame", None), _argument(arguments, "max_frame", None)),
+            (
+                "intensity",
+                _argument(arguments, "min_intensity", None),
+                _argument(arguments, "max_intensity", None),
+            ),
+            ("y", _argument(arguments, "min_y", None), _argument(arguments, "max_y", None)),
+            ("x", _argument(arguments, "min_x", None), _argument(arguments, "max_x", None)),
+        ]
+        for column, minimum, maximum in checks:
+            if minimum is None and maximum is None:
+                continue
+            if column not in df.columns:
+                if column == "intensity":
                     continue
-                value = float(row[column])
-                if minimum is not None and value < float(minimum):
-                    return False
-                if maximum is not None and value > float(maximum):
-                    return False
-            return True
+                raise ValueError(f"FilterObjects input table is missing required column {column!r}.")
+            series = df[column].astype(float)
+            column_mask = series.notna()
+            if minimum is not None:
+                column_mask &= series >= float(minimum)
+            if maximum is not None:
+                column_mask &= series <= float(maximum)
+            mask = column_mask if mask is None else mask & column_mask
 
-        filtered = [row for row in rows if keep(row)]
-        fieldnames = list(rows[0]) if rows else ["frame", "label", "y", "x", "area"]
-        output = _write_rows(arguments.filtered_objects_csv, filtered, fieldnames)
-        return self.Outputs(filtered_objects_csv=output, object_count=len(filtered))
+        result = df.copy() if mask is None else df.loc[mask].copy()
+        result["object_count"] = len(result)
+        return result
 
 
 class TracksToLabels(ProcessingTool):
@@ -121,7 +113,9 @@ class TracksToLabels(ProcessingTool):
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        tracks_csv: Annotated[Path, GUIMeta("Tracks CSV", connectable=Connectable.BY_DEFAULT)]
+        track_id: Annotated[int, GUIMeta("Track ID", connectable=Connectable.BY_DEFAULT)]
+        frame: Annotated[int, GUIMeta("Frame", connectable=Connectable.BY_DEFAULT)]
+        label: Annotated[int, GUIMeta("Label", connectable=Connectable.BY_DEFAULT)]
         label_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR, Layout.PLANAR_TIME}),
@@ -136,11 +130,26 @@ class TracksToLabels(ProcessingTool):
         ] = Template("{label_image.stem}_tracks.tif")
         track_count: Annotated[int, GUIMeta("Track count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+        *,
+        context: Any = None,
+    ) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
-        tracks = _read_rows(arguments.tracks_csv)
+        if not arguments_list:
+            return []
+        arguments = arguments_list[0]
+        tracks = [
+            {
+                "track_id": row_arguments.track_id,
+                "frame": row_arguments.frame,
+                "label": _argument(row_arguments, "label", None),
+            }
+            for row_arguments in arguments_list
+        ]
         source = iio.imread(arguments.label_image)
         if source.ndim == 2:
             source = source[np.newaxis, ...]
@@ -154,41 +163,45 @@ class TracksToLabels(ProcessingTool):
         output = Path(arguments.output_label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, output_image, photometric="minisblack")
-        return self.Outputs(
-            output_label_image=output,
-            track_count=len({_int(row, "track_id") for row in tracks}),
-        )
+        return [[
+            self.Outputs(
+                output_label_image=output,
+                track_count=len({_int(row, "track_id") for row in tracks}),
+            )
+        ]]
 
 
-class TrackTableValidate(ProcessingTool):
+class TrackTableValidate(DataFrameTool):
     """Validate required tracking columns and basic table consistency."""
 
     display_name = "Track Table Validate"
     documentation = "Validate required columns, frame order, and track IDs."
     category = Category.TRACKING
     tags = ["tracking", "validation", "tables"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        tracks_csv: Annotated[Path, GUIMeta("Tracks CSV", connectable=Connectable.BY_DEFAULT)]
+        pass
 
     class Outputs(IOModel):
-        validation_csv: Annotated[Path, GUIMeta("Validation CSV")] = Template(
-            "{tracks_csv.stem}_validation.csv"
-        )
+        severity: Annotated[str, GUIMeta("Severity")]
+        message: Annotated[str, GUIMeta("Message")]
         valid: Annotated[bool, GUIMeta("Valid")]
         error_count: Annotated[int, GUIMeta("Error count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        rows = _read_rows(arguments.tracks_csv)
+    def transform(self, df: Any, arguments: Any) -> Any:
+        import pandas as pd
+
         required = {"track_id", "frame", "label", "y", "x"}
-        present = set(rows[0]) if rows else set()
         errors = [
             {"severity": "error", "message": f"missing required column: {column}"}
-            for column in sorted(required - present)
+            for column in sorted(required - set(df.columns))
         ]
         seen_track_frames: set[tuple[int, int]] = set()
         frames_by_track: dict[int, list[int]] = {}
+        if not errors:
+            rows = df[list(required)].to_dict("records")
+        else:
+            rows = []
         for row in rows:
             try:
                 track_id = _int(row, "track_id")
@@ -217,11 +230,20 @@ class TrackTableValidate(ProcessingTool):
                         "message": f"frames are not sorted for track_id {track_id}",
                     }
                 )
-        output = _write_rows(arguments.validation_csv, errors, ["severity", "message"])
-        return self.Outputs(
-            validation_csv=output,
-            valid=len(errors) == 0,
-            error_count=len(errors),
+        if not errors:
+            errors = [{"severity": "info", "message": "valid"}]
+        valid = len(errors) == 1 and errors[0]["severity"] == "info"
+        error_count = 0 if valid else len(errors)
+        return pd.DataFrame(
+            [
+                {
+                    "severity": error["severity"],
+                    "message": error["message"],
+                    "valid": valid,
+                    "error_count": error_count,
+                }
+                for error in errors
+            ]
         )
 
 
@@ -235,28 +257,33 @@ def _track_groups(rows: list[dict[str, str]]) -> dict[int, list[dict[str, str]]]
     }
 
 
-class TrackSummary(ProcessingTool):
+class TrackSummary(DataFrameTool):
     """Compute per-track duration, displacement, and speed."""
 
     display_name = "Track Summary"
     documentation = "Summarize per-track duration, displacement, speed, and frame bounds."
     category = Category.MEASUREMENT
     tags = ["tracking", "summary", "metrics"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        tracks_csv: Annotated[Path, GUIMeta("Tracks CSV", connectable=Connectable.BY_DEFAULT)]
+        pass
 
     class Outputs(IOModel):
-        summary_csv: Annotated[Path, GUIMeta("Track summary CSV")] = Template(
-            "{tracks_csv.stem}_summary.csv"
-        )
+        track_id: Annotated[int, GUIMeta("Track ID")]
+        track_length: Annotated[int, GUIMeta("Track length")]
+        duration: Annotated[int, GUIMeta("Duration")]
+        start_frame: Annotated[int, GUIMeta("Start frame")]
+        end_frame: Annotated[int, GUIMeta("End frame")]
+        displacement: Annotated[float, GUIMeta("Displacement")]
+        mean_speed: Annotated[float, GUIMeta("Mean speed")]
         track_count: Annotated[int, GUIMeta("Track count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def transform(self, df: Any, arguments: Any) -> Any:
         import numpy as np
+        import pandas as pd
 
-        rows = _read_rows(arguments.tracks_csv)
+        _require_columns(df, {"track_id", "frame", "y", "x"}, "TrackSummary")
+        rows = df.to_dict("records")
         summaries = []
         for track_id, group in sorted(_track_groups(rows).items()):
             first = group[0]
@@ -278,57 +305,55 @@ class TrackSummary(ProcessingTool):
                     "mean_speed": displacement / max(1, duration - 1),
                 }
             )
-        output = _write_rows(
-            arguments.summary_csv,
-            summaries,
-            [
-                "track_id",
-                "track_length",
-                "duration",
-                "start_frame",
-                "end_frame",
-                "displacement",
-                "mean_speed",
-            ],
-        )
-        return self.Outputs(summary_csv=output, track_count=len(summaries))
+        for row in summaries:
+            row["track_count"] = len(summaries)
+        columns = [
+            "track_id",
+            "track_length",
+            "duration",
+            "start_frame",
+            "end_frame",
+            "displacement",
+            "mean_speed",
+            "track_count",
+        ]
+        return pd.DataFrame(summaries, columns=columns)
 
 
-class TrackQualityMetrics(ProcessingTool):
+class TrackQualityMetrics(DataFrameTool):
     """Compute simple quality metrics for linked track tables."""
 
     display_name = "Track Quality Metrics"
     documentation = "Compute gap counts, split/merge flags, and short-track fraction."
     category = Category.MEASUREMENT
     tags = ["tracking", "quality", "metrics"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        tracks_csv: Annotated[Path, GUIMeta("Tracks CSV", connectable=Connectable.BY_DEFAULT)]
         min_track_length: int = 3
 
     class Outputs(IOModel):
-        quality_csv: Annotated[Path, GUIMeta("Track quality CSV")] = Template(
-            "{tracks_csv.stem}_quality.csv"
-        )
         track_count: Annotated[int, GUIMeta("Track count")]
         gap_count: Annotated[int, GUIMeta("Gap count")]
         split_count: Annotated[int, GUIMeta("Split count")]
         merge_count: Annotated[int, GUIMeta("Merge count")]
         short_track_fraction: Annotated[float, GUIMeta("Short-track fraction")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        rows = _read_rows(arguments.tracks_csv)
+    def transform(self, df: Any, arguments: Any) -> Any:
+        import pandas as pd
+
+        _require_columns(df, {"track_id", "frame", "label"}, "TrackQualityMetrics")
+        rows = df.to_dict("records")
         groups = _track_groups(rows)
         gap_count = 0
         short_count = 0
+        min_track_length = int(_argument(arguments, "min_track_length", 3))
         for group in groups.values():
             frames = [_int(row, "frame") for row in group]
             gap_count += sum(
                 max(0, frames[index + 1] - frames[index] - 1)
                 for index in range(len(frames) - 1)
             )
-            if len(group) < int(arguments.min_track_length):
+            if len(group) < min_track_length:
                 short_count += 1
         track_frame_counts: dict[tuple[int, int], int] = {}
         object_frame_counts: dict[tuple[int, int], int] = {}
@@ -348,22 +373,4 @@ class TrackQualityMetrics(ProcessingTool):
             "merge_count": merge_count,
             "short_track_fraction": short_fraction,
         }
-        output = _write_rows(
-            arguments.quality_csv,
-            [row],
-            [
-                "track_count",
-                "gap_count",
-                "split_count",
-                "merge_count",
-                "short_track_fraction",
-            ],
-        )
-        return self.Outputs(
-            quality_csv=output,
-            track_count=track_count,
-            gap_count=gap_count,
-            split_count=split_count,
-            merge_count=merge_count,
-            short_track_fraction=short_fraction,
-        )
+        return pd.DataFrame([row])

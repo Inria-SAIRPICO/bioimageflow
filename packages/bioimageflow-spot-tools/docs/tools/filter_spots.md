@@ -1,47 +1,36 @@
 # FilterSpots
 
-`FilterSpots` filters spot coordinate tables using optional numeric thresholds
-and an optional mask image.
+`FilterSpots` filters spot dataframe rows by numeric thresholds and an optional mask image.
 
-## Inputs
-
-- `spots_csv`: table with `y` and `x` columns.
-- `min_intensity`, `max_intensity`, `min_score`, `max_score`, `min_radius`,
-  and `max_radius`: optional filters applied when matching columns exist.
-- `mask_image`: optional nonzero mask checked at each spot coordinate.
-
-## Outputs
-
-- `filtered_spots_csv`.
-- `spot_count`.
+`FilterSpots` is a dataframe tool that consumes one upstream spot dataframe.
+Thresholds use the conventional `intensity`, `score`, and `radius` columns when the corresponding min/max parameter is set.
+When `mask_image` is provided, `y` and `x` are required so each spot can be tested against the nonzero mask.
+Outputs preserve the kept input rows, including arbitrary extra columns, and add `spot_count`.
+No filtered CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling, imageio for optional masks, and NumPy-compatible coordinate
-checks.
-
-## Assumptions
-
-Coordinate columns are pixel-space `y` and `x`. Missing optional filter columns
-are ignored, but mask filtering requires valid coordinates.
+BioImageFlow core APIs and imageio for optional mask reading.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_spot_tools import FilterSpots
 
-FilterSpots().process_row(
-    Arguments(spots_csv="spots.csv", min_score=0.5, filtered_spots_csv="kept.csv")
+spots = pd.DataFrame({"spot_id": [1], "y": [5.0], "x": [7.0], "intensity": [12.0]})
+filtered = FilterSpots().transform(
+    spots,
+    Arguments(min_intensity=5.0),
 )
 ```
 
 ## Expected Results
 
-Synthetic tables keep only rows within requested score, intensity, radius, and
-mask constraints while preserving table columns.
+Rows inside all requested thresholds pass through as dataframe rows.
 
 ## Failure Modes
 
-Malformed required coordinates, out-of-bounds mask coordinates, unreadable
-files, and CSV write failures raise errors.
+Missing columns required by requested filters, malformed coordinates, out-of-bounds mask coordinates, unreadable masks, and invalid numeric thresholds raise errors.

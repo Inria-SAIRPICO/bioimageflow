@@ -1,44 +1,35 @@
 # TrackQualityMetrics
 
-`TrackQualityMetrics` computes table-level quality metrics for linked tracks.
+`TrackQualityMetrics` computes simple quality metrics for linked track dataframe rows.
 
-## Inputs
-
-- `tracks_csv`: linked track table.
-- `min_track_length`: threshold used for short-track fraction.
-
-## Outputs
-
-- `quality_csv`: track count, gap count, split count, merge count, and
-  short-track fraction.
-- Scalar outputs mirroring those CSV values.
+The tool is a `DataFrameTool`: pass an upstream track dataframe positionally, then configure `min_track_length`.
+The input dataframe must contain `track_id`, `frame`, and `label`.
+Outputs are `track_count`, `gap_count`, `split_count`, `merge_count`, and `short_track_fraction`.
+No quality CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling and package-local numeric table validation helpers.
-
-## Assumptions
-
-Track rows have numeric `track_id`, `frame`, and `label` fields. Split and
-merge counts are table-level consistency indicators, not lineage validation.
+BioImageFlow core APIs and package-local numeric helpers.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_tracking_tools import TrackQualityMetrics
 
-TrackQualityMetrics().process_row(
-    Arguments(tracks_csv="tracks.csv", min_track_length=3, quality_csv="quality.csv")
-)
+tracks = pd.DataFrame([
+    {"track_id": 1, "frame": 0, "label": 1},
+])
+
+quality = TrackQualityMetrics().transform(tracks, Arguments(min_track_length=3))
 ```
 
 ## Expected Results
 
-Synthetic tracks with frame gaps and short tracks produce exact gap counts and
-short-track fractions.
+The output dataframe contains one summary row with quality counters and short-track fraction.
 
 ## Failure Modes
 
-Missing required numeric fields, unreadable CSV files, invalid thresholds, and
-CSV write failures raise errors.
+Missing required numeric fields or invalid thresholds raise errors.

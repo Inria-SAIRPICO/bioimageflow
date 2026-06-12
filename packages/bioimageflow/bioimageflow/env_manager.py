@@ -24,7 +24,7 @@ logger = logging.getLogger("bioimageflow")
 
 
 def _bioimageflow_core_pin() -> str:
-    """Return the pip requirement pinning the orchestrator's bioimageflow-core.
+    """Return the package requirement pinning bioimageflow-core.
 
     Tool environments must run the same ``bioimageflow-core`` API the
     orchestrator was built against, otherwise tools that import newer
@@ -38,6 +38,47 @@ def _bioimageflow_core_pin() -> str:
             "tool environments will install the latest published version."
         )
         return "bioimageflow-core"
+
+
+def _local_bioimageflow_core_project() -> Path | None:
+    """Return the local bioimageflow-core project path when running from source."""
+    try:
+        import bioimageflow_core
+    except ImportError:
+        return None
+
+    package_dir = Path(bioimageflow_core.__file__).resolve().parent
+    project_dir = package_dir.parent
+    pyproject = project_dir / "pyproject.toml"
+    if pyproject.exists() and 'name = "bioimageflow-core"' in pyproject.read_text():
+        return project_dir
+    return None
+
+
+def _bioimageflow_core_editable_dependency(project_dir: Path) -> dict[str, Any]:
+    """Return the Wetlands dependency entry for editable local core installs."""
+    return {
+        "name": "bioimageflow-core",
+        "path": str(project_dir),
+        "editable": True,
+    }
+
+
+def _has_bioimageflow_core_dependency(*dependency_lists: list[Any]) -> bool:
+    dependencies = [
+        dependency
+        for dependency_list in dependency_lists
+        for dependency in dependency_list
+    ]
+    for dependency in dependencies:
+        name = dependency.get("name") if isinstance(dependency, dict) else dependency
+        if isinstance(name, str) and "bioimageflow-core" in name:
+            return True
+    return False
+
+
+def _is_local_dependency(dependency: Any) -> bool:
+    return isinstance(dependency, dict) and "path" in dependency
 
 # ── Shared EnvironmentManager singleton ──────────────────────────────
 
@@ -142,6 +183,8 @@ class WetlandsEnvManager:
         wetlands_instance_path: Path | None = None,
         conda_path: str | None = None,
         main_conda_environment_path: str | None = None,
+        bioimageflow_core_dependency: Any | None = None,
+        use_local_bioimageflow_core: bool = False,
         **kwargs: Any,
     ) -> None:
         if wetlands_instance_path is None:
@@ -159,14 +202,34 @@ class WetlandsEnvManager:
         # name -> (max_workers, worker_env, worker_timeout)
         self._worker_file = _find_worker_file()
         self._lock = threading.RLock()
+        if bioimageflow_core_dependency is not None:
+            self._bioimageflow_core_dependency = bioimageflow_core_dependency
+        elif use_local_bioimageflow_core:
+            project_dir = _local_bioimageflow_core_project()
+            if project_dir is None:
+                raise RuntimeError(
+                    "use_local_bioimageflow_core=True requires an editable "
+                    "or source checkout of bioimageflow-core."
+                )
+            self._bioimageflow_core_dependency = _bioimageflow_core_editable_dependency(
+                project_dir
+            )
+        else:
+            self._bioimageflow_core_dependency = _bioimageflow_core_pin()
 
     def _augment_dependencies(self, dependencies: dict) -> Dependencies:
         """Auto-inject bioimageflow-core into the environment deps."""
         deps = cast(Dependencies, {k: v for k, v in dependencies.items()})
         pip_deps = list(deps.get("pip", []))
-        if not any("bioimageflow-core" in d for d in pip_deps):
-            pip_deps.append(_bioimageflow_core_pin())
+        local_deps = list(deps.get("local", []))
+        if not _has_bioimageflow_core_dependency(pip_deps, local_deps):
+            if _is_local_dependency(self._bioimageflow_core_dependency):
+                local_deps.append(self._bioimageflow_core_dependency)
+            else:
+                pip_deps.append(self._bioimageflow_core_dependency)
         deps["pip"] = pip_deps
+        if local_deps:
+            deps["local"] = local_deps
         return deps
 
     def get_or_create(

@@ -5,7 +5,6 @@ import sys
 import types
 import imageio.v3 as iio
 import numpy as np
-import pandas as pd
 import pytest
 
 from bioimageflow_core import Arguments
@@ -114,14 +113,14 @@ def test_synthetic_fish_workflow_executes(tmp_path: Path) -> None:
     )
     result = wf.compute(terminal)
 
-    assert {"summary_csv", "label_count", "summary_csv_1", "label_count_1"} <= set(
+    assert {"label", "spot_count", "label_count", "label_1", "spot_count_1"} <= set(
         result.columns
     )
     assert not result.empty
     assert int(result["label_count"].iloc[0]) >= 1
     assert int(result["label_count_1"].iloc[0]) >= 1
-    assert not pd_read(result["summary_csv"].iloc[0]).empty
-    assert not pd_read(result["summary_csv_1"].iloc[0]).empty
+    assert int(result["spot_count"].iloc[0]) >= 1
+    assert int(result["spot_count_1"].iloc[0]) >= 1
 
 
 def test_bbbc038_segmentation_benchmark_constructs_and_executes(tmp_path: Path) -> None:
@@ -421,6 +420,3 @@ def test_example_workflow_documentation_records_review_contract() -> None:
         assert "Expected" in text
         assert "Test" in text
 
-
-def pd_read(path: str) -> pd.DataFrame:
-    return pd.read_csv(path)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -272,62 +271,69 @@ def test_heavy_segmentation_tools_build_graph_without_model_dependencies(
 
 @pytest.mark.model_runtime
 @pytest.mark.complete
-@pytest.mark.skipif(
-    importlib.util.find_spec("cellpose") is None,
-    reason="Cellpose3 complete runtime test requires optional cellpose",
-)
-def test_cellpose3_runtime_segments_tiny_synthetic_image(tmp_path: Path) -> None:
+@pytest.mark.wetlands
+def test_cellpose3_runtime_segments_tiny_synthetic_image(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
     image_path = tmp_path / "cellpose_input.tif"
-    mask_path = tmp_path / "cellpose_mask.tif"
     image = np.zeros((32, 32), dtype=np.float32)
     image[10:22, 10:22] = 1.0
     iio.imwrite(image_path, image)
 
-    result = Cellpose3().process_row(
-        Arguments(
+    with Workflow(
+        storage_path=tmp_path / "results",
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
+    ) as wf:
+        cellpose = Cellpose3()(
             input_image=image_path,
-            mask=mask_path,
             diameter=12.0,
             model_type="cyto3",
             channel=0,
             nuclear_channel=0,
             flow_threshold=0.4,
             cellprob_threshold=-6.0,
+            name="cellpose3_runtime",
         )
-    )
+        result = wf.compute(cellpose)
 
+    mask_path = Path(result.iloc[0]["mask"])
     labels = iio.imread(mask_path)
     assert labels.shape == image.shape
-    assert result.cell_count == int(labels.max())
+    assert int(result.iloc[0]["cell_count"]) == int(labels.max())
 
 
 @pytest.mark.model_runtime
 @pytest.mark.complete
-@pytest.mark.skipif(
-    importlib.util.find_spec("stardist") is None
-    or importlib.util.find_spec("csbdeep") is None,
-    reason="StarDistSegmenter complete runtime test requires optional stardist/csbdeep",
-)
-def test_stardist_runtime_segments_tiny_synthetic_image(tmp_path: Path) -> None:
+@pytest.mark.wetlands
+def test_stardist_runtime_segments_tiny_synthetic_image(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
     image_path = tmp_path / "stardist_input.tif"
-    mask_path = tmp_path / "stardist_mask.tif"
     yy, xx = np.ogrid[:48, :48]
     image = (((yy - 24) ** 2 + (xx - 24) ** 2) <= 64).astype(np.float32)
     iio.imwrite(image_path, image)
 
-    result = StarDistSegmenter().process_row(
-        Arguments(
+    with Workflow(
+        storage_path=tmp_path / "results",
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
+    ) as wf:
+        stardist = StarDistSegmenter()(
             input_image=image_path,
-            mask=mask_path,
             model_name="2D_versatile_fluo",
             channel=0,
             prob_thresh=0.1,
             nms_thresh=0.4,
             normalize_low=1.0,
             normalize_high=99.8,
+            name="stardist_runtime",
         )
-    )
+        result = wf.compute(stardist)
 
+    mask_path = Path(result.iloc[0]["mask"])
     labels = iio.imread(mask_path)
     assert labels.shape == image.shape
-    assert result.object_count == int(labels.max())
+    assert int(result.iloc[0]["object_count"]) == int(labels.max())

@@ -42,16 +42,14 @@ def test_detect_spots_finds_synthetic_puncta(tmp_path: Path) -> None:
             threshold=0.3,
             min_distance=5,
             output_labels=str(tmp_path / "spots.tif"),
-            spots_csv=str(tmp_path / "spots.csv"),
         )
     )
 
-    assert result.spot_count == 3
-    labels = iio.imread(result.output_labels)
+    assert len(result) == 3
+    assert result[0].spot_count == 3
+    labels = iio.imread(result[0].output_labels)
     assert labels.max() == 3
-    spots = pd.read_csv(result.spots_csv)
-    assert set(spots.columns) == {"spot_id", "y", "x", "intensity", "score"}
-    assert len(spots) == 3
+    assert {spot.spot_id for spot in result} == {1, 2, 3}
 
 
 def test_detect_spots_log_method_finds_synthetic_puncta(tmp_path: Path) -> None:
@@ -66,50 +64,46 @@ def test_detect_spots_log_method_finds_synthetic_puncta(tmp_path: Path) -> None:
             threshold=0.2,
             min_distance=5,
             output_labels=str(tmp_path / "log_spots.tif"),
-            spots_csv=str(tmp_path / "log_spots.csv"),
         )
     )
 
-    assert result.spot_count == 3
-    spots = pd.read_csv(result.spots_csv)
-    assert len(spots) == 3
-    assert (spots["score"] > 0).all()
+    assert len(result) == 3
+    assert all(spot.score > 0 for spot in result)
 
 
 def test_assign_spots_to_labels_and_summarize(tmp_path: Path) -> None:
-    spots_csv = tmp_path / "spots.csv"
-    pd.DataFrame(
-        [
-            {"spot_id": 1, "y": 6, "x": 6, "intensity": 10.0, "score": 4.0},
-            {"spot_id": 2, "y": 10, "x": 10, "intensity": 12.0, "score": 5.0},
-            {"spot_id": 3, "y": 30, "x": 30, "intensity": 8.0, "score": 3.0},
-        ]
-    ).to_csv(spots_csv, index=False)
+    spots = [
+        Arguments(spot_id=1, y=6, x=6, intensity=10.0, score=4.0),
+        Arguments(spot_id=2, y=10, x=10, intensity=12.0, score=5.0),
+        Arguments(spot_id=3, y=30, x=30, intensity=8.0, score=3.0),
+    ]
     labels = np.zeros((40, 40), dtype=np.uint16)
     labels[0:20, 0:20] = 1
     labels[25:35, 25:35] = 2
     label_path = tmp_path / "labels.tif"
     iio.imwrite(label_path, labels)
 
-    assigned = AssignSpotsToLabels().process_row(
-        Arguments(
-            spots_csv=str(spots_csv),
-            label_image=str(label_path),
-            output_csv=str(tmp_path / "assigned.csv"),
+    assigned = [
+        AssignSpotsToLabels().process_row(
+            Arguments(**vars(spot), label_image=str(label_path))
         )
+        for spot in spots
+    ]
+    assigned_table = pd.DataFrame(
+        [
+            {"label": row.label, "intensity": row.intensity}
+            for row in assigned
+        ],
+        index=[f"spot::{index}" for index in range(len(assigned))],
     )
-    summary = SpotSummary().process_row(
-        Arguments(
-            assigned_spots_csv=str(assigned.assigned_spots_csv),
-            output_csv=str(tmp_path / "summary.csv"),
-        )
+    summary = SpotSummary().transform(
+        assigned_table,
+        Arguments(),
     )
 
-    table = pd.read_csv(assigned.assigned_spots_csv)
-    assert table["label"].tolist() == [1, 1, 2]
-    summary_table = pd.read_csv(summary.summary_csv).sort_values("label")
-    assert summary_table["spot_count"].tolist() == [2, 1]
-    assert summary_table["total_intensity"].tolist() == [22.0, 8.0]
+    assert [row.label for row in assigned] == [1, 1, 2]
+    assert list(summary["spot_count"]) == [2, 1]
+    assert list(summary["total_intensity"]) == [22.0, 8.0]
 
 
 def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
@@ -118,79 +112,89 @@ def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
     labels_path = tmp_path / "labels.tif"
     iio.imwrite(labels_path, labels)
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(storage_path=str(tmp_path / "bif"), use_wetlands=False) as wf:
         detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
         assigned = AssignSpotsToLabels()(
-            spots_csv=detected["spots_csv"],
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            intensity=detected["intensity"],
+            score=detected["score"],
             label_image=labels_path,
             name="assign",
         )
-        summary = SpotSummary()(
-            assigned_spots_csv=assigned["assigned_spots_csv"],
-            name="summary",
-        )
+        summary = SpotSummary()(assigned, name="summary")
         result = wf.compute(summary)
 
     assert len(result) == 1
-    assert Path(result.iloc[0]["summary_csv"]).exists()
+    assert result.iloc[0]["spot_count"] == 3
+    assert result.iloc[0]["total_intensity"] > 0
+
+
+def test_spot_colocalization_builds_workflow_graph(tmp_path: Path) -> None:
+    image = _spot_image(tmp_path / "puncta.tif")
+
+    with Workflow(storage_path=str(tmp_path / "bif"), use_wetlands=False) as wf:
+        detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
+        matches = SpotColocalization()(
+            detected,
+            detected,
+            max_distance=0.1,
+            name="matches",
+        )
+        result = wf.compute(matches)
+
+    assert len(result) == 3
+    assert [str(group) for group in result["group"].unique()] == ["0"]
+    assert set(result["reference_spot_id"]) == {1, 2, 3}
+    assert set(result["query_spot_id"]) == {1, 2, 3}
 
 
 def test_filter_spots_uses_numeric_thresholds_and_mask(tmp_path: Path) -> None:
-    spots_csv = tmp_path / "spots.csv"
-    pd.DataFrame(
-        [
-            {"spot_id": 1, "y": 5, "x": 5, "intensity": 4.0, "score": 0.4, "radius": 1.0},
-            {"spot_id": 2, "y": 8, "x": 8, "intensity": 9.0, "score": 0.9, "radius": 2.0},
-            {"spot_id": 3, "y": 12, "x": 12, "intensity": 11.0, "score": 0.7, "radius": 5.0},
-        ]
-    ).to_csv(spots_csv, index=False)
     mask = np.zeros((16, 16), dtype=np.uint8)
     mask[0:10, 0:10] = 1
     mask_path = tmp_path / "mask.tif"
     iio.imwrite(mask_path, mask)
 
-    result = FilterSpots().process_row(
+    rows = pd.DataFrame(
+        {
+            "spot_id": [1, 2, 3],
+            "y": [5, 8, 12],
+            "x": [5, 8, 12],
+            "intensity": [4.0, 9.0, 11.0],
+            "score": [0.4, 0.9, 0.7],
+            "radius": [1.0, 2.0, 5.0],
+            "source": ["a", "b", "c"],
+        },
+        index=["image::0", "image::1", "image::2"],
+    )
+    result = FilterSpots().transform(
+        rows,
         Arguments(
-            spots_csv=spots_csv,
             min_intensity=5.0,
             min_score=0.5,
             max_radius=3.0,
             mask_image=mask_path,
-            filtered_spots_csv=tmp_path / "filtered.csv",
-        )
+        ),
     )
 
-    table = pd.read_csv(result.filtered_spots_csv)
-    assert table["spot_id"].tolist() == [2]
-    assert result.spot_count == 1
+    assert list(result["spot_id"]) == [2]
+    assert list(result["source"]) == ["b"]
+    assert list(result["spot_count"]) == [1]
 
 
 def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) -> None:
-    spots_csv = tmp_path / "spots.csv"
-    pd.DataFrame(
-        [
-            {"spot_id": 10, "y": 4, "x": 5, "intensity": 8.0},
-            {"spot_id": 11, "y": 9, "x": 12, "intensity": 7.0},
-        ]
-    ).to_csv(spots_csv, index=False)
+    spots = [
+        Arguments(spot_id=10, y=4, x=5, image_shape="16,16", radius=1, label_mode=True),
+        Arguments(spot_id=11, y=9, x=12, image_shape="16,16", radius=1, label_mode=True),
+    ]
 
-    rendered = RenderSpots().process_row(
-        Arguments(
-            spots_csv=spots_csv,
-            image_shape="16,16",
-            radius=1,
-            label_mode=True,
-            output_image=tmp_path / "rendered.tif",
-        )
-    )
-    labels = SpotsToLabels().process_row(
-        Arguments(
-            spots_csv=spots_csv,
-            image_shape="16,16",
-            radius=1,
-            label_image=tmp_path / "labels.tif",
-        )
-    )
+    rendered = RenderSpots().process_batch(
+        [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif") for spot in spots]
+    )[0][0]
+    labels = SpotsToLabels().process_batch(
+        [Arguments(**vars(spot), label_image=tmp_path / "labels.tif") for spot in spots]
+    )[0][0]
 
     rendered_image = iio.imread(rendered.output_image)
     label_image = iio.imread(labels.label_image)
@@ -203,123 +207,167 @@ def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) ->
 def test_spot_coordinate_tools_reject_missing_required_coordinates(
     tmp_path: Path,
 ) -> None:
-    bad_spots_csv = tmp_path / "bad_spots.csv"
-    pd.DataFrame([{"spot_id": 1, "y": 4}]).to_csv(bad_spots_csv, index=False)
+    with pytest.raises(ValueError, match="required column 'x'"):
+        RenderSpots().process_batch(
+            [
+                Arguments(
+                    spot_id=1,
+                    y=4,
+                    image_shape="16,16",
+                    radius=1,
+                    label_mode=True,
+                    output_image=tmp_path / "rendered.tif",
+                )
+            ]
+        )
 
     with pytest.raises(ValueError, match="required column 'x'"):
-        RenderSpots().process_row(
-            Arguments(
-                spots_csv=bad_spots_csv,
-                image_shape="16,16",
-                radius=1,
-                label_mode=True,
-                output_image=tmp_path / "rendered.tif",
-            )
-        )
-
-    with pytest.raises(ValueError, match="required column 'x'"):
-        SpotsToLabels().process_row(
-            Arguments(
-                spots_csv=bad_spots_csv,
-                image_shape="16,16",
-                radius=1,
-                label_image=tmp_path / "labels.tif",
-            )
+        SpotsToLabels().process_batch(
+            [
+                Arguments(
+                    spot_id=1,
+                    y=4,
+                    image_shape="16,16",
+                    radius=1,
+                    label_image=tmp_path / "labels.tif",
+                )
+            ]
         )
 
 
-def test_spot_colocalization_matches_nearest_available_spots(tmp_path: Path) -> None:
-    reference_csv = tmp_path / "reference.csv"
-    query_csv = tmp_path / "query.csv"
-    pd.DataFrame(
-        [
-            {"spot_id": 1, "y": 5.0, "x": 5.0},
-            {"spot_id": 2, "y": 20.0, "x": 20.0},
-        ]
-    ).to_csv(reference_csv, index=False)
-    pd.DataFrame(
-        [
-            {"spot_id": 7, "y": 6.0, "x": 5.0},
-            {"spot_id": 8, "y": 28.0, "x": 20.0},
-        ]
-    ).to_csv(query_csv, index=False)
-
-    result = SpotColocalization().process_row(
-        Arguments(
-            reference_spots_csv=reference_csv,
-            query_spots_csv=query_csv,
-            max_distance=2.0,
-            matches_csv=tmp_path / "matches.csv",
-        )
+def test_spot_colocalization_matches_nearest_available_spots() -> None:
+    reference = pd.DataFrame(
+        {
+            "spot_id": [1, 2, 3],
+            "y": [5.0, 20.0, 10.0],
+            "x": [5.0, 20.0, 10.0],
+        },
+        index=["image_a::0", "image_a::1", "image_b::0"],
+    )
+    query = pd.DataFrame(
+        {
+            "spot_id": [7, 8, 9],
+            "y": [6.0, 28.0, 10.0],
+            "x": [5.0, 20.0, 11.5],
+        },
+        index=["image_a::0", "image_a::1", "image_b::0"],
     )
 
-    matches = pd.read_csv(result.matches_csv)
-    assert matches[["reference_spot_id", "query_spot_id"]].values.tolist() == [[1, 7]]
-    assert result.matched_count == 1
+    result = SpotColocalization().merge_dataframes(
+        [reference, query],
+        Arguments(max_distance=2.0),
+    )
+
+    assert list(result.index) == ["image_a::0", "image_b::0"]
+    assert list(result["group"]) == ["image_a", "image_b"]
+    assert list(zip(result["reference_spot_id"], result["query_spot_id"])) == [
+        (1, 7),
+        (3, 9),
+    ]
+    assert list(result["matched_count"]) == [1, 1]
 
 
-def test_spot_colocalization_rejects_malformed_coordinates(tmp_path: Path) -> None:
-    reference_csv = tmp_path / "reference.csv"
-    query_csv = tmp_path / "query.csv"
-    pd.DataFrame([{"spot_id": 1, "y": 5.0}]).to_csv(reference_csv, index=False)
-    pd.DataFrame([{"spot_id": 2, "y": 5.0, "x": 5.0}]).to_csv(query_csv, index=False)
+def test_spot_colocalization_can_group_by_image_column() -> None:
+    reference = pd.DataFrame(
+        {
+            "image_id": ["field_1", "field_2"],
+            "spot_id": [1, 2],
+            "y": [4.0, 20.0],
+            "x": [4.0, 20.0],
+        },
+        index=["ref_0", "ref_1"],
+    )
+    query = pd.DataFrame(
+        {
+            "image_id": ["field_2", "field_1"],
+            "spot_id": [10, 11],
+            "y": [20.5, 4.5],
+            "x": [20.0, 4.0],
+        },
+        index=["query_0", "query_1"],
+    )
 
-    with pytest.raises(ValueError, match="required column 'x'"):
-        SpotColocalization().process_row(
-            Arguments(
-                reference_spots_csv=reference_csv,
-                query_spots_csv=query_csv,
-                max_distance=2.0,
-                matches_csv=tmp_path / "matches.csv",
-            )
+    result = SpotColocalization().merge_dataframes(
+        [reference, query],
+        Arguments(group_by="image_id", max_distance=1.0),
+    )
+
+    assert list(result["group"]) == ["field_1", "field_2"]
+    assert list(zip(result["reference_spot_id"], result["query_spot_id"])) == [
+        (1, 11),
+        (2, 10),
+    ]
+
+
+def test_spot_colocalization_rejects_malformed_coordinates() -> None:
+    with pytest.raises(ValueError, match="missing required column.*'x'"):
+        SpotColocalization().merge_dataframes(
+            [
+                pd.DataFrame({"spot_id": [1], "y": [5.0]}, index=["image::0"]),
+                pd.DataFrame(
+                    {"spot_id": [2], "y": [5.0], "x": [5.0]},
+                    index=["image::0"],
+                ),
+            ],
+            Arguments(max_distance=2.0),
         )
 
 
-def test_spot_quality_metrics_writes_snr_and_nearest_neighbor(tmp_path: Path) -> None:
+def test_spot_colocalization_rejects_unrelated_index_lineage() -> None:
+    with pytest.raises(ValueError, match="no shared groups"):
+        SpotColocalization().merge_dataframes(
+            [
+                pd.DataFrame(
+                    {"spot_id": [1], "y": [5.0], "x": [5.0]},
+                    index=["reference_image::0"],
+                ),
+                pd.DataFrame(
+                    {"spot_id": [2], "y": [5.0], "x": [5.0]},
+                    index=["query_image::0"],
+                ),
+            ],
+            Arguments(max_distance=2.0),
+        )
+
+
+def test_spot_quality_metrics_reports_snr_and_nearest_neighbor(tmp_path: Path) -> None:
     image = np.ones((20, 20), dtype=np.float32)
     image[5, 5] = 11.0
     image[5, 9] = 7.0
     image_path = tmp_path / "image.tif"
     iio.imwrite(image_path, image)
-    spots_csv = tmp_path / "spots.csv"
-    pd.DataFrame(
-        [
-            {"spot_id": 1, "y": 5, "x": 5, "intensity": 11.0},
-            {"spot_id": 2, "y": 5, "x": 9, "intensity": 7.0},
-        ]
-    ).to_csv(spots_csv, index=False)
 
-    result = SpotQualityMetrics().process_row(
-        Arguments(
-            spots_csv=spots_csv,
-            image=str(image_path),
-            radius=1,
-            metrics_csv=tmp_path / "quality.csv",
-        )
+    spots = pd.DataFrame(
+        {
+            "spot_id": [1, 2],
+            "y": [5, 5],
+            "x": [5, 9],
+            "intensity": [11.0, 7.0],
+            "channel": ["gfp", "gfp"],
+        },
+        index=["image::0", "image::1"],
+    )
+    result = SpotQualityMetrics().transform(
+        spots,
+        Arguments(image=str(image_path), radius=1),
     )
 
-    metrics = pd.read_csv(result.metrics_csv).sort_values("spot_id")
-    assert metrics["nearest_neighbor_distance"].tolist() == [4.0, 4.0]
-    assert (metrics["snr"] > 1.0).all()
-    assert result.spot_count == 2
+    assert list(result["nearest_neighbor_distance"]) == [4.0, 4.0]
+    assert all(result["snr"] > 1.0)
+    assert list(result["channel"]) == ["gfp", "gfp"]
+    assert list(result["spot_count"]) == [2, 2]
 
 
 def test_spot_quality_metrics_rejects_out_of_bounds_coordinates(tmp_path: Path) -> None:
     image = np.ones((10, 10), dtype=np.float32)
     image_path = tmp_path / "image.tif"
     iio.imwrite(image_path, image)
-    spots_csv = tmp_path / "spots.csv"
-    pd.DataFrame([{"spot_id": 1, "y": 15, "x": 5, "intensity": 2.0}]).to_csv(
-        spots_csv,
-        index=False,
-    )
 
     with pytest.raises(ValueError, match="outside image bounds"):
-        SpotQualityMetrics().process_row(
-            Arguments(
-                spots_csv=spots_csv,
-                image=str(image_path),
-                radius=1,
-                metrics_csv=tmp_path / "quality.csv",
-            )
+        SpotQualityMetrics().transform(
+            pd.DataFrame(
+                {"spot_id": [1], "y": [15], "x": [5], "intensity": [2.0]},
+                index=["image::0"],
+            ),
+            Arguments(image=str(image_path), radius=1),
         )

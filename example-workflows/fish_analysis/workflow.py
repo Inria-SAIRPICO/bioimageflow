@@ -62,7 +62,9 @@ https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
 def build_fish_workflow(
     storage_path: str = "./fish_results",
     data_dir: str = "./data",
-    debug: bool=False
+    debug: bool = False,
+    use_wetlands: bool = True,
+    wetlands_config: dict | None = None,
 ) -> tuple:
     """Build and return the FISH analysis workflow and its terminal node.
 
@@ -78,7 +80,11 @@ def build_fish_workflow(
     tuple of (Workflow, Node)
         The workflow and the terminal stats node.
     """
-    wf = Workflow(storage_path=storage_path, wetlands_config={"debug": debug})
+    wf = Workflow(
+        storage_path=storage_path,
+        use_wetlands=use_wetlands,
+        wetlands_config={**(wetlands_config or {}), "debug": debug},
+    )
 
     with wf:
         # -- 1. Data ingestion --
@@ -157,6 +163,8 @@ def build_fish_workflow(
 
 def build_synthetic_fish_workflow(
     storage_path: str = "./fish_synthetic_results",
+    use_wetlands: bool = False,
+    wetlands_config: dict | None = None,
 ) -> tuple[Workflow, object]:
     """Build a lightweight FISH-like workflow for tests and examples.
 
@@ -188,7 +196,11 @@ def build_synthetic_fish_workflow(
     source = data_dir / "synthetic_fish_cyx.tif"
     iio.imwrite(source, image, photometric="minisblack")
 
-    wf = Workflow(storage_path=str(storage / "bif"), use_wetlands=False)
+    wf = Workflow(
+        storage_path=str(storage / "bif"),
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         read = ReadImage()(input_image=source, name="read_synthetic_fish")
         ch_fols2 = ExtractChannel()(
@@ -226,23 +238,25 @@ def build_synthetic_fish_workflow(
             name="detect_csf1r_spots",
         )
         fols2_assigned = AssignSpotsToLabels()(
-            spots_csv=fols2_spots["spots_csv"],
+            spot_id=fols2_spots["spot_id"],
+            y=fols2_spots["y"],
+            x=fols2_spots["x"],
+            intensity=fols2_spots["intensity"],
+            score=fols2_spots["score"],
             label_image=nuclei_labels["labels"],
             name="assign_fols2_to_nuclei",
         )
         csf1r_assigned = AssignSpotsToLabels()(
-            spots_csv=csf1r_spots["spots_csv"],
+            spot_id=csf1r_spots["spot_id"],
+            y=csf1r_spots["y"],
+            x=csf1r_spots["x"],
+            intensity=csf1r_spots["intensity"],
+            score=csf1r_spots["score"],
             label_image=nuclei_labels["labels"],
             name="assign_csf1r_to_nuclei",
         )
-        fols2_summary = SpotSummary()(
-            assigned_spots_csv=fols2_assigned["assigned_spots_csv"],
-            name="summarize_fols2",
-        )
-        csf1r_summary = SpotSummary()(
-            assigned_spots_csv=csf1r_assigned["assigned_spots_csv"],
-            name="summarize_csf1r",
-        )
+        fols2_summary = SpotSummary()(fols2_assigned, name="summarize_fols2")
+        csf1r_summary = SpotSummary()(csf1r_assigned, name="summarize_csf1r")
         summary = Collect()(
             fols2_summary,
             csf1r_summary,

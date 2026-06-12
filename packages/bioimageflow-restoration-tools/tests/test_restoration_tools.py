@@ -2,7 +2,6 @@ from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
-import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
@@ -44,7 +43,7 @@ def test_restore_image_improves_noisy_synthetic_image(tmp_path: Path) -> None:
     assert np.mean((restored - clean) ** 2) < np.mean((noisy - clean) ** 2)
 
 
-def test_benchmark_restoration_writes_metrics(tmp_path: Path) -> None:
+def test_benchmark_restoration_returns_metrics(tmp_path: Path) -> None:
     result = BenchmarkRestoration().process_row(
         Arguments(
             image_size=48,
@@ -54,19 +53,14 @@ def test_benchmark_restoration_writes_metrics(tmp_path: Path) -> None:
             clean_image=str(tmp_path / "declared" / "clean_custom.tif"),
             degraded_image=str(tmp_path / "declared" / "degraded_custom.tif"),
             restored_image=str(tmp_path / "declared" / "restored_custom.tif"),
-            metrics_csv=str(tmp_path / "declared" / "metrics_custom.csv"),
         )
     )
 
     assert Path(result.clean_image) == tmp_path / "declared" / "clean_custom.tif"
     assert Path(result.degraded_image) == tmp_path / "declared" / "degraded_custom.tif"
     assert Path(result.restored_image) == tmp_path / "declared" / "restored_custom.tif"
-    assert Path(result.metrics_csv) == tmp_path / "declared" / "metrics_custom.csv"
-    metrics = pd.read_csv(result.metrics_csv)
-    assert {"degraded_psnr", "restored_psnr", "mse_degraded", "mse_restored"} <= set(
-        metrics.columns
-    )
-    assert metrics.loc[0, "restored_psnr"] > metrics.loc[0, "degraded_psnr"]
+    assert result.restored_psnr > result.degraded_psnr
+    assert result.mse_restored < result.mse_degraded
     assert Path(result.restored_image).exists()
 
 

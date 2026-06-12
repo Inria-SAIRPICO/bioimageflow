@@ -26,12 +26,18 @@ def _write_synthetic_input(data_dir: Path) -> Path:
 
 def build_workflow(
     storage_path: str = "./sairpico_restoration_smoke_results",
+    use_wetlands: bool = False,
+    wetlands_config: dict | None = None,
 ) -> tuple[Workflow, object]:
     """Build a SAIRPICO denoise plus deconvolution smoke graph."""
     storage = Path(storage_path)
     image_path = _write_synthetic_input(storage / "data")
 
-    wf = Workflow(storage_path=str(storage / "bif"), use_wetlands=False)
+    wf = Workflow(
+        storage_path=str(storage / "bif"),
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         denoised = MedianDenoising()(
             input_image=image_path,

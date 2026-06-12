@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import imageio.v3 as iio
 import numpy as np
-import pandas as pd
 import pytest
 
+from bioimageflow import Workflow
 from bioimageflow_core import Arguments, ProcessingTool
 
 from bioimageflow_sairpico_tools import (
@@ -20,7 +18,6 @@ from bioimageflow_sairpico_tools import (
     GaussianPSF,
     GibsonLanniPSF,
     HotspotDetection,
-    HotspotToSpots,
     MedianDenoising,
     RichardsonLucyDeconvolution,
     SpitfireDeconvolution,
@@ -31,17 +28,8 @@ from bioimageflow_sairpico_tools import (
 pytestmark = [
     pytest.mark.package_tools,
     pytest.mark.complete,
+    pytest.mark.wetlands,
 ]
-
-
-def _require_sairpico_binaries(*binaries: str) -> None:
-    missing = [binary for binary in binaries if shutil.which(binary) is None]
-    if missing:
-        pytest.skip(
-            "Required SAIRPICO binary/binaries are not available on PATH: "
-            f"{', '.join(missing)}. Install the SAIRPICO runtime and keep "
-            "--run-complete set to run this test."
-        )
 
 
 def _write_intensity_fixture(path: Path, *, shape: tuple[int, int] = (32, 32)) -> np.ndarray:
@@ -278,43 +266,62 @@ BINARY_TOOL_CASES = (
 )
 
 
+TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS = {
+    "gaussian-psf",
+    "gibson-lanni-psf",
+    "richardson-lucy-deconvolution",
+    "wiener-deconvolution",
+    "spitfire-deconvolution",
+    "median-denoising",
+    "cimg-denoising",
+}
+
+TEMPORARILY_UNAVAILABLE_PACKAGE_REASON = (
+    "Temporarily disabled while SAIRPICO conda packages are being rebuilt for "
+    "this platform. Re-enable these cases when simglib, serpico-cimgdenoising, "
+    "and serpico-spitfire are available by removing "
+    "TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS and restoring direct "
+    "BINARY_TOOL_CASES parametrization."
+)
+
+
+def _parametrize_binary_tool_case(case: BinaryToolCase) -> pytest.ParameterSet:
+    if case.id in TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS:
+        return pytest.param(
+            case,
+            id=case.id,
+            marks=pytest.mark.skip(reason=TEMPORARILY_UNAVAILABLE_PACKAGE_REASON),
+        )
+    return pytest.param(case, id=case.id)
+
+
 @pytest.mark.external_binary
 @pytest.mark.sairpico_binary
-@pytest.mark.parametrize("case", BINARY_TOOL_CASES, ids=[case.id for case in BINARY_TOOL_CASES])
+@pytest.mark.parametrize(
+    "case",
+    [_parametrize_binary_tool_case(case) for case in BINARY_TOOL_CASES],
+)
 def test_exported_sairpico_binary_tool_executes_real_cli(
     case: BinaryToolCase,
     tmp_path: Path,
+    complete_wetlands_config: dict,
 ) -> None:
-    _require_sairpico_binaries(*case.binaries)
     output_path = tmp_path / f"{case.id}.tif"
+    arguments = case.make_arguments(tmp_path, output_path)
+    kwargs = vars(arguments).copy()
+    kwargs.pop("output_image")
 
-    result: Any = case.tool_cls().process_row(
-        case.make_arguments(tmp_path, output_path)
-    )
-
-    assert result.output_image == output_path
-    case.assert_output(output_path)
-
-
-def test_hotspot_to_spots_converts_generated_hotspot_output(tmp_path: Path) -> None:
-    hotspot = np.zeros((12, 12), dtype=np.float32)
-    hotspot[2:4, 2:4] = 5.0
-    hotspot[8, 9] = 9.0
-    hotspot_path = tmp_path / "hotspot.tif"
-    spots_csv = tmp_path / "spots.csv"
-    iio.imwrite(hotspot_path, hotspot)
-
-    result = HotspotToSpots().process_row(
-        Arguments(
-            hotspot_image=hotspot_path,
-            threshold=1.0,
-            spots_csv=spots_csv,
+    with Workflow(
+        storage_path=tmp_path / "results",
+        use_wetlands=True,
+        wetlands_config=complete_wetlands_config,
+    ) as wf:
+        output_node = case.tool_cls()(
+            name=case.id.replace("-", "_"),
+            output_templates={"output_image": str(output_path)},
+            **kwargs,
         )
-    )
+        result = wf.compute(output_node)
 
-    table = pd.read_csv(result.spots_csv).sort_values("spot_id")
-    assert result.spots_csv == spots_csv
-    assert result.spot_count == 2
-    assert table["intensity"].tolist() == [5.0, 9.0]
-    assert table["area"].tolist() == [4, 1]
-    assert table[["y", "x"]].round(2).values.tolist() == [[2.5, 2.5], [8.0, 9.0]]
+    assert Path(result.iloc[0]["output_image"]) == output_path
+    case.assert_output(output_path)

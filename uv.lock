@@ -106,7 +106,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -123,7 +123,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "wetlands", specifier = ">=1.0.1" },
+    { name = "wetlands", specifier = ">=1.0.8" },
 ]
 
 [[package]]
@@ -153,7 +153,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-core"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/bioimageflow-core" }
 
 [[package]]
@@ -2780,7 +2780,7 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "1.0.1"
+version = "1.0.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "json5" },
@@ -2791,7 +2791,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/21/6874a4c8fa3f5382e5d5e32f46a78ce33a860690d7ad34d249ef5d3586ca/wetlands-1.0.1.tar.gz", hash = "sha256:8be862a57ca07fcd87a8000a4e25f89510b478b004922119207f1a76d03d3e1f", size = 293802, upload-time = "2026-04-10T09:45:15.013Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/9c/4c71a97a96532c5b6797c3ed7701921918831cca06319e05825fcf5c955c/wetlands-1.0.8.tar.gz", hash = "sha256:d3fca142109b59427ee05d349ddad5a2e04d2c87759ebe6c2fc6732654ee91a8", size = 553900, upload-time = "2026-06-11T11:59:07.341Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/b1/1ecb880d8d14e88c5ff1a922302b3fe7e68a602468089eb61e2906d4a309/wetlands-1.0.1-py3-none-any.whl", hash = "sha256:516aa5f8188e0ee716cdff8a468e48482cea665d62a28411712adfc4fbc5aadd", size = 61941, upload-time = "2026-04-10T09:45:16.534Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/b6/37a7280721a40650375b8ad548ab221ec4f78eae86bd017ed42540f8f751/wetlands-1.0.8-py3-none-any.whl", hash = "sha256:279b84f5a2520f2e9295d0752cdec7355e63e84605e076da818b5bc4bb35511b", size = 72478, upload-time = "2026-06-11T11:59:05.913Z" },
 ]

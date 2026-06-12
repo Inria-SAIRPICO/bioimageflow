@@ -656,9 +656,13 @@ class HotspotToSpots(ProcessingTool):
         threshold: float = 0.0
 
     class Outputs(IOModel):
-        spots_csv: Annotated[Path, GUIMeta("Spots CSV")] = Template(
-            "{hotspot_image.stem}_spots.csv"
-        )
+        spot_id: Annotated[int, GUIMeta("Spot ID")]
+        y: Annotated[float, GUIMeta("Y")]
+        x: Annotated[float, GUIMeta("X")]
+        intensity: Annotated[float, GUIMeta("Intensity")]
+        score: Annotated[float, GUIMeta("Score")]
+        area: Annotated[int, GUIMeta("Area")]
+        label: Annotated[int, GUIMeta("Label")]
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -686,10 +690,16 @@ class HotspotToSpots(ProcessingTool):
                 }
             )
 
-        output = _ensure_output_parent(arguments.spots_csv)
-        fieldnames = ["spot_id", "y", "x", "intensity", "score", "area", "label"]
-        with output.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        return self.Outputs(spots_csv=output, spot_count=len(rows))
+        return [
+            self.Outputs(
+                spot_id=int(row["spot_id"]),
+                y=float(row["y"]),
+                x=float(row["x"]),
+                intensity=float(row["intensity"]),
+                score=float(row["score"]),
+                area=int(row["area"]),
+                label=int(row["label"]),
+                spot_count=len(rows),
+            )
+            for row in rows
+        ]

@@ -1,70 +1,84 @@
 """Summarize spot assignments per label."""
 
-from pathlib import Path
 from typing import Annotated, Any
-import csv
 
+from bioimageflow import DataFrameTool
 from bioimageflow_core import (
     Arguments,
     Category,
-    Connectable,
-    GENERAL_ENV,
     GUIMeta,
     IOModel,
-    ProcessingTool,
-    Template,
 )
 
 
-class SpotSummary(ProcessingTool):
+class SpotSummary(DataFrameTool):
     """Aggregate assigned puncta counts and intensities by label."""
 
     display_name = "Spot Summary"
     documentation = "Compute per-label spot count and intensity summaries."
     category = Category.MEASUREMENT
     tags = ["spots", "summary", "puncta"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        assigned_spots_csv: Annotated[
-            Path,
+        label_column: Annotated[
+            str,
             GUIMeta(
-                display_name="Assigned spots CSV",
-                description="Output from AssignSpotsToLabels.",
-                connectable=Connectable.BY_DEFAULT,
+                display_name="Label column",
+                description="Column containing assigned label IDs.",
             ),
-        ]
+        ] = "label"
+        intensity_column: Annotated[
+            str,
+            GUIMeta(
+                display_name="Intensity column",
+                description="Column containing spot intensities.",
+            ),
+        ] = "intensity"
 
     class Outputs(IOModel):
-        summary_csv: Annotated[Path, GUIMeta(display_name="Spot summary")] = Template(
-            "{assigned_spots_csv.stem}_summary.csv"
-        )
+        label: Annotated[int, GUIMeta(display_name="Label")]
+        spot_count: Annotated[int, GUIMeta(display_name="Spot count")]
+        mean_intensity: Annotated[float, GUIMeta(display_name="Mean intensity")]
+        total_intensity: Annotated[float, GUIMeta(display_name="Total intensity")]
         label_count: Annotated[int, GUIMeta(display_name="Label count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        with Path(arguments.assigned_spots_csv).open(newline="") as handle:
-            assigned = list(csv.DictReader(handle))
-        groups: dict[int, list[float]] = {}
-        for row in assigned:
-            label = int(float(row["label"]))
-            if label <= 0:
-                continue
-            groups.setdefault(label, []).append(float(row["intensity"]))
-        summary = [
-            {
-                "label": label,
-                "spot_count": len(values),
-                "mean_intensity": sum(values) / len(values),
-                "total_intensity": sum(values),
-            }
-            for label, values in sorted(groups.items())
-        ]
+    def merge_dataframes(self, dfs: list[Any], arguments: Arguments) -> Any:
+        if len(dfs) != 1:
+            raise ValueError("SpotSummary requires exactly one upstream spot table.")
+        return dfs[0].copy()
 
-        output = Path(getattr(arguments, "summary_csv", getattr(arguments, "output_csv", "")))
-        output.parent.mkdir(parents=True, exist_ok=True)
-        fieldnames = ["label", "spot_count", "mean_intensity", "total_intensity"]
-        with output.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(summary)
-        return self.Outputs(summary_csv=output, label_count=len(summary))
+    def transform(self, df: Any, arguments: Arguments) -> Any:
+        import pandas as pd
+
+        label_column = getattr(arguments, "label_column", "label")
+        intensity_column = getattr(arguments, "intensity_column", "intensity")
+        missing = [
+            column
+            for column in (label_column, intensity_column)
+            if column not in df.columns
+        ]
+        if missing:
+            raise ValueError(
+                "SpotSummary input table is missing required column(s): "
+                + ", ".join(repr(column) for column in missing)
+                + "."
+            )
+
+        table = df[[label_column, intensity_column]].copy()
+        table[label_column] = pd.to_numeric(table[label_column])
+        table[intensity_column] = pd.to_numeric(table[intensity_column])
+        table = table[table[label_column] > 0]
+        grouped = table.groupby(label_column, sort=True)[intensity_column]
+        result = grouped.agg(
+            spot_count="count",
+            mean_intensity="mean",
+            total_intensity="sum",
+        ).reset_index()
+        result = result.rename(columns={label_column: "label"})
+        result["label"] = result["label"].astype(int)
+        result["spot_count"] = result["spot_count"].astype(int)
+        result["label_count"] = len(result)
+        result.index = [str(label) for label in result["label"]]
+        return result[
+            ["label", "spot_count", "mean_intensity", "total_intensity", "label_count"]
+        ]

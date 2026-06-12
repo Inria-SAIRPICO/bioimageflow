@@ -1,45 +1,32 @@
 # SpotQualityMetrics
 
-`SpotQualityMetrics` computes local quality measurements for detected spots.
+`SpotQualityMetrics` computes local spot quality metrics from spot dataframe rows and an intensity image.
 
-## Inputs
-
-- `spots_csv`: table with `y`, `x`, and optional `intensity`.
-- `image`: source intensity image.
-- `radius`: local window radius.
-
-## Outputs
-
-- `metrics_csv`: original spot columns plus `local_background`, `snr`, and
-  `nearest_neighbor_distance`.
-- `spot_count`.
+`SpotQualityMetrics` is a dataframe tool that consumes one upstream spot dataframe and an `image` parameter.
+It requires `y` and `x`, uses `intensity` when present, and otherwise samples the image at each spot coordinate.
+Outputs preserve the input rows, including arbitrary extra columns, and add `local_background`, `snr`, `nearest_neighbor_distance`, and `spot_count`.
+No metrics CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-Python CSV handling, imageio, and NumPy local-window and distance calculations.
-
-## Assumptions
-
-Coordinates are in image pixel units. If `intensity` is missing, the image pixel
-at the spot center is used.
+BioImageFlow core APIs, imageio, and NumPy local-window and distance calculations.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_spot_tools import SpotQualityMetrics
 
-SpotQualityMetrics().process_row(
-    Arguments(spots_csv="spots.csv", image="image.tif", metrics_csv="quality.csv")
-)
+spots = pd.DataFrame({"spot_id": [1], "y": [5.0], "x": [5.0], "intensity": [12.0]})
+metrics = SpotQualityMetrics().transform(spots, Arguments(image="image.tif"))
 ```
 
 ## Expected Results
 
-Synthetic fixtures report positive SNR for bright spots and exact nearest
-neighbor distances.
+The output dataframe contains SNR and nearest-neighbor distance values for each spot.
 
 ## Failure Modes
 
-Missing or out-of-bounds coordinates, unreadable images, invalid windows, and
-CSV write failures raise errors.
+Missing coordinates, out-of-bounds coordinates, unreadable images, and malformed numeric values raise errors.

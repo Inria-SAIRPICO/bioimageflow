@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow-core"
-version = "0.1.4"
+version = "0.1.5"
 description = "Core types and tool base classes for BioImageFlow — zero dependencies"
 requires-python = ">=3.9"
 dependencies = []

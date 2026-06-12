@@ -5,7 +5,7 @@ Tools for image restoration baselines and synthetic benchmarking.
 ## Tools
 
 - `RestoreImage`: applies a scikit-image restoration baseline when scikit-image is installed. A small NumPy fallback keeps default tests and examples runnable.
-- `BenchmarkRestoration`: generates a synthetic clean image, applies blur and noise, restores it, and writes PSNR/MSE metrics.
+- `BenchmarkRestoration`: generates a synthetic clean image, applies blur and noise, restores it, and returns PSNR/MSE metrics as dataframe columns.
 - `GaussianDenoise`: applies Gaussian smoothing as a denoising baseline.
 - `MedianDenoise`: removes impulse noise with a dependency-light median filter.
 - `BackgroundSubtract`: subtracts a smoothed background estimate.

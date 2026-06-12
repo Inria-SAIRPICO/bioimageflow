@@ -1,39 +1,32 @@
 # SpotSummary
 
-`SpotSummary` aggregates assigned spots per non-zero label.
+`SpotSummary` aggregates assigned spot rows by label.
 
-Input is `assigned_spots_csv` from `AssignSpotsToLabels`. Output is
-`summary_csv`, with `label`, `spot_count`, `mean_intensity`, and
-`total_intensity`, plus `label_count`.
-
-Use it for per-cell or per-nucleus puncta summaries. Background label `0` is
-ignored. Empty assignments produce an empty summary table with the expected
-columns.
+`SpotSummary` is a dataframe tool that consumes one upstream assigned spot dataframe.
+By default it uses the `label` and `intensity` columns from `AssignSpotsToLabels`; override `label_column` or `intensity_column` when using custom table schemas.
+Outputs are one dataframe row per non-zero label: `label`, `spot_count`, `mean_intensity`, `total_intensity`, and `label_count`.
+No summary CSV artifact is written because BioImageFlow already records the output dataframe.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs and csv.
-
-## Assumptions
-
-The input CSV comes from `AssignSpotsToLabels` and contains numeric `label` and
-`intensity` columns.
+BioImageFlow core APIs.
 
 ## Minimal Example
 
 ```python
+import pandas as pd
+
 from bioimageflow_core import Arguments
 from bioimageflow_spot_tools import SpotSummary
 
-SpotSummary().process_row(Arguments(assigned_spots_csv="spots_assigned.csv"))
+assigned = pd.DataFrame({"label": [1, 1], "intensity": [10.0, 12.0]})
+summary = SpotSummary().transform(assigned, Arguments())
 ```
 
 ## Expected Results
 
-The summary CSV has one row per non-zero label with spot count, mean intensity,
-and total intensity.
+The output dataframe contains one row per label with count and intensity summaries.
 
 ## Failure Modes
 
-Missing columns or malformed numeric values fail during CSV parsing or
-aggregation.
+Missing or malformed label and intensity columns fail during validation or numeric conversion.

@@ -23,7 +23,9 @@ from bioimageflow_common_tools.atlas import Atlas
 def build_parameter_space_workflow(
     data_dir: str = "./data",
     storage_path: str = "./parameter_space_results",
-    pattern: str = "*.tif"
+    pattern: str = "*.tif",
+    use_wetlands: bool = True,
+    wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """
     Build the parameter space exploration workflow.
@@ -42,7 +44,11 @@ def build_parameter_space_workflow(
     Tuple[Workflow, Node]
         The workflow object and the terminal mosaic node.
     """
-    wf = Workflow(storage_path=storage_path)
+    wf = Workflow(
+        storage_path=storage_path,
+        use_wetlands=use_wetlands,
+        wetlands_config=wetlands_config,
+    )
     with wf:
         # Step 1: List input images
         images = Files()(

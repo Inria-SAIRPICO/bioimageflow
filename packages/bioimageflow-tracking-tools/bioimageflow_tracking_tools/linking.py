@@ -1,22 +1,25 @@
 """Greedy nearest-neighbor object linking."""
 
-from pathlib import Path
 from typing import Annotated, Any
-import csv
 
+from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
-    Arguments,
     Category,
-    Connectable,
-    GENERAL_ENV,
     GUIMeta,
     IOModel,
-    ProcessingTool,
-    Template,
 )
 
 
-class LinkObjects(ProcessingTool):
+def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
+    missing = sorted(columns - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"{tool_name} input table is missing required column(s): "
+            f"{', '.join(repr(column) for column in missing)}."
+        )
+
+
+class LinkObjects(DataFrameTool):
     """Link objects frame-to-frame with a lightweight nearest-neighbor method."""
 
     display_name = "Link Objects"
@@ -26,42 +29,45 @@ class LinkObjects(ProcessingTool):
     )
     category = Category.TRACKING
     tags = ["tracking", "linking", "nearest-neighbor"]
-    environment = GENERAL_ENV
 
     class Inputs(IOModel):
-        objects_csv: Annotated[
-            Path,
+        max_distance: Annotated[
+            float,
             GUIMeta(
-                display_name="Objects CSV",
-                description="Object table from LabelsToObjects.",
-                connectable=Connectable.BY_DEFAULT,
+                display_name="Max distance",
+                description="Maximum centroid distance for linking objects between adjacent frames.",
             ),
-        ]
-        max_distance: float = 10.0
+        ] = 10.0
 
-    class Outputs(IOModel):
-        tracks_csv: Annotated[Path, GUIMeta(display_name="Tracks CSV")] = Template(
-            "{objects_csv.stem}_tracks.csv"
-        )
+    class Outputs(Passthrough):
+        track_id: Annotated[int, GUIMeta(display_name="Track ID")]
         track_count: Annotated[int, GUIMeta(display_name="Track count")]
 
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+    def transform(self, df: Any, arguments: Any) -> Any:
         import numpy as np
-        with Path(arguments.objects_csv).open(newline="") as handle:
-            objects = sorted(
-                csv.DictReader(handle),
-                key=lambda row: (int(float(row["frame"])), int(float(row["label"]))),
-            )
-        rows = []
+
+        _require_columns(df, {"frame", "label", "y", "x", "area"}, "LinkObjects")
+        if df.empty:
+            result = df.copy()
+            result["track_id"] = []
+            result["track_count"] = []
+            return result
+
+        result = df.copy()
+        result["_bif_frame_sort"] = result["frame"].astype(float).astype(int)
+        result["_bif_label_sort"] = result["label"].astype(float).astype(int)
+        result = result.sort_values(["_bif_frame_sort", "_bif_label_sort"])
+
         active: dict[int, tuple[int, float, float]] = {}
         next_track_id = 1
-        max_distance = float(arguments.max_distance)
+        assignments: dict[Any, int] = {}
+        max_distance = float(getattr(arguments, "max_distance", 10.0))
 
-        frames = sorted({int(float(row["frame"])) for row in objects})
+        frames = sorted(result["_bif_frame_sort"].unique())
         for frame in frames:
-            frame_objects = [row for row in objects if int(float(row["frame"])) == frame]
+            frame_objects = result[result["_bif_frame_sort"] == frame]
             used_tracks: set[int] = set()
-            for obj in frame_objects:
+            for index, obj in frame_objects.iterrows():
                 obj_y = float(obj["y"])
                 obj_x = float(obj["x"])
                 best_track = None
@@ -78,26 +84,8 @@ class LinkObjects(ProcessingTool):
                     next_track_id += 1
                 used_tracks.add(best_track)
                 active[best_track] = (int(frame), obj_y, obj_x)
-                rows.append(
-                    {
-                        "track_id": best_track,
-                        "frame": int(frame),
-                        "label": int(float(obj["label"])),
-                        "y": obj_y,
-                        "x": obj_x,
-                        "area": int(float(obj["area"])),
-                    }
-                )
+                assignments[index] = best_track
 
-        output = Path(arguments.tracks_csv)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w", newline="") as handle:
-            writer = csv.DictWriter(
-                handle, fieldnames=["track_id", "frame", "label", "y", "x", "area"]
-            )
-            writer.writeheader()
-            writer.writerows(rows)
-        return self.Outputs(
-            tracks_csv=output,
-            track_count=len({row["track_id"] for row in rows}),
-        )
+        result["track_id"] = [assignments[index] for index in result.index]
+        result["track_count"] = len(set(assignments.values()))
+        return result.drop(columns=["_bif_frame_sort", "_bif_label_sort"])

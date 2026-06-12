@@ -10,6 +10,7 @@ data/
 .venv/
 __pycache__/
 docs/build/
+docs/_build/
 wetlands/
 wetlands-lib/
 packages/bioimageflow-common-tools/bioimageflow_common_tools/.vscode/
