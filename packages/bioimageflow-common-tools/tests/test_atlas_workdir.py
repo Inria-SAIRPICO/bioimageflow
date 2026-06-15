@@ -39,7 +39,7 @@ def test_atlas_runs_external_command_in_execution_row_dir(tmp_path, monkeypatch)
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
 
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.subprocess.run", fake_run)
+    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
 
     output_path = tmp_path / "assets" / "detections.tif"
     context = _execution_context(tmp_path)
@@ -75,7 +75,7 @@ def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypat
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.subprocess.run", fake_run)
+    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
     monkeypatch.chdir(tmp_path)
 
     relative_root = Path("relative_run")
@@ -123,7 +123,7 @@ def test_atlas_blobsref_fallback_is_generated_once_for_parallel_rows(
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.subprocess.run", fake_run)
+    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
 
     def run_row(i: int) -> None:
         Atlas().process_row(

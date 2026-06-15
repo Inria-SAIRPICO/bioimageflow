@@ -196,12 +196,10 @@ def test_diagnostics_are_not_public_workflow_tools() -> None:
 def test_gaussian_psf_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple[list[str], bool]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        calls.append((command, check))
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        calls.append((command, bool(run_kwargs["check"])))
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
     output = tmp_path / "psf.tif"
 
     result = GaussianPSF().process_row(Arguments(
@@ -231,13 +229,11 @@ def test_richardson_lucy_2d_uses_regularization_lambda(
 ) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
     input_image = tmp_path / "input.tif"
     output_image = tmp_path / "output.tif"
 
@@ -290,13 +286,11 @@ def test_wiener_3d_requires_existing_psf_before_subprocess(
 def test_spitfire_3d_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
     psf = tmp_path / "psf.tif"
     psf.touch()
 
@@ -329,13 +323,11 @@ def test_spitfire_3d_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 def test_median_4d_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
     MedianDenoising().process_row(Arguments(
         input_image=tmp_path / "input.tif",
@@ -366,13 +358,11 @@ def test_cimg_denoising_command_omits_false_flags(
 ) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
     CImgDenoising().process_row(Arguments(
         input_image=tmp_path / "input.tif",
@@ -409,13 +399,11 @@ def test_cimg_denoising_command_includes_algorithm_when_set(
 ) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
     CImgDenoising().process_row(Arguments(
         input_image=tmp_path / "input.tif",
@@ -446,13 +434,11 @@ def test_cimg_denoising_command_includes_algorithm_when_set(
 def test_hotspot_detection_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], *, check: bool) -> None:
-        assert check is True
+    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+        assert run_kwargs["check"] is True
         calls.append(command)
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
     HotspotDetection().process_row(Arguments(
         input_image=tmp_path / "input.tif",

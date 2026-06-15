@@ -8,6 +8,8 @@ from bioimageflow.engine import (
     NodePlanStatus as NodePlanStatus,
     DisabledNodeError as DisabledNodeError,
     CycleInWorkflowError as CycleInWorkflowError,
+    WorkerTaskError as WorkerTaskError,
+    WorkerTimeoutError as WorkerTimeoutError,
 )
 from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError, SourceToolUpstreamError as SourceToolUpstreamError
 from bioimageflow.validation import (

@@ -1,6 +1,5 @@
 """Atlas — adaptive spot detection via external CLI."""
 
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -19,6 +18,7 @@ from bioimageflow_core import (
     ProcessingTool,
     Semantic,
     Template,
+    run_external_command,
 )
 
 atlas_env = EnvironmentSpec(
@@ -54,10 +54,10 @@ def _ensure_generated_blobs_file(work_dir: Path) -> Path:
         if not blobs_file.exists():
             tmp_file = atlas_work_dir / "blobs.txt.tmp"
             tmp_file.unlink(missing_ok=True)
-            subprocess.run(
+            run_external_command(
                 ["blobsref", "-o", str(tmp_file)],
-                check=True,
                 cwd=atlas_work_dir,
+                context="Atlas reference generation",
             )
             tmp_file.replace(blobs_file)
     finally:
@@ -179,7 +179,7 @@ class Atlas(ProcessingTool):
             if arguments.verbose:
                 command.append("-v")
 
-            subprocess.run(command, check=True, cwd=row_dir)
+            run_external_command(command, cwd=row_dir, context="Atlas")
             print(f"Atlas: detection complete -> {output_path.name}")
 
             return self.Outputs(output_image=output_path)

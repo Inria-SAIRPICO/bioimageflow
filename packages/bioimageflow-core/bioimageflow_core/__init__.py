@@ -27,3 +27,7 @@ from bioimageflow_core.arguments import (
     Arguments as Arguments,
     ExecutionContext as ExecutionContext,
 )
+from bioimageflow_core.external import (
+    ExternalCommandError as ExternalCommandError,
+    run_external_command as run_external_command,
+)

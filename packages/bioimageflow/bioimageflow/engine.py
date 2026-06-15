@@ -243,6 +243,75 @@ class WorkerTimeoutError(RuntimeError):
     pass
 
 
+class WorkerTaskError(RuntimeError):
+    """Raised when a Wetlands worker task fails while executing a node."""
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        node_name: str = "",
+        tool_class: str = "",
+        environment_name: str = "",
+        row_index: str | None = None,
+        original: BaseException | None = None,
+        task_status: Any = None,
+        task_traceback: Any = None,
+    ) -> None:
+        self.node_name = node_name
+        self.tool_class = tool_class
+        self.environment_name = environment_name
+        self.row_index = row_index
+        self.original = original
+        self.task_status = task_status
+        self.task_traceback = task_traceback
+
+        if message is None:
+            scope = "batch task" if row_index is None else f"row {row_index}"
+            lines = [
+                f"Worker task failed for node '{node_name}' ({scope}).",
+                f"Tool: {tool_class}",
+                f"Environment: {environment_name}",
+            ]
+            if task_status is not None:
+                lines.append(f"Task status: {task_status}")
+            if original is not None:
+                lines.append(f"Original error: {type(original).__name__}: {original}")
+            if task_traceback:
+                if isinstance(task_traceback, str):
+                    traceback_text = task_traceback
+                else:
+                    traceback_text = "\n".join(str(line) for line in task_traceback)
+                lines.append(f"Remote traceback:\n{traceback_text}")
+            message = "\n".join(lines)
+
+        super().__init__(message)
+
+
+def _raise_worker_task_error(
+    task: Any,
+    *,
+    node_name: str,
+    tool: ProcessingTool,
+    row_index: str | None,
+) -> None:
+    original = getattr(task, "exception", None)
+    if original is not None and not isinstance(original, BaseException):
+        original = RuntimeError(str(original))
+    error = WorkerTaskError(
+        node_name=node_name,
+        tool_class=type(tool).__name__,
+        environment_name=tool.environment.name,
+        row_index=row_index,
+        original=original,
+        task_status=getattr(task, "status", None),
+        task_traceback=getattr(task, "traceback", None),
+    )
+    if original is None:
+        raise error
+    raise error from original
+
+
 class NodeStep:
     """Handle for a single node in a stepped workflow execution.
 
@@ -1473,7 +1542,12 @@ class DefaultEngine:
                     f"worker_timeout={worker_timeout}s)"
                 )
             if task.status == TaskStatus.FAILED:
-                raise task.exception
+                _raise_worker_task_error(
+                    task,
+                    node_name=node_name,
+                    tool=tool,
+                    row_index=None,
+                )
             if task.status == TaskStatus.CANCELED:
                 raise WorkflowCancelledError("Workflow cancelled during batch execution")
             result_dicts = task.result
@@ -1518,7 +1592,12 @@ class DefaultEngine:
                         f"worker_timeout={worker_timeout}s)"
                     )
                 if task.status == TaskStatus.FAILED:
-                    raise task.exception
+                    _raise_worker_task_error(
+                        task,
+                        node_name=node_name,
+                        tool=tool,
+                        row_index=row_contexts[i].row_index,
+                    )
         except (WorkflowCancelledError, Exception):
             # Cancel all remaining in-flight tasks
             for t in tasks:

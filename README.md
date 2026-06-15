@@ -149,8 +149,9 @@ uv run pytest tests/unit/
 uv run pytest tests/integration/
 
 # Run opt-in complete tests
-uv run pytest -m complete --run-complete -rs
+uv run pytest -m complete --run-complete -rsx
 # -rs reports skipped tests and reasons
+# -x stops at first failure
 
 # Run the real Wetlands smoke tier
 uv run pytest -m wetlands tests/integration/test_wetlands_smoke.py

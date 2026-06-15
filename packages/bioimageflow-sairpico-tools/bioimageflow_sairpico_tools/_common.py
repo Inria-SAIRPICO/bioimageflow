@@ -16,6 +16,7 @@ from bioimageflow_core import (
     ImageSpec,
     Layout,
     Semantic,
+    run_external_command,
 )
 
 
@@ -103,9 +104,8 @@ OptionalPsfImage: TypeAlias = Annotated[
 
 
 def _run(command: list[Any]) -> None:
-    import subprocess
-
-    subprocess.run([str(value) for value in command], check=True)
+    context = str(command[0]) if command else "SAIRPICO command"
+    run_external_command(command, context=context)
 
 
 def _bool(value: bool) -> str:

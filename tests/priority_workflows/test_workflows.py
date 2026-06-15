@@ -242,7 +242,7 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.eye(16, dtype=np.uint8) * 255)
 
-    monkeypatch.setitem(module.Atlas.process_row.__globals__["subprocess"].__dict__, "run", fake_run)
+    monkeypatch.setitem(module.Atlas.process_row.__globals__, "run_external_command", fake_run)
 
     wf, terminal = module.build_parameter_space_workflow(
         data_dir=str(data_dir),
