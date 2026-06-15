@@ -17,6 +17,7 @@ from bioimageflow_core import (
     Layout,
     Semantic,
     run_external_command,
+    run_external_command_with_staged_output,
 )
 
 
@@ -106,6 +107,15 @@ OptionalPsfImage: TypeAlias = Annotated[
 def _run(command: list[Any]) -> None:
     context = str(command[0]) if command else "SAIRPICO command"
     run_external_command(command, context=context)
+
+
+def _run_with_staged_output(command: list[Any], output_path: Path) -> None:
+    context = str(command[0]) if command else "SAIRPICO command"
+    run_external_command_with_staged_output(
+        command,
+        output_path=output_path,
+        context=context,
+    )
 
 
 def _bool(value: bool) -> str:

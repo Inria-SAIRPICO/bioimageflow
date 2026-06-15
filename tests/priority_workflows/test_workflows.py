@@ -235,14 +235,19 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
 
     calls: list[list[str]] = []
 
-    def fake_run(command: list[object], **_: object) -> None:
+    def fake_run(command: list[object], **kwargs: object) -> None:
         command_parts = [str(value) for value in command]
         calls.append(command_parts)
-        output = Path(command_parts[command_parts.index("-o") + 1])
+        output = Path(kwargs["output_path"])
+        assert output == Path(command_parts[command_parts.index("-o") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.eye(16, dtype=np.uint8) * 255)
 
-    monkeypatch.setitem(module.Atlas.process_row.__globals__, "run_external_command", fake_run)
+    monkeypatch.setitem(
+        module.Atlas.process_row.__globals__,
+        "run_external_command_with_staged_output",
+        fake_run,
+    )
 
     wf, terminal = module.build_parameter_space_workflow(
         data_dir=str(data_dir),
@@ -284,10 +289,11 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     module = _load_module(_example("sairpico_restoration_smoke"))
     calls: list[list[str]] = []
 
-    def fake_run(command: list[object]) -> None:
+    def fake_run(command: list[object], output_path: Path) -> None:
         command_parts = [str(value) for value in command]
         calls.append(command_parts)
         output = Path(command_parts[command_parts.index("-o") + 1])
+        assert output == output_path
         input_path = Path(command_parts[command_parts.index("-i") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
         if input_path.exists():
@@ -300,9 +306,15 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
         else:
             output.touch()
 
-    monkeypatch.setitem(module.MedianDenoising.process_row.__globals__, "_run", fake_run)
     monkeypatch.setitem(
-        module.RichardsonLucyDeconvolution.process_row.__globals__, "_run", fake_run
+        module.MedianDenoising.process_row.__globals__,
+        "_run_with_staged_output",
+        fake_run,
+    )
+    monkeypatch.setitem(
+        module.RichardsonLucyDeconvolution.process_row.__globals__,
+        "_run_with_staged_output",
+        fake_run,
     )
 
     wf, terminal = module.build_workflow(storage_path=str(tmp_path / "sairpico"))
@@ -326,12 +338,19 @@ def test_sairpico_command_construction_without_binaries(
 ) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[object]) -> None:
+    def fake_run(command: list[object], output_path: Path) -> None:
+        assert Path(command[command.index("-o") + 1]) == output_path
         calls.append([str(value) for value in command])
 
-    monkeypatch.setitem(MedianDenoising.process_row.__globals__, "_run", fake_run)
     monkeypatch.setitem(
-        RichardsonLucyDeconvolution.process_row.__globals__, "_run", fake_run
+        MedianDenoising.process_row.__globals__,
+        "_run_with_staged_output",
+        fake_run,
+    )
+    monkeypatch.setitem(
+        RichardsonLucyDeconvolution.process_row.__globals__,
+        "_run_with_staged_output",
+        fake_run,
     )
     image = tmp_path / "input.tif"
     image.touch()

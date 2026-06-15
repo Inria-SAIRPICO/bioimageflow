@@ -19,6 +19,7 @@ from bioimageflow_core import (
     Semantic,
     Template,
     run_external_command,
+    run_external_command_with_staged_output,
 )
 
 atlas_env = EnvironmentSpec(
@@ -179,7 +180,12 @@ class Atlas(ProcessingTool):
             if arguments.verbose:
                 command.append("-v")
 
-            run_external_command(command, cwd=row_dir, context="Atlas")
+            run_external_command_with_staged_output(
+                command,
+                output_path=output_path,
+                cwd=row_dir,
+                context="Atlas",
+            )
             print(f"Atlas: detection complete -> {output_path.name}")
 
             return self.Outputs(output_image=output_path)

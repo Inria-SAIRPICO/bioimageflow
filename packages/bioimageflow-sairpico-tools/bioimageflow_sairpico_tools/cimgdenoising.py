@@ -22,7 +22,7 @@ if package_root not in sys.path:
 from bioimageflow_sairpico_tools._common import (  # noqa: E402
     IntensityImage,
     _ensure_output_parent,
-    _run,
+    _run_with_staged_output,
     cimgdenoising_env,
 )
 
@@ -89,5 +89,5 @@ class CImgDenoising(ProcessingTool):
             command.append("-stab")
         if arguments.algorithm is not None:
             command += ["-algo", arguments.algorithm]
-        _run(command)
+        _run_with_staged_output(command, output_path)
         return self.Outputs(output_image=output_path)

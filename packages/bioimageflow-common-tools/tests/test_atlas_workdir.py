@@ -36,10 +36,14 @@ def _execution_context(run_dir: Path, row_name: str = "000000") -> ExecutionCont
 def test_atlas_runs_external_command_in_execution_row_dir(tmp_path, monkeypatch):
     calls = []
 
-    def fake_run(command, **kwargs):
+    def fake_run_staged(command, **kwargs):
         calls.append((command, kwargs))
+        Path(kwargs["output_path"]).write_text("detections")
 
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
+    monkeypatch.setattr(
+        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        fake_run_staged,
+    )
 
     output_path = tmp_path / "assets" / "detections.tif"
     context = _execution_context(tmp_path)
@@ -57,9 +61,11 @@ def test_atlas_runs_external_command_in_execution_row_dir(tmp_path, monkeypatch)
     )
 
     assert Path(result.output_image) == output_path
+    assert output_path.read_text() == "detections"
     assert calls
     assert calls[-1][0][0] == "atlas"
     assert calls[-1][1]["cwd"] == context.row_dir
+    assert calls[-1][1]["output_path"] == output_path
     assert not (Path.cwd() / "LoG.tif").exists()
 
 
@@ -71,11 +77,19 @@ def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypat
         if command[0] == "blobsref":
             Path(command[2]).write_text("reference")
 
+    def fake_run_staged(command, **kwargs):
+        calls.append((command, kwargs))
+        Path(kwargs["output_path"]).write_text("detections")
+
     fake_package_file = tmp_path / "missing_package_data" / "atlas.py"
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
     monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
+    monkeypatch.setattr(
+        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        fake_run_staged,
+    )
     monkeypatch.chdir(tmp_path)
 
     relative_root = Path("relative_run")
@@ -104,6 +118,7 @@ def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypat
     assert atlas_call[0][0] == "atlas"
     assert atlas_call[0][2] == str(expected_blobs_path)
     assert atlas_call[1]["cwd"] == context.row_dir
+    assert atlas_call[1]["output_path"] == tmp_path / "assets" / "detections.tif"
 
 
 def test_atlas_blobsref_fallback_is_generated_once_for_parallel_rows(
@@ -119,11 +134,20 @@ def test_atlas_blobsref_fallback_is_generated_once_for_parallel_rows(
             time.sleep(0.05)
             Path(command[2]).write_text("reference")
 
+    def fake_run_staged(command, **kwargs):
+        with calls_lock:
+            calls.append((command, kwargs))
+        Path(kwargs["output_path"]).write_text("detections")
+
     fake_package_file = tmp_path / "missing_package_data" / "atlas.py"
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
     monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
+    monkeypatch.setattr(
+        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        fake_run_staged,
+    )
 
     def run_row(i: int) -> None:
         Atlas().process_row(

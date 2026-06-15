@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import signal
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -171,3 +173,87 @@ def run_external_command(
             stderr=exc.stderr,
         )
         raise error from exc
+
+
+def _default_staging_parent() -> Path:
+    configured = os.environ.get("BIOIMAGEFLOW_EXTERNAL_STAGING_DIR")
+    if configured:
+        return Path(configured)
+    tmp_root = Path("/tmp")
+    if os.name != "nt" and tmp_root.is_dir() and os.access(tmp_root, os.W_OK):
+        return tmp_root
+    return Path(tempfile.gettempdir())
+
+
+def _replace_file_from_staged_output(staged_output: Path, final_output: Path) -> None:
+    if staged_output.is_dir():
+        raise IsADirectoryError(
+            "External command staged output is a directory; "
+            "run_external_command_with_staged_output only supports single-file outputs: "
+            f"{staged_output}"
+        )
+    if not staged_output.exists():
+        raise FileNotFoundError(
+            "External command completed but did not create staged output: "
+            f"{staged_output}. Intended final output: {final_output}"
+        )
+
+    final_output.parent.mkdir(parents=True, exist_ok=True)
+    final_temp = final_output.with_name(f".{final_output.name}.tmp-{os.getpid()}")
+    try:
+        shutil.copy2(staged_output, final_temp)
+        os.replace(final_temp, final_output)
+    finally:
+        if final_temp.exists():
+            final_temp.unlink()
+
+
+def run_external_command_with_staged_output(
+    command: Sequence[Any],
+    *,
+    output_path: Union[str, os.PathLike[str]],
+    staging_parent: Optional[Union[str, os.PathLike[str]]] = None,
+    cwd: Optional[Union[str, os.PathLike[str]]] = None,
+    env: Optional[Mapping[str, str]] = None,
+    context: Optional[str] = None,
+    **kwargs: Any,
+) -> Any:
+    """Run a command with one file output redirected through a short path.
+
+    Some legacy native tools fail when asked to write directly to long or
+    symlink-expanded paths. This helper replaces the requested output path in
+    ``command`` with a short temporary file, runs the command, then copies the
+    produced file back to the requested final path.
+    """
+
+    final_output = Path(output_path)
+    final_output_text = str(final_output)
+    parent = Path(staging_parent) if staging_parent is not None else _default_staging_parent()
+    parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="bif-external-", dir=parent) as temp_dir:
+        staged_output = Path(temp_dir) / final_output.name
+        staged_command: list[Any] = []
+        replaced = False
+        for value in command:
+            if str(value) == final_output_text:
+                staged_command.append(staged_output)
+                replaced = True
+            else:
+                staged_command.append(value)
+
+        if not replaced:
+            raise ValueError(
+                "Cannot stage external command output because the requested "
+                f"output path is not present in the command: {final_output}"
+            )
+
+        result = run_external_command(
+            staged_command,
+            cwd=cwd,
+            env=env,
+            context=context,
+            **kwargs,
+        )
+        _replace_file_from_staged_output(staged_output, final_output)
+        return result

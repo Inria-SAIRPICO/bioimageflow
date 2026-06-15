@@ -30,4 +30,5 @@ from bioimageflow_core.arguments import (
 from bioimageflow_core.external import (
     ExternalCommandError as ExternalCommandError,
     run_external_command as run_external_command,
+    run_external_command_with_staged_output as run_external_command_with_staged_output,
 )

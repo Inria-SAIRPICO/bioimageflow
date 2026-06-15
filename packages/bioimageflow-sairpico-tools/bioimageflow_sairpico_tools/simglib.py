@@ -27,7 +27,7 @@ from bioimageflow_sairpico_tools._common import (  # noqa: E402
     _deconvolution_suffix,
     _ensure_output_parent,
     _require_psf,
-    _run,
+    _run_with_staged_output,
     simglib_env,
 )
 
@@ -57,7 +57,7 @@ class GaussianPSF(ProcessingTool):
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         output_path = _ensure_output_parent(arguments.output_image)
-        _run([
+        _run_with_staged_output([
             "simggaussian3dpsf",
             "-o", output_path,
             "-sigmaxy", arguments.sigmaxy,
@@ -65,7 +65,7 @@ class GaussianPSF(ProcessingTool):
             "-depth", arguments.depth,
             "-height", arguments.height,
             "-width", arguments.width,
-        ])
+        ], output_path)
         return self.Outputs(output_image=output_path)
 
 
@@ -99,7 +99,7 @@ class GibsonLanniPSF(ProcessingTool):
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         output_path = _ensure_output_parent(arguments.output_image)
-        _run([
+        _run_with_staged_output([
             "simggibsonlannipsf",
             "-o", output_path,
             "-width", arguments.width,
@@ -112,7 +112,7 @@ class GibsonLanniPSF(ProcessingTool):
             "-ni", arguments.ni,
             "-ns", arguments.ns,
             "-ti", arguments.ti,
-        ])
+        ], output_path)
         return self.Outputs(output_image=output_path)
 
 
@@ -160,7 +160,7 @@ class RichardsonLucyDeconvolution(ProcessingTool):
             command += ["-psf", _require_psf(arguments.psf_image)]
         else:
             command += ["-sigma", arguments.sigma, "-lambda", arguments.regularization_lambda]
-        _run(command)
+        _run_with_staged_output(command, output_path)
         return self.Outputs(output_image=output_path)
 
 
@@ -207,7 +207,7 @@ class WienerDeconvolution(ProcessingTool):
             command += ["-psf", _require_psf(arguments.psf_image)]
         else:
             command += ["-sigma", arguments.sigma]
-        _run(command)
+        _run_with_staged_output(command, output_path)
         return self.Outputs(output_image=output_path)
 
 
@@ -257,7 +257,7 @@ class SpitfireDeconvolution(ProcessingTool):
             command += ["-psf", _require_psf(arguments.psf_image)]
         else:
             command += ["-sigma", arguments.sigma]
-        _run(command)
+        _run_with_staged_output(command, output_path)
         return self.Outputs(output_image=output_path)
 
 
@@ -303,5 +303,5 @@ class MedianDenoising(ProcessingTool):
             command += ["-rz", arguments.radius_z]
         if arguments.denoising_type == "4D":
             command += ["-rt", arguments.radius_t]
-        _run(command)
+        _run_with_staged_output(command, output_path)
         return self.Outputs(output_image=output_path)

@@ -24,7 +24,7 @@ from bioimageflow_sairpico_tools._common import (  # noqa: E402
     IntensityImage,
     _ensure_output_parent,
     _hotspot_components,
-    _run,
+    _run_with_staged_output,
     hotspot_env,
 )
 
@@ -53,14 +53,14 @@ class HotspotDetection(ProcessingTool):
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         output_path = _ensure_output_parent(arguments.output_image)
-        _run([
+        _run_with_staged_output([
             "hotSpotDetection",
             "-i", arguments.input_image,
             "-o", output_path,
             "-m", arguments.patch_size,
             "-n", arguments.neighborhood_size,
             "-pv", arguments.p_value,
-        ])
+        ], output_path)
         return self.Outputs(output_image=output_path)
 
 

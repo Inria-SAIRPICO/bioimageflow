@@ -4,7 +4,13 @@ import subprocess
 
 import pytest
 
-from bioimageflow_core import ExternalCommandError, run_external_command
+from pathlib import Path
+
+from bioimageflow_core import (
+    ExternalCommandError,
+    run_external_command,
+    run_external_command_with_staged_output,
+)
 
 
 def test_run_external_command_reports_signal_failures(monkeypatch) -> None:
@@ -72,3 +78,52 @@ def test_run_external_command_reports_launch_failures(monkeypatch) -> None:
     assert "missing-cli --version" in message
     assert "No such file or directory" in message
     assert exc_info.value.returncode is None
+
+
+def test_run_external_command_with_staged_output_copies_to_final_path(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, run_kwargs):
+        calls.append(command)
+        output_path = Path(command[command.index("-o") + 1])
+        output_path.write_text("staged result")
+
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
+
+    final_output = tmp_path / "long" / "requested-output.tif"
+    run_external_command_with_staged_output(
+        ["external-tool", "-o", final_output],
+        output_path=final_output,
+        context="ExampleTool",
+    )
+
+    assert final_output.read_text() == "staged result"
+    staged_output = Path(calls[0][calls[0].index("-o") + 1])
+    assert staged_output.name == final_output.name
+    assert staged_output != final_output
+    assert staged_output.parent != final_output.parent
+
+
+def test_run_external_command_with_staged_output_reports_missing_output(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(command, run_kwargs):
+        return None
+
+    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
+
+    final_output = tmp_path / "missing.tif"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        run_external_command_with_staged_output(
+            ["external-tool", "-o", final_output],
+            output_path=final_output,
+            context="ExampleTool",
+        )
+
+    message = str(exc_info.value)
+    assert "did not create staged output" in message
+    assert str(final_output) in message
