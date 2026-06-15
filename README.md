@@ -149,7 +149,8 @@ uv run pytest tests/unit/
 uv run pytest tests/integration/
 
 # Run opt-in complete tests
-uv run pytest -m complete --run-complete
+uv run pytest -m complete --run-complete -rs
+# -rs reports skipped tests and reasons
 
 # Run the real Wetlands smoke tier
 uv run pytest -m wetlands tests/integration/test_wetlands_smoke.py

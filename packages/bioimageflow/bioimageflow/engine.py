@@ -1168,9 +1168,13 @@ class DefaultEngine:
         for field_name, value in row_args.items():
             context[field_name] = value
 
-        if len(path_input_fields) == 1:
-            pf = path_input_fields[0]
-            context['_ext'] = Path(str(row_args[pf])).suffix if pf in row_args else ''
+        path_values = [
+            row_args[pf]
+            for pf in path_input_fields
+            if pf in row_args and row_args[pf] is not None
+        ]
+        if len(path_values) == 1:
+            context['_ext'] = Path(str(path_values[0])).suffix
         else:
             context['_ext'] = ''
 

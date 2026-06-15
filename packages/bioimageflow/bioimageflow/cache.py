@@ -12,16 +12,32 @@ import pandas as pd
 from bioimageflow.storage import ensure_dirs, find_hash_dir, create_hash_dir
 
 
+def _normalize_dependency_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_dependency_value(item)
+            for key, item in sorted(value.items())
+        }
+    if isinstance(value, list):
+        normalized_items = [_normalize_dependency_value(item) for item in value]
+        serialized_items = {
+            json.dumps(item, sort_keys=True, separators=(",", ":")): item
+            for item in normalized_items
+        }
+        return [
+            serialized_items[key]
+            for key in sorted(serialized_items)
+        ]
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
 def normalize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
     """Normalize dependencies for consistent hashing."""
     normalized: dict[str, Any] = {}
     for key, value in sorted(dependencies.items()):
-        if isinstance(value, list):
-            normalized[key] = sorted(s.strip() for s in value)
-        elif isinstance(value, str):
-            normalized[key] = value.strip()
-        else:
-            normalized[key] = value
+        normalized[key] = _normalize_dependency_value(value)
     return normalized
 
 

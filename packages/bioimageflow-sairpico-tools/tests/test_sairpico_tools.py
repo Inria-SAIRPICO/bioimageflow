@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import ast
+import inspect
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -43,6 +45,8 @@ ALL_TOOLS = [
     HotspotDetection,
     HotspotToSpots,
 ]
+
+SAIRPICO_PACKAGE = Path(__file__).parents[1] / "bioimageflow_sairpico_tools"
 
 pytestmark = pytest.mark.package_tools
 
@@ -136,6 +140,48 @@ def test_importing_package_does_not_import_subprocess() -> None:
     __import__("bioimageflow_sairpico_tools")
 
     assert "subprocess" not in sys.modules
+
+
+def test_tools_are_isolated_by_runtime_module() -> None:
+    assert Path(inspect.getfile(GaussianPSF)).name == "simglib.py"
+    assert Path(inspect.getfile(GibsonLanniPSF)).name == "simglib.py"
+    assert Path(inspect.getfile(RichardsonLucyDeconvolution)).name == "simglib.py"
+    assert Path(inspect.getfile(WienerDeconvolution)).name == "simglib.py"
+    assert Path(inspect.getfile(SpitfireDeconvolution)).name == "simglib.py"
+    assert Path(inspect.getfile(MedianDenoising)).name == "simglib.py"
+    assert Path(inspect.getfile(CImgDenoising)).name == "cimgdenoising.py"
+    assert Path(inspect.getfile(HotspotDetection)).name == "hotspot.py"
+    assert Path(inspect.getfile(HotspotToSpots)).name == "hotspot.py"
+
+
+def _annotation_nodes(tree: ast.AST) -> list[ast.expr]:
+    annotations: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        elif isinstance(node, ast.arg) and node.annotation is not None:
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+            annotations.append(node.returns)
+    return annotations
+
+
+def test_python39_worker_modules_do_not_use_pep604_annotations() -> None:
+    offenders: list[str] = []
+
+    for source_path in [
+        SAIRPICO_PACKAGE / "_common.py",
+        SAIRPICO_PACKAGE / "simglib.py",
+        SAIRPICO_PACKAGE / "hotspot.py",
+        SAIRPICO_PACKAGE / "cimgdenoising.py",
+    ]:
+        source = source_path.read_text()
+        tree = ast.parse(source, filename=str(source_path), feature_version=(3, 9))
+        for annotation in _annotation_nodes(tree):
+            if any(isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) for node in ast.walk(annotation)):
+                offenders.append(f"{source_path.relative_to(SAIRPICO_PACKAGE)}:{annotation.lineno}")
+
+    assert offenders == []
 
 
 def test_diagnostics_are_not_public_workflow_tools() -> None:

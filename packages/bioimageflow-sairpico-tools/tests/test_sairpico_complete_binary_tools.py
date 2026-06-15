@@ -266,41 +266,9 @@ BINARY_TOOL_CASES = (
 )
 
 
-TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS = {
-    "gaussian-psf",
-    "gibson-lanni-psf",
-    "richardson-lucy-deconvolution",
-    "wiener-deconvolution",
-    "spitfire-deconvolution",
-    "median-denoising",
-    "cimg-denoising",
-}
-
-TEMPORARILY_UNAVAILABLE_PACKAGE_REASON = (
-    "Temporarily disabled while SAIRPICO conda packages are being rebuilt for "
-    "this platform. Re-enable these cases when simglib, serpico-cimgdenoising, "
-    "and serpico-spitfire are available by removing "
-    "TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS and restoring direct "
-    "BINARY_TOOL_CASES parametrization."
-)
-
-
-def _parametrize_binary_tool_case(case: BinaryToolCase) -> object:
-    if case.id in TEMPORARILY_UNAVAILABLE_PACKAGE_CASE_IDS:
-        return pytest.param(
-            case,
-            id=case.id,
-            marks=pytest.mark.skip(reason=TEMPORARILY_UNAVAILABLE_PACKAGE_REASON),
-        )
-    return pytest.param(case, id=case.id)
-
-
 @pytest.mark.external_binary
 @pytest.mark.sairpico_binary
-@pytest.mark.parametrize(
-    "case",
-    [_parametrize_binary_tool_case(case) for case in BINARY_TOOL_CASES],
-)
+@pytest.mark.parametrize("case", BINARY_TOOL_CASES, ids=[case.id for case in BINARY_TOOL_CASES])
 def test_exported_sairpico_binary_tool_executes_real_cli(
     case: BinaryToolCase,
     tmp_path: Path,

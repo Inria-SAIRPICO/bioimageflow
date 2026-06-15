@@ -9,6 +9,7 @@ everything else picks up the same instance automatically.
 import inspect
 import json
 import logging
+from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, cast
@@ -219,7 +220,7 @@ class WetlandsEnvManager:
 
     def _augment_dependencies(self, dependencies: dict) -> Dependencies:
         """Auto-inject bioimageflow-core into the environment deps."""
-        deps = cast(Dependencies, {k: v for k, v in dependencies.items()})
+        deps = cast(Dependencies, deepcopy(dependencies))
         pip_deps = list(deps.get("pip", []))
         local_deps = list(deps.get("local", []))
         if not _has_bioimageflow_core_dependency(pip_deps, local_deps):
@@ -253,7 +254,7 @@ class WetlandsEnvManager:
         This method is thread-safe and may be called concurrently.
         """
         augmented_deps = self._augment_dependencies(env_spec.dependencies)
-        dep_hash = compute_env_hash(env_spec.dependencies)
+        dep_hash = compute_env_hash(cast(dict[str, Any], augmented_deps))
 
         # Fast path: check without lock first
         if env_spec.name in self._envs:

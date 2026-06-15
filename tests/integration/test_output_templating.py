@@ -80,6 +80,26 @@ class StubMultiInput(ProcessingTool):
         return self.Outputs(diff=arguments.diff)
 
 
+class StubOptionalPathTemplate(ProcessingTool):
+    """Tool with one required path and one optional path."""
+    display_name = "Stub Optional Path Template"
+    environment = imageio_env
+
+    class Inputs(IOModel):
+        input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        psf_image: Annotated[Path | None, ImageSpec(semantics={Semantic.INTENSITY})] = None
+
+    class Outputs(IOModel):
+        result: Annotated[Path, ImageSpec()] = Template(
+            "{input_image.stem}_processed{ext}"
+        )
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)
+        Path(arguments.result).write_text("DATA")
+        return self.Outputs(result=arguments.result)
+
+
 class TestTemplateResolution:
 
     def test_custom_template_resolved(self, tmp_workspace):
@@ -136,6 +156,19 @@ class TestTemplateResolution:
             for _, row in df.iterrows():
                 p = Path(str(row["diff"]))
                 assert p.suffix == ".tif"
+
+    def test_optional_none_path_does_not_clear_ext(self, tmp_workspace):
+        load = FileLoader()
+        tool = StubOptionalPathTemplate()
+
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            raw = load(path=str(tmp_workspace / "data"))
+            output = tool(input_image=raw["path"], psf_image=None)
+            df = wf.compute(output)
+
+            for _, row in df.iterrows():
+                p = Path(str(row["result"]))
+                assert p.name.endswith("_processed.tif")
 
 
 class TestTilerOutputNaming:

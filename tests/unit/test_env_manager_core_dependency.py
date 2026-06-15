@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -9,11 +11,42 @@ from bioimageflow.env_manager import (
     _bioimageflow_core_editable_dependency,
     _local_bioimageflow_core_project,
 )
+from bioimageflow_core import EnvironmentSpec
 
 
 def _manager_with_core_dependency(dependency: object) -> WetlandsEnvManager:
     manager = object.__new__(WetlandsEnvManager)
     manager._bioimageflow_core_dependency = dependency
+    return manager
+
+
+class _MutatingWetlandsEnvironment:
+    def __init__(self, dependencies: dict[str, Any]) -> None:
+        self.dependencies = dependencies
+        self.launched = False
+
+    def launch(self, **kwargs: Any) -> None:
+        self.launched = True
+        self.dependencies.setdefault("channels", []).append("bioimageit")
+
+
+class _MutatingWetlandsManager:
+    def __init__(self) -> None:
+        self.created_dependencies: list[dict[str, Any]] = []
+
+    def create(self, name: str, dependencies: dict[str, Any]) -> _MutatingWetlandsEnvironment:
+        self.created_dependencies.append(dependencies)
+        return _MutatingWetlandsEnvironment(dependencies)
+
+
+def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvManager:
+    manager = _manager_with_core_dependency(dependency)
+    manager._manager = _MutatingWetlandsManager()
+    manager._envs = {}
+    manager._env_hashes = {}
+    manager._launch_configs = {}
+    manager._worker_file = "worker.py"
+    manager._lock = threading.RLock()
     return manager
 
 
@@ -44,11 +77,72 @@ def test_augment_dependencies_injects_configured_local_core_dependency() -> None
         "editable": True,
     }
     manager = _manager_with_core_dependency(dependency)
+    dependencies = {"python": "3.9", "pip": ["numpy"]}
 
-    augmented = manager._augment_dependencies({"python": "3.9", "pip": ["numpy"]})
+    augmented = manager._augment_dependencies(dependencies)
 
     assert augmented.get("pip") == ["numpy"]
     assert augmented.get("local") == [dependency]
+    assert "local" not in dependencies
+
+
+def test_augment_dependencies_does_not_mutate_dependency_spec() -> None:
+    dependency = {
+        "name": "bioimageflow-core",
+        "path": "/repo/packages/bioimageflow-core",
+        "editable": True,
+    }
+    manager = _manager_with_core_dependency(dependency)
+    dependencies = {
+        "python": "3.9",
+        "channels": ["conda-forge", "bioimageit"],
+        "pip": ["numpy"],
+    }
+
+    augmented = manager._augment_dependencies(dependencies)
+    augmented_dict = cast(dict[str, Any], augmented)
+    augmented_dict["channels"].append("extra")
+    augmented_dict["pip"].append("scipy")
+    augmented_dict["local"].append({"name": "other", "path": "/repo/other"})
+
+    assert dependencies == {
+        "python": "3.9",
+        "channels": ["conda-forge", "bioimageit"],
+        "pip": ["numpy"],
+    }
+
+
+def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
+    dependency = {
+        "name": "bioimageflow-core",
+        "path": "/repo/packages/bioimageflow-core",
+        "editable": True,
+    }
+    manager = _runtime_manager_with_core_dependency(dependency)
+    env_spec = EnvironmentSpec(
+        name="simglib",
+        dependencies={
+            "python": "3.9",
+            "conda": ["bioimageit::simglib=0.1.2"],
+            "channels": ["conda-forge", "bioimageit"],
+        },
+    )
+
+    first = manager.get_or_create(env_spec)
+    second = manager.get_or_create(env_spec)
+
+    assert first is second
+    assert env_spec.dependencies == {
+        "python": "3.9",
+        "conda": ["bioimageit::simglib=0.1.2"],
+        "channels": ["conda-forge", "bioimageit"],
+    }
+    created_dependencies = manager._manager.created_dependencies[0]
+    assert created_dependencies["channels"] == [
+        "conda-forge",
+        "bioimageit",
+        "bioimageit",
+    ]
 
 
 @pytest.mark.parametrize(

@@ -83,13 +83,6 @@ def test_parameter_space_workflow_executes_with_real_atlas_binary(
 
 @pytest.mark.external_binary
 @pytest.mark.sairpico_binary
-@pytest.mark.skip(
-    reason=(
-        "Temporarily disabled while SAIRPICO conda packages are being rebuilt for "
-        "this platform. Re-enable when simglib/serpico-spitfire are available by "
-        "removing this skip marker."
-    )
-)
 def test_sairpico_workflow_executes_with_real_binaries(
     tmp_path: Path,
     complete_wetlands_config: dict,
