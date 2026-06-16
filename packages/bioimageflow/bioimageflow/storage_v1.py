@@ -259,6 +259,47 @@ def _file_sha256(path: Path) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
+def asset_digest_and_size(path: Path) -> tuple[int, str]:
+    """Return deterministic size and digest metadata for a file or directory asset."""
+    if path.is_symlink():
+        raise CacheCorruptionError("Asset must not be a symlink.")
+    if path.is_file():
+        return path.stat().st_size, _file_sha256(path)
+    if not path.is_dir():
+        raise CacheCorruptionError(f"Asset is not a regular file or directory: {path}")
+
+    root = path.resolve()
+    total_size = 0
+    entries: list[dict[str, Any]] = []
+    for child in sorted(path.rglob("*"), key=lambda item: item.relative_to(path).as_posix()):
+        if child.is_symlink():
+            raise CacheCorruptionError(f"Directory asset contains a symlink: {child}")
+        try:
+            child.resolve().relative_to(root)
+        except ValueError as exc:
+            raise CacheCorruptionError(f"Directory asset escapes its root: {child}") from exc
+        relative = validate_relative_posix_path(child.relative_to(path).as_posix())
+        if child.is_dir():
+            entries.append({"kind": "directory", "path": relative})
+            continue
+        if not child.is_file():
+            raise CacheCorruptionError(f"Directory asset contains an unsupported entry: {child}")
+        size = child.stat().st_size
+        total_size += size
+        entries.append(
+            {
+                "digest": _file_sha256(child),
+                "kind": "file",
+                "path": relative,
+                "size": size,
+            }
+        )
+    digest = hashlib.sha256(
+        canonical_json_bytes({"kind": "directory", "entries": entries})
+    ).hexdigest()
+    return total_size, f"sha256:{digest}"
+
+
 def make_record_id(manifest_material: dict[str, Any]) -> str:
     """Create a record ID from content material, excluding execution metadata."""
     excluded = {
@@ -372,14 +413,22 @@ class RecordManifest:
                 raise CacheCorruptionError(f"Record asset is missing: {relative}")
             if "size" not in output or "digest" not in output:
                 raise CacheCorruptionError(f"Record asset is missing size or digest: {relative}")
+            asset_type = str(output.get("asset_type", "file"))
+            if asset_type not in {"file", "directory"}:
+                raise CacheCorruptionError(f"Record asset type is invalid: {relative}")
+            if asset_type == "file" and not asset_path.is_file():
+                raise CacheCorruptionError(f"Record asset is not a file: {relative}")
+            if asset_type == "directory" and not asset_path.is_dir():
+                raise CacheCorruptionError(f"Record asset is not a directory: {relative}")
             try:
                 expected_size = int(output["size"])
             except (TypeError, ValueError) as exc:
                 raise CacheCorruptionError(f"Record asset size is invalid: {relative}") from exc
-            if asset_path.stat().st_size != expected_size:
+            actual_size, actual_digest = asset_digest_and_size(asset_path)
+            if actual_size != expected_size:
                 raise CacheCorruptionError(f"Record asset size mismatch: {relative}")
             _validate_sha256_digest(str(output["digest"]), label="asset")
-            if _file_sha256(asset_path) != output["digest"]:
+            if actual_digest != output["digest"]:
                 raise CacheCorruptionError(f"Record asset digest mismatch: {relative}")
             return
         if kind == "external_path":

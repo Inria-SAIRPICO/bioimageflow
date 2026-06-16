@@ -18,7 +18,7 @@ from bioimageflow.cache import (
 )
 from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, make_record_id
 from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, Template
-from bioimageflow_core.types import ImageSpec, Semantic
+from bioimageflow_core.types import ImageSpec, Semantic, SharedArray
 
 
 class CountingTable(DataFrameTool):
@@ -43,6 +43,19 @@ class DoubleValue(DataFrameTool):
         result = df.copy()
         result["double"] = result["value"] * 2
         return result
+
+
+class MultiRowTable(DataFrameTool):
+    display_name = "Multi Row Table"
+    accepts_upstream = False
+    executions = 0
+
+    def transform(self, df: pd.DataFrame, arguments) -> pd.DataFrame:
+        type(self).executions += 1
+        return pd.DataFrame(
+            {"label": ["alpha", "beta"]},
+            index=["a", "b"],
+        )
 
 
 class PathTable(DataFrameTool):
@@ -156,6 +169,7 @@ class UnsafeTemplateSource(ProcessingTool):
 class ColumnBoundLegacyWriter(ProcessingTool):
     display_name = "Column Bound Legacy Writer"
     environment = EnvironmentSpec(name="column_bound_legacy_writer", dependencies={})
+    executions = 0
 
     class Inputs(IOModel):
         label: str
@@ -164,10 +178,67 @@ class ColumnBoundLegacyWriter(ProcessingTool):
         output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("legacy_{row_index}.txt")
 
     def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
         assert context is not None
         output = Path(arguments.output)
+        assert "cache/v1/results" in str(context.run_dir)
+        assert str(context.run_dir).endswith("/staging")
+        assert output.resolve().relative_to(context.assets_dir.resolve())
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(arguments.label)
         return self.Outputs(output=output)
+
+
+class EscapingColumnBoundWriter(ProcessingTool):
+    display_name = "Escaping Column Bound Writer"
+    environment = EnvironmentSpec(name="escaping_column_bound_writer", dependencies={})
+
+    class Inputs(IOModel):
+        label: str
+        directory: Path
+
+    class Outputs(IOModel):
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("owned_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        outside = Path(arguments.directory) / f"{arguments.label}.txt"
+        outside.write_text(arguments.label)
+        return self.Outputs(output=outside)
+
+
+class SourceSharedMemoryWriter(ProcessingTool):
+    display_name = "Source Shared Memory Writer"
+    environment = EnvironmentSpec(name="source_shared_memory_writer", dependencies={})
+
+    class Outputs(IOModel):
+        result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        import numpy as np
+        from bioimageflow_core.shm import create_shared_output
+
+        with create_shared_output(np.zeros((2, 2), dtype=np.uint8)) as ref:
+            return self.Outputs(result=ref)
+
+
+class SourceSharedMemoryConsumer(ProcessingTool):
+    display_name = "Source Shared Memory Consumer"
+    environment = EnvironmentSpec(name="source_shared_memory_consumer", dependencies={})
+
+    class Inputs(IOModel):
+        result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
+
+    class Outputs(IOModel):
+        total: int
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        from bioimageflow_core.io import load_image
+
+        def fail_file_reader(path: Path):
+            raise RuntimeError("Should not be called for SharedArray")
+
+        with load_image(arguments.result, file_reader=fail_file_reader) as array:
+            return self.Outputs(total=int(array.sum()))
 
 
 def _current_pointer_files(storage_path: Path) -> list[Path]:
@@ -719,18 +790,279 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
     assert list(outside.iterdir()) == []
 
 
-def test_column_bound_processing_tool_still_uses_legacy_cache(tmp_path: Path) -> None:
+def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
+    node_name = "DirectoryTool_1"
+    sig_hash = "sig"
+    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+        storage_path,
+        node_name,
+        sig_hash,
+    )
+    directory = assets_dir / "dataset.zarr"
+    directory.mkdir()
+    child = directory / "0"
+    child.write_text("chunk")
+    (directory / "1").write_text("other")
+    df = pd.DataFrame(
+        {"directory": [str(directory)], "child": [str(child)]},
+        index=["0"],
+    )
+
+    with pytest.raises(CacheCorruptionError, match="Overlapping owned asset paths"):
+        processing_v1_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+            df,
+            result_key=result_key,
+            attempt_id=attempt_id,
+            staging_dir=staging_dir,
+            staging_assets_dir=assets_dir,
+            path_columns={"directory", "child"},
+            owned_path_columns={"directory", "child"},
+        )
+
+
+def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    ColumnBoundLegacyWriter.executions = 0
+    events: list[tuple[str, str]] = []
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=4)
         node = ColumnBoundLegacyWriter()(label=table["label"])
-        df = wf.compute(node)
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
 
-    assert Path(df.loc["row", "output"]).read_text() == "v4"
-    assert (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
-    assert not [
-        path
-        for path in _current_pointer_files(storage_path)
-        if "ColumnBoundLegacyWriter" in path.read_text()
+    result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "path": "assets/legacy_row.txt",
+            "size": 2,
+        }
     ]
+    assert Path(first.loc["row", "output"]) == record_dir / "assets" / "legacy_row.txt"
+    assert Path(first.loc["row", "output"]).read_text() == "v4"
+    assert not (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
+
+    with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
+        table = CountingTable()(value=4)
+        second = wf.compute(ColumnBoundLegacyWriter()(label=table["label"]))
+
+    pd.testing.assert_frame_equal(first, second)
+    assert ColumnBoundLegacyWriter.executions == 1
+    assert ("ColumnBoundLegacyWriter_1", "cached") in events
+
+
+def test_column_bound_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=5)
+        wf.compute(ColumnBoundLegacyWriter()(label=table["label"]))
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=5)
+        node = ColumnBoundLegacyWriter()(label=table["label"])
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.CACHED
+
+
+def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_record(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=6)
+        node = ColumnBoundLegacyWriter()(label=table["label"])
+        wf.compute(node)
+        node_name = node.name
+        sig_hash = wf.plan()[node_name].sig_hash
+
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=6)
+        node = ColumnBoundLegacyWriter()(label=table["label"])
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {node_name}
+    assert storage.load_current(result_key) is None
+    assert record_dir.exists()
+
+
+def test_column_bound_processing_tool_invalidate_removes_prior_signature_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=9)
+        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "old_{row_index}.txt"})
+        wf.compute(node)
+        old_sig_hash = wf.plan()[node.name].sig_hash
+
+    old_result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", old_sig_hash)
+    storage = StorageV1(storage_path)
+    assert storage.load_current(old_result_key) is not None
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=9)
+        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "new_{row_index}.txt"})
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {"ColumnBoundLegacyWriter_1"}
+    assert storage.load_current(old_result_key) is None
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=9)
+        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "old_{row_index}.txt"})
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.UNEXECUTED
+
+
+def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=10)
+        node_a = ColumnBoundLegacyWriter()(label=table["label"], name="writer_a")
+        node_b = ColumnBoundLegacyWriter()(label=table["label"], name="writer_b")
+        wf.compute(node_a, node_b)
+        plan = wf.plan()
+
+    storage = StorageV1(storage_path)
+    key_a = processing_v1_result_key("writer_a", plan["writer_a"].sig_hash)
+    key_b = processing_v1_result_key("writer_b", plan["writer_b"].sig_hash)
+    (storage.result_dir(key_a) / "result.json").unlink()
+    (storage.result_dir(key_b) / "result.json").unlink()
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=10)
+        node_a = ColumnBoundLegacyWriter()(label=table["label"], name="writer_a")
+        ColumnBoundLegacyWriter()(label=table["label"], name="writer_b")
+        cleared = wf.invalidate([node_a.name], cascade=False)
+
+    assert cleared == {"writer_a"}
+    assert storage.load_current(key_a) is None
+    assert storage.load_current(key_b) is not None
+
+
+def test_column_bound_processing_tool_preserves_nested_owned_asset_paths(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        node = ColumnBoundLegacyWriter()(
+            label=table["label"],
+            output_templates={"output": "nested/{column:label}/{row_index}.txt"},
+        )
+        df = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert [output["path"] for output in manifest["outputs"]] == [
+        "assets/nested/alpha/a.txt",
+        "assets/nested/beta/b.txt",
+    ]
+    assert set(df["output"]) == {
+        str(record_dir / "assets" / "nested" / "alpha" / "a.txt"),
+        str(record_dir / "assets" / "nested" / "beta" / "b.txt"),
+    }
+    assert not (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
+
+
+@pytest.mark.parametrize("template", ["../outside.txt", "/absolute.txt", r"nested\\backslash.txt"])
+def test_column_bound_processing_tool_rejects_unsafe_output_template_before_execution(
+    tmp_path: Path,
+    template: str,
+) -> None:
+    storage_path = tmp_path / "results"
+    ColumnBoundLegacyWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=7)
+        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": template})
+        sig_hash = wf.plan()[node.name].sig_hash
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+
+    assert ColumnBoundLegacyWriter.executions == 0
+    assert not (StorageV1(storage_path).result_dir(processing_v1_result_key(node.name, sig_hash)) / "current.json").exists()
+
+
+def test_column_bound_processing_tool_rejects_templated_output_outside_staging(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=8)
+        node = EscapingColumnBoundWriter()(label=table["label"], directory=tmp_path)
+        sig_hash = wf.plan()[node.name].sig_hash
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+
+    assert not (StorageV1(storage_path).result_dir(processing_v1_result_key(node.name, sig_hash)) / "current.json").exists()
+
+
+def test_column_bound_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_path: Path) -> None:
+    from .conftest import FileLoader, StubSharedMemoryTool
+
+    storage_path = tmp_path / "results"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "image.tif").write_text("image")
+
+    with Workflow(storage_path=storage_path) as wf:
+        raw = FileLoader()(path=str(data_dir))
+        node = StubSharedMemoryTool()(input_image=raw["path"])
+        wf.compute(node)
+
+    assert (storage_path / "data" / "StubSharedMemoryTool_1").exists()
+
+
+def test_source_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceSharedMemoryWriter()()
+        wf.compute(node)
+
+    assert (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()
+    assert _current_pointer_files(storage_path) == []
+
+    with Workflow(storage_path=storage_path) as wf:
+        writer = SourceSharedMemoryWriter()()
+        consumer = SourceSharedMemoryConsumer()(result=writer["result"])
+        steps = list(wf.compute_steps(consumer))
+        writer_step = next(step for step in steps if step.node_name == writer.name)
+        assert writer_step.cached is True
+        cached_writer_df = writer_step.execute()
+        assert isinstance(cached_writer_df.loc["0", "result"], SharedArray)
+        consumer_step = next(step for step in steps if step.node_name == consumer.name)
+        consumer_df = consumer_step.execute()
+
+    assert consumer_df.loc["0", "total"] == 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceSharedMemoryWriter()()
+        assert wf.plan()[node.name].status is NodePlanStatus.CACHED
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {"SourceSharedMemoryWriter_1"}
+    assert not (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()

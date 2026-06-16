@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow.cache import dataframe_v1_result_key
-from bioimageflow.storage import get_node_dir
+from bioimageflow.cache import dataframe_v1_result_key, processing_v1_result_key
 from bioimageflow.storage_v1 import StorageV1
 
 from .conftest import FileLoader, StubSegmenter, StubStats
@@ -32,6 +31,12 @@ def _dataframe_v1_current_exists(wf: Workflow, node_name: str) -> bool:
     return (StorageV1(wf.storage_path).result_dir(result_key) / "current.json").exists()
 
 
+def _processing_v1_current_exists(wf: Workflow, node_name: str) -> bool:
+    entry = wf.plan()[node_name]
+    result_key = processing_v1_result_key(node_name, entry.sig_hash)
+    return (StorageV1(wf.storage_path).result_dir(result_key) / "current.json").exists()
+
+
 class TestInvalidate:
     def test_clears_node_and_downstream_cache(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)
@@ -39,7 +44,7 @@ class TestInvalidate:
 
         assert _dataframe_v1_current_exists(wf, "FileLoader_1")
         for n in ("StubSegmenter_1", "StubStats_1"):
-            assert get_node_dir(wf.storage_path, n).exists()
+            assert _processing_v1_current_exists(wf, n)
 
         cleared = wf.invalidate(["StubSegmenter_1"])
         # Returns the set of cleared names — segmentation + stats (downstream).
@@ -48,8 +53,8 @@ class TestInvalidate:
         assert "FileLoader_1" not in cleared
 
         # Disk reflects the same.
-        assert not get_node_dir(wf.storage_path, "StubSegmenter_1").exists()
-        assert not get_node_dir(wf.storage_path, "StubStats_1").exists()
+        assert not _processing_v1_current_exists(wf, "StubSegmenter_1")
+        assert not _processing_v1_current_exists(wf, "StubStats_1")
         assert _dataframe_v1_current_exists(wf, "FileLoader_1")
 
     def test_no_cascade(self, tmp_path: Path) -> None:
@@ -58,7 +63,7 @@ class TestInvalidate:
         cleared = wf.invalidate(["StubSegmenter_1"], cascade=False)
         assert cleared == {"StubSegmenter_1"}
         # Downstream cache survives.
-        assert get_node_dir(wf.storage_path, "StubStats_1").exists()
+        assert _processing_v1_current_exists(wf, "StubStats_1")
 
     def test_unknown_node_raises_key_error(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)

@@ -7,13 +7,18 @@ import pandas as pd
 import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
-from bioimageflow.cache import dataframe_v1_result_key
+from bioimageflow.cache import dataframe_v1_result_key, processing_v1_result_key
 from bioimageflow.engine import WorkflowCancelledError
-from bioimageflow.storage import find_hash_dir, get_node_dir
+from bioimageflow.storage import get_node_dir
 from bioimageflow.storage_v1 import StorageV1
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
 
 from .conftest import AddColumn, FileLoader, StubSegmenter, imageio_env
+
+
+def _processing_v1_current_exists(storage: Path, node_name: str, sig_hash: str) -> bool:
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    return (StorageV1(storage).result_dir(result_key) / "current.json").exists()
 
 
 def _build_loader_and_tagged(
@@ -108,8 +113,21 @@ class TestTargetExecution:
         assert "FileLoader_1" in event_nodes
         assert "selected" in event_nodes
         assert "unselected" not in event_nodes
-        assert get_node_dir(storage, "selected").exists()
-        assert not get_node_dir(storage, "unselected").exists()
+        with Workflow(storage_path=storage) as wf:
+            raw = FileLoader()(path=str(tmp_workspace / "data"))
+            selected = StubSegmenter()(
+                input_image=raw["path"],
+                diameter=20.0,
+                name="selected",
+            )
+            unselected = StubSegmenter()(
+                input_image=raw["path"],
+                diameter=40.0,
+                name="unselected",
+            )
+            plan = wf.plan()
+        assert _processing_v1_current_exists(storage, selected.name, plan[selected.name].sig_hash)
+        assert not _processing_v1_current_exists(storage, unselected.name, plan[unselected.name].sig_hash)
 
 
 class TestFailureAndCancellation:
@@ -265,10 +283,11 @@ class TestSubWorkflowPlanCache:
         assert internal_name in plan
         assert plan[internal_name].status is NodePlanStatus.CACHED
         assert plan["SegmentOnly_1"].status is NodePlanStatus.CACHED
-        assert find_hash_dir(
-            get_node_dir(storage, internal_name),
+        assert _processing_v1_current_exists(
+            storage,
+            internal_name,
             plan[internal_name].sig_hash,
-        ) is not None
+        )
         assert any(
             e.node_name == internal_name and e.status == "cached"
             for e in events

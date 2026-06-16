@@ -10,9 +10,10 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from types import UnionType
 from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, cast, TYPE_CHECKING
+from typing import Annotated, Any, cast, get_args, get_origin, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -29,9 +30,11 @@ from bioimageflow.cache import (
     cache_load,
     dataframe_v1_lookup,
     dataframe_v1_publish,
+    iter_processing_v1_result_metadata,
     processing_v1_lookup,
     processing_v1_prepare_attempt,
     processing_v1_publish,
+    processing_v1_result_key,
 )
 from bioimageflow.node import IndexAlignmentError, Node
 from bioimageflow.storage import (
@@ -192,6 +195,37 @@ def _explicit_template_output_columns(node: Node) -> set[str]:
         if isinstance(template, str) and template
     )
     return columns
+
+
+def _is_shared_array_type(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _is_shared_array_type(get_args(annotation)[0])
+    if origin is Union or origin is UnionType:
+        return any(_is_shared_array_type(arg) for arg in get_args(annotation) if arg is not type(None))
+    return annotation is SharedArray
+
+
+def _has_shared_array_output(tool: Any) -> bool:
+    outputs = getattr(tool, "Outputs", None)
+    if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+        return False
+    return any(_is_shared_array_type(annotation) for annotation in outputs._get_all_annotations().values())
+
+
+def _processing_v1_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
+    expected_key = processing_v1_result_key(node_name, sig_hash)
+    for metadata in iter_processing_v1_result_metadata(
+        storage_path,
+        {node_name: {sig_hash}},
+    ):
+        if (
+            metadata.get("node") != node_name
+            or metadata.get("result_key") == expected_key
+        ):
+            continue
+        return True
+    return False
 
 
 class DisabledNodeError(Exception):
@@ -896,7 +930,10 @@ class DefaultEngine:
                 return None, sig_hash
             df = self._coerce_numeric_columns(df)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
-        if isinstance(node.tool, ProcessingTool) and not node._column_bindings:
+        if (
+            isinstance(node.tool, ProcessingTool)
+            and not _has_shared_array_output(node.tool)
+        ):
             df = processing_v1_lookup(
                 workflow.storage_path,
                 node.name,
@@ -915,7 +952,7 @@ class DefaultEngine:
 
         df = self._coerce_numeric_columns(cache_load(cached))
         # Restore shared arrays for ProcessingTools with column bindings
-        if node._column_bindings:
+        if isinstance(node.tool, ProcessingTool):
             cached_hash_dir = find_hash_dir(node_dir, sig_hash)
             if cached_hash_dir is not None:
                 df = self._restore_shared_arrays(df, cached_hash_dir)
@@ -1030,6 +1067,15 @@ class DefaultEngine:
             workflow,
         )
 
+        if _has_shared_array_output(node.tool):
+            return self._execute_source_processing_tool_legacy(
+                node,
+                sig_hash,
+                input_annotations,
+                templates,
+                workflow,
+            )
+
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         cached = processing_v1_lookup(
@@ -1090,6 +1136,71 @@ class DefaultEngine:
         self._emit_progress(workflow, node.name, "completed")
         return df, sig_hash
 
+    def _execute_source_processing_tool_legacy(
+        self,
+        node: Node,
+        sig_hash: str,
+        input_annotations: dict[str, Any],
+        templates: dict[str, str],
+        workflow: Any,
+    ) -> tuple[pd.DataFrame, str]:
+        """Execute source SharedArray tools on the legacy cache path until Phase 6."""
+        aligned_index: list[Any] = ["0"]
+        node_dir = get_node_dir(workflow.storage_path, node.name)
+        cached = cache_lookup(node_dir, sig_hash)
+        if cached:
+            self._emit_progress(workflow, node.name, "cached")
+            df = self._coerce_numeric_columns(cache_load(cached))
+            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
+            if cached_hash_dir is not None:
+                df = self._restore_shared_arrays(df, cached_hash_dir)
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
+
+        self._emit_progress(workflow, node.name, "started")
+        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
+
+        row_args = self._resolve_defaults(node, input_annotations)
+        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
+        context = self._build_template_context(
+            node.name,
+            "0",
+            row_args,
+            path_input_fields=path_input_fields,
+            upstream_nodes={},
+            results={},
+            idx="0",
+        )
+        for out_field, template in templates.items():
+            row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
+        arguments_dicts = [row_args]
+
+        row_contexts, batch_context = self._build_execution_contexts(
+            hash_dir,
+            real_assets_dir,
+            aligned_index,
+        )
+        raw_results = self._dispatch_tool(
+            node.tool,
+            arguments_dicts,
+            workflow,
+            node.name,
+            row_contexts,
+            batch_context,
+        )
+        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = self._normalize_path_output_columns(df, node.tool)
+        self._emit_progress(workflow, node.name, "completed")
+        df = self._persist_shared_arrays(df, hash_dir)
+        self._save_and_cleanup(
+            node_dir,
+            sig_hash,
+            df,
+            type(node.tool).__name__,
+            workflow,
+            hash_dir=hash_dir,
+        )
+        return df, sig_hash
+
     def _execute_processing_tool_with_column_bindings(
         self,
         node: Node,
@@ -1118,7 +1229,84 @@ class DefaultEngine:
             node, input_annotations, upstream_nodes, sig_hashes, workflow,
         )
 
+        if _has_shared_array_output(node.tool):
+            return self._execute_processing_tool_with_column_bindings_legacy(
+                node,
+                results,
+                sig_hash,
+                upstream_nodes,
+                aligned_index,
+                input_annotations,
+                templates,
+                workflow,
+            )
+
         # --- Cache check ---
+        path_output_columns = _path_output_columns(node.tool)
+        cached = processing_v1_lookup(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            path_output_columns,
+        )
+        if cached is not None:
+            self._emit_progress(workflow, node.name, "cached")
+            df = self._coerce_numeric_columns(cached)
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
+
+        # --- Resolve arguments ---
+        self._emit_progress(workflow, node.name, "started")
+        result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+        )
+
+        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
+        arguments_dicts = self._resolve_all_row_arguments(
+            node, aligned_index, results, upstream_nodes,
+            input_annotations, templates, path_input_fields, workflow,
+            assets_dir=real_assets_dir,
+        )
+
+        # --- Dispatch & build output ---
+        row_contexts, batch_context = self._build_execution_contexts(
+            staging_dir, real_assets_dir, aligned_index,
+        )
+        raw_results = self._dispatch_tool(
+            node.tool, arguments_dicts, workflow, node.name,
+            row_contexts, batch_context,
+        )
+        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = processing_v1_publish(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            df,
+            result_key=result_key,
+            attempt_id=attempt_id,
+            staging_dir=staging_dir,
+            staging_assets_dir=real_assets_dir,
+            path_columns=path_output_columns,
+            owned_path_columns=_explicit_template_output_columns(node),
+        )
+        df = self._coerce_numeric_columns(df)
+        df = self._normalize_path_output_columns(df, node.tool)
+        self._emit_progress(workflow, node.name, "completed")
+        return df, sig_hash
+
+    def _execute_processing_tool_with_column_bindings_legacy(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        sig_hash: str,
+        upstream_nodes: dict[str, Node],
+        aligned_index: list[Any],
+        input_annotations: dict[str, Any],
+        templates: dict[str, str],
+        workflow: Any,
+    ) -> tuple[pd.DataFrame, str]:
+        """Execute shared-array-producing column-bound tools on the legacy cache path."""
         node_dir = get_node_dir(workflow.storage_path, node.name)
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
@@ -1129,7 +1317,6 @@ class DefaultEngine:
                 df = self._restore_shared_arrays(df, cached_hash_dir)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
-        # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
         hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
 
@@ -1140,7 +1327,6 @@ class DefaultEngine:
         )
         self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
 
-        # --- Dispatch & build output ---
         row_contexts, batch_context = self._build_execution_contexts(
             hash_dir, real_assets_dir, aligned_index,
         )
@@ -1153,8 +1339,14 @@ class DefaultEngine:
         self._emit_progress(workflow, node.name, "completed")
 
         df = self._persist_shared_arrays(df, hash_dir)
-        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__, workflow,
-                               hash_dir=hash_dir)
+        self._save_and_cleanup(
+            node_dir,
+            sig_hash,
+            df,
+            type(node.tool).__name__,
+            workflow,
+            hash_dir=hash_dir,
+        )
         return df, sig_hash
 
     # ── Argument resolution ────────────────────────────────────────────
@@ -1226,6 +1418,7 @@ class DefaultEngine:
         templates: dict[str, str],
         path_input_fields: list[str],
         workflow: Any,
+        assets_dir: Path | None = None,
     ) -> list[dict[str, Any]]:
         """Resolve per-row arguments for all rows in the aligned index."""
         arguments_dicts: list[dict[str, Any]] = []
@@ -1246,11 +1439,14 @@ class DefaultEngine:
                 node.name, str(idx), row_args, path_input_fields,
                 upstream_nodes, results, idx, timestamp,
             )
-            assets_dir = get_assets_dir(
+            template_assets_dir = assets_dir or get_assets_dir(
                 get_hash_dir(get_node_dir(workflow.storage_path, node.name), "pending")
             )
             for out_field, template in templates.items():
-                row_args[out_field] = str(assets_dir / resolve_template(template, context))
+                if assets_dir is None:
+                    row_args[out_field] = str(template_assets_dir / resolve_template(template, context))
+                else:
+                    row_args[out_field] = _resolve_staged_output_path(template_assets_dir, template, context)
 
             arguments_dicts.append(row_args)
         return arguments_dicts
@@ -2203,7 +2399,15 @@ class DefaultEngine:
         else:
             from bioimageflow.storage import has_other_hash_dirs
             node_dir = get_node_dir(workflow.storage_path, node.name)
-            if has_other_hash_dirs(node_dir, sig_hash):
+            if isinstance(node.tool, ProcessingTool) and not _has_shared_array_output(node.tool):
+                has_prior_current = _processing_v1_has_other_current(
+                    workflow.storage_path,
+                    node.name,
+                    sig_hash,
+                )
+            else:
+                has_prior_current = has_other_hash_dirs(node_dir, sig_hash)
+            if has_prior_current:
                 status = NodePlanStatus.OUT_OF_DATE
             else:
                 status = NodePlanStatus.UNEXECUTED
