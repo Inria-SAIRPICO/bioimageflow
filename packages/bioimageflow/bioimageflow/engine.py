@@ -335,16 +335,16 @@ class NodePlan:
         Scoped names of this node's direct upstreams.
     pending_upstreams
         Upstream node names whose selected records are not known yet.
-    sig_hash
-        Transitional diagnostic logical signature. It is retained for
-        existing callers but is not the public v1 cache identity field.
+    logical_signature
+        Diagnostic logical signature computed by the same helpers as
+        execution. It is not the public v1 cache identity field.
 
     ``cached`` and ``skipped`` are read-only convenience accessors
     derived from ``status`` (``cached == status is CACHED``,
     ``skipped == status is SKIPPED``).
     """
     node_name: str
-    sig_hash: str
+    logical_signature: str
     status: NodePlanStatus
     upstream: tuple[str, ...]
     final_result_key: str | None = None
@@ -498,7 +498,7 @@ class NodeStep:
     def cached(self) -> bool:
         """True if the node's result is already in the cache.
 
-        The first access triggers a signature-hash computation and cache
+        The first access triggers logical-signature computation and cache
         lookup; subsequent accesses reuse the result.
         """
         if self._skipped:
@@ -2494,7 +2494,7 @@ class DefaultEngine:
     # ── Pre-execution planning ─────────────────────────────────────────
 
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
-        """Return the cache status and signature hash of every node.
+        """Return the v1 cache status and diagnostic plan state of every node.
 
         Walks the graph in topological order, computes diagnostic logical
         signatures with the same helpers as :meth:`execute`, and reports v1

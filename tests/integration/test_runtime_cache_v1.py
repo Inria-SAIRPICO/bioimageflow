@@ -15,7 +15,6 @@ from bioimageflow.cache import (
     dataframe_v1_result_key,
     processing_v1_prepare_attempt,
     processing_v1_publish,
-    processing_v1_result_key,
 )
 from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, make_record_id
 from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, Template
@@ -346,6 +345,12 @@ def _invalidated_node_names(invalidated) -> set[str]:
 def _selection_for(invalidated, node_name: str):
     [selection] = [item for item in invalidated if item.node_name == node_name]
     return selection
+
+
+def _planned_result_key(wf: Workflow, node_name: str) -> str:
+    entry = wf.plan()[node_name]
+    assert entry.final_result_key is not None
+    return entry.final_result_key
 
 
 def _parquet_digest(df: pd.DataFrame, path: Path) -> str:
@@ -702,9 +707,8 @@ def test_dataframe_tool_invalidate_removes_v1_current_but_keeps_record(tmp_path:
         node = CountingTable()(value=9)
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -736,9 +740,8 @@ def test_dataframe_tool_invalidate_removes_corrupt_v1_current(tmp_path: Path) ->
         node = CountingTable()(value=10)
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
     current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
@@ -760,9 +763,8 @@ def test_dataframe_tool_invalidate_removes_prior_signature_current(tmp_path: Pat
     with Workflow(storage_path=storage_path) as wf:
         node = CountingTable()(value=1)
         wf.compute(node)
-        old_sig_hash = wf.plan()[node.name].sig_hash
+        old_result_key = _planned_result_key(wf, node.name)
 
-    old_result_key = dataframe_v1_result_key("CountingTable_1", old_sig_hash)
     storage = StorageV1(storage_path)
     old_pointer = storage.load_current(old_result_key)
     assert old_pointer is not None
@@ -852,9 +854,8 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     with Workflow(storage_path=storage_path) as wf:
         node = SourceAssetWriter()(text="abc")
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("SourceAssetWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -920,9 +921,8 @@ def test_source_processing_tool_external_paths_stay_external_references(tmp_path
     with Workflow(storage_path=storage_path) as wf:
         node = SourceExternalPaths()(directory=source_dir)
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("SourceExternalPaths_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -962,13 +962,13 @@ def test_source_processing_tool_default_input_value_affects_signature(tmp_path: 
     with Workflow(storage_path=storage_path) as wf:
         explicit = SourceAssetWriter()(text="mask", name="source")
         wf.compute(explicit)
-        explicit_sig_hash = wf.plan()[explicit.name].sig_hash
+        explicit_sig_hash = wf.plan()[explicit.name].logical_signature
 
     with Workflow(storage_path=storage_path) as wf:
         defaulted = SourceAssetWriter()(name="source")
         plan = wf.plan()
 
-    assert plan[defaulted.name].sig_hash == explicit_sig_hash
+    assert plan[defaulted.name].logical_signature == explicit_sig_hash
     assert plan[defaulted.name].status is NodePlanStatus.CACHED
 
 
@@ -983,9 +983,8 @@ def test_source_processing_tool_empty_output_template_override_does_not_claim_ex
     with Workflow(storage_path=storage_path) as wf:
         node = SourceExternalPaths()(directory=source_dir, output_templates={"path": ""})
         df = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("SourceExternalPaths_1", sig_hash)
     pointer = StorageV1(storage_path).load_current(result_key)
     assert pointer is not None
     assert list(df["path"]) == [str(source_dir / "a.txt")]
@@ -999,9 +998,8 @@ def test_source_processing_tool_invalidate_removes_current_but_keeps_record(tmp_
         node = SourceAssetWriter()(text="invalidate")
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = processing_v1_result_key(node_name, sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1032,9 +1030,8 @@ def test_source_processing_tool_invalidate_removes_corrupt_current(tmp_path: Pat
         node = SourceAssetWriter()(text="corrupt")
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = processing_v1_result_key(node_name, sig_hash)
     current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
@@ -1057,9 +1054,8 @@ def test_source_processing_tool_invalidate_removes_corrupt_current_with_default_
         node = SourceAssetWriter()()
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = processing_v1_result_key(node_name, sig_hash)
     current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
@@ -1119,8 +1115,7 @@ def test_source_processing_tool_rejects_symlinked_attempts_directory_before_exec
 
     with Workflow(storage_path=storage_path) as wf:
         node = SourceAssetWriter()(text="symlink-attempt")
-        sig_hash = wf.plan()[node.name].sig_hash
-        result_key = processing_v1_result_key(node.name, sig_hash)
+        result_key = _planned_result_key(wf, node.name)
         attempts_dir = StorageV1(storage_path).result_dir(result_key) / "attempts"
         attempts_dir.parent.mkdir(parents=True)
         attempts_dir.symlink_to(outside)
@@ -1224,9 +1219,8 @@ def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cach
         table = CountingTable()(value=4)
         node = ColumnBoundLegacyWriter()(label=table["label"])
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1276,9 +1270,8 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
         node = ColumnBoundLegacyWriter()(label=table["label"])
         wf.compute(node)
         node_name = node.name
-        sig_hash = wf.plan()[node_name].sig_hash
+        result_key = _planned_result_key(wf, node_name)
 
-    result_key = processing_v1_result_key(node_name, sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1301,9 +1294,8 @@ def test_column_bound_processing_tool_invalidate_removes_prior_signature_current
         table = CountingTable()(value=9)
         node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "old_{row_index}.txt"})
         wf.compute(node)
-        old_sig_hash = wf.plan()[node.name].sig_hash
+        old_result_key = _planned_result_key(wf, node.name)
 
-    old_result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", old_sig_hash)
     storage = StorageV1(storage_path)
     assert storage.load_current(old_result_key) is not None
 
@@ -1337,8 +1329,10 @@ def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_c
         plan = wf.plan()
 
     storage = StorageV1(storage_path)
-    key_a = processing_v1_result_key("writer_a", plan["writer_a"].sig_hash)
-    key_b = processing_v1_result_key("writer_b", plan["writer_b"].sig_hash)
+    key_a = plan["writer_a"].final_result_key
+    key_b = plan["writer_b"].final_result_key
+    assert key_a is not None
+    assert key_b is not None
     (storage.result_dir(key_a) / "result.json").unlink()
     (storage.result_dir(key_b) / "result.json").unlink()
 
@@ -1363,9 +1357,8 @@ def test_column_bound_processing_tool_preserves_nested_owned_asset_paths(tmp_pat
             output_templates={"output": "nested/{column:label}/{row_index}.txt"},
         )
         df = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("ColumnBoundLegacyWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1393,12 +1386,12 @@ def test_column_bound_processing_tool_rejects_unsafe_output_template_before_exec
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=7)
         node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": template})
-        sig_hash = wf.plan()[node.name].sig_hash
         with pytest.raises(CacheCorruptionError):
             wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
 
     assert ColumnBoundLegacyWriter.executions == 0
-    assert not (StorageV1(storage_path).result_dir(processing_v1_result_key(node.name, sig_hash)) / "current.json").exists()
+    assert not (StorageV1(storage_path).result_dir(result_key) / "current.json").exists()
 
 
 def test_column_bound_processing_tool_rejects_templated_output_outside_staging(tmp_path: Path) -> None:
@@ -1407,11 +1400,11 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(t
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=8)
         node = EscapingColumnBoundWriter()(label=table["label"], directory=tmp_path)
-        sig_hash = wf.plan()[node.name].sig_hash
         with pytest.raises(CacheCorruptionError):
             wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
 
-    assert not (StorageV1(storage_path).result_dir(processing_v1_result_key(node.name, sig_hash)) / "current.json").exists()
+    assert not (StorageV1(storage_path).result_dir(result_key) / "current.json").exists()
 
 
 def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(
@@ -1426,7 +1419,7 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
         table = CountingTable()(value=4)
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
     assert ColumnBoundSharedMemoryWriter.executions == 1
     assert isinstance(first.loc["row", "result"], SharedArray)
@@ -1436,7 +1429,6 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
         assert str(array.dtype) == "uint8"
         assert int(array.sum()) == 8
 
-    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1510,9 +1502,8 @@ def test_column_bound_shared_array_processing_tool_upstream_change_reports_pendi
         table = CountingTable()(value=4)
         wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
         node_name = "ColumnBoundSharedMemoryWriter_1"
-        old_sig_hash = wf.plan()[node_name].sig_hash
+        old_result_key = _planned_result_key(wf, node_name)
 
-    old_result_key = processing_v1_result_key(node_name, old_sig_hash)
     assert StorageV1(storage_path).load_current(old_result_key) is not None
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=5)
@@ -1564,10 +1555,9 @@ def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_pe
         table = MultiRowTable()()
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
     assert ColumnBoundSharedMemoryWriter.executions == 2
-    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1607,9 +1597,8 @@ def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_cu
         table = CountingTable()(value=4)
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1634,9 +1623,8 @@ def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_co
         table = CountingTable()(value=4)
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1659,7 +1647,7 @@ def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehy
     with Workflow(storage_path=storage_path) as wf:
         node = SourceSharedMemoryWriter()()
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
     assert SourceSharedMemoryWriter.executions == 1
     assert isinstance(first.loc["0", "result"], SharedArray)
@@ -1669,7 +1657,6 @@ def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehy
         assert str(array.dtype) == "uint8"
         assert int(array.sum()) == 0
 
-    result_key = processing_v1_result_key("SourceSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1741,9 +1728,8 @@ def test_source_shared_array_processing_tool_missing_asset_raises_cache_corrupti
     with Workflow(storage_path=storage_path) as wf:
         node = SourceSharedMemoryWriter()()
         wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
-    result_key = processing_v1_result_key("SourceSharedMemoryWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1776,12 +1762,11 @@ def test_source_path_or_shared_array_output_handles_path_values(tmp_path: Path) 
     with Workflow(storage_path=storage_path) as wf:
         node = SourceFlexibleImageWriter()(as_shared_array=False)
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
     result_path = Path(first.loc["0", "result"])
     assert result_path.name == "flex_0.txt"
     assert result_path.read_text() == "path-result"
-    result_key = processing_v1_result_key("SourceFlexibleImageWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
@@ -1818,13 +1803,12 @@ def test_source_path_or_shared_array_output_handles_shared_array_values(tmp_path
     with Workflow(storage_path=storage_path) as wf:
         node = SourceFlexibleImageWriter()(as_shared_array=True)
         first = wf.compute(node)
-        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = _planned_result_key(wf, node.name)
 
     assert isinstance(first.loc["0", "result"], SharedArray)
     with open_shared_array(first.loc["0", "result"]) as array:
         assert int(array.sum()) == 4
 
-    result_key = processing_v1_result_key("SourceFlexibleImageWriter_1", sig_hash)
     storage = StorageV1(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None

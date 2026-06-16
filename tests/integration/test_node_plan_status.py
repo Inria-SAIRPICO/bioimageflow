@@ -8,7 +8,6 @@ The status enum lets external callers distinguish ``cached`` from
 from pathlib import Path
 
 from bioimageflow import NodePlanStatus, Workflow
-from bioimageflow.cache import dataframe_v1_result_key
 from bioimageflow.storage_v1 import StorageV1
 
 from .conftest import FileLoader, StubSegmenter
@@ -69,7 +68,9 @@ class TestNodePlanStatusBasics:
 
         plan = wf.plan()
         entry = plan[node.name]
-        assert entry.final_result_key == dataframe_v1_result_key(node.name, entry.sig_hash)
+        assert entry.logical_signature
+        assert not hasattr(entry, "sig_hash")
+        assert entry.final_result_key is not None
         pointer = StorageV1(wf.storage_path).load_current(entry.final_result_key)
         assert pointer is not None
         assert entry.selected_record_id == pointer.record_id

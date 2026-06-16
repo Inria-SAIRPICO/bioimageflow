@@ -32,13 +32,13 @@ Skip propagation
 A disabled node — and **every node transitively downstream of it** — is
 skipped during execution. ``Workflow.plan()`` reflects this with
 ``NodePlanStatus.SKIPPED`` (see :doc:`planning_and_cache`); the
-``sig_hash`` of skipped nodes is the empty string.
+``logical_signature`` of skipped nodes is the empty string.
 
 Skipping does not cascade to *parents*. A disabled leaf node leaves its
 ancestors untouched.
 
-The ``enabled`` flag is **not** part of the signature hash
------------------------------------------------------------
+The ``enabled`` flag is **not** part of v1 result identity
+----------------------------------------------------------
 
 Re-enabling a previously disabled node hits the existing cache — no
 recompute. The flag affects scheduling, not the per-node identity.

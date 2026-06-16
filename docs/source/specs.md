@@ -2352,8 +2352,9 @@ Result keys are stored under the canonical cache root:
 storage_path/cache/v1/results/<result-shard>/<result-key>/
 ```
 
-The legacy `sig_hash` name is not the v1 public cache key.
-Implementations may keep diagnostic signatures internally during migration, but public planning and cache APIs use result keys and selected record IDs.
+The legacy `sig_hash` name is not part of the clean v1 public planning API.
+Implementations may keep diagnostic signatures internally, and `NodePlan.logical_signature` exposes the diagnostic value when callers need it.
+Public cache APIs use result keys and selected record IDs.
 
 ### 6.2 Current Record Selection
 
@@ -2389,11 +2390,11 @@ from bioimageflow import NodePlan, NodePlanStatus
 plan: dict[str, NodePlan] = workflow.plan(dev_mode=False)
 for name, entry in plan.items():
     assert isinstance(entry, NodePlan)
-    # entry.node_name, entry.final_result_key, entry.selected_record_id, entry.status, entry.upstream
+    # entry.node_name, entry.final_result_key, entry.selected_record_id, entry.status, entry.upstream, entry.logical_signature
     # entry.cached / entry.skipped: boolean shortcuts derived from status
 ```
 
-`NodePlan` is a frozen dataclass with fields `node_name`, `final_result_key`, `selected_record_id`, `status` (a `NodePlanStatus`), `upstream` (tuple of upstream scoped names), and `pending_upstreams` (tuple of upstream scoped names whose selected records are not known yet).
+`NodePlan` is a frozen dataclass with fields `node_name`, `final_result_key`, `selected_record_id`, `status` (a `NodePlanStatus`), `upstream` (tuple of upstream scoped names), `pending_upstreams` (tuple of upstream scoped names whose selected records are not known yet), and `logical_signature` (a diagnostic value, not a cache key).
 The `cached` and `skipped` booleans are read-only shortcuts (`cached == status is CACHED`, `skipped == status is SKIPPED`).
 `NodePlanStatus` values:
 
@@ -3300,7 +3301,7 @@ env.exit()  # Shuts down all workers and releases resources
   - `Workflow.from_dict` gains orthogonal `validate_only` and `partial` flags. The legacy `collect_errors=` kwarg is **removed** (passing it raises `TypeError`); `validate_only=True, partial=True` is the equivalent.
   - The `Workflow.collect_errors()` context manager is **renamed** to `Workflow.capture_errors()`; the underlying `_error_capture` ContextVar is consistent. No alias.
   - `Workflow` exposes `errors`, `failed_nodes`, `is_partial` build-time properties and `invalidate(node_ids, *, cascade=True)` for cache cleanup. `invalidate` is **not** safe vs concurrent `compute()`.
-  - `Workflow.plan()` exposes v1 `NodePlanStatus` (`CACHED` / `OUT_OF_DATE` / `UNEXECUTED` / `SKIPPED` / `PENDING_UPSTREAM`) plus `final_result_key`, `selected_record_id`, and `pending_upstreams` on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
+  - `Workflow.plan()` exposes v1 `NodePlanStatus` (`CACHED` / `OUT_OF_DATE` / `UNEXECUTED` / `SKIPPED` / `PENDING_UPSTREAM`) plus `final_result_key`, `selected_record_id`, `pending_upstreams`, and diagnostic `logical_signature` on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
   - `ValidationError` adds an `edge_id: str | None` field, copied from the optional `id` key on wire-format edges. `validate()`'s deduplication includes `edge_id`, so two errors that differ only by `edge_id` are reported as distinct.
   - `serialize_constant` / `deserialize_constant` are public exports of `bioimageflow.validation`. `deserialize_constant` requires the typed envelope; bare-string input is no longer accepted.
   - New `bioimageflow.ToolRegistry` and `bioimageflow.ToolMetadata` for GUIs to enumerate tools without rebuilding loader plumbing. `install_package` (network) and `register_package` (in-process) are split so hot validation paths never touch the network.
