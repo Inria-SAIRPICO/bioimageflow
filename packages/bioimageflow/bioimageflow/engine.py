@@ -551,6 +551,13 @@ class NodeStep:
         self._ensure_cache_checked()
         if self._cached_df is not None:
             self._df = self._cached_df
+            assert self._sig_hash is not None
+            self._engine._write_run_node_view(
+                self._workflow,
+                self._node,
+                self._sig_hash,
+                cache_hit=True,
+            )
             self._executed = True
             return self._df
         df, sig_hash = self._engine._execute_node(
@@ -558,6 +565,13 @@ class NodeStep:
         )
         self._df = df
         self._sig_hash = sig_hash
+        cache_hit = self._engine._pop_node_cache_hit(self._node)
+        self._engine._write_run_node_view(
+            self._workflow,
+            self._node,
+            sig_hash,
+            cache_hit=cache_hit,
+        )
         self._executed = True
         return df
 
@@ -596,6 +610,8 @@ class DefaultEngine:
         self._use_wetlands = use_wetlands
         self._force_sequential = force_sequential
         self._progress_lock = threading.Lock()
+        self._cache_hit_lock = threading.Lock()
+        self._node_cache_hits: dict[Node, bool] = {}
         self._env_manager = None
         if use_wetlands:
             from bioimageflow.env_manager import WetlandsEnvManager
@@ -783,6 +799,8 @@ class DefaultEngine:
             # Execute DataFrameTool nodes sequentially on main thread
             for node in df_nodes:
                 df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
+                cache_hit = self._pop_node_cache_hit(node)
+                self._write_run_node_view(workflow, node, sig_hash, cache_hit=cache_hit)
                 results[node] = df
                 sig_hashes[node] = sig_hash
                 ts.done(node)
@@ -793,6 +811,8 @@ class DefaultEngine:
                     if workflow.cancel_requested:
                         raise WorkflowCancelledError("Workflow cancelled by user")
                     df, sig_hash = self._execute_node(node, results, sig_hashes, workflow)
+                    cache_hit = self._pop_node_cache_hit(node)
+                    self._write_run_node_view(workflow, node, sig_hash, cache_hit=cache_hit)
                     results[node] = df
                     sig_hashes[node] = sig_hash
                     ts.done(node)
@@ -806,13 +826,23 @@ class DefaultEngine:
                         pool.submit(self._execute_node, node, results, sig_hashes, workflow): node
                         for node in pt_nodes
                     }
+                    first_error: Exception | None = None
                     for future in concurrent.futures.as_completed(future_to_node):
                         node = future_to_node[future]
-                        df, sig_hash = future.result()  # raises on failure
+                        try:
+                            df, sig_hash = future.result()
+                        except Exception as exc:
+                            if first_error is None:
+                                first_error = exc
+                            continue
+                        cache_hit = self._pop_node_cache_hit(node)
+                        self._write_run_node_view(workflow, node, sig_hash, cache_hit=cache_hit)
                         with lock:
                             results[node] = df
                             sig_hashes[node] = sig_hash
                         ts.done(node)
+                    if first_error is not None:
+                        raise first_error
 
         # Log skipped targets
         for t in targets:
@@ -820,6 +850,48 @@ class DefaultEngine:
                 logger.info("Skipping disabled target node '%s'", t.name)
 
         return {t.name: results[t] for t in targets if t not in skipped}
+
+    def _set_node_cache_hit(self, node: Node, cache_hit: bool) -> None:
+        with self._cache_hit_lock:
+            self._node_cache_hits[node] = cache_hit
+
+    def _pop_node_cache_hit(self, node: Node) -> bool:
+        with self._cache_hit_lock:
+            return self._node_cache_hits.pop(node, False)
+
+    def _write_run_node_view(
+        self,
+        workflow: Any,
+        node: Node,
+        sig_hash: str | None,
+        *,
+        cache_hit: bool,
+    ) -> None:
+        context = getattr(workflow, "_run_view_context", None)
+        if context is None or sig_hash is None:
+            return
+        from bioimageflow.dataframe_tool import DataFrameTool
+
+        if isinstance(node.tool, DataFrameTool):
+            result_key = dataframe_v1_result_key(node.name, sig_hash)
+        elif isinstance(node.tool, ProcessingTool):
+            result_key = processing_v1_result_key(node.name, sig_hash)
+        else:
+            return
+        storage = StorageV1(workflow.storage_path)
+        pointer = storage.load_current(result_key)
+        if pointer is None:
+            return
+        run_id = str(context["run_id"])
+        node_key = node.name
+        storage.write_run_node_result(
+            run_id,
+            node_key,
+            result_key=result_key,
+            record_id=pointer.record_id,
+            cache_hit=cache_hit,
+        )
+        storage.update_latest_node(node_key, run_id)
 
     # ── Graph traversal ────────────────────────────────────────────────
 
@@ -1059,6 +1131,7 @@ class DefaultEngine:
 
         cached = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
         if cached is not None:
+            self._set_node_cache_hit(node, True)
             self._emit_progress(workflow, node.name, "cached")
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
@@ -1079,6 +1152,7 @@ class DefaultEngine:
             dataframe_v1_publish(workflow.storage_path, node.name, sig_hash, df)
         )
         df = self._normalize_path_output_columns(df, node.tool)
+        self._set_node_cache_hit(node, False)
         return df, sig_hash
 
     # ── ProcessingTool execution ───────────────────────────────────────
@@ -1123,6 +1197,7 @@ class DefaultEngine:
             shared_array_columns=shared_array_output_columns,
         )
         if cached is not None:
+            self._set_node_cache_hit(node, True)
             self._emit_progress(workflow, node.name, "cached")
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
@@ -1173,6 +1248,7 @@ class DefaultEngine:
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(workflow, node.name, "completed")
+        self._set_node_cache_hit(node, False)
         return df, sig_hash
 
     def _execute_source_processing_tool_legacy(
@@ -1280,6 +1356,7 @@ class DefaultEngine:
             shared_array_columns=shared_array_output_columns,
         )
         if cached is not None:
+            self._set_node_cache_hit(node, True)
             self._emit_progress(workflow, node.name, "cached")
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
@@ -1324,6 +1401,7 @@ class DefaultEngine:
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(workflow, node.name, "completed")
+        self._set_node_cache_hit(node, False)
         return df, sig_hash
 
     def _execute_processing_tool_with_column_bindings_legacy(
@@ -2001,6 +2079,8 @@ class DefaultEngine:
                 if workflow.cancel_requested:
                     raise WorkflowCancelledError("Workflow cancelled by user")
                 df, sig_hash = self._execute_node(inode, results, sig_hashes, workflow)
+                cache_hit = self._pop_node_cache_hit(inode)
+                self._write_run_node_view(workflow, inode, sig_hash, cache_hit=cache_hit)
                 results[inode] = df
                 sig_hashes[inode] = sig_hash
         finally:
