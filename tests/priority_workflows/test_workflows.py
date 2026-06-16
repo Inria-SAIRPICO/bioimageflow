@@ -238,7 +238,7 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     def fake_run(command: list[object], **kwargs: object) -> None:
         command_parts = [str(value) for value in command]
         calls.append(command_parts)
-        output = Path(kwargs["output_path"])
+        output = Path(str(kwargs["output_path"]))
         assert output == Path(command_parts[command_parts.index("-o") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.eye(16, dtype=np.uint8) * 255)
@@ -339,7 +339,7 @@ def test_sairpico_command_construction_without_binaries(
     calls: list[list[str]] = []
 
     def fake_run(command: list[object], output_path: Path) -> None:
-        assert Path(command[command.index("-o") + 1]) == output_path
+        assert Path(str(command[command.index("-o") + 1])) == output_path
         calls.append([str(value) for value in command])
 
     monkeypatch.setitem(

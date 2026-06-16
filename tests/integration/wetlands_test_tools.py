@@ -6,6 +6,7 @@ by file path via the worker's ``_load_module_from_file()``.
 """
 
 import time
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -92,6 +93,26 @@ class ErrorRowTool(ProcessingTool):
 
     def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
         raise RuntimeError("Intentional test error")
+
+
+class WorkerStreamTool(ProcessingTool):
+    """Writes to worker stdout and stderr for console routing tests."""
+    display_name = "Worker Stream Tool"
+    environment = stub_env
+
+    class Inputs(IOModel):
+        input_path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+
+    class Outputs(IOModel):
+        output_path: Path = Template("{input_path.stem}_stream_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
+        print("worker routine stdout")
+        print("worker actual stderr", file=sys.stderr)
+        out = Path(arguments.output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("streamed")
+        return self.Outputs(output_path=out)
 
 
 # ── Feature 2: GPU-aware worker assignment ────────────────────────

@@ -2671,10 +2671,13 @@ wf.get_environment(my_gpu_tool).worker_env = lambda i: {
 
 ## 11. Logging
 
-BioImageFlow uses Python's standard `logging` module with node-specific logger names.
+BioImageFlow uses Python's standard `logging` module with node-specific logger names. Engine and workflow construction do not attach console handlers; console logging is an explicit host/application concern.
 
 ```python
 import logging
+import bioimageflow
+
+bioimageflow.configure_logging()
 
 # Framework-level logger
 logger = logging.getLogger("bioimageflow")
@@ -2683,7 +2686,9 @@ logger = logging.getLogger("bioimageflow")
 node_logger = logging.getLogger(f"bioimageflow.node.{node_name}")
 ```
 
-- The execution engine creates a `FileHandler` per execution run that saves logs to the workflow's provenance directory.
+- `bioimageflow.configure_logging()` sets the BioImageFlow logger level to `INFO` by default and routes emitted `DEBUG`/`INFO` records to stdout and `WARNING`+ records to stderr using BioImageFlow-owned split stream handlers. Pass `level=logging.DEBUG` to emit debug records.
+- `bioimageflow.configure_logging()` delegates Wetlands console setup to `wetlands.logger.enable_console_logging`; with Wetlands 1.1.0, subprocess stdout is logged at `INFO`/stdout and subprocess stderr at `ERROR`/stderr.
+- BioImageFlow does not own Wetlands file logging. Wetlands file logs remain the responsibility of the Wetlands `EnvironmentManager`.
 - A `JsonFormatter` is available for machine-readable output (structured event logging).
 - Worker-side log messages are forwarded to the main process via the Wetlands communication channel, tagged with the node name and row index.
 - Log levels follow standard Python conventions: `DEBUG` for per-row details, `INFO` for node lifecycle events, `WARNING` for compatibility warnings (e.g., unverified type constraints), `ERROR` for failures.

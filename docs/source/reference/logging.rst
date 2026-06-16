@@ -9,13 +9,28 @@ names:
 - ``wetlands`` — worker process output (stdout/stderr from
   ``ProcessingTool.process_row`` runs).
 
-The first :class:`~bioimageflow.engine.DefaultEngine` instantiation
-attaches a :class:`logging.StreamHandler` to each logger if none are
-present, with the format
-``%(asctime)s [%(name)s] %(message)s``, datefmt ``%H:%M:%S``, and
-level ``INFO``. Existing handlers are left in place — applications
-that configure logging before importing BioImageFlow keep their
-configuration.
+BioImageFlow does not configure console logging during engine or
+workflow construction. Library users that want terminal progress can
+call :func:`bioimageflow.configure_logging` from the host application:
+
+.. code-block:: python
+
+   import bioimageflow
+
+   bioimageflow.configure_logging()
+
+By default this sets the ``bioimageflow`` logger level to ``INFO`` and
+routes emitted ``DEBUG`` / ``INFO`` records to stdout and ``WARNING`` /
+``ERROR`` / ``CRITICAL`` records to stderr, using the format
+``%(asctime)s [%(name)s] %(message)s``. Pass ``level=logging.DEBUG`` to
+emit debug records. Repeated calls are idempotent for BioImageFlow-owned
+console handlers; ``force=True`` replaces only those handlers and
+leaves unrelated user handlers in place.
+
+``configure_logging()`` also delegates Wetlands console setup to
+``wetlands.logger.enable_console_logging``. Wetlands 1.1.0 routes
+worker stdout to ``INFO`` / stdout and worker stderr to ``ERROR`` /
+stderr.
 
 Adjusting verbosity
 -------------------
@@ -31,7 +46,7 @@ The standard ``logging`` API works:
 Routing to a file
 -----------------
 
-Replace or supplement the default ``StreamHandler``:
+Add your own handlers with the standard ``logging`` API:
 
 .. code-block:: python
 
@@ -46,8 +61,10 @@ Worker logs
 -----------
 
 Worker process output is forwarded to the ``wetlands`` logger by the
-Wetlands runtime. Hosts that surface execution logs in a UI typically
-attach a custom handler to that logger and pump records onto a
-dispatch queue.
+Wetlands runtime. Wetlands owns its file logging through its
+environment manager; BioImageFlow does not duplicate or wrap that file
+logging behavior. Hosts that surface execution logs in a UI typically
+attach a custom handler to the ``wetlands`` logger and pump records
+onto a dispatch queue.
 
 Specs.md §11 covers the contract end-to-end.

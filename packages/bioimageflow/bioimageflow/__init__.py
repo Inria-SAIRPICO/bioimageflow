@@ -41,4 +41,5 @@ from bioimageflow.registry import (
 )
 from bioimageflow.session import WorkflowSession as WorkflowSession
 from bioimageflow.env_manager import configure_wetlands as configure_wetlands
+from bioimageflow.logging_config import configure_logging as configure_logging
 from bioimageflow.paths import get_home as get_home, get_tool_store_path as get_tool_store_path, get_wetlands_path as get_wetlands_path

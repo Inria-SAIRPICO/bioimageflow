@@ -101,23 +101,6 @@ def topological_order(workflow: Any) -> list[str]:
     return list(TopologicalSorter(dep_graph).static_order())
 
 
-def _configure_default_logging() -> None:
-    """Attach a StreamHandler to the bioimageflow and wetlands loggers.
-
-    Called once at engine init so that worker output and engine messages
-    are visible on stdout by default.  No-op if handlers already exist.
-    """
-    fmt = logging.Formatter("%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
-
-    for name in ("bioimageflow", "wetlands"):
-        lg = logging.getLogger(name)
-        if not lg.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(fmt)
-            lg.addHandler(handler)
-            lg.setLevel(logging.INFO)
-
-
 def _to_python(val: Any) -> Any:
     """Convert numpy scalars to native Python types.
 
@@ -463,7 +446,6 @@ class DefaultEngine:
         wetlands_config: dict[str, Any] | None = None,
         force_sequential: bool = False,
     ) -> None:
-        _configure_default_logging()
         self._use_wetlands = use_wetlands
         self._force_sequential = force_sequential
         self._progress_lock = threading.Lock()

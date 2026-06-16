@@ -122,7 +122,7 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
     result = wf.compute(terminal)
 
     assert not result.empty
-    assert {"avg_spots_fols2", "avg_spots_csfr1"} & set(result.columns)
+    assert {"avg_fols2_per_nucleus", "avg_csfr1_per_nucleus"} <= set(result.columns)
 
 
 @pytest.mark.slow
