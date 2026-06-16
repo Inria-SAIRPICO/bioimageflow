@@ -18,13 +18,17 @@ COMPLETE_TEST_MARKERS = [
     "model_runtime: tests that require optional model runtimes or model downloads",
 ]
 
+EXTERNAL_TEST_MARKER_NAMES = frozenset(
+    marker.split(":", 1)[0] for marker in COMPLETE_TEST_MARKERS
+)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--run-complete",
         action="store_true",
         default=False,
-        help="run complete tests marked with @pytest.mark.complete",
+        help="run complete and external tests",
     )
 
 
@@ -39,12 +43,13 @@ def pytest_collection_modifyitems(
     if config.getoption("--run-complete"):
         return
 
-    skip_complete = pytest.mark.skip(
-        reason="complete tests require --run-complete"
+    skip_external = pytest.mark.skip(
+        reason="external tests require --run-complete"
     )
     for item in items:
-        if "complete" in item.keywords:
-            item.add_marker(skip_complete)
+        marker_names = {marker.name for marker in item.iter_markers()}
+        if EXTERNAL_TEST_MARKER_NAMES.intersection(marker_names):
+            item.add_marker(skip_external)
 
 
 @pytest.fixture
