@@ -166,7 +166,11 @@ class Workflow:
         externally (e.g., cancel + join + invalidate).
         """
         import shutil
+        from bioimageflow.cache import dataframe_v1_result_key
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.engine import DefaultEngine, topological_order
         from bioimageflow.storage import get_node_dir
+        from bioimageflow.storage_v1 import StorageV1
 
         targets: set[str] = set()
         for nid in node_ids:
@@ -179,12 +183,67 @@ class Workflow:
                 targets.update(self.downstream_of(nid))
 
         cleared: set[str] = set()
+        self._discover_graph(list(self._nodes.values()))
+        engine = DefaultEngine(use_wetlands=False)
+        try:
+            plan = engine.plan(self)
+            plan_sig_hashes = {
+                name: entry.sig_hash
+                for name, entry in plan.items()
+                if entry.sig_hash
+            }
+        except Exception:
+            plan_sig_hashes = {}
+            sig_hashes: dict[Node, str] = {}
+            results: dict[Node, Any] = {}
+            for name in topological_order(self):
+                node = self._nodes[name]
+                try:
+                    _cached_df, sig_hash = engine._check_node_cache(
+                        node, results, sig_hashes, self,
+                    )
+                except Exception:
+                    sig_hash = engine._compute_sig_hash(
+                        node,
+                        "",
+                        self._dataframe_tool_signature_params(node),
+                        {
+                            arg.name: sig_hashes[arg]
+                            for arg in node._args
+                            if isinstance(arg, Node) and arg in sig_hashes
+                        },
+                        self,
+                    ) if isinstance(node.tool, DataFrameTool) else None
+                if sig_hash is not None:
+                    sig_hashes[node] = sig_hash
+                    plan_sig_hashes[name] = sig_hash
+        v1_storage = StorageV1(self.storage_path)
         for name in targets:
             node_dir = get_node_dir(self.storage_path, name)
+            node = self._nodes[name]
+            sig_hash = plan_sig_hashes.get(name)
+            if isinstance(node.tool, DataFrameTool) and sig_hash:
+                result_key = dataframe_v1_result_key(name, sig_hash)
+                current_path = v1_storage.result_dir(result_key) / "current.json"
+                if current_path.exists():
+                    current_path.unlink()
+                    cleared.add(name)
             if node_dir.exists():
                 shutil.rmtree(node_dir)
                 cleared.add(name)
         return cleared
+
+    def _dataframe_tool_signature_params(self, node: Node) -> dict[str, Any]:
+        from bioimageflow.validation import is_path_type
+
+        input_annotations = node.tool.Inputs._get_all_annotations()
+        args_dict = dict(node._constant_bindings)
+        for field_name in input_annotations:
+            if field_name not in args_dict and hasattr(node.tool.Inputs, field_name):
+                args_dict[field_name] = getattr(node.tool.Inputs, field_name)
+            if field_name in args_dict and is_path_type(input_annotations[field_name]):
+                args_dict[field_name] = _absolute_runtime_path(args_dict[field_name])
+        return args_dict
 
     def downstream_of(self, node_name: str) -> set[str]:
         """Return node names transitively downstream of ``node_name``.

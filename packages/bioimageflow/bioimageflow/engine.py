@@ -27,6 +27,8 @@ from bioimageflow.cache import (
     cache_lookup,
     cache_save,
     cache_load,
+    dataframe_v1_lookup,
+    dataframe_v1_publish,
 )
 from bioimageflow.node import IndexAlignmentError, Node
 from bioimageflow.storage import (
@@ -816,6 +818,13 @@ class DefaultEngine:
             return None, None
 
         # ── Cache lookup ──
+        if isinstance(node.tool, DataFrameTool):
+            df = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
+            if df is None:
+                return None, sig_hash
+            df = self._coerce_numeric_columns(df)
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
+
         node_dir = get_node_dir(workflow.storage_path, node.name)
         cached = cache_lookup(node_dir, sig_hash)
         if not cached:
@@ -823,10 +832,7 @@ class DefaultEngine:
 
         df = self._coerce_numeric_columns(cache_load(cached))
         # Restore shared arrays for ProcessingTools with column bindings
-        if (
-            isinstance(node.tool, ProcessingTool)
-            and node._column_bindings
-        ):
+        if node._column_bindings:
             cached_hash_dir = find_hash_dir(node_dir, sig_hash)
             if cached_hash_dir is not None:
                 df = self._restore_shared_arrays(df, cached_hash_dir)
@@ -886,11 +892,10 @@ class DefaultEngine:
                           if isinstance(arg, Node) and arg in sig_hashes}
         sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_hashes, workflow)
 
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if cached:
+        cached = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
+        if cached is not None:
             self._emit_progress(workflow, node.name, "cached")
-            df = self._coerce_numeric_columns(cache_load(cached))
+            df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         self._emit_progress(workflow, node.name, "started")
@@ -905,9 +910,10 @@ class DefaultEngine:
         df.index = df.index.astype(str)
 
         self._emit_progress(workflow, node.name, "completed")
-        hash_dir = create_hash_dir(node_dir, sig_hash)
-        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__,
-                               workflow, parameters=args_dict, hash_dir=hash_dir)
+        df = self._coerce_numeric_columns(
+            dataframe_v1_publish(workflow.storage_path, node.name, sig_hash, df)
+        )
+        df = self._normalize_path_output_columns(df, node.tool)
         return df, sig_hash
 
     # ── ProcessingTool execution ───────────────────────────────────────
