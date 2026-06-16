@@ -13,8 +13,11 @@ Integrators trees.
    testing
    tool_packages
    tool_package_strategy
+   output_cache_storage
    agent_tool_workflow_playbook
    segmentation_tools
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.
+The target v1 replacement for output and cache storage is specified in
+:doc:`output_cache_storage` until it is folded into the exhaustive specification.

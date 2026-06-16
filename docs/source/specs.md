@@ -2476,6 +2476,8 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
 
 ### 7.2 Directory Structure
 
+> **Target v1 storage note:** This section describes the currently implemented legacy storage layout. The target replacement layout for output and cache storage is specified in [Output and Cache Storage Specification](reference/output_cache_storage.md).
+
 The library runtime storage layout below is rooted at `Workflow.storage_path`.
 When the platform runs a saved workflow, it sets that root from the active
 workspace: `workspace/outputs/<workflow_id>/`. The workspace itself also
