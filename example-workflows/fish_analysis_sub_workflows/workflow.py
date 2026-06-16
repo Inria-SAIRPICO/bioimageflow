@@ -163,7 +163,7 @@ def main() -> None:
     # Step-by-step execution — shows internal sub-workflow nodes with
     # scoped names like "fols2_analysis/spot_detection_1/extract_channel_1"
     engine = SequentialEngine(
-        use_wetlands=wf.use_wetlands,
+        use_wetlands=wf.engine_type == "wetlands",
         wetlands_config=wf.wetlands_config,
     )
 

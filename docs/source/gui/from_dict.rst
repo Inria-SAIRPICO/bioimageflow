@@ -72,7 +72,7 @@ Other parameters
 - ``storage_path_override`` — overrides ``data["config"]["storage_path"]``
   without mutating the dict. Useful when validating a graph against a
   specific cache path (e.g., a sandboxed scratch directory).
-- ``on_progress`` / ``use_wetlands`` / ``wetlands_config`` — passed
+- ``on_progress`` / ``engine`` / ``execution`` / ``wetlands_config`` — passed
   through to the constructed :class:`Workflow`. ``None`` means "use the
   values from ``data['config']`` (or defaults)".
 

@@ -27,7 +27,6 @@ from bioimageflow.cache import (
     cache_lookup,
     cache_save,
     cache_load,
-    cleanup_cache,
 )
 from bioimageflow.node import IndexAlignmentError, Node
 from bioimageflow.storage import (
@@ -1785,12 +1784,15 @@ class DefaultEngine:
         parameters: dict[str, Any] | None = None,
         hash_dir: Path | None = None,
     ) -> None:
-        """Save results to cache and run cleanup."""
+        """Save results to cache.
+
+        Legacy retention deletion is intentionally disabled for the clean API.
+        V1 cache pruning will be an explicit storage maintenance operation.
+        """
         cache_save(node_dir, sig_hash, df, metadata={
             "tool": tool_name,
             "timestamp": time.time(),
         }, parameters=parameters, hash_dir=hash_dir)
-        cleanup_cache(node_dir, workflow.max_executions, workflow.max_age)
 
     # ── Index alignment ────────────────────────────────────────────────
 

@@ -48,7 +48,7 @@ the SAIRPICO binaries documented by each command wrapper.
 
 ## Assumptions
 
-- The workflow uses `use_wetlands=False`.
+- The workflow uses the default direct engine for deterministic command-construction tests.
 - Real execution requires the SAIRPICO `simgmedian2d` and
   `simgrichardsonlucy2d` commands.
 - Default tests validate command construction with fake subprocess behavior,

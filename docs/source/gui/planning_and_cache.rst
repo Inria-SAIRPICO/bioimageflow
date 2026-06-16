@@ -21,10 +21,7 @@ Workflow.plan()
    for name, entry in plan.items():
        print(name, entry.status, entry.sig_hash[:12])
 
-It instantiates an in-process :class:`DefaultEngine` with
-``use_wetlands=False`` — **no Wetlands worker pools are launched**, no
-tool code runs. The hashes returned are byte-identical to what
-``compute()`` would compute.
+It uses the direct planning path — **no Wetlands worker pools are launched** and no tool code runs.
 
 NodePlan
 --------

@@ -31,7 +31,7 @@ def build_workflow(
     storage = Path(storage_path)
     source = _write_synthetic_input(storage / "data")
 
-    wf = Workflow(storage_path=str(storage / "bif"), use_wetlands=False)
+    wf = Workflow(storage_path=str(storage / "bif"))
     with wf:
         read = ReadImage()(input_image=source, name="read_source")
         selected = SelectDimensions()(

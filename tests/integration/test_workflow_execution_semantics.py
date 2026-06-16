@@ -23,7 +23,6 @@ def _build_loader_and_tagged(
     wf = Workflow(
         storage_path=storage_path,
         on_progress=on_progress,
-        use_wetlands=False,
     )
     with wf:
         raw = FileLoader()(path=str(data_path))
@@ -83,7 +82,6 @@ class TestTargetExecution:
         with Workflow(
             storage_path=storage,
             on_progress=lambda e: events.append(e),
-            use_wetlands=False,
         ) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             selected = StubSegmenter()(
@@ -131,7 +129,6 @@ class TestFailureAndCancellation:
             with Workflow(
                 storage_path=storage,
                 on_progress=lambda e: events.append(e),
-                use_wetlands=False,
             ) as wf:
                 raw = FileLoader()(path=str(tmp_workspace / "data"))
                 masks = StubSegmenter()(input_image=raw["path"])
@@ -143,7 +140,7 @@ class TestFailureAndCancellation:
             for e in events
         )
 
-        with Workflow(storage_path=storage, use_wetlands=False) as wf:
+        with Workflow(storage_path=storage) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             masks = StubSegmenter()(input_image=raw["path"])
             failed = FailingConsumer()(mask=masks["mask"])
@@ -161,7 +158,6 @@ class TestFailureAndCancellation:
         with Workflow(
             storage_path=storage,
             on_progress=lambda e: cached_events.append(e),
-            use_wetlands=False,
         ) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             masks = StubSegmenter()(input_image=raw["path"])
@@ -196,7 +192,6 @@ class TestFailureAndCancellation:
             with Workflow(
                 storage_path=storage,
                 on_progress=lambda e: events.append(e),
-                use_wetlands=False,
             ) as wf:
                 raw = FileLoader()(path=str(tmp_workspace / "data"))
                 masks = CancellingSegmenter()(input_image=raw["path"])
@@ -207,7 +202,7 @@ class TestFailureAndCancellation:
             for e in events
         )
 
-        with Workflow(storage_path=storage, use_wetlands=False) as wf:
+        with Workflow(storage_path=storage) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             masks = CancellingSegmenter()(input_image=raw["path"])
             plan = wf.plan()
@@ -243,7 +238,7 @@ class TestSubWorkflowPlanCache:
 
         storage = tmp_workspace / "results"
 
-        with Workflow(storage_path=storage, use_wetlands=False) as wf:
+        with Workflow(storage_path=storage) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             results = SegmentOnly()(image=raw["path"])
             wf.compute(results)
@@ -252,7 +247,6 @@ class TestSubWorkflowPlanCache:
         with Workflow(
             storage_path=storage,
             on_progress=lambda e: events.append(e),
-            use_wetlands=False,
         ) as wf:
             raw = FileLoader()(path=str(tmp_workspace / "data"))
             results = SegmentOnly()(image=raw["path"])

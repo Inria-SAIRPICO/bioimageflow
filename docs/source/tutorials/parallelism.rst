@@ -123,15 +123,15 @@ complete:
 Leave it ``None`` (the default) when the tool's runtime is bounded; set
 it only when you have observed deadlocks in third-party code.
 
-engine="sequential" for debugging
----------------------------------
+execution="sequential" for debugging
+------------------------------------
 
-Constructing a workflow with ``engine="sequential"`` and ``max_workers=1``
+Constructing a workflow with ``execution="sequential"`` and ``max_workers=1``
 gives deterministic, single-threaded execution that is easier to debug:
 
 .. code-block:: python
 
-   with Workflow(engine="sequential", max_workers=1) as wf:
+   with Workflow(execution="sequential", max_workers=1) as wf:
        ...
 
 Use it when chasing a non-deterministic bug; switch back to the default

@@ -85,20 +85,24 @@ class Workflow:
     def __init__(
         self,
         storage_path: str | Path = "./bif_data",
-        engine: str = "sequential",
-        max_executions: int = 0,
-        max_age: str | None = None,
+        engine: str = "direct",
+        execution: str = "parallel",
         on_progress: Callable[[ProgressEvent], None] | None = None,
-        use_wetlands: bool = True,
         wetlands_config: dict[str, Any] | None = None,
         max_workers: int = 1,
     ) -> None:
+        if engine not in {"direct", "wetlands"}:
+            raise ValueError(
+                f"Unknown engine '{engine}'. Expected 'direct' or 'wetlands'."
+            )
+        if execution not in {"parallel", "sequential"}:
+            raise ValueError(
+                f"Unknown execution '{execution}'. Expected 'parallel' or 'sequential'."
+            )
         self.storage_path = _absolute_runtime_path(storage_path)
         self.engine_type = engine
-        self.max_executions = max_executions
-        self.max_age = max_age
+        self.execution = execution
         self.on_progress = on_progress
-        self.use_wetlands = use_wetlands
         self.wetlands_config = wetlands_config
         self.max_workers = max_workers
         self._env_configs: dict[str, WorkflowEnvironment] = {}
@@ -225,6 +229,19 @@ class Workflow:
         self._dev_mode = dev_mode
         self._discover_graph(list(self._nodes.values()))
         return DefaultEngine(use_wetlands=False).plan(self)
+
+    def _make_engine(self) -> "DefaultEngine":
+        """Create the configured local execution engine."""
+        from bioimageflow.engine import DefaultEngine, SequentialEngine
+
+        use_wetlands = self.engine_type == "wetlands"
+        kwargs: dict[str, Any] = {
+            "use_wetlands": use_wetlands,
+            "wetlands_config": self.wetlands_config,
+        }
+        if self.execution == "sequential":
+            return SequentialEngine(**kwargs)
+        return DefaultEngine(**kwargs)
 
     def validate(self, *, dev_mode: bool = False) -> list[ValidationError]:
         """Return all domain-level problems in this workflow.
@@ -501,7 +518,7 @@ class Workflow:
 
         Parameters:
             dev_mode: Development mode flag
-            engine: Optional pre-configured engine to use. If None, a default DefaultEngine is created using this workflow's use_wetlands and wetlands_config. Providing an engine allows post-execution inspection and testing."""
+            engine: Optional pre-configured engine to use. If None, the configured engine backend and execution policy are used. Providing an engine allows post-execution inspection and testing."""
         self._cancel_event.clear()
         self._dev_mode = dev_mode
 
@@ -528,11 +545,7 @@ class Workflow:
         self._discover_graph(target_list)
 
         if engine is None:
-            from bioimageflow.engine import DefaultEngine
-            engine = DefaultEngine(
-                use_wetlands=self.use_wetlands,
-                wetlands_config=self.wetlands_config,
-            )
+            engine = self._make_engine()
         results = engine.execute(target_list, self)
 
         if len(target_list) == 1:
@@ -585,11 +598,7 @@ class Workflow:
         self._discover_graph(target_list)
 
         if engine is None:
-            from bioimageflow.engine import DefaultEngine
-            engine = DefaultEngine(
-                use_wetlands=self.use_wetlands,
-                wetlands_config=self.wetlands_config,
-            )
+            engine = self._make_engine()
         yield from engine.execute_steps(target_list, self)
 
     def _discover_graph(self, targets: list[Node]) -> None:
@@ -737,8 +746,7 @@ class Workflow:
             "config": {
                 "storage_path": str(self.storage_path),
                 "engine": self.engine_type,
-                "max_executions": self.max_executions,
-                "max_age": self.max_age,
+                "execution": self.execution,
             },
         }
         if custom_tool_modules:
@@ -832,7 +840,8 @@ class Workflow:
         auto_install: bool = True,
         storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
-        use_wetlands: bool | None = None,
+        engine: str | None = None,
+        execution: str | None = None,
         wetlands_config: dict[str, Any] | None = None,
     ) -> "tuple[Workflow, list[ValidationError]]": ...
 
@@ -847,7 +856,8 @@ class Workflow:
         auto_install: bool = True,
         storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
-        use_wetlands: bool | None = None,
+        engine: str | None = None,
+        execution: str | None = None,
         wetlands_config: dict[str, Any] | None = None,
     ) -> "Workflow": ...
 
@@ -861,7 +871,8 @@ class Workflow:
         auto_install: bool = True,
         storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
-        use_wetlands: bool | None = None,
+        engine: str | None = None,
+        execution: str | None = None,
         wetlands_config: dict[str, Any] | None = None,
     ) -> "Workflow | tuple[Workflow, list[ValidationError]]":
         """Reconstruct a Workflow from a serialized dict.
@@ -890,7 +901,7 @@ class Workflow:
             Override ``data["config"]["storage_path"]`` without mutating
             the dict. Useful for GUIs that validate a graph against a
             specific cache path.
-        on_progress, use_wetlands, wetlands_config
+        on_progress, engine, execution, wetlands_config
             Passed to :class:`Workflow`. ``None`` means "use the values
             from ``data['config']`` (or defaults)".
 
@@ -907,14 +918,11 @@ class Workflow:
 
         wf_kwargs: dict[str, Any] = dict(
             storage_path=storage_path,
-            engine=config.get("engine", "sequential"),
-            max_executions=config.get("max_executions", 0),
-            max_age=config.get("max_age"),
+            engine=engine if engine is not None else config.get("engine", "direct"),
+            execution=execution if execution is not None else config.get("execution", "parallel"),
         )
         if on_progress is not None:
             wf_kwargs["on_progress"] = on_progress
-        if use_wetlands is not None:
-            wf_kwargs["use_wetlands"] = use_wetlands
         if wetlands_config is not None:
             wf_kwargs["wetlands_config"] = wetlands_config
         wf = cls(**wf_kwargs)

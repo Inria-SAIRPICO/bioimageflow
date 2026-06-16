@@ -24,7 +24,7 @@ def build_parameter_space_workflow(
     data_dir: str = "./data",
     storage_path: str = "./parameter_space_results",
     pattern: str = "*.tif",
-    use_wetlands: bool = True,
+    engine: str = "direct",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """
@@ -46,7 +46,7 @@ def build_parameter_space_workflow(
     """
     wf = Workflow(
         storage_path=storage_path,
-        use_wetlands=use_wetlands,
+        engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:

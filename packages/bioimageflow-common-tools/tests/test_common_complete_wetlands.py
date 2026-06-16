@@ -29,8 +29,7 @@ def test_connected_components_labels_binary_objects_through_wetlands(
     iio.imwrite(input_path, image)
 
     with Workflow(
-        storage_path=tmp_path / "results",
-        use_wetlands=True,
+        storage_path=tmp_path / "results", engine="wetlands",
         wetlands_config=complete_wetlands_config,
     ) as wf:
         labels_node = ConnectedComponents()(

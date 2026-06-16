@@ -30,7 +30,7 @@ inputs.
 from bioimageflow import Workflow
 from bioimageflow_common_tools import CrossJoin, Files, Generate
 
-with Workflow(storage_path="results", use_wetlands=False) as wf:
+with Workflow(storage_path="results") as wf:
     images = Files()(path="demo-images", pattern="*.tif", name="images")
     thresholds = Generate()(
         column_name="threshold",

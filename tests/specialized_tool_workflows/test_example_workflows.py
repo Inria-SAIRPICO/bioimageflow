@@ -58,7 +58,6 @@ def test_specialized_example_workflow_executes(
     workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)
     wf, node = module.build_workflow(storage_path=str(tmp_path / workflow_name))
-    wf.use_wetlands = False
 
     result = wf.compute(node)
 

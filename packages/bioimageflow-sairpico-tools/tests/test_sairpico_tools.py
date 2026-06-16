@@ -116,7 +116,7 @@ def test_output_image_override_uses_output_template_not_input_binding(
     output_path = tmp_path / "median.tif"
     iio.imwrite(input_path, np.zeros((8, 8), dtype=np.uint16))
 
-    with Workflow(storage_path=tmp_path / "results", use_wetlands=False):
+    with Workflow(storage_path=tmp_path / "results"):
         node = MedianDenoising()(
             input_image=input_path,
             denoising_type="2D",

@@ -74,8 +74,7 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=1,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -95,8 +94,7 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=4,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -115,8 +113,7 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -136,8 +133,7 @@ class TestRowParallelism:
 
         with pytest.raises(Exception, match="Intentional test error"):
             with Workflow(
-                storage_path=workspace / "results",
-                use_wetlands=True,
+                storage_path=workspace / "results", engine="wetlands",
                 max_workers=2,
             ) as wf:
                 raw = load(path=str(workspace / "data"))
@@ -150,8 +146,7 @@ class TestRowParallelism:
         tool = BatchTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -177,8 +172,7 @@ class TestGpuWorkerAssignment:
         engine = DefaultEngine(use_wetlands=True)
         # Verify the engine detects GPU requirement
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -194,8 +188,7 @@ class TestGpuWorkerAssignment:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=1,  # workflow default
         ) as wf:
             env = wf.get_environment(tool)
@@ -214,8 +207,7 @@ class TestGpuWorkerAssignment:
         engine = DefaultEngine(use_wetlands=True)
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -233,8 +225,7 @@ class TestGpuWorkerAssignment:
             return {"MY_DEVICE": str(i)}
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
         ) as wf:
             env = wf.get_environment(tool)
             env.worker_env = custom_env
@@ -260,8 +251,7 @@ class TestSubRowProgress:
         tool = ProgressReportingTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             on_progress=lambda e: events.append(e),
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -286,8 +276,7 @@ class TestSubRowProgress:
 
         with pytest.raises(Exception):
             with Workflow(
-                storage_path=workspace / "results",
-                use_wetlands=True,
+                storage_path=workspace / "results", engine="wetlands",
                 on_progress=lambda e: events.append(e),
             ) as wf:
                 raw = load(path=str(workspace / "data"))
@@ -305,8 +294,7 @@ class TestSubRowProgress:
         tool = BatchTool()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             on_progress=lambda e: events.append(e),
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -332,8 +320,7 @@ class TestWorkflowCancellation:
 
         with pytest.raises(WorkflowCancelledError):
             with Workflow(
-                storage_path=workspace / "results",
-                use_wetlands=True,
+                storage_path=workspace / "results", engine="wetlands",
             ) as wf:
                 raw = load(path=str(workspace / "data"))
                 out = tool(input_path=raw["path"])
@@ -359,8 +346,7 @@ class TestWorkflowCancellation:
 
         with pytest.raises(WorkflowCancelledError):
             with Workflow(
-                storage_path=workspace / "results",
-                use_wetlands=True,
+                storage_path=workspace / "results", engine="wetlands",
                 on_progress=lambda e: events.append(e),
             ) as wf:
                 raw = load(path=str(workspace / "data"))
@@ -395,8 +381,7 @@ class TestBranchParallelism:
 
         t0 = time.monotonic()
         with Workflow(
-            storage_path=large_workspace / "results",
-            use_wetlands=True,
+            storage_path=large_workspace / "results", engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(large_workspace / "data"))
@@ -427,8 +412,7 @@ class TestBranchParallelism:
         df_seq = pd.DataFrame()
         seq_engine = SequentialEngine(use_wetlands=True)
         with Workflow(
-            storage_path=workspace / "seq_results",
-            use_wetlands=True,
+            storage_path=workspace / "seq_results", engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -436,8 +420,7 @@ class TestBranchParallelism:
 
         # Parallel (default engine)
         with Workflow(
-            storage_path=workspace / "par_results",
-            use_wetlands=True,
+            storage_path=workspace / "par_results", engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -458,8 +441,7 @@ class TestBranchParallelism:
         add_col = AddColumn()
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             add_col(column_name="tag", value="test")
@@ -477,8 +459,7 @@ class TestBranchParallelism:
         engine = SequentialEngine(use_wetlands=True)
 
         with Workflow(
-            storage_path=workspace / "results",
-            use_wetlands=True,
+            storage_path=workspace / "results", engine="wetlands",
             max_workers=4,  # should be ignored by SequentialEngine
         ) as wf:
             raw = load(path=str(workspace / "data"))

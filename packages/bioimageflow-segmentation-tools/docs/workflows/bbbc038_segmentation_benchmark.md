@@ -35,7 +35,7 @@ extension, not part of the default test path.
 from bioimageflow import Workflow
 from bioimageflow_segmentation_tools import PostprocessLabels, ThresholdSegment
 
-with Workflow(storage_path="results", use_wetlands=False) as wf:
+with Workflow(storage_path="results") as wf:
     labels = ThresholdSegment()(
         input_image="input.tif",
         threshold=5.0,

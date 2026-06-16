@@ -32,7 +32,7 @@ converted artifacts exist.
 from bioimageflow import Workflow
 from bioimageflow_io_tools import ConvertToOmeTiff, ReadImage, SelectDimensions
 
-with Workflow(storage_path="results", use_wetlands=False) as wf:
+with Workflow(storage_path="results") as wf:
     image = ReadImage()(input_image="source.tif", name="read")
     plane = SelectDimensions()(
         input_image=image["output_image"],

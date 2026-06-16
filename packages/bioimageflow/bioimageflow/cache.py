@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import time
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -162,33 +161,3 @@ def cache_load(cache_path: Path) -> pd.DataFrame:
                     pass
     df.index = df.index.astype(str)
     return df
-
-
-def cleanup_cache(node_dir: Path, max_executions: int = 0, max_age: str | None = None) -> None:
-    """Remove old hash dirs based on retention policy."""
-    import shutil
-
-    node_dir = Path(node_dir)
-    if not node_dir.exists():
-        return
-    hash_dirs = sorted(
-        [d for d in node_dir.iterdir() if d.is_dir()],
-        key=lambda d: d.stat().st_mtime,
-        reverse=True,
-    )
-    # max_executions=0 means keep only the latest; N means keep N total
-    to_keep = max_executions if max_executions > 0 else 1
-    for d in hash_dirs[to_keep:]:
-        shutil.rmtree(d)
-
-    if max_age is not None:
-        now = time.time()
-        if max_age.endswith('d'):
-            max_seconds = int(max_age[:-1]) * 86400
-        elif max_age.endswith('h'):
-            max_seconds = int(max_age[:-1]) * 3600
-        else:
-            max_seconds = int(max_age)
-        for d in node_dir.iterdir():
-            if d.is_dir() and (now - d.stat().st_mtime) > max_seconds:
-                shutil.rmtree(d)
