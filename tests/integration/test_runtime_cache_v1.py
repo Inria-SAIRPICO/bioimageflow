@@ -10,6 +10,7 @@ import pytest
 
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
+from bioimageflow.sub_workflow import SubWorkflow
 from bioimageflow.cache import (
     dataframe_v1_result_key,
     processing_v1_prepare_attempt,
@@ -43,6 +44,13 @@ class DoubleValue(DataFrameTool):
         result = df.copy()
         result["double"] = result["value"] * 2
         return result
+
+
+class FailingDataFrameTool(DataFrameTool):
+    display_name = "Failing DataFrame Tool"
+
+    def transform(self, df: pd.DataFrame, arguments) -> pd.DataFrame:
+        raise RuntimeError("planned failure")
 
 
 class MultiRowTable(DataFrameTool):
@@ -131,6 +139,17 @@ class FailingSourceAssetWriter(ProcessingTool):
         assert context is not None
         Path(arguments.mask).write_text(arguments.text)
         raise RuntimeError("boom")
+
+
+class SlowSourceAssetWriter(SourceAssetWriter):
+    display_name = "Slow Source Asset Writer"
+    environment = EnvironmentSpec(name="slow_source_asset_writer", dependencies={})
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        import time
+
+        time.sleep(0.2)
+        return super().process_row(arguments, context=context)
 
 
 class EscapingSourceAssetWriter(ProcessingTool):
@@ -292,8 +311,32 @@ class ColumnBoundSharedMemoryWriter(ProcessingTool):
             return self.Outputs(result=ref)
 
 
+class ConstantTableSubWorkflow(SubWorkflow):
+    display_name = "Constant Table SubWorkflow"
+
+    class Outputs(IOModel):
+        value: int
+        label: str
+
+    def build(self, inputs):
+        table = CountingTable()(value=16)
+        return {"value": table["value"], "label": table["label"]}
+
+
 def _current_pointer_files(storage_path: Path) -> list[Path]:
     return sorted((storage_path / "cache" / "v1" / "results").glob("*/*/rk_*/current.json"))
+
+
+def _run_dirs(storage_path: Path) -> list[Path]:
+    runs_root = storage_path / "runs"
+    if not runs_root.exists():
+        return []
+    return sorted(path for path in runs_root.iterdir() if path.is_dir())
+
+
+def _latest_success_run_dir(storage_path: Path) -> Path:
+    latest = json.loads((storage_path / "runs" / "latest-success.bioimageflow-link.json").read_text())
+    return storage_path / "runs" / latest["target"]
 
 
 def _parquet_digest(df: pd.DataFrame, path: Path) -> str:
@@ -330,6 +373,163 @@ def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path:
     assert CountingTable.executions == 1
     assert ("CountingTable_1", "cached") in events
     assert _current_pointer_files(storage_path) == current_files
+
+
+def test_compute_writes_run_view_for_dataframe_cache_miss_and_hit(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    CountingTable.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=12)
+        wf.compute(node)
+        node_name = node.name
+
+    [first_run] = _run_dirs(storage_path)
+    first_run_metadata = json.loads((first_run / "run.json").read_text())
+    assert first_run_metadata["schema"] == "bioimageflow.run.v1"
+    assert first_run_metadata["status"] == "succeeded"
+    assert first_run_metadata["target_nodes"] == [node_name]
+    first_result = json.loads((first_run / "nodes" / node_name / "result.json").read_text())
+    assert first_result["schema"] == "bioimageflow.run.node_result.v1"
+    assert first_result["node_key"] == node_name
+    assert first_result["cache_hit"] is False
+    assert StorageV1(storage_path).load_current(first_result["result_key"]).record_id == first_result["record_id"]
+    assert (first_run / "nodes" / node_name / "record.bioimageflow-link.json").exists()
+    assert _latest_success_run_dir(storage_path) == first_run
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=12)
+        wf.compute(node)
+
+    assert CountingTable.executions == 1
+    second_run = [path for path in _run_dirs(storage_path) if path != first_run][0]
+    second_result = json.loads((second_run / "nodes" / node_name / "result.json").read_text())
+    assert second_result["result_key"] == first_result["result_key"]
+    assert second_result["record_id"] == first_result["record_id"]
+    assert second_result["cache_hit"] is True
+    latest_node = json.loads((storage_path / "latest" / f"{node_name}.bioimageflow-link.json").read_text())
+    assert latest_node["target"] == f"../runs/{second_run.name}/nodes/{node_name}"
+    assert _latest_success_run_dir(storage_path) == second_run
+
+
+def test_compute_writes_run_view_output_pointers_for_processing_assets(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="view")
+        wf.compute(node)
+        node_name = node.name
+
+    [run_dir] = _run_dirs(storage_path)
+    result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
+    assert result["cache_hit"] is False
+    assert result["outputs"][0]["kind"] == "owned_asset"
+    asset_path = result["outputs"][0]["path"]
+    output_link_path = run_dir / "nodes" / node_name / "outputs" / f"{asset_path}.bioimageflow-link.json"
+    output_link = json.loads(output_link_path.read_text())
+    assert output_link["schema"] == "bioimageflow.link.v1"
+    assert output_link["kind"] == "file"
+    assert output_link["digest"] == result["outputs"][0]["digest"]
+    assert output_link["target"].endswith(f"records/{result['record_id']}/{asset_path}")
+
+
+def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    CountingTable.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=13)
+        wf.compute(node)
+        node_name = node.name
+    assert CountingTable.executions == 1
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=13)
+        steps = wf.compute_steps(node)
+        step = next(steps)
+        assert step.cached is True
+        step.execute()
+        with pytest.raises(StopIteration):
+            next(steps)
+
+    assert CountingTable.executions == 1
+    latest_run = _latest_success_run_dir(storage_path)
+    result = json.loads((latest_run / "nodes" / node_name / "result.json").read_text())
+    assert result["cache_hit"] is True
+
+
+def test_compute_steps_auto_execute_writes_successful_run_view(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=14)
+        steps = wf.compute_steps(node)
+        step = next(steps)
+        assert step.node_name == node.name
+        with pytest.raises(StopIteration):
+            next(steps)
+        node_name = node.name
+
+    latest_run = _latest_success_run_dir(storage_path)
+    result = json.loads((latest_run / "nodes" / node_name / "result.json").read_text())
+    assert result["cache_hit"] is False
+
+
+def test_failed_compute_keeps_successful_node_latest_without_latest_success(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=15)
+        failing = FailingDataFrameTool()(table)
+        with pytest.raises(RuntimeError, match="planned failure"):
+            wf.compute(failing)
+        table_name = table.name
+        failing_name = failing.name
+
+    [run_dir] = _run_dirs(storage_path)
+    run = json.loads((run_dir / "run.json").read_text())
+    assert run["status"] == "failed"
+    assert (run_dir / "nodes" / table_name / "result.json").exists()
+    assert not (run_dir / "nodes" / failing_name / "result.json").exists()
+    assert not (storage_path / "runs" / "latest-success.bioimageflow-link.json").exists()
+    latest_node = json.loads((storage_path / "latest" / f"{table_name}.bioimageflow-link.json").read_text())
+    assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{table_name}"
+
+
+def test_failed_parallel_compute_keeps_successful_sibling_run_view(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        slow_success = SlowSourceAssetWriter()(text="ok")
+        fast_failure = FailingSourceAssetWriter()(text="boom")
+        with pytest.raises(RuntimeError, match="boom"):
+            wf.compute(slow_success, fast_failure)
+        success_name = slow_success.name
+
+    [run_dir] = _run_dirs(storage_path)
+    run = json.loads((run_dir / "run.json").read_text())
+    assert run["status"] == "failed"
+    assert (run_dir / "nodes" / success_name / "result.json").exists()
+    assert not (storage_path / "runs" / "latest-success.bioimageflow-link.json").exists()
+    latest_node = json.loads((storage_path / "latest" / f"{success_name}.bioimageflow-link.json").read_text())
+    assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{success_name}"
+
+
+def test_compute_writes_run_view_for_subworkflow_internal_nodes(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    CountingTable.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = ConstantTableSubWorkflow()()
+        wf.compute(node)
+        subworkflow_name = node.name
+
+    [run_dir] = _run_dirs(storage_path)
+    internal_result = run_dir / "nodes" / subworkflow_name / "CountingTable_1" / "result.json"
+    assert internal_result.exists()
+    result = json.loads(internal_result.read_text())
+    assert result["node_key"] == f"{subworkflow_name}/CountingTable_1"
+    assert result["cache_hit"] is False
 
 
 def test_dataframe_tool_parameter_change_creates_distinct_v1_result_without_legacy_data(tmp_path: Path) -> None:

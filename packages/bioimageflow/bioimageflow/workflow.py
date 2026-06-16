@@ -13,6 +13,7 @@ import zipfile
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, overload
 from typing import TYPE_CHECKING
@@ -147,6 +148,7 @@ class Workflow:
         self._build_errors: list[ValidationError] = []
         self._failed_nodes: dict[str, ValidationError] = {}
         self._expected_node_names: set[str] | None = None
+        self._run_view_context: dict[str, Any] | None = None
 
     def __enter__(self) -> "Workflow":
         self._prev_workflow = get_active_workflow()
@@ -679,7 +681,17 @@ class Workflow:
 
         if engine is None:
             engine = self._make_engine()
-        results = engine.execute(target_list, self)
+        self._start_run_view(target_list)
+        try:
+            results = engine.execute(target_list, self)
+        except Exception as exc:
+            self._finish_run_view(
+                self._run_status_for_exception(exc),
+                update_latest_success=False,
+            )
+            raise
+        else:
+            self._finish_run_view("succeeded", update_latest_success=True)
 
         if len(target_list) == 1:
             return list(results.values())[0]
@@ -732,7 +744,75 @@ class Workflow:
 
         if engine is None:
             engine = self._make_engine()
-        yield from engine.execute_steps(target_list, self)
+        self._start_run_view(target_list)
+        try:
+            yield from engine.execute_steps(target_list, self)
+        except GeneratorExit:
+            self._finish_run_view("cancelled", update_latest_success=False)
+            raise
+        except Exception as exc:
+            self._finish_run_view(
+                self._run_status_for_exception(exc),
+                update_latest_success=False,
+            )
+            raise
+        else:
+            self._finish_run_view("succeeded", update_latest_success=True)
+
+    def _start_run_view(self, targets: list[Node]) -> None:
+        from bioimageflow.storage_v1 import StorageV1
+
+        storage = StorageV1(self.storage_path)
+        run_id = f"run_{storage.new_attempt_id()}"
+        started_at = datetime.now(timezone.utc).isoformat()
+        target_nodes = [target.name for target in targets]
+        self._run_view_context = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "target_nodes": target_nodes,
+        }
+        storage.write_run_metadata(
+            run_id,
+            workflow_identity=self._workflow_identity(target_nodes),
+            engine=f"{self.engine_type}:{self.execution}",
+            status="running",
+            target_nodes=target_nodes,
+            started_at=started_at,
+        )
+
+    def _finish_run_view(self, status: str, *, update_latest_success: bool) -> None:
+        context = self._run_view_context
+        self._run_view_context = None
+        if context is None:
+            return
+        from bioimageflow.storage_v1 import StorageV1
+
+        storage = StorageV1(self.storage_path)
+        run_id = str(context["run_id"])
+        storage.write_run_metadata(
+            run_id,
+            workflow_identity=self._workflow_identity(list(context["target_nodes"])),
+            engine=f"{self.engine_type}:{self.execution}",
+            status=status,
+            target_nodes=list(context["target_nodes"]),
+            started_at=str(context["started_at"]),
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        if update_latest_success:
+            storage.update_latest_success_run(run_id)
+
+    def _workflow_identity(self, target_nodes: list[str]) -> str:
+        payload = {
+            "nodes": sorted(self._nodes),
+            "targets": list(target_nodes),
+        }
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        return f"workflow:{digest}"
+
+    def _run_status_for_exception(self, exc: Exception) -> str:
+        from bioimageflow.engine import WorkflowCancelledError
+
+        return "cancelled" if isinstance(exc, WorkflowCancelledError) else "failed"
 
     def _discover_graph(self, targets: list[Node]) -> None:
         """Discover and register all nodes reachable from targets."""
