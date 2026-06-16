@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
-from bioimageflow.cache import dataframe_v1_result_key, processing_v1_result_key
+from bioimageflow.cache import processing_v1_result_key
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import get_node_dir
 from bioimageflow.storage_v1 import StorageV1
@@ -46,7 +46,8 @@ class TestDataFrameToolPlanCacheParity:
         wf1, tagged1 = _build_loader_and_tagged(storage, tmp_workspace / "data")
         pre_plan = wf1.plan()
         assert pre_plan["FileLoader_1"].status is NodePlanStatus.UNEXECUTED
-        assert pre_plan["AddColumn_1"].status is NodePlanStatus.UNEXECUTED
+        assert pre_plan["AddColumn_1"].status is NodePlanStatus.PENDING_UPSTREAM
+        assert pre_plan["AddColumn_1"].pending_upstreams == ("FileLoader_1",)
 
         df1 = wf1.compute(tagged1)
         assert set(df1["tag"]) == {"library"}
@@ -58,9 +59,11 @@ class TestDataFrameToolPlanCacheParity:
 
         v1_storage = StorageV1(storage)
         for node_name, entry in cached_plan.items():
-            result_key = dataframe_v1_result_key(node_name, entry.sig_hash)
+            assert entry.final_result_key is not None
+            result_key = entry.final_result_key
             pointer = v1_storage.load_current(result_key)
             assert pointer is not None
+            assert entry.selected_record_id == pointer.record_id
             record_dir = v1_storage.result_dir(result_key) / "records" / pointer.record_id
             assert (record_dir / "dataframe.parquet").exists()
             assert (record_dir / "manifest.json").exists()

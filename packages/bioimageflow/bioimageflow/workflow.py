@@ -226,8 +226,14 @@ class Workflow:
                 for name, entry in plan.items()
                 if entry.sig_hash
             }
+            plan_result_keys = {
+                name: entry.final_result_key
+                for name, entry in plan.items()
+                if entry.final_result_key
+            }
         except Exception:
             plan_sig_hashes = {}
+            plan_result_keys = {}
             sig_hashes: dict[Node, str] = {}
             results: dict[Node, Any] = {}
             for name in topological_order(self):
@@ -281,7 +287,7 @@ class Workflow:
             node = self._nodes[name]
             sig_hash = plan_sig_hashes.get(name)
             if isinstance(node.tool, DataFrameTool) and sig_hash:
-                result_key = dataframe_v1_result_key(name, sig_hash)
+                result_key = plan_result_keys.get(name) or dataframe_v1_result_key(name, sig_hash)
                 current_path = v1_storage.result_dir(result_key) / "current.json"
                 if current_path.exists():
                     current_path.unlink()
@@ -290,7 +296,7 @@ class Workflow:
                 isinstance(node.tool, ProcessingTool)
                 and sig_hash
             ):
-                result_key = processing_v1_result_key(name, sig_hash)
+                result_key = plan_result_keys.get(name) or processing_v1_result_key(name, sig_hash)
                 current_path = v1_storage.result_dir(result_key) / "current.json"
                 if current_path.exists():
                     current_path.unlink()
@@ -347,11 +353,10 @@ class Workflow:
         return visited
 
     def plan(self, *, dev_mode: bool = False) -> "dict[str, NodePlan]":
-        """Return a per-node cache-status and signature-hash plan.
+        """Return a per-node v1 cache-status plan.
 
         Instantiates a non-Wetlands :class:`DefaultEngine` and calls its
-        :meth:`plan` — the returned hashes are byte-identical to what
-        :meth:`compute` would compute. No tool code runs.
+        :meth:`plan`. No tool code runs.
         """
         from bioimageflow.engine import DefaultEngine
         self._dev_mode = dev_mode

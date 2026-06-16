@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bioimageflow import Workflow
+from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.cache import dataframe_v1_result_key, processing_v1_result_key
 from bioimageflow.storage_v1 import StorageV1
 
@@ -64,6 +64,19 @@ class TestInvalidate:
         assert cleared == {"StubSegmenter_1"}
         # Downstream cache survives.
         assert _processing_v1_current_exists(wf, "StubStats_1")
+
+    def test_no_cascade_leaves_downstream_pending_when_upstream_selection_is_removed(self, tmp_path: Path) -> None:
+        wf = _build_chain(tmp_path)
+        wf.compute()
+        cleared = wf.invalidate(["FileLoader_1"], cascade=False)
+        assert cleared == {"FileLoader_1"}
+
+        plan = wf.plan()
+
+        assert plan["FileLoader_1"].selected_record_id is None
+        assert plan["StubSegmenter_1"].status is NodePlanStatus.PENDING_UPSTREAM
+        assert plan["StubSegmenter_1"].final_result_key is None
+        assert plan["StubSegmenter_1"].pending_upstreams == ("FileLoader_1",)
 
     def test_unknown_node_raises_key_error(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)
