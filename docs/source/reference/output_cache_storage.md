@@ -2,7 +2,7 @@
 
 This document defines the target v1 on-disk layout for BioImageFlow workflow outputs and cache storage.
 It is a clean v1 target contract and does not preserve the legacy timestamp plus hash directory layout.
-Until `docs/source/specs.md` is updated to inline this contract, the exhaustive specification still describes the currently implemented layout.
+`docs/source/specs.md` summarizes the same public contract.
 
 The canonical cache is the source of truth.
 The human-facing output tree is a derived view over the canonical cache.
@@ -52,11 +52,11 @@ All paths below are rooted at `Workflow.storage_path`.
       nodes/
         <node-key>/
           result.json
-          record -> ../../../../cache/v1/results/<result-shard>/<result-key>/records/<record-id>
+          record.bioimageflow-link.json
           outputs/
-    latest-success -> <run-id>
+    latest-success.bioimageflow-link.json
   latest/
-    <node-key> -> ../runs/<run-id>/nodes/<node-key>
+    <node-key>.bioimageflow-link.json
   provenance_graph.json
 ```
 
@@ -250,7 +250,7 @@ If `current.json` is missing, cache lookup treats the result key as a miss.
 If valid record directories exist but `current.json` is missing after a crash, normal lookup must not pick a winner by filesystem iteration or mtime.
 An explicit repair operation may rebuild `current.json`, but it must report ambiguity when multiple valid records exist.
 
-If `current.json` points to a missing or invalid record, lookup must ignore it and report corruption or treat the result as a miss according to the caller's error policy.
+If `current.json` is corrupt, points outside the result-key directory, or points to a missing or invalid record, lookup must raise a cache corruption error.
 Normal publication must not silently replace an invalid current pointer; repair is a separate operation.
 
 Required fields:
@@ -488,7 +488,7 @@ runs/<run-id>/
   nodes/
     <node-key>/
       result.json
-      record -> ../../../../cache/v1/results/<result-shard>/<result-key>/records/<record-id>
+      record.bioimageflow-link.json
       outputs/
 ```
 
@@ -518,14 +518,14 @@ runs/<run-id>/
 }
 ```
 
-`record` is a symlink to the selected canonical record.
-`outputs/` may contain symlinks to individual user-facing artifacts for convenient browsing.
+`record.bioimageflow-link.json` is a pointer file to the selected canonical record.
+`outputs/` may contain pointer files to individual user-facing artifacts for convenient browsing.
 
 Example:
 
 ```text
-runs/<run-id>/nodes/segmentation/record -> ../../../../cache/v1/results/ab/cd/rk_.../records/rec_...
-runs/<run-id>/nodes/segmentation/outputs/mask.tif -> ../record/assets/mask.tif
+runs/<run-id>/nodes/segmentation/record.bioimageflow-link.json
+runs/<run-id>/nodes/segmentation/outputs/mask.tif.bioimageflow-link.json
 ```
 
 The run view records what the run used, including cache hits from previous runs.
@@ -537,30 +537,31 @@ It must not be used to decide cache hits.
 Each entry points to the latest successful result for that node, even if the workflow run later fails on another node.
 
 ```text
-latest/<node-key> -> ../runs/<run-id>/nodes/<node-key>
+latest/<node-key>.bioimageflow-link.json
 ```
 
-The latest fully successful workflow run is tracked separately:
+The latest fully successful workflow run is tracked separately with a pointer file:
 
 ```text
-runs/latest-success -> <run-id>
+runs/latest-success.bioimageflow-link.json
 ```
 
 The latest view should be updated after the run view has been written.
 Updating `latest/<node-key>` must be atomic:
 
-1. Create a temporary symlink or pointer file in the same parent directory.
+1. Create a temporary pointer file in the same parent directory.
 2. Atomically replace the old latest entry with the temporary entry.
 
 If a workflow run fails or is cancelled, the engine may still update `latest/<node-key>` for nodes that successfully resolved to a selected record before the failure.
-It must not update `runs/latest-success` unless the whole requested workflow run completed successfully.
+It must not update `runs/latest-success.bioimageflow-link.json` unless the whole requested workflow run completed successfully.
 
 The latest view is allowed to change over time.
 It must not be included in result-key hashing.
 
-## Symlink Fallback
+## Pointer Files and Symlink Export
 
-If symlinks are unavailable, disabled, or not portable in the active environment, the engine writes pointer files instead.
+The engine writes pointer files by default for run and latest views.
+This avoids platform-specific symlink permissions and keeps the public run view portable.
 
 Directory pointer example:
 
@@ -594,8 +595,8 @@ runs/<run-id>/nodes/<node-key>/outputs/mask.tif.bioimageflow-link.json
 Pointer files must be written by temp-file plus atomic rename.
 Pointer targets should use normalized relative paths when possible.
 
-The engine may offer an export mode that materializes real copied files for users.
-Copied export files are not canonical cache records.
+The engine may offer export modes that materialize real symlinks or copied files for users.
+Exported symlinks and copied files are not canonical cache records.
 
 ## Invalidation, Retention, and Transient Cleanup
 
@@ -603,8 +604,8 @@ V1 invalidation changes cache selection state; it does not delete record directo
 Invalidating a node removes or tombstones `current.json` for affected result keys and downstream result keys according to workflow dependency rules.
 Invalidation must use the same per-result-key guarded metadata update discipline as publication, or coordinate externally with active compute operations for the same workflow storage path.
 
-The legacy `max_executions` and `max_age` settings must not delete `records/<record-id>/` in v1.
-Until explicit record pruning exists, these settings may apply only to run views, latest views, and transient attempt cleanup, or they may be documented as temporarily disabled for v1 cache records.
+The legacy `max_executions` and `max_age` Workflow settings are removed from the clean v1 public API and must not delete `records/<record-id>/`.
+If legacy configuration is encountered during migration, it must be ignored for v1 cache records or handled by an explicit migration layer outside the clean v1 API.
 
 V1 core does not define a background garbage collector.
 An explicit `cleanup_transients()` operation may remove transient, non-canonical state:
@@ -660,7 +661,7 @@ A repair command may:
 
 Repair must not silently choose a different current record when the existing state contains conflicts unless the user requested that policy.
 
-## Compatibility With Existing Specs
+## Compatibility With Legacy Storage
 
 This document intentionally replaces the legacy storage shape documented in the exhaustive specification:
 
@@ -680,4 +681,4 @@ runs/<run-id>/
 latest/
 ```
 
-Before implementation, `docs/source/specs.md` should either reference this document as authoritative for output/cache storage or inline this contract so there is one storage specification.
+`docs/source/specs.md` summarizes this contract and should remain aligned with this reference document.
