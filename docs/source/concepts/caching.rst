@@ -134,11 +134,12 @@ downstream:
 .. code-block:: python
 
    cleared = wf.invalidate(["segment"])      # cascade=True is the default
-   # cleared == {"segment", "measure", "summary"}
+   cleared_nodes = {selection.node_name for selection in cleared}
 
    wf.invalidate(["segment"], cascade=False) # just "segment"
 
-The return value identifies the affected cache selections.
+The return value is a set of ``InvalidatedSelection`` entries for v1 ``current.json`` pointers that were actually removed.
+Each entry reports the node name, result key, selected record ID when it was readable, and whether the pointer was removed normally or as corrupt metadata.
 Passing an unknown name raises ``KeyError``.
 
 .. warning::

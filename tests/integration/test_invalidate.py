@@ -13,6 +13,10 @@ from bioimageflow.storage_v1 import StorageV1
 from .conftest import FileLoader, StubSegmenter, StubStats
 
 
+def _invalidated_node_names(invalidated) -> set[str]:
+    return {selection.node_name for selection in invalidated}
+
+
 def _build_chain(tmp_path: Path) -> Workflow:
     src = tmp_path / "files"
     src.mkdir(exist_ok=True)
@@ -47,10 +51,13 @@ class TestInvalidate:
             assert _processing_v1_current_exists(wf, n)
 
         cleared = wf.invalidate(["StubSegmenter_1"])
-        # Returns the set of cleared names — segmentation + stats (downstream).
-        assert "StubSegmenter_1" in cleared
-        assert "StubStats_1" in cleared
-        assert "FileLoader_1" not in cleared
+        # Returns the removed v1 selections — segmentation + stats (downstream).
+        names = _invalidated_node_names(cleared)
+        assert "StubSegmenter_1" in names
+        assert "StubStats_1" in names
+        assert "FileLoader_1" not in names
+        assert all(selection.result_key.startswith("rk_") for selection in cleared)
+        assert all(selection.selected_record_id.startswith("rec_") for selection in cleared)
 
         # Disk reflects the same.
         assert not _processing_v1_current_exists(wf, "StubSegmenter_1")
@@ -61,7 +68,7 @@ class TestInvalidate:
         wf = _build_chain(tmp_path)
         wf.compute()
         cleared = wf.invalidate(["StubSegmenter_1"], cascade=False)
-        assert cleared == {"StubSegmenter_1"}
+        assert _invalidated_node_names(cleared) == {"StubSegmenter_1"}
         # Downstream cache survives.
         assert _processing_v1_current_exists(wf, "StubStats_1")
 
@@ -69,7 +76,7 @@ class TestInvalidate:
         wf = _build_chain(tmp_path)
         wf.compute()
         cleared = wf.invalidate(["FileLoader_1"], cascade=False)
-        assert cleared == {"FileLoader_1"}
+        assert _invalidated_node_names(cleared) == {"FileLoader_1"}
 
         plan = wf.plan()
 
