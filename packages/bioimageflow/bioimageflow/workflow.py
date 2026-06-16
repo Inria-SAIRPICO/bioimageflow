@@ -289,7 +289,7 @@ class Workflow:
                     cleared.add(name)
             if (
                 isinstance(node.tool, ProcessingTool)
-                and not _has_shared_array_output(node.tool)
+                and (not _has_shared_array_output(node.tool) or not node._column_bindings)
                 and sig_hash
             ):
                 result_key = processing_v1_result_key(name, sig_hash)

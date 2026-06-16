@@ -209,6 +209,10 @@ class EscapingColumnBoundWriter(ProcessingTool):
 class SourceSharedMemoryWriter(ProcessingTool):
     display_name = "Source Shared Memory Writer"
     environment = EnvironmentSpec(name="source_shared_memory_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        value: int = 0
 
     class Outputs(IOModel):
         result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
@@ -217,8 +221,34 @@ class SourceSharedMemoryWriter(ProcessingTool):
         import numpy as np
         from bioimageflow_core.shm import create_shared_output
 
-        with create_shared_output(np.zeros((2, 2), dtype=np.uint8)) as ref:
+        type(self).executions += 1
+        with create_shared_output(np.full((2, 2), arguments.value, dtype=np.uint8)) as ref:
             return self.Outputs(result=ref)
+
+
+class SourceFlexibleImageWriter(ProcessingTool):
+    display_name = "Source Flexible Image Writer"
+    environment = EnvironmentSpec(name="source_flexible_image_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        as_shared_array: bool = True
+
+    class Outputs(IOModel):
+        result: Annotated[Path | SharedArray, ImageSpec(semantics={Semantic.LABEL})] = Template("flex_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        if arguments.as_shared_array:
+            import numpy as np
+            from bioimageflow_core.shm import create_shared_output
+
+            with create_shared_output(np.ones((2, 2), dtype=np.uint8)) as ref:
+                return self.Outputs(result=ref)
+        output = Path(arguments.result)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("path-result")
+        return self.Outputs(result=output)
 
 
 class SourceSharedMemoryConsumer(ProcessingTool):
@@ -1036,15 +1066,66 @@ def test_column_bound_shared_array_processing_tool_stays_legacy_until_durable_v1
     assert (storage_path / "data" / "StubSharedMemoryTool_1").exists()
 
 
-def test_source_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_path: Path) -> None:
+def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(tmp_path: Path) -> None:
+    from bioimageflow_core.shm import open_shared_array
+
     storage_path = tmp_path / "results"
+    SourceSharedMemoryWriter.executions = 0
 
     with Workflow(storage_path=storage_path) as wf:
         node = SourceSharedMemoryWriter()()
-        wf.compute(node)
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
 
-    assert (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()
-    assert _current_pointer_files(storage_path) == []
+    assert SourceSharedMemoryWriter.executions == 1
+    assert isinstance(first.loc["0", "result"], SharedArray)
+    first_ref = first.loc["0", "result"]
+    with open_shared_array(first_ref) as array:
+        assert array.shape == (2, 2)
+        assert str(array.dtype) == "uint8"
+        assert int(array.sum()) == 0
+
+    result_key = processing_v1_result_key("SourceSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert len(manifest["outputs"]) == 1
+    [output] = manifest["outputs"]
+    assert output == {
+        "array": {
+            "column": "result",
+            "dtype": "uint8",
+            "format": "npy",
+            "order": "C",
+            "row_index": "0",
+            "shape": [2, 2],
+        },
+        "asset_role": "shared_array",
+        "digest": output["digest"],
+        "kind": "owned_asset",
+        "path": output["path"],
+        "size": output["size"],
+    }
+    assert output["path"].startswith("assets/shm/result_")
+    assert output["path"].endswith(".npy")
+    assert (record_dir / output["path"]).exists()
+    assert not (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()
+
+    events: list[tuple[str, str]] = []
+    with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
+        second = wf.compute(SourceSharedMemoryWriter()())
+
+    assert SourceSharedMemoryWriter.executions == 1
+    assert isinstance(second.loc["0", "result"], SharedArray)
+    second_ref = second.loc["0", "result"]
+    assert second_ref.name != first_ref.name
+    with open_shared_array(second_ref) as array:
+        assert array.shape == (2, 2)
+        assert str(array.dtype) == "uint8"
+        assert int(array.sum()) == 0
+    assert ("SourceSharedMemoryWriter_1", "cached") in events
 
     with Workflow(storage_path=storage_path) as wf:
         writer = SourceSharedMemoryWriter()()
@@ -1058,6 +1139,7 @@ def test_source_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_p
         consumer_df = consumer_step.execute()
 
     assert consumer_df.loc["0", "total"] == 0
+    assert SourceSharedMemoryWriter.executions == 1
 
     with Workflow(storage_path=storage_path) as wf:
         node = SourceSharedMemoryWriter()()
@@ -1065,4 +1147,112 @@ def test_source_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_p
         cleared = wf.invalidate([node.name])
 
     assert cleared == {"SourceSharedMemoryWriter_1"}
-    assert not (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()
+    assert storage.load_current(result_key) is None
+    assert record_dir.exists()
+
+
+def test_source_shared_array_processing_tool_missing_asset_raises_cache_corruption(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceSharedMemoryWriter()()
+        wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("SourceSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    (record_dir / manifest["outputs"][0]["path"]).unlink()
+
+    with Workflow(storage_path=storage_path) as wf:
+        with pytest.raises(CacheCorruptionError, match="Record asset is missing"):
+            wf.compute(SourceSharedMemoryWriter()())
+
+
+def test_source_shared_array_processing_tool_parameter_change_reports_out_of_date(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        wf.compute(SourceSharedMemoryWriter()(value=0))
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceSharedMemoryWriter()(value=1)
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.OUT_OF_DATE
+
+
+def test_source_path_or_shared_array_output_handles_path_values(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    SourceFlexibleImageWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceFlexibleImageWriter()(as_shared_array=False)
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_path = Path(first.loc["0", "result"])
+    assert result_path.name == "flex_0.txt"
+    assert result_path.read_text() == "path-result"
+    result_key = processing_v1_result_key("SourceFlexibleImageWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"][0]["kind"] == "owned_asset"
+    assert manifest["outputs"][0]["path"] == "assets/flex_0.txt"
+
+    with Workflow(storage_path=storage_path) as wf:
+        second = wf.compute(SourceFlexibleImageWriter()(as_shared_array=False))
+
+    assert Path(second.loc["0", "result"]) == result_path
+    assert SourceFlexibleImageWriter.executions == 1
+
+
+def test_source_path_or_shared_array_output_rejects_path_assets_under_shared_namespace(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceFlexibleImageWriter()(
+            as_shared_array=False,
+            output_templates={"result": "shm/path.txt"},
+        )
+        with pytest.raises(CacheCorruptionError, match="reserved for shared-array assets"):
+            wf.compute(node)
+
+
+def test_source_path_or_shared_array_output_handles_shared_array_values(tmp_path: Path) -> None:
+    from bioimageflow_core.shm import open_shared_array
+
+    storage_path = tmp_path / "results"
+    SourceFlexibleImageWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceFlexibleImageWriter()(as_shared_array=True)
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    assert isinstance(first.loc["0", "result"], SharedArray)
+    with open_shared_array(first.loc["0", "result"]) as array:
+        assert int(array.sum()) == 4
+
+    result_key = processing_v1_result_key("SourceFlexibleImageWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"][0]["asset_role"] == "shared_array"
+    assert manifest["outputs"][0]["path"].startswith("assets/shm/result_")
+
+    with Workflow(storage_path=storage_path) as wf:
+        second = wf.compute(SourceFlexibleImageWriter()(as_shared_array=True))
+
+    assert isinstance(second.loc["0", "result"], SharedArray)
+    with open_shared_array(second.loc["0", "result"]) as array:
+        assert int(array.sum()) == 4
+    assert SourceFlexibleImageWriter.executions == 1

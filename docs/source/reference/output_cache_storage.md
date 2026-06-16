@@ -638,10 +638,33 @@ V1 represents reusable shared-memory outputs as record-owned assets.
 For example, a shared-memory dataframe cell may be canonicalized to:
 
 ```text
-assets/shm/<column>/<row-key>.npy
+assets/shm/<safe-column>/<row-position>_<safe-row>.npy
 ```
 
+The `assets/shm/` namespace is reserved for shared-array assets; ordinary path outputs must use another `assets/` subdirectory.
+The safe column and row segments are sanitized and digest-suffixed to avoid unsafe paths and collisions.
 The manifest records the array dtype, shape, order, and digest.
+The owned asset entry uses `asset_role: "shared_array"` and an `array` object with the producing dataframe `column`, stringified `row_index`, `format: "npy"`, `dtype`, `order`, and `shape`.
+For example:
+
+```json
+{
+  "kind": "owned_asset",
+  "asset_role": "shared_array",
+  "path": "assets/shm/result_a791366f/000000_row_ab12cd34.npy",
+  "size": 192,
+  "digest": "sha256:...",
+  "array": {
+    "column": "result",
+    "row_index": "row",
+    "format": "npy",
+    "dtype": "uint8",
+    "order": "C",
+    "shape": [2, 2]
+  }
+}
+```
+
 When the engine loads the cache hit for runtime execution, it may recreate a fresh `SharedArray` with a new node-local shared-memory name from the durable asset.
 The shared-memory name created during reload is runtime state and is not part of the result key or record ID.
 

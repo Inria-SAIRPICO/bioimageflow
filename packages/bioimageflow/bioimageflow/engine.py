@@ -213,6 +213,17 @@ def _has_shared_array_output(tool: Any) -> bool:
     return any(_is_shared_array_type(annotation) for annotation in outputs._get_all_annotations().values())
 
 
+def _shared_array_output_columns(tool: Any) -> set[str]:
+    outputs = getattr(tool, "Outputs", None)
+    if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+        return set()
+    return {
+        name
+        for name, annotation in outputs._get_all_annotations().items()
+        if _is_shared_array_type(annotation)
+    }
+
+
 def _processing_v1_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
     expected_key = processing_v1_result_key(node_name, sig_hash)
     for metadata in iter_processing_v1_result_metadata(
@@ -932,13 +943,14 @@ class DefaultEngine:
             return self._normalize_path_output_columns(df, node.tool), sig_hash
         if (
             isinstance(node.tool, ProcessingTool)
-            and not _has_shared_array_output(node.tool)
+            and (not _has_shared_array_output(node.tool) or not node._column_bindings)
         ):
             df = processing_v1_lookup(
                 workflow.storage_path,
                 node.name,
                 sig_hash,
                 _path_output_columns(node.tool),
+                shared_array_columns=_shared_array_output_columns(node.tool),
             )
             if df is None:
                 return None, sig_hash
@@ -1067,22 +1079,15 @@ class DefaultEngine:
             workflow,
         )
 
-        if _has_shared_array_output(node.tool):
-            return self._execute_source_processing_tool_legacy(
-                node,
-                sig_hash,
-                input_annotations,
-                templates,
-                workflow,
-            )
-
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
+        shared_array_output_columns = _shared_array_output_columns(node.tool)
         cached = processing_v1_lookup(
             workflow.storage_path,
             node.name,
             sig_hash,
             path_output_columns,
+            shared_array_columns=shared_array_output_columns,
         )
         if cached is not None:
             self._emit_progress(workflow, node.name, "cached")
@@ -1130,6 +1135,7 @@ class DefaultEngine:
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
             owned_path_columns=_explicit_template_output_columns(node),
+            shared_array_columns=shared_array_output_columns,
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -1145,6 +1151,7 @@ class DefaultEngine:
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
         """Execute source SharedArray tools on the legacy cache path until Phase 6."""
+        tool = cast(ProcessingTool, node.tool)
         aligned_index: list[Any] = ["0"]
         node_dir = get_node_dir(workflow.storage_path, node.name)
         cached = cache_lookup(node_dir, sig_hash)
@@ -1180,15 +1187,15 @@ class DefaultEngine:
             aligned_index,
         )
         raw_results = self._dispatch_tool(
-            node.tool,
+            tool,
             arguments_dicts,
             workflow,
             node.name,
             row_contexts,
             batch_context,
         )
-        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
-        df = self._normalize_path_output_columns(df, node.tool)
+        df = self._build_output_dataframe(raw_results, aligned_index, tool)
+        df = self._normalize_path_output_columns(df, tool)
         self._emit_progress(workflow, node.name, "completed")
         df = self._persist_shared_arrays(df, hash_dir)
         self._save_and_cleanup(
@@ -1248,6 +1255,7 @@ class DefaultEngine:
             node.name,
             sig_hash,
             path_output_columns,
+            shared_array_columns=set(),
         )
         if cached is not None:
             self._emit_progress(workflow, node.name, "cached")
@@ -1289,6 +1297,7 @@ class DefaultEngine:
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
             owned_path_columns=_explicit_template_output_columns(node),
+            shared_array_columns=set(),
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -1307,6 +1316,7 @@ class DefaultEngine:
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
         """Execute shared-array-producing column-bound tools on the legacy cache path."""
+        tool = cast(ProcessingTool, node.tool)
         node_dir = get_node_dir(workflow.storage_path, node.name)
         cached = cache_lookup(node_dir, sig_hash)
         if cached:
@@ -1331,11 +1341,11 @@ class DefaultEngine:
             hash_dir, real_assets_dir, aligned_index,
         )
         raw_results = self._dispatch_tool(
-            node.tool, arguments_dicts, workflow, node.name,
+            tool, arguments_dicts, workflow, node.name,
             row_contexts, batch_context,
         )
-        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
-        df = self._normalize_path_output_columns(df, node.tool)
+        df = self._build_output_dataframe(raw_results, aligned_index, tool)
+        df = self._normalize_path_output_columns(df, tool)
         self._emit_progress(workflow, node.name, "completed")
 
         df = self._persist_shared_arrays(df, hash_dir)
@@ -2399,7 +2409,10 @@ class DefaultEngine:
         else:
             from bioimageflow.storage import has_other_hash_dirs
             node_dir = get_node_dir(workflow.storage_path, node.name)
-            if isinstance(node.tool, ProcessingTool) and not _has_shared_array_output(node.tool):
+            if (
+                isinstance(node.tool, ProcessingTool)
+                and (not _has_shared_array_output(node.tool) or not node._column_bindings)
+            ):
                 has_prior_current = _processing_v1_has_other_current(
                     workflow.storage_path,
                     node.name,

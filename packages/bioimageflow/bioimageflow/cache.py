@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 from enum import Enum
 from pathlib import Path
@@ -466,11 +467,90 @@ def _rehydrate_processing_paths(
     return hydrated
 
 
+def _shared_array_manifest_by_path(outputs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(output.get("path")): output
+        for output in outputs
+        if output.get("kind") == "owned_asset"
+        and output.get("asset_role") == "shared_array"
+    }
+
+
+def _rehydrate_processing_shared_arrays(
+    df: pd.DataFrame,
+    record_dir: Path,
+    shared_array_columns: set[str],
+    outputs: list[dict[str, Any]],
+) -> pd.DataFrame:
+    if not shared_array_columns:
+        return df
+    from bioimageflow_core.shm import create_shared_output
+
+    hydrated = df.copy()
+    shared_outputs = _shared_array_manifest_by_path(outputs)
+    for column in shared_array_columns:
+        if column not in hydrated.columns:
+            continue
+
+        def _rehydrate(value: Any) -> Any:
+            if not isinstance(value, str) or not value.startswith("assets/shm/"):
+                return value
+            try:
+                relative = validate_relative_posix_path(value)
+            except ValueError as exc:
+                raise CacheCorruptionError("Cached shared-array asset path is unsafe.") from exc
+            output = shared_outputs.get(relative)
+            if output is None:
+                raise CacheCorruptionError(f"Cached shared-array asset is missing manifest metadata: {relative}")
+            array_metadata = output.get("array")
+            if not isinstance(array_metadata, dict):
+                raise CacheCorruptionError(f"Cached shared-array asset metadata is invalid: {relative}")
+            path = record_dir / relative
+            try:
+                path.resolve().relative_to(record_dir.resolve())
+            except ValueError as exc:
+                raise CacheCorruptionError("Cached shared-array asset path escapes record directory.") from exc
+            try:
+                import numpy as np
+
+                array = np.load(path, allow_pickle=False)
+            except Exception as exc:
+                raise CacheCorruptionError(f"Cached shared-array asset is unreadable: {relative}") from exc
+            if list(array.shape) != list(array_metadata.get("shape", [])):
+                raise CacheCorruptionError(f"Cached shared-array shape mismatch: {relative}")
+            if str(array.dtype) != str(array_metadata.get("dtype", "")):
+                raise CacheCorruptionError(f"Cached shared-array dtype mismatch: {relative}")
+            if str(array_metadata.get("order", "")) != "C" or not array.flags.c_contiguous:
+                raise CacheCorruptionError(f"Cached shared-array memory order mismatch: {relative}")
+            with create_shared_output(array) as ref:
+                return ref
+
+        hydrated[column] = hydrated[column].map(_rehydrate)
+    return hydrated
+
+
+def _rehydrate_processing_assets(
+    df: pd.DataFrame,
+    record_dir: Path,
+    path_columns: set[str],
+    shared_array_columns: set[str],
+    outputs: list[dict[str, Any]],
+) -> pd.DataFrame:
+    hydrated = _rehydrate_processing_shared_arrays(
+        df,
+        record_dir,
+        shared_array_columns,
+        outputs,
+    )
+    return _rehydrate_processing_paths(hydrated, record_dir, path_columns)
+
+
 def processing_v1_lookup(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
     path_columns: set[str],
+    shared_array_columns: set[str] | None = None,
 ) -> pd.DataFrame | None:
     """Load a ProcessingTool v1 cache hit, or return ``None`` on miss."""
     storage = StorageV1(storage_path)
@@ -478,12 +558,76 @@ def processing_v1_lookup(
     pointer = storage.load_current(result_key)
     if pointer is None:
         return None
+    manifest = storage._load_record_manifest(result_key, pointer.record_id)
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
     try:
         df = cache_load(record_dir / "dataframe.parquet")
     except Exception as exc:
         raise CacheCorruptionError("Cached v1 ProcessingTool dataframe is unreadable.") from exc
-    return _rehydrate_processing_paths(df, record_dir, path_columns)
+    return _rehydrate_processing_assets(
+        df,
+        record_dir,
+        path_columns,
+        shared_array_columns or set(),
+        manifest.outputs,
+    )
+
+
+def _safe_asset_segment(value: Any) -> str:
+    raw = str(value)
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-") or "value"
+    sanitized = sanitized[:48]
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    return f"{sanitized}_{digest}"
+
+
+def _write_shared_array_asset(
+    value: Any,
+    *,
+    column: str,
+    row_index: Any,
+    row_position: int,
+    staging_assets_dir: Path,
+) -> tuple[str, dict[str, Any], Path]:
+    from bioimageflow_core.shm import open_shared_array
+    from bioimageflow_core.types import SharedArray
+
+    if not isinstance(value, SharedArray):
+        raise CacheCorruptionError(f"Shared-array output column contains unsupported value: {type(value).__name__}")
+
+    try:
+        import numpy as np
+
+        with open_shared_array(value) as source:
+            array = np.array(source, copy=True, order="C")
+    except Exception as exc:
+        raise CacheCorruptionError(f"Shared-array output could not be opened for column {column!r}.") from exc
+
+    column_segment = _safe_asset_segment(column)
+    row_segment = _safe_asset_segment(row_index)
+    relative = validate_relative_posix_path(
+        f"assets/shm/{column_segment}/{row_position:06d}_{row_segment}.npy"
+    )
+    path = staging_assets_dir / "shm" / column_segment / f"{row_position:06d}_{row_segment}.npy"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, array, allow_pickle=False)
+    size, digest = asset_digest_and_size(path)
+    entry = {
+        "array": {
+            "column": str(column),
+            "dtype": str(array.dtype),
+            "format": "npy",
+            "order": "C",
+            "row_index": str(row_index),
+            "shape": list(array.shape),
+        },
+        "asset_role": "shared_array",
+        "digest": digest,
+        "kind": "owned_asset",
+        "path": relative,
+        "size": size,
+    }
+    return relative, entry, path
 
 
 def _processing_manifest_entries_and_dataframe(
@@ -491,12 +635,42 @@ def _processing_manifest_entries_and_dataframe(
     path_columns: set[str],
     owned_path_columns: set[str],
     staging_assets_dir: Path,
+    shared_array_columns: set[str] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path]]:
     stored = df.copy()
     outputs: list[dict[str, Any]] = []
     owned_assets: dict[str, Path] = {}
     seen_outputs: set[tuple[str, str]] = set()
     staging_root = staging_assets_dir.resolve()
+    shared_array_columns = shared_array_columns or set()
+    from bioimageflow_core.types import SharedArray
+
+    for column in shared_array_columns:
+        if column not in stored.columns:
+            continue
+        for row_position, index in enumerate(stored.index):
+            value = stored.at[index, column]
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            if not isinstance(value, SharedArray):
+                if column in path_columns:
+                    continue
+                raise CacheCorruptionError(
+                    f"Shared-array output column contains unsupported value: {type(value).__name__}"
+                )
+            record_relative, entry, path = _write_shared_array_asset(
+                value,
+                column=column,
+                row_index=index,
+                row_position=row_position,
+                staging_assets_dir=staging_assets_dir,
+            )
+            if record_relative in owned_assets:
+                raise CacheCorruptionError(f"Duplicate shared-array asset path: {record_relative}")
+            owned_assets[record_relative] = path
+            outputs.append(entry)
+            seen_outputs.add(("owned_asset", record_relative))
+            stored.at[index, column] = record_relative
     for column in path_columns:
         if column not in stored.columns:
             continue
@@ -504,6 +678,12 @@ def _processing_manifest_entries_and_dataframe(
             value = stored.at[index, column]
             if value is None or (isinstance(value, float) and pd.isna(value)):
                 continue
+            if column in shared_array_columns and isinstance(value, str) and value.startswith("assets/shm/"):
+                continue
+            if not isinstance(value, (str, os.PathLike)):
+                raise CacheCorruptionError(
+                    f"Declared path output column {column!r} contains unsupported value: {type(value).__name__}"
+                )
             path = Path(value)
             if not path.is_absolute():
                 path = Path.cwd() / path
@@ -525,6 +705,8 @@ def _processing_manifest_entries_and_dataframe(
                 record_relative = validate_relative_posix_path(f"assets/{relative.as_posix()}")
             except ValueError as exc:
                 raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
+            if record_relative.startswith("assets/shm/"):
+                raise CacheCorruptionError("assets/shm/ is reserved for shared-array assets.")
             if not path.exists():
                 raise CacheCorruptionError(f"Declared output asset is missing: {path}")
             try:
@@ -571,6 +753,7 @@ def processing_v1_publish(
     staging_assets_dir: Path,
     path_columns: set[str],
     owned_path_columns: set[str],
+    shared_array_columns: set[str] | None = None,
 ) -> pd.DataFrame:
     """Publish a source ProcessingTool attempt as a v1 immutable record."""
     storage = StorageV1(storage_path)
@@ -579,6 +762,7 @@ def processing_v1_publish(
         path_columns,
         owned_path_columns,
         staging_assets_dir,
+        shared_array_columns,
     )
     staging_parquet = staging_dir / "dataframe.parquet"
     _prepare_dataframe_for_parquet(stored_df).to_parquet(staging_parquet, index=True)
@@ -653,8 +837,15 @@ def processing_v1_publish(
         run_id=f"run_{attempt_id}",
     )
     selected_record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    selected_manifest = storage._load_record_manifest(result_key, pointer.record_id)
     try:
         selected_df = cache_load(selected_record_dir / "dataframe.parquet")
     except Exception as exc:
         raise CacheCorruptionError("Published v1 ProcessingTool dataframe is unreadable.") from exc
-    return _rehydrate_processing_paths(selected_df, selected_record_dir, path_columns)
+    return _rehydrate_processing_assets(
+        selected_df,
+        selected_record_dir,
+        path_columns,
+        shared_array_columns or set(),
+        selected_manifest.outputs,
+    )
