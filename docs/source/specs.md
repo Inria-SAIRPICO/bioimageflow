@@ -1949,12 +1949,18 @@ results.compute()
 |--------------|-----------------|--------------------------------------------------------|
 | `node_name`   | `str`           | Name of the node being executed                        |
 | `status`      | `str`           | One of: `"started"`, `"row_progress"`, `"row_complete"`, `"completed"`, `"cached"`, `"failed"`, `"cancelled"` |
+| `result_key`  | `str \| None`   | V1 result key when the event is tied to a cacheable node result |
+| `record_id`   | `str \| None`   | Selected v1 record ID for `"completed"` and `"cached"` events |
 | `row`         | `int`           | Current row index (for `row_complete` and `row_progress`) |
 | `total_rows`  | `int`           | Total number of rows for this node                     |
 | `message`     | `str \| None`   | Sub-row progress message from `RemoteTaskHandle.update()` |
 | `current`     | `int \| None`   | Sub-row progress current value                         |
 | `maximum`     | `int \| None`   | Sub-row progress maximum value                         |
 | `timestamp`   | `float`         | Unix timestamp                                         |
+
+`result_key` and `record_id` are v1 cache identities only.
+They never expose legacy timestamp/hash directory names or diagnostic signatures.
+For a cache miss, `"started"` may include `result_key` while `record_id` remains `None` until the result is published and selected.
 
 When using branch-level parallelism, progress events from concurrent nodes may interleave. The engine serializes all `on_progress` callback invocations via an internal lock, so the callback does not need to be thread-safe.
 

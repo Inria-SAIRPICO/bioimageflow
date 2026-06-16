@@ -8,7 +8,7 @@ from typing import Annotated
 import pandas as pd
 import pytest
 
-from bioimageflow import NodePlanStatus, Workflow
+from bioimageflow import NodePlanStatus, ProgressEvent, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
 from bioimageflow.sub_workflow import SubWorkflow
 from bioimageflow.cache import (
@@ -384,6 +384,35 @@ def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path:
     assert _current_pointer_files(storage_path) == current_files
 
 
+def test_dataframe_tool_progress_events_expose_v1_selection_identity(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    CountingTable.executions = 0
+    events: list[ProgressEvent] = []
+
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
+        node = CountingTable()(value=19)
+        wf.compute(node)
+        node_name = node.name
+
+    [current_path] = _current_pointer_files(storage_path)
+    current = json.loads(current_path.read_text())
+    started = [event for event in events if event.node_name == node_name and event.status == "started"]
+    completed = [event for event in events if event.node_name == node_name and event.status == "completed"]
+    assert started[-1].result_key == current["result_key"]
+    assert started[-1].record_id is None
+    assert completed[-1].result_key == current["result_key"]
+    assert completed[-1].record_id == current["record_id"]
+
+    events.clear()
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
+        wf.compute(CountingTable()(value=19))
+
+    cached = [event for event in events if event.node_name == node_name and event.status == "cached"]
+    assert cached[-1].result_key == current["result_key"]
+    assert cached[-1].record_id == current["record_id"]
+    assert CountingTable.executions == 1
+
+
 def test_compute_writes_run_view_for_dataframe_cache_miss_and_hit(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
@@ -452,7 +481,8 @@ def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:
         node_name = node.name
     assert CountingTable.executions == 1
 
-    with Workflow(storage_path=storage_path) as wf:
+    events: list[ProgressEvent] = []
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
         node = CountingTable()(value=13)
         steps = wf.compute_steps(node)
         step = next(steps)
@@ -465,6 +495,38 @@ def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:
     latest_run = _latest_success_run_dir(storage_path)
     result = json.loads((latest_run / "nodes" / node_name / "result.json").read_text())
     assert result["cache_hit"] is True
+    cached = [event for event in events if event.node_name == node_name and event.status == "cached"]
+    assert cached[-1].result_key == result["result_key"]
+    assert cached[-1].record_id == result["record_id"]
+
+
+def test_compute_steps_processing_tool_cached_step_emits_v1_progress_identity(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    SourceAssetWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="step")
+        wf.compute(node)
+        node_name = node.name
+    assert SourceAssetWriter.executions == 1
+
+    events: list[ProgressEvent] = []
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
+        node = SourceAssetWriter()(text="step")
+        steps = wf.compute_steps(node)
+        step = next(steps)
+        assert step.cached is True
+        step.execute()
+        with pytest.raises(StopIteration):
+            next(steps)
+
+    assert SourceAssetWriter.executions == 1
+    latest_run = _latest_success_run_dir(storage_path)
+    result = json.loads((latest_run / "nodes" / node_name / "result.json").read_text())
+    assert result["cache_hit"] is True
+    cached = [event for event in events if event.node_name == node_name and event.status == "cached"]
+    assert cached[-1].result_key == result["result_key"]
+    assert cached[-1].record_id == result["record_id"]
 
 
 def test_compute_steps_auto_execute_writes_successful_run_view(tmp_path: Path) -> None:
@@ -816,6 +878,35 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     pd.testing.assert_frame_equal(first, second)
     assert SourceAssetWriter.executions == 1
     assert ("SourceAssetWriter_1", "cached") in events
+
+
+def test_processing_tool_progress_events_expose_v1_selection_identity(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    SourceAssetWriter.executions = 0
+    events: list[ProgressEvent] = []
+
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
+        node = SourceAssetWriter()(text="progress")
+        wf.compute(node)
+        node_name = node.name
+
+    [current_path] = _current_pointer_files(storage_path)
+    current = json.loads(current_path.read_text())
+    started = [event for event in events if event.node_name == node_name and event.status == "started"]
+    completed = [event for event in events if event.node_name == node_name and event.status == "completed"]
+    assert started[-1].result_key == current["result_key"]
+    assert started[-1].record_id is None
+    assert completed[-1].result_key == current["result_key"]
+    assert completed[-1].record_id == current["record_id"]
+
+    events.clear()
+    with Workflow(storage_path=storage_path, on_progress=events.append) as wf:
+        wf.compute(SourceAssetWriter()(text="progress"))
+
+    cached = [event for event in events if event.node_name == node_name and event.status == "cached"]
+    assert cached[-1].result_key == current["result_key"]
+    assert cached[-1].record_id == current["record_id"]
+    assert SourceAssetWriter.executions == 1
 
 
 def test_source_processing_tool_external_paths_stay_external_references(tmp_path: Path) -> None:

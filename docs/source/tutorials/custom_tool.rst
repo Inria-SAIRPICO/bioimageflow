@@ -137,7 +137,7 @@ when the worker-only dependency is not installed in the main process.
 
 Anatomy:
 
-- **display_name**: human-readable name used in cache paths and progress events.
+- **display_name**: human-readable label for UIs and documentation. Runtime progress events use scoped node names; cache identity uses v1 result keys.
 - **environment**: declares the conda/pip dependencies this tool needs.
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.

@@ -289,18 +289,17 @@ class NodePlanStatus(str, Enum):
     Values
     ------
     CACHED
-        The node's current signature hash matches an existing entry in
-        the storage directory; ``compute()`` would short-circuit.
+        The node's v1 result key has a valid selected current record;
+        ``compute()`` would short-circuit.
     OUT_OF_DATE
-        The storage directory contains entries from a previous run, but
-        none match the current signature hash. ``compute()`` would
-        re-execute and replace.
+        The node has historical v1 cache selections, but no valid current
+        selection for this planned result key. ``compute()`` would re-execute
+        and publish or select a record.
     UNEXECUTED
-        No storage directory exists for this node yet — it has never
-        run.
+        No known v1 cache record exists for this node.
     SKIPPED
         The node is disabled, or has a disabled upstream that prevents
-        execution. ``sig_hash`` is empty.
+        execution. ``final_result_key`` and ``selected_record_id`` are ``None``.
     PENDING_UPSTREAM
         At least one upstream selected record is not known yet, so the
         node's final result key cannot be determined from a stable v1
@@ -552,12 +551,21 @@ class NodeStep:
         if self._cached_df is not None:
             self._df = self._cached_df
             assert self._sig_hash is not None
+            result_key = self._engine._node_v1_result_key(self._node, self._sig_hash)
             self._engine._write_run_node_view(
                 self._workflow,
                 self._node,
                 self._sig_hash,
                 cache_hit=True,
             )
+            if result_key is not None:
+                self._engine._emit_progress(
+                    self._workflow,
+                    self._node.name,
+                    "cached",
+                    result_key=result_key,
+                    record_id=self._engine._selected_v1_record_id(self._workflow, result_key),
+                )
             self._executed = True
             return self._df
         df, sig_hash = self._engine._execute_node(
@@ -893,6 +901,21 @@ class DefaultEngine:
         )
         storage.update_latest_node(node_key, run_id)
 
+    def _selected_v1_record_id(self, workflow: Any, result_key: str) -> str | None:
+        pointer = StorageV1(workflow.storage_path).load_current(result_key)
+        if pointer is None:
+            return None
+        return pointer.record_id
+
+    def _node_v1_result_key(self, node: Node, sig_hash: str) -> str | None:
+        from bioimageflow.dataframe_tool import DataFrameTool
+
+        if isinstance(node.tool, DataFrameTool):
+            return dataframe_v1_result_key(node.name, sig_hash)
+        if isinstance(node.tool, ProcessingTool):
+            return processing_v1_result_key(node.name, sig_hash)
+        return None
+
     # ── Graph traversal ────────────────────────────────────────────────
 
     def _collect_reachable(self, node: Node, visited: set[Node]) -> None:
@@ -1129,14 +1152,21 @@ class DefaultEngine:
                           if isinstance(arg, Node) and arg in sig_hashes}
         sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_hashes, workflow)
 
+        result_key = dataframe_v1_result_key(node.name, sig_hash)
         cached = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
         if cached is not None:
             self._set_node_cache_hit(node, True)
-            self._emit_progress(workflow, node.name, "cached")
+            self._emit_progress(
+                workflow,
+                node.name,
+                "cached",
+                result_key=result_key,
+                record_id=self._selected_v1_record_id(workflow, result_key),
+            )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
-        self._emit_progress(workflow, node.name, "started")
+        self._emit_progress(workflow, node.name, "started", result_key=result_key)
 
         if len(dfs) > 1:
             dfs = self._align_dataframes_for_merge(dfs)
@@ -1147,9 +1177,15 @@ class DefaultEngine:
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
 
-        self._emit_progress(workflow, node.name, "completed")
         df = self._coerce_numeric_columns(
             dataframe_v1_publish(workflow.storage_path, node.name, sig_hash, df)
+        )
+        self._emit_progress(
+            workflow,
+            node.name,
+            "completed",
+            result_key=result_key,
+            record_id=self._selected_v1_record_id(workflow, result_key),
         )
         df = self._normalize_path_output_columns(df, node.tool)
         self._set_node_cache_hit(node, False)
@@ -1189,6 +1225,7 @@ class DefaultEngine:
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
+        result_key = processing_v1_result_key(node.name, sig_hash)
         cached = processing_v1_lookup(
             workflow.storage_path,
             node.name,
@@ -1198,12 +1235,18 @@ class DefaultEngine:
         )
         if cached is not None:
             self._set_node_cache_hit(node, True)
-            self._emit_progress(workflow, node.name, "cached")
+            self._emit_progress(
+                workflow,
+                node.name,
+                "cached",
+                result_key=result_key,
+                record_id=self._selected_v1_record_id(workflow, result_key),
+            )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
-        self._emit_progress(workflow, node.name, "started")
+        self._emit_progress(workflow, node.name, "started", result_key=result_key)
         result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
             workflow.storage_path,
             node.name,
@@ -1247,7 +1290,13 @@ class DefaultEngine:
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
-        self._emit_progress(workflow, node.name, "completed")
+        self._emit_progress(
+            workflow,
+            node.name,
+            "completed",
+            result_key=result_key,
+            record_id=self._selected_v1_record_id(workflow, result_key),
+        )
         self._set_node_cache_hit(node, False)
         return df, sig_hash
 
@@ -1348,6 +1397,7 @@ class DefaultEngine:
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
+        result_key = processing_v1_result_key(node.name, sig_hash)
         cached = processing_v1_lookup(
             workflow.storage_path,
             node.name,
@@ -1357,12 +1407,18 @@ class DefaultEngine:
         )
         if cached is not None:
             self._set_node_cache_hit(node, True)
-            self._emit_progress(workflow, node.name, "cached")
+            self._emit_progress(
+                workflow,
+                node.name,
+                "cached",
+                result_key=result_key,
+                record_id=self._selected_v1_record_id(workflow, result_key),
+            )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
-        self._emit_progress(workflow, node.name, "started")
+        self._emit_progress(workflow, node.name, "started", result_key=result_key)
         result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
             workflow.storage_path,
             node.name,
@@ -1400,7 +1456,13 @@ class DefaultEngine:
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
-        self._emit_progress(workflow, node.name, "completed")
+        self._emit_progress(
+            workflow,
+            node.name,
+            "completed",
+            result_key=result_key,
+            record_id=self._selected_v1_record_id(workflow, result_key),
+        )
         self._set_node_cache_hit(node, False)
         return df, sig_hash
 
@@ -2407,6 +2469,8 @@ class DefaultEngine:
         message: str | None = None,
         current: int | None = None,
         maximum: int | None = None,
+        result_key: str | None = None,
+        record_id: str | None = None,
     ) -> None:
         """Emit a progress event, serialized via ``_progress_lock``."""
         if workflow.on_progress is not None:
@@ -2414,6 +2478,8 @@ class DefaultEngine:
             event = ProgressEvent(
                 node_name=node_name,
                 status=status,
+                result_key=result_key,
+                record_id=record_id,
                 row=row,
                 total_rows=total_rows,
                 message=message,
