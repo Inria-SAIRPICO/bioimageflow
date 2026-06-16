@@ -1,8 +1,8 @@
 """Tests for ``NodePlanStatus`` (plan-platform-boundary-refactor.md Task 4).
 
 The status enum lets external callers distinguish ``cached`` from
-``out_of_date`` (run before with a different signature) and from
-``unexecuted`` (never run) without inspecting the storage layout.
+``prior_selection_miss`` (another selected result exists for this node)
+and from ``unexecuted`` (never run) without inspecting the storage layout.
 """
 
 from pathlib import Path
@@ -75,7 +75,7 @@ class TestNodePlanStatusBasics:
         assert pointer is not None
         assert entry.selected_record_id == pointer.record_id
 
-    def test_out_of_date_after_param_change(self, tmp_path: Path) -> None:
+    def test_prior_selection_miss_after_param_change(self, tmp_path: Path) -> None:
         src = tmp_path / "files"
         src.mkdir()
         (src / "a.txt").write_text("a")
@@ -90,17 +90,17 @@ class TestNodePlanStatusBasics:
         # First run materializes the cache for diameter=20.0.
         build(20.0).compute()
 
-        # Re-plan with a different diameter — same node has prior runs,
-        # but the current sig hash does not match.
+        # Re-plan with a different diameter: the planned result key has no
+        # current selection, but the same node has another selected result.
         plan = build(99.0).plan()
         seg = plan["StubSegmenter_1"]
-        assert seg.status is NodePlanStatus.OUT_OF_DATE
+        assert seg.status is NodePlanStatus.PRIOR_SELECTION_MISS
         assert seg.cached is False
         assert seg.final_result_key is not None
         assert seg.selected_record_id is None
         assert seg.pending_upstreams == ()
 
-    def test_dataframe_tool_out_of_date_after_parameter_change(self, tmp_path: Path) -> None:
+    def test_dataframe_tool_prior_selection_miss_after_parameter_change(self, tmp_path: Path) -> None:
         src_a = tmp_path / "files_a"
         src_b = tmp_path / "files_b"
         src_a.mkdir()
@@ -118,7 +118,7 @@ class TestNodePlanStatusBasics:
         plan = build(src_b).plan()
         entry = plan["loader"]
 
-        assert entry.status is NodePlanStatus.OUT_OF_DATE
+        assert entry.status is NodePlanStatus.PRIOR_SELECTION_MISS
         assert entry.final_result_key is not None
         assert entry.selected_record_id is None
         assert entry.pending_upstreams == ()
@@ -141,7 +141,7 @@ class TestNodePlanStatusValues:
         # NodePlanStatus is a string enum so values can be JSON-serialized
         # by GUIs without an extra mapping.
         assert NodePlanStatus.CACHED == "cached"
-        assert NodePlanStatus.OUT_OF_DATE == "out_of_date"
+        assert NodePlanStatus.PRIOR_SELECTION_MISS == "prior_selection_miss"
         assert NodePlanStatus.UNEXECUTED == "unexecuted"
         assert NodePlanStatus.SKIPPED == "skipped"
         assert NodePlanStatus.PENDING_UPSTREAM == "pending_upstream"

@@ -291,10 +291,10 @@ class NodePlanStatus(str, Enum):
     CACHED
         The node's v1 result key has a valid selected current record;
         ``compute()`` would short-circuit.
-    OUT_OF_DATE
-        The node has historical v1 cache selections, but no valid current
-        selection for this planned result key. ``compute()`` would re-execute
-        and publish or select a record.
+    PRIOR_SELECTION_MISS
+        The planned v1 result key has no selected current record, but the
+        same node has another selected current record from prior result-key
+        material. ``compute()`` would re-execute and publish or select a record.
     UNEXECUTED
         No known v1 cache record exists for this node.
     SKIPPED
@@ -306,7 +306,7 @@ class NodePlanStatus(str, Enum):
         record graph snapshot.
     """
     CACHED = "cached"
-    OUT_OF_DATE = "out_of_date"
+    PRIOR_SELECTION_MISS = "prior_selection_miss"
     UNEXECUTED = "unexecuted"
     SKIPPED = "skipped"
     PENDING_UPSTREAM = "pending_upstream"
@@ -329,7 +329,7 @@ class NodePlan:
         node is cached; otherwise ``None``.
     status
         Per-node :class:`NodePlanStatus` — the canonical signal for
-        external callers wanting to display "cached / out-of-date /
+        external callers wanting to display "cached / prior selection miss /
         unexecuted / skipped" in a GUI.
     upstream
         Scoped names of this node's direct upstreams.
@@ -2604,7 +2604,7 @@ class DefaultEngine:
                 node_dir = get_node_dir(workflow.storage_path, node.name)
                 has_prior_current = has_other_hash_dirs(node_dir, sig_hash)
             if has_prior_current:
-                status = NodePlanStatus.OUT_OF_DATE
+                status = NodePlanStatus.PRIOR_SELECTION_MISS
             else:
                 status = NodePlanStatus.UNEXECUTED
         plan[node.name] = NodePlan(

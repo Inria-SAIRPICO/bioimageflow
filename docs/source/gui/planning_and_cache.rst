@@ -1,8 +1,8 @@
 Planning and Cache State
 ========================
 
-Hosts that want to render "this node is cached / out of date / not yet
-run / skipped" without executing anything use
+Hosts that want to render "this node is cached / prior selection miss / not
+yet run / skipped" without executing anything use
 :meth:`Workflow.plan <bioimageflow.Workflow.plan>`. Hosts that want to
 clear selected cache records explicitly use
 :meth:`Workflow.invalidate <bioimageflow.Workflow.invalidate>`.
@@ -71,9 +71,9 @@ NodePlanStatus → UI mapping
      - The planned v1 result key has a selected current record; ``compute()``
        would short-circuit.
      - Green / "up to date"
-   * - ``OUT_OF_DATE``
-     - The node has historical cache state, but no selected record for the
-       planned v1 result key. ``compute()`` would re-execute.
+   * - ``PRIOR_SELECTION_MISS``
+     - The planned v1 result key has no selected record, but the same node has
+       another selected current record. ``compute()`` would re-execute.
      - Yellow / "needs rebuild"
    * - ``UNEXECUTED``
      - No known v1 cache record exists for this node yet.
@@ -94,7 +94,7 @@ A sub-workflow node aggregates its internals: the parent reports
 ``CACHED`` only when *every* internal entry is cached, and
 ``UNEXECUTED`` otherwise. Internal entries are still present in the
 plan dict under their scoped names, so a host can show drill-down
-("3/5 internals cached") on an "out of date" parent.
+("3/5 internals cached") on a "needs rebuild" parent.
 
 Workflow.invalidate()
 ---------------------

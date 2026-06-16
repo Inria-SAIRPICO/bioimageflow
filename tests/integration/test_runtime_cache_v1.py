@@ -1742,7 +1742,7 @@ def test_source_shared_array_processing_tool_missing_asset_raises_cache_corrupti
             wf.compute(SourceSharedMemoryWriter()())
 
 
-def test_source_shared_array_processing_tool_parameter_change_reports_out_of_date(tmp_path: Path) -> None:
+def test_source_shared_array_processing_tool_parameter_change_reports_prior_selection_miss(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1752,7 +1752,7 @@ def test_source_shared_array_processing_tool_parameter_change_reports_out_of_dat
         node = SourceSharedMemoryWriter()(value=1)
         plan = wf.plan()
 
-    assert plan[node.name].status is NodePlanStatus.OUT_OF_DATE
+    assert plan[node.name].status is NodePlanStatus.PRIOR_SELECTION_MISS
 
 
 def test_source_path_or_shared_array_output_handles_path_values(tmp_path: Path) -> None:

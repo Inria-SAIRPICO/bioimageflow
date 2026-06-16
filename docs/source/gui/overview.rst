@@ -34,7 +34,7 @@ The pages are designed to be read in order:
 4. :doc:`tool_registry` — installing, registering, and indexing tool
    packages.
 5. :doc:`live_validation` — keystroke-rate validation helpers.
-6. :doc:`planning_and_cache` — rendering "cached / out-of-date /
+6. :doc:`planning_and_cache` — rendering "cached / needs rebuild /
    unexecuted / skipped" without executing.
 7. :doc:`disabled_nodes` — the disable/enable flag and partial
    execution.

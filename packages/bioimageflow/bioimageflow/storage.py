@@ -40,8 +40,8 @@ def has_other_hash_dirs(node_dir: str | Path, sig_hash: str) -> bool:
     """Return True if *node_dir* contains hash sub-directories whose
     short suffix differs from ``sig_hash[:12]``.
 
-    Used by :meth:`Workflow.plan` to distinguish "out_of_date" (the node
-    was run before with different parameters) from "unexecuted" (no
+    Used by :meth:`Workflow.plan` to distinguish "prior_selection_miss" (the
+    node was run before with different parameters) from "unexecuted" (no
     storage at all).
     """
     node_dir = Path(node_dir)
