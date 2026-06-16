@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,6 +27,9 @@ import pandas as pd
 CACHE_SCHEMA_VERSION = "bioimageflow.cache.v1"
 CURRENT_SCHEMA = "bioimageflow.cache.current.v1"
 RECORD_SCHEMA = "bioimageflow.cache.record.v1"
+LINK_SCHEMA = "bioimageflow.link.v1"
+RUN_SCHEMA = "bioimageflow.run.v1"
+RUN_NODE_RESULT_SCHEMA = "bioimageflow.run.node_result.v1"
 
 _RESERVED_NAMES = {
     "con",
@@ -131,6 +135,31 @@ def validate_relative_posix_path(path: str) -> str:
         if part.lower() in _RESERVED_NAMES:
             raise ValueError(f"Reserved path segment: {part!r}")
     return "/".join(parts)
+
+
+def _validate_path_segment(value: str, *, label: str) -> str:
+    segment = validate_relative_posix_path(value)
+    if "/" in segment:
+        raise ValueError(f"{label} must be one path segment: {value!r}")
+    return segment
+
+
+def _validate_node_key(value: str) -> str:
+    return validate_relative_posix_path(value)
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any], *, stem: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.parent / f".{stem}.{uuid.uuid4().hex}.tmp"
+    tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    os.replace(tmp_path, path)
+
+
+def _bioimageflow_version() -> str | None:
+    try:
+        return version("bioimageflow")
+    except PackageNotFoundError:
+        return None
 
 
 def _is_missing(value: Any) -> bool:
@@ -556,12 +585,109 @@ class StorageV1:
     def cache_root(self) -> Path:
         return self.storage_path / "cache" / "v1"
 
+    @property
+    def runs_root(self) -> Path:
+        return self.storage_path / "runs"
+
+    @property
+    def latest_root(self) -> Path:
+        return self.storage_path / "latest"
+
     def result_dir(self, result_key: str) -> Path:
         first, second = result_shard_parts(result_key)
         return self.cache_root / "results" / first / second / result_key
 
+    def run_dir(self, run_id: str) -> Path:
+        return self.runs_root / _validate_path_segment(run_id, label="Run ID")
+
+    def run_node_dir(self, run_id: str, node_key: str) -> Path:
+        return self.run_dir(run_id) / "nodes" / _validate_node_key(node_key)
+
     def new_attempt_id(self) -> str:
         return f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:12]}"
+
+    def write_run_metadata(
+        self,
+        run_id: str,
+        *,
+        workflow_identity: str,
+        engine: str,
+        status: str,
+        target_nodes: Sequence[str],
+        started_at: str | None = None,
+        completed_at: str | None = None,
+    ) -> Path:
+        """Write workflow-level run metadata."""
+        run_path = self.run_dir(run_id) / "run.json"
+        payload = {
+            "schema": RUN_SCHEMA,
+            "run_id": _validate_path_segment(run_id, label="Run ID"),
+            "workflow_identity": workflow_identity,
+            "storage_path": str(self.storage_path),
+            "started_at": started_at or datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at,
+            "engine": engine,
+            "bioimageflow_version": _bioimageflow_version(),
+            "target_nodes": [str(node) for node in target_nodes],
+            "status": status,
+        }
+        _atomic_write_json(run_path, payload, stem="run")
+        return run_path
+
+    def write_run_node_result(
+        self,
+        run_id: str,
+        node_key: str,
+        *,
+        result_key: str,
+        record_id: str,
+        cache_hit: bool,
+    ) -> Path:
+        """Write a run-local view over the selected current record for one node."""
+        safe_run_id = _validate_path_segment(run_id, label="Run ID")
+        safe_node_key = _validate_node_key(node_key)
+        result_shard_parts(result_key)
+        record_id = _validate_record_id(record_id)
+        current = self.load_current(result_key)
+        if current is None or current.record_id != record_id:
+            raise CacheCorruptionError("Run node result must reference the selected current record.")
+        manifest = self._load_record_manifest(result_key, record_id)
+        record_dir = self.result_dir(result_key) / "records" / record_id
+        node_dir = self.run_node_dir(run_id, node_key)
+        canonical = self._relative_target(node_dir / "result.json", record_dir)
+        payload = {
+            "schema": RUN_NODE_RESULT_SCHEMA,
+            "run_id": safe_run_id,
+            "node_key": safe_node_key,
+            "result_key": result_key,
+            "record_id": record_id,
+            "cache_hit": bool(cache_hit),
+            "canonical": canonical,
+            "outputs": list(manifest.outputs),
+        }
+        result_path = node_dir / "result.json"
+        _atomic_write_json(result_path, payload, stem="result")
+        self._write_link(node_dir / "record.bioimageflow-link.json", kind="directory", target=record_dir)
+        self._write_output_links(node_dir, record_dir, manifest.outputs)
+        return result_path
+
+    def update_latest_node(self, node_key: str, run_id: str) -> Path:
+        """Atomically point ``latest/<node-key>`` at a run-node view."""
+        target = self.run_node_dir(run_id, node_key)
+        self._validate_run_node_view(run_id, node_key)
+        latest_path = self._latest_node_path(node_key)
+        self._write_link(latest_path, kind="directory", target=target)
+        return latest_path
+
+    def update_latest_success_run(self, run_id: str) -> Path:
+        """Atomically point ``runs/latest-success`` at a successful run view."""
+        target = self.run_dir(run_id)
+        run = self._load_run_metadata(run_id)
+        if run.get("status") != "succeeded":
+            raise CacheCorruptionError("Latest successful run must reference a successful run.")
+        latest_path = self.runs_root / "latest-success.bioimageflow-link.json"
+        self._write_link(latest_path, kind="directory", target=target)
+        return latest_path
 
     def load_current(self, result_key: str) -> CurrentPointer | None:
         result_dir = self.result_dir(result_key)
@@ -632,6 +758,157 @@ class StorageV1:
             return pointer
         finally:
             lock_dir.rmdir()
+
+    def _latest_node_path(self, node_key: str) -> Path:
+        safe_node_key = _validate_node_key(node_key)
+        parent = self.latest_root
+        parts = safe_node_key.split("/")
+        for part in parts[:-1]:
+            parent = parent / part
+        return parent / f"{parts[-1]}.bioimageflow-link.json"
+
+    def _relative_target(self, pointer_path: Path, target: Path) -> str:
+        return os.path.relpath(target, start=pointer_path.parent).replace(os.sep, "/")
+
+    def _write_link(
+        self,
+        path: Path,
+        *,
+        kind: str,
+        target: Path,
+        digest: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "schema": LINK_SCHEMA,
+            "kind": kind,
+            "target": self._relative_target(path, target),
+        }
+        if digest is not None:
+            payload["digest"] = digest
+        _atomic_write_json(path, payload, stem="link")
+
+    def _write_output_links(
+        self,
+        node_dir: Path,
+        record_dir: Path,
+        outputs: list[dict[str, Any]],
+    ) -> None:
+        for output in outputs:
+            if output.get("kind") != "owned_asset":
+                continue
+            try:
+                relative = validate_relative_posix_path(str(output["path"]))
+            except (KeyError, ValueError) as exc:
+                raise CacheCorruptionError("Run output link contains an unsafe asset path.") from exc
+            asset_path = record_dir / relative
+            try:
+                asset_path.resolve().relative_to(record_dir.resolve())
+            except ValueError as exc:
+                raise CacheCorruptionError(f"Run output link escapes record directory: {relative}") from exc
+            if not asset_path.exists():
+                raise CacheCorruptionError(f"Run output link target is missing: {relative}")
+            asset_type = str(output.get("asset_type", "file"))
+            if asset_type not in {"file", "directory"}:
+                raise CacheCorruptionError(f"Run output link asset type is invalid: {relative}")
+            link_kind = "directory" if asset_type == "directory" else "file"
+            link_path = node_dir / "outputs" / f"{relative}.bioimageflow-link.json"
+            digest = str(output.get("digest")) if link_kind == "file" and output.get("digest") is not None else None
+            self._write_link(link_path, kind=link_kind, target=asset_path, digest=digest)
+
+    def _load_run_metadata(self, run_id: str) -> dict[str, Any]:
+        run_path = self.run_dir(run_id) / "run.json"
+        if not run_path.exists():
+            raise CacheCorruptionError("Run metadata is missing.")
+        try:
+            payload = json.loads(run_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CacheCorruptionError("Run metadata is invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CacheCorruptionError("Run metadata must be a JSON object.")
+        if payload.get("schema") != RUN_SCHEMA:
+            raise CacheCorruptionError("Run metadata has an invalid schema.")
+        if payload.get("run_id") != run_id:
+            raise CacheCorruptionError("Run metadata run ID mismatch.")
+        if not isinstance(payload.get("status"), str) or payload["status"] == "":
+            raise CacheCorruptionError("Run metadata status is invalid.")
+        return payload
+
+    def _validate_run_node_view(self, run_id: str, node_key: str) -> dict[str, Any]:
+        node_dir = self.run_node_dir(run_id, node_key)
+        result_path = node_dir / "result.json"
+        if not result_path.exists():
+            raise CacheCorruptionError("Run node view is missing result.json.")
+        try:
+            payload = json.loads(result_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CacheCorruptionError("Run node result is invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CacheCorruptionError("Run node result must be a JSON object.")
+        if payload.get("schema") != RUN_NODE_RESULT_SCHEMA:
+            raise CacheCorruptionError("Run node result has an invalid schema.")
+        if payload.get("run_id") != run_id:
+            raise CacheCorruptionError("Run node result run ID mismatch.")
+        if payload.get("node_key") != node_key:
+            raise CacheCorruptionError("Run node result node key mismatch.")
+        result_key = str(payload.get("result_key", ""))
+        record_id = str(payload.get("record_id", ""))
+        try:
+            result_shard_parts(result_key)
+            _validate_record_id(record_id)
+        except ValueError as exc:
+            raise CacheCorruptionError("Run node result contains invalid identifiers.") from exc
+        current = self.load_current(result_key)
+        if current is None or current.record_id != record_id:
+            raise CacheCorruptionError("Run node result no longer references the selected current record.")
+        manifest = self._load_record_manifest(result_key, record_id)
+        record_dir = self.result_dir(result_key) / "records" / record_id
+        expected_canonical = self._relative_target(result_path, record_dir)
+        if payload.get("canonical") != expected_canonical:
+            raise CacheCorruptionError("Run node result canonical path mismatch.")
+        record_link = node_dir / "record.bioimageflow-link.json"
+        if not record_link.exists():
+            raise CacheCorruptionError("Run node record pointer is missing.")
+        self._validate_link(record_link, kind="directory", target=record_dir)
+        for output in manifest.outputs:
+            if output.get("kind") != "owned_asset":
+                continue
+            relative = validate_relative_posix_path(str(output["path"]))
+            asset_type = str(output.get("asset_type", "file"))
+            link_kind = "directory" if asset_type == "directory" else "file"
+            digest = str(output.get("digest")) if link_kind == "file" and output.get("digest") is not None else None
+            self._validate_link(
+                node_dir / "outputs" / f"{relative}.bioimageflow-link.json",
+                kind=link_kind,
+                target=record_dir / relative,
+                digest=digest,
+            )
+        return payload
+
+    def _validate_link(
+        self,
+        path: Path,
+        *,
+        kind: str,
+        target: Path,
+        digest: str | None = None,
+    ) -> None:
+        if not path.exists():
+            raise CacheCorruptionError(f"Run view pointer is missing: {path.name}")
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CacheCorruptionError("Run view pointer is invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CacheCorruptionError("Run view pointer must be a JSON object.")
+        if payload.get("schema") != LINK_SCHEMA:
+            raise CacheCorruptionError("Run view pointer has an invalid schema.")
+        if payload.get("kind") != kind:
+            raise CacheCorruptionError("Run view pointer kind mismatch.")
+        expected_target = self._relative_target(path, target)
+        if payload.get("target") != expected_target:
+            raise CacheCorruptionError("Run view pointer target mismatch.")
+        if digest is not None and payload.get("digest") != digest:
+            raise CacheCorruptionError("Run view pointer digest mismatch.")
 
     def _load_record_manifest(self, result_key: str, record_id: str) -> RecordManifest:
         record_id = _validate_record_id(record_id)

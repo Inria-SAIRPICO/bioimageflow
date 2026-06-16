@@ -587,13 +587,15 @@ runs/<run-id>/nodes/<node-key>/outputs/mask.tif.bioimageflow-link.json
 {
   "schema": "bioimageflow.link.v1",
   "kind": "file",
-  "target": "../record/assets/mask.tif",
+  "target": "../../../../cache/v1/results/ab/cd/rk_.../records/rec_.../assets/mask.tif",
   "digest": "sha256:..."
 }
 ```
 
 Pointer files must be written by temp-file plus atomic rename.
 Pointer targets should use normalized relative paths when possible.
+Output pointer targets resolve to the selected canonical record's owned assets, not to attempt staging directories or a separate run-local record copy.
+The path below `outputs/` preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json`.
 
 The engine may offer export modes that materialize real symlinks or copied files for users.
 Exported symlinks and copied files are not canonical cache records.
