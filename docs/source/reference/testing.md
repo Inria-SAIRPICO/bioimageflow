@@ -45,10 +45,11 @@ Add one or more specific resource markers when relevant:
 - `slow`: takes materially longer than the regular package tests.
 
 Reserve resource markers for tests that actually require those resources.
-Resource markers are descriptive selectors; they are not permission to skip because a dependency is absent from the host environment.
+External resource markers are descriptive selectors, and the external markers listed below also keep service-dependent tests out of the default pytest run.
+They are not permission to skip because a dependency is absent from the host environment after the external tier has been enabled.
 Regular tests that only build graphs, check documentation, or use fake/mocked resources should not use `public_data`, `external_binary`, `sairpico_binary`, or `model_runtime`.
 
-Complete tests are skipped unless explicitly enabled with `--run-complete`:
+Tests marked `complete`, `wetlands`, `public_data`, `external_binary`, `sairpico_binary`, or `model_runtime` are skipped unless explicitly enabled with `--run-complete`:
 
 ```bash
 uv run pytest -m complete --run-complete
@@ -63,7 +64,7 @@ uv run pytest tests/priority_workflows -m "complete and wetlands" --run-complete
 
 The remaining valid complete-test gates are:
 
-- `--run-complete`, which opts into slower Wetlands environment creation and execution;
+- `--run-complete`, which opts into slower Wetlands environment creation, external/service-dependent resources, and execution;
 - `BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS=1`, for tests that download public datasets.
 
 Public-data tests should skip with an actionable reason when `BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS=1` is not set.
