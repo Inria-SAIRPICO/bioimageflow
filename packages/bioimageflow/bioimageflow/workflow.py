@@ -80,20 +80,69 @@ class ProgressEvent:
     timestamp: float = 0.0
 
 
-def _clear_processing_v1_currents_for_node(
+@dataclass(frozen=True)
+class InvalidatedSelection:
+    """A v1 cache selection removed by :meth:`Workflow.invalidate`."""
+
+    node_name: str
+    result_key: str
+    selected_record_id: str | None
+    status: Literal["removed", "corrupt_removed"] = "removed"
+
+
+def _remove_v1_current_selection(
+    storage: "StorageV1",
+    result_key: str,
+    *,
+    node_name: str,
+) -> InvalidatedSelection | None:
+    from bioimageflow.storage_v1 import CacheCorruptionError
+
+    current_path = storage.result_dir(result_key) / "current.json"
+    if not current_path.exists():
+        return None
+    selected_record_id: str | None = None
+    status: Literal["removed", "corrupt_removed"] = "removed"
+    try:
+        selected_record_id = storage.load_current(result_key).record_id  # type: ignore[union-attr]
+    except CacheCorruptionError:
+        status = "corrupt_removed"
+        try:
+            raw = json.loads(current_path.read_text())
+            if isinstance(raw, dict) and isinstance(raw.get("record_id"), str):
+                selected_record_id = raw["record_id"]
+        except (OSError, json.JSONDecodeError):
+            selected_record_id = None
+    current_path.unlink()
+    return InvalidatedSelection(
+        node_name=node_name,
+        result_key=result_key,
+        selected_record_id=selected_record_id,
+        status=status,
+    )
+
+
+def _clear_v1_currents_for_node(
     storage_path: str | Path,
     node_name: str,
     known_sig_hashes: set[str],
-) -> bool:
-    from bioimageflow.cache import iter_processing_v1_result_metadata
+    *,
+    kind: Literal["dataframe_tool", "processing_tool"],
+) -> set[InvalidatedSelection]:
+    from bioimageflow.cache import iter_dataframe_v1_result_metadata, iter_processing_v1_result_metadata
     from bioimageflow.storage_v1 import StorageV1
 
     results_root = Path(storage_path) / "cache" / "v1" / "results"
     if not results_root.exists():
-        return False
-    cleared = False
+        return set()
+    invalidated: set[InvalidatedSelection] = set()
     storage = StorageV1(storage_path)
-    for metadata in iter_processing_v1_result_metadata(
+    metadata_iter = (
+        iter_dataframe_v1_result_metadata
+        if kind == "dataframe_tool"
+        else iter_processing_v1_result_metadata
+    )
+    for metadata in metadata_iter(
         storage_path,
         {node_name: known_sig_hashes},
     ):
@@ -102,11 +151,14 @@ def _clear_processing_v1_currents_for_node(
         result_key = metadata.get("result_key")
         if not isinstance(result_key, str):
             continue
-        current_path = storage.result_dir(result_key) / "current.json"
-        if current_path.exists():
-            current_path.unlink()
-            cleared = True
-    return cleared
+        selection = _remove_v1_current_selection(storage, result_key, node_name=node_name)
+        if selection is not None:
+            invalidated.add(selection)
+    return invalidated
+
+
+if TYPE_CHECKING:
+    from bioimageflow.storage_v1 import StorageV1
 
 
 class Workflow:
@@ -174,15 +226,15 @@ class Workflow:
         node_ids: "Iterable[str]",
         *,
         cascade: bool = True,
-    ) -> set[str]:
-        """Remove cache directories for the given nodes (and their
-        downstream by default).
+    ) -> set[InvalidatedSelection]:
+        """Remove v1 cache selections for the given nodes.
 
-        Returns the set of node IDs whose cache directories were
-        cleared. ``cascade=True`` (the default) also removes the cache
-        of every node transitively downstream of each input node, so a
-        single call leaves the workflow in a state where re-running
-        will recompute everything that depended on the changed node.
+        Returns the v1 selections whose ``current.json`` pointers were
+        removed. ``cascade=True`` (the default) also removes selections
+        for every node transitively downstream of each input node, so a
+        subsequent run recomputes or reselects everything that depended on
+        the changed node. Immutable ``records/<record-id>/`` directories
+        are retained.
 
         ``KeyError`` is raised if any name in ``node_ids`` is not
         registered with this workflow — matching the existing behavior
@@ -218,7 +270,7 @@ class Workflow:
             if cascade:
                 targets.update(self.downstream_of(nid))
 
-        cleared: set[str] = set()
+        invalidated: set[InvalidatedSelection] = set()
         self._discover_graph(list(self._nodes.values()))
         engine = DefaultEngine(use_wetlands=False)
         try:
@@ -290,25 +342,36 @@ class Workflow:
             sig_hash = plan_sig_hashes.get(name)
             if isinstance(node.tool, DataFrameTool) and sig_hash:
                 result_key = plan_result_keys.get(name) or dataframe_v1_result_key(name, sig_hash)
-                current_path = v1_storage.result_dir(result_key) / "current.json"
-                if current_path.exists():
-                    current_path.unlink()
-                    cleared.add(name)
+                selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                if selection is not None:
+                    invalidated.add(selection)
+                invalidated.update(
+                    _clear_v1_currents_for_node(
+                        self.storage_path,
+                        name,
+                        {sig_hash},
+                        kind="dataframe_tool",
+                    )
+                )
             if (
                 isinstance(node.tool, ProcessingTool)
                 and sig_hash
             ):
                 result_key = plan_result_keys.get(name) or processing_v1_result_key(name, sig_hash)
-                current_path = v1_storage.result_dir(result_key) / "current.json"
-                if current_path.exists():
-                    current_path.unlink()
-                    cleared.add(name)
-                if _clear_processing_v1_currents_for_node(self.storage_path, name, {sig_hash}):
-                    cleared.add(name)
+                selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                if selection is not None:
+                    invalidated.add(selection)
+                invalidated.update(
+                    _clear_v1_currents_for_node(
+                        self.storage_path,
+                        name,
+                        {sig_hash},
+                        kind="processing_tool",
+                    )
+                )
             if node_dir.exists():
                 shutil.rmtree(node_dir)
-                cleared.add(name)
-        return cleared
+        return invalidated
 
     def _dataframe_tool_signature_params(self, node: Node) -> dict[str, Any]:
         from bioimageflow.validation import is_path_type

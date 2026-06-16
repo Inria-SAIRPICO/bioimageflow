@@ -339,6 +339,15 @@ def _latest_success_run_dir(storage_path: Path) -> Path:
     return storage_path / "runs" / latest["target"]
 
 
+def _invalidated_node_names(invalidated) -> set[str]:
+    return {selection.node_name for selection in invalidated}
+
+
+def _selection_for(invalidated, node_name: str):
+    [selection] = [item for item in invalidated if item.node_name == node_name]
+    return selection
+
+
 def _parquet_digest(df: pd.DataFrame, path: Path) -> str:
     df.to_parquet(path, index=True)
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
@@ -644,7 +653,11 @@ def test_dataframe_tool_invalidate_removes_v1_current_but_keeps_record(tmp_path:
         node = CountingTable()(value=9)
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
+    selection = _selection_for(cleared, node_name)
+    assert selection.result_key == result_key
+    assert selection.selected_record_id == pointer.record_id
+    assert selection.status == "removed"
     assert storage.load_current(result_key) is None
     assert record_dir.exists()
 
@@ -671,8 +684,36 @@ def test_dataframe_tool_invalidate_removes_corrupt_v1_current(tmp_path: Path) ->
         node = CountingTable()(value=10)
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
+    selection = _selection_for(cleared, node_name)
+    assert selection.result_key == result_key
+    assert selection.selected_record_id is None
+    assert selection.status == "corrupt_removed"
     assert not current_path.exists()
+
+
+def test_dataframe_tool_invalidate_removes_prior_signature_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=1)
+        wf.compute(node)
+        old_sig_hash = wf.plan()[node.name].sig_hash
+
+    old_result_key = dataframe_v1_result_key("CountingTable_1", old_sig_hash)
+    storage = StorageV1(storage_path)
+    old_pointer = storage.load_current(old_result_key)
+    assert old_pointer is not None
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = CountingTable()(value=2)
+        cleared = wf.invalidate([node.name])
+
+    assert _invalidated_node_names(cleared) == {"CountingTable_1"}
+    selection = _selection_for(cleared, "CountingTable_1")
+    assert selection.result_key == old_result_key
+    assert selection.selected_record_id == old_pointer.record_id
+    assert storage.load_current(old_result_key) is None
 
 
 def test_dataframe_tool_corrupt_v1_dataframe_file_raises_cache_corruption(tmp_path: Path) -> None:
@@ -879,7 +920,11 @@ def test_source_processing_tool_invalidate_removes_current_but_keeps_record(tmp_
         node = SourceAssetWriter()(text="invalidate")
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
+    selection = _selection_for(cleared, node_name)
+    assert selection.result_key == result_key
+    assert selection.selected_record_id == pointer.record_id
+    assert selection.status == "removed"
     assert storage.load_current(result_key) is None
     assert record_dir.exists()
 
@@ -906,7 +951,11 @@ def test_source_processing_tool_invalidate_removes_corrupt_current(tmp_path: Pat
         node = SourceAssetWriter()(text="corrupt")
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
+    selection = _selection_for(cleared, node_name)
+    assert selection.result_key == result_key
+    assert selection.selected_record_id is None
+    assert selection.status == "corrupt_removed"
     assert not current_path.exists()
 
 
@@ -927,7 +976,7 @@ def test_source_processing_tool_invalidate_removes_corrupt_current_with_default_
         node = SourceAssetWriter()()
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
     assert not current_path.exists()
 
 
@@ -1149,7 +1198,7 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
         node = ColumnBoundLegacyWriter()(label=table["label"])
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {node_name}
+    assert _invalidated_node_names(cleared) == {node_name}
     assert storage.load_current(result_key) is None
     assert record_dir.exists()
 
@@ -1172,7 +1221,10 @@ def test_column_bound_processing_tool_invalidate_removes_prior_signature_current
         node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "new_{row_index}.txt"})
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {"ColumnBoundLegacyWriter_1"}
+    assert _invalidated_node_names(cleared) == {"ColumnBoundLegacyWriter_1"}
+    selection = _selection_for(cleared, "ColumnBoundLegacyWriter_1")
+    assert selection.result_key == old_result_key
+    assert selection.status == "removed"
     assert storage.load_current(old_result_key) is None
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1205,7 +1257,7 @@ def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_c
         ColumnBoundLegacyWriter()(label=table["label"], name="writer_b")
         cleared = wf.invalidate([node_a.name], cascade=False)
 
-    assert cleared == {"writer_a"}
+    assert _invalidated_node_names(cleared) == {"writer_a"}
     assert storage.load_current(key_a) is None
     assert storage.load_current(key_b) is not None
 
@@ -1355,7 +1407,7 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
         assert wf.plan()[node.name].status is NodePlanStatus.CACHED
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+    assert _invalidated_node_names(cleared) == {"ColumnBoundSharedMemoryWriter_1"}
     assert storage.load_current(result_key) is None
     assert record_dir.exists()
 
@@ -1408,7 +1460,7 @@ def test_column_bound_shared_array_plan_and_invalidate_do_not_rehydrate_shared_m
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+    assert _invalidated_node_names(cleared) == {"ColumnBoundSharedMemoryWriter_1"}
 
 
 def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_per_row(tmp_path: Path) -> None:
@@ -1479,7 +1531,7 @@ def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_cu
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+    assert _invalidated_node_names(cleared) == {"ColumnBoundSharedMemoryWriter_1"}
     assert not current_path.exists()
     assert record_dir.exists()
 
@@ -1587,7 +1639,7 @@ def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehy
         assert wf.plan()[node.name].status is NodePlanStatus.CACHED
         cleared = wf.invalidate([node.name])
 
-    assert cleared == {"SourceSharedMemoryWriter_1"}
+    assert _invalidated_node_names(cleared) == {"SourceSharedMemoryWriter_1"}
     assert storage.load_current(result_key) is None
     assert record_dir.exists()
 

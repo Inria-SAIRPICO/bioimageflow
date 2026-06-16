@@ -90,19 +90,20 @@ Workflow.invalidate()
 
 When a long-lived host changes a parameter and wants to clear cached
 results explicitly, :meth:`Workflow.invalidate
-<bioimageflow.Workflow.invalidate>` removes the cache directories of
+<bioimageflow.Workflow.invalidate>` removes v1 cache selections for
 the named nodes:
 
 .. code-block:: python
 
    cleared = wf.invalidate(["segment"])               # cascade=True default
-   # cleared == {"segment", "measure", "summary"}
+   cleared_nodes = {selection.node_name for selection in cleared}
 
    wf.invalidate(["segment"], cascade=False)         # just "segment"
 
-Returns the set of node names whose directories were actually removed
-(entries that didn't exist on disk are silently skipped). ``KeyError``
-is raised when any name is unknown.
+Returns ``InvalidatedSelection`` entries for actual ``current.json`` pointers that were removed.
+Each entry includes the node name, result key, selected record ID when readable, and a removal status.
+Entries that had no selected v1 cache record are silently skipped.
+``KeyError`` is raised when any name is unknown.
 
 .. warning::
 

@@ -1866,12 +1866,16 @@ deps: set[str] = workflow.downstream_of("loader_1")    # transitive downstream n
 **Cache invalidation:**
 
 ```python
-affected: set[str] = workflow.invalidate(["segmenter_1"])               # cascades to downstream
-affected = workflow.invalidate(["segmenter_1"], cascade=False)          # only this node
+from bioimageflow import InvalidatedSelection
+
+affected: set[InvalidatedSelection] = workflow.invalidate(["segmenter_1"])      # cascades to downstream
+affected = workflow.invalidate(["segmenter_1"], cascade=False)                  # only this node
 ```
 
 `invalidate` removes or tombstones the v1 `current.json` cache selections for each affected node/result key; with `cascade=True` (default) it also invalidates every transitively downstream node selection so a subsequent `compute()` recomputes or reselects everything that depended on the changed node.
-It returns the affected result keys or node selections, depending on the public return model chosen by the implementation; it never deletes immutable `records/<record-id>/` directories.
+It returns `InvalidatedSelection` entries for actual v1 selections whose `current.json` pointers were removed.
+Each entry contains `node_name`, `result_key`, `selected_record_id`, and `status` (`"removed"` or `"corrupt_removed"`).
+It never reports legacy directory cleanup as a cache selection and never deletes immutable `records/<record-id>/` directories.
 It raises `KeyError` for unknown node names.
 It is not safe to call concurrently with `compute()` on the same workflow storage path unless both operations use the same guarded metadata protocol or callers coordinate externally.
 

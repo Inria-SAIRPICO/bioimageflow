@@ -1,7 +1,7 @@
 """BioImageFlow orchestrator — main process only."""
 
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
-from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent
+from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent, InvalidatedSelection as InvalidatedSelection
 from bioimageflow.engine import (
     NodeStep as NodeStep,
     NodePlan as NodePlan,
