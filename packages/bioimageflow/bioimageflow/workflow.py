@@ -199,7 +199,6 @@ class Workflow:
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.engine import (
             DefaultEngine,
-            _has_shared_array_output,
             source_processing_signature_material,
             topological_order,
         )
@@ -235,7 +234,7 @@ class Workflow:
                 node = self._nodes[name]
                 try:
                     _cached_df, sig_hash = engine._check_node_cache(
-                        node, results, sig_hashes, self,
+                        node, results, sig_hashes, self, hydrate_assets=False,
                     )
                 except Exception:
                     if isinstance(node.tool, DataFrameTool):
@@ -258,7 +257,7 @@ class Workflow:
                             {},
                             self,
                         )
-                    elif isinstance(node.tool, ProcessingTool) and not _has_shared_array_output(node.tool):
+                    elif isinstance(node.tool, ProcessingTool):
                         input_annotations = node.tool.Inputs._get_all_annotations()
                         upstream_nodes = {
                             cr.node.name: cr.node
@@ -289,7 +288,6 @@ class Workflow:
                     cleared.add(name)
             if (
                 isinstance(node.tool, ProcessingTool)
-                and (not _has_shared_array_output(node.tool) or not node._column_bindings)
                 and sig_hash
             ):
                 result_key = processing_v1_result_key(name, sig_hash)

@@ -631,10 +631,11 @@ Shared memory is a runtime transport optimization, not a canonical storage forma
 Shared-memory segment names must not appear in result keys or record IDs.
 Records must contain durable file artifacts or manifests that can be read by a different process or machine.
 
-If a tool produces a `SharedArray` during execution and the result is cacheable, the engine must publish a durable representation before a cache hit can be served to a later run.
+If a source or column-bound `ProcessingTool` produces a `SharedArray` during execution and the result is cacheable, the engine must publish a durable representation before a cache hit can be served to a later run.
 The durable representation belongs in the selected record and is described by the manifest.
 
 V1 represents reusable shared-memory outputs as record-owned assets.
+Column-bound outputs produce one owned asset for each non-null `SharedArray` dataframe cell.
 For example, a shared-memory dataframe cell may be canonicalized to:
 
 ```text

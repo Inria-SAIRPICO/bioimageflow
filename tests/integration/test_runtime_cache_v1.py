@@ -271,6 +271,27 @@ class SourceSharedMemoryConsumer(ProcessingTool):
             return self.Outputs(total=int(array.sum()))
 
 
+class ColumnBoundSharedMemoryWriter(ProcessingTool):
+    display_name = "Column Bound Shared Memory Writer"
+    environment = EnvironmentSpec(name="column_bound_shared_memory_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        label: str
+
+    class Outputs(IOModel):
+        result: Annotated[SharedArray, ImageSpec(semantics={Semantic.LABEL})]
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        import numpy as np
+        from bioimageflow_core.shm import create_shared_output
+
+        type(self).executions += 1
+        value = len(arguments.label)
+        with create_shared_output(np.full((2, 2), value, dtype=np.uint8)) as ref:
+            return self.Outputs(result=ref)
+
+
 def _current_pointer_files(storage_path: Path) -> list[Path]:
     return sorted((storage_path / "cache" / "v1" / "results").glob("*/*/rk_*/current.json"))
 
@@ -1050,20 +1071,238 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(t
     assert not (StorageV1(storage_path).result_dir(processing_v1_result_key(node.name, sig_hash)) / "current.json").exists()
 
 
-def test_column_bound_shared_array_processing_tool_stays_legacy_until_durable_v1(tmp_path: Path) -> None:
-    from .conftest import FileLoader, StubSharedMemoryTool
+def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_core.shm import open_shared_array
 
     storage_path = tmp_path / "results"
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    (data_dir / "image.tif").write_text("image")
+    ColumnBoundSharedMemoryWriter.executions = 0
 
     with Workflow(storage_path=storage_path) as wf:
-        raw = FileLoader()(path=str(data_dir))
-        node = StubSharedMemoryTool()(input_image=raw["path"])
-        wf.compute(node)
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
 
-    assert (storage_path / "data" / "StubSharedMemoryTool_1").exists()
+    assert ColumnBoundSharedMemoryWriter.executions == 1
+    assert isinstance(first.loc["row", "result"], SharedArray)
+    first_ref = first.loc["row", "result"]
+    with open_shared_array(first_ref) as array:
+        assert array.shape == (2, 2)
+        assert str(array.dtype) == "uint8"
+        assert int(array.sum()) == 8
+
+    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert len(manifest["outputs"]) == 1
+    [output] = manifest["outputs"]
+    assert output == {
+        "array": {
+            "column": "result",
+            "dtype": "uint8",
+            "format": "npy",
+            "order": "C",
+            "row_index": "row",
+            "shape": [2, 2],
+        },
+        "asset_role": "shared_array",
+        "digest": output["digest"],
+        "kind": "owned_asset",
+        "path": output["path"],
+        "size": output["size"],
+    }
+    assert output["path"].startswith("assets/shm/result_")
+    assert output["path"].endswith(".npy")
+    assert (record_dir / output["path"]).exists()
+    assert not (storage_path / "data" / "ColumnBoundSharedMemoryWriter_1").exists()
+
+    events: list[tuple[str, str]] = []
+    with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
+        table = CountingTable()(value=4)
+        second = wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
+
+    assert ColumnBoundSharedMemoryWriter.executions == 1
+    assert isinstance(second.loc["row", "result"], SharedArray)
+    second_ref = second.loc["row", "result"]
+    assert second_ref.name != first_ref.name
+    with open_shared_array(second_ref) as array:
+        assert int(array.sum()) == 8
+    assert ("ColumnBoundSharedMemoryWriter_1", "cached") in events
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        writer = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        consumer = SourceSharedMemoryConsumer()(result=writer["result"])
+        steps = list(wf.compute_steps(consumer))
+        writer_step = next(step for step in steps if step.node_name == writer.name)
+        assert writer_step.cached is True
+        cached_writer_df = writer_step.execute()
+        assert isinstance(cached_writer_df.loc["row", "result"], SharedArray)
+        consumer_step = next(step for step in steps if step.node_name == consumer.name)
+        consumer_df = consumer_step.execute()
+
+    assert consumer_df.loc["row", "total"] == 8
+    assert ColumnBoundSharedMemoryWriter.executions == 1
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        assert wf.plan()[node.name].status is NodePlanStatus.CACHED
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+    assert storage.load_current(result_key) is None
+    assert record_dir.exists()
+
+
+def test_column_bound_shared_array_processing_tool_parameter_change_reports_out_of_date(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
+        node_name = "ColumnBoundSharedMemoryWriter_1"
+        old_sig_hash = wf.plan()[node_name].sig_hash
+
+    old_result_key = processing_v1_result_key(node_name, old_sig_hash)
+    assert StorageV1(storage_path).load_current(old_result_key) is not None
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=5)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.OUT_OF_DATE
+
+
+def test_column_bound_shared_array_plan_and_invalidate_do_not_rehydrate_shared_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
+
+    def fail_create_shared_output(*args, **kwargs):
+        raise AssertionError("planning should not create shared-memory segments")
+
+    monkeypatch.setattr("bioimageflow_core.shm.create_shared_output", fail_create_shared_output)
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.CACHED
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+
+
+def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_per_row(tmp_path: Path) -> None:
+    from bioimageflow_core.shm import open_shared_array
+
+    storage_path = tmp_path / "results"
+    ColumnBoundSharedMemoryWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    assert ColumnBoundSharedMemoryWriter.executions == 2
+    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    outputs = sorted(manifest["outputs"], key=lambda output: output["array"]["row_index"])
+    assert [output["array"]["row_index"] for output in outputs] == ["a", "b"]
+    assert [output["array"]["column"] for output in outputs] == ["result", "result"]
+    assert [output["array"]["shape"] for output in outputs] == [[2, 2], [2, 2]]
+    assert all(output["asset_role"] == "shared_array" for output in outputs)
+    assert all(output["path"].startswith("assets/shm/result_") for output in outputs)
+    assert all((record_dir / output["path"]).exists() for output in outputs)
+
+    stored = pd.read_parquet(record_dir / "dataframe.parquet")
+    assert all(str(value).startswith("assets/shm/result_") for value in stored["result"])
+    assert set(first.index) == {"a", "b"}
+    with open_shared_array(first.loc["a", "result"]) as array:
+        assert int(array.sum()) == 20
+    with open_shared_array(first.loc["b", "result"]) as array:
+        assert int(array.sum()) == 16
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        second = wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
+
+    assert ColumnBoundSharedMemoryWriter.executions == 2
+    with open_shared_array(second.loc["a", "result"]) as array:
+        assert int(array.sum()) == 20
+    with open_shared_array(second.loc["b", "result"]) as array:
+        assert int(array.sum()) == 16
+
+
+def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    current_path = storage.result_dir(result_key) / "current.json"
+    current_path.write_text("{not json")
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {"ColumnBoundSharedMemoryWriter_1"}
+    assert not current_path.exists()
+    assert record_dir.exists()
+
+
+def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_corruption(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundSharedMemoryWriter()(label=table["label"])
+        wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("ColumnBoundSharedMemoryWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    (record_dir / manifest["outputs"][0]["path"]).unlink()
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        with pytest.raises(CacheCorruptionError, match="Record asset is missing"):
+            wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
 
 
 def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(tmp_path: Path) -> None:
