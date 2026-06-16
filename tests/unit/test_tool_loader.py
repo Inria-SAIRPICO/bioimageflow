@@ -14,6 +14,7 @@ Covers:
 """
 
 import inspect
+import json
 import sys
 
 import pytest
@@ -52,6 +53,9 @@ def tool_store(tmp_path):
     ]:
         pkg_dir = store / "dummy_tools" / version / "dummy_tools"
         pkg_dir.mkdir(parents=True)
+        dep_dir = store / "dummy_tools" / version / "dep_pkg"
+        dep_dir.mkdir()
+        (dep_dir / "__init__.py").write_text("DEP_VALUE = 42\n")
 
         (pkg_dir / "__init__.py").write_text(
             "from .alpha import AlphaTool\n"
@@ -68,6 +72,7 @@ def tool_store(tmp_path):
         )
 
         (pkg_dir / "alpha.py").write_text(
+            "import dep_pkg\n"
             "from .base import DummyBase\n"
             "from .utils.helpers import helper_func\n"
             "from bioimageflow_core import IOModel, Arguments\n\n"
@@ -619,3 +624,45 @@ class TestTransitiveDeps:
 
         unload_versioned_package("dummy_tools", "1.0.0")
         assert expected not in sys.path
+
+    def test_worker_loads_versioned_package_tool_with_relative_imports(self, tool_store):
+        from bioimageflow.env_manager import _find_tool_file
+        from bioimageflow.tool_loader import load_versioned_package
+        from bioimageflow_core.worker import _load_module_from_file
+
+        package = load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        tool_file = _find_tool_file(package.AlphaTool)
+        config = json.loads(tool_file)
+        assert config == {
+            "mode": "versioned_module",
+            "module": "dummy_tools__1_0_0.alpha",
+            "package": "dummy_tools",
+            "sys_path": str(tool_store / "dummy_tools" / "1.0.0"),
+        }
+
+        original_path = list(sys.path)
+        for module_name in list(sys.modules):
+            if module_name == "dummy_tools" or module_name.startswith("dummy_tools."):
+                sys.modules.pop(module_name, None)
+        sys.modules.pop("dep_pkg", None)
+        try:
+            sys.path[:] = [entry for entry in sys.path if entry != config["sys_path"]]
+            module = _load_module_from_file(tool_file)
+            alpha_tool = getattr(module, "AlphaTool")
+            assert alpha_tool().process_row(None).result == "v1"
+        finally:
+            sys.path[:] = original_path
+
+    def test_worker_loads_two_versioned_package_tools_without_module_collision(self, tool_store):
+        from bioimageflow.env_manager import _find_tool_file
+        from bioimageflow.tool_loader import load_versioned_package
+        from bioimageflow_core.worker import _load_module_from_file
+
+        v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
+        v2 = load_versioned_package("dummy_tools", "2.0.0", tool_store)
+
+        module_v1 = _load_module_from_file(_find_tool_file(v1.AlphaTool))
+        module_v2 = _load_module_from_file(_find_tool_file(v2.AlphaTool))
+
+        assert getattr(module_v1, "AlphaTool")().process_row(None).result == "v1"
+        assert getattr(module_v2, "AlphaTool")().process_row(None).result == "v2"

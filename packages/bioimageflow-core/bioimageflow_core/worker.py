@@ -38,6 +38,30 @@ _accepts_context: dict[type, bool] = {}
 _batch_accepts_context_cache: dict[type, bool] = {}
 
 
+def _load_versioned_module(config: dict[str, Any]) -> object:
+    module_name = str(config["module"])
+    package_name = str(config["package"])
+    sys_path = str(config["sys_path"])
+    if sys_path not in sys.path:
+        sys.path.insert(0, sys_path)
+    scoped_package = module_name.split(".", 1)[0]
+    package_dir = Path(sys_path) / package_name
+    init_path = package_dir / "__init__.py"
+    if scoped_package not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            scoped_package,
+            init_path,
+            submodule_search_locations=[str(package_dir)],
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load package from '{init_path}'")
+        package_module = importlib.util.module_from_spec(spec)
+        package_module.__package__ = scoped_package
+        sys.modules[scoped_package] = package_module
+        spec.loader.exec_module(package_module)
+    return importlib.import_module(module_name)
+
+
 def _discover_tools(module: object) -> dict[str, type]:
     """Build a name->class registry from all BaseTool subclasses in the module."""
     registry: dict[str, type] = {}
@@ -51,6 +75,8 @@ def _load_module_from_file(file_path: str) -> object:
     """Load a Python module from a file path."""
     if file_path.startswith("{"):
         config = json.loads(file_path)
+        if config.get("mode") == "versioned_module":
+            return _load_versioned_module(config)
         if config.get("mode") == "module":
             sys_path = config.get("sys_path")
             if sys_path and sys_path not in sys.path:
