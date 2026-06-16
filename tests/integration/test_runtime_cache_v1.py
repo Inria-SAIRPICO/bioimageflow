@@ -1,7 +1,5 @@
 """Runtime integration tests for the v1 output/cache storage contract."""
 
-from __future__ import annotations
-
 import json
 import hashlib
 from pathlib import Path
@@ -12,9 +10,14 @@ import pytest
 
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
-from bioimageflow.cache import dataframe_v1_result_key
+from bioimageflow.cache import (
+    dataframe_v1_result_key,
+    processing_v1_prepare_attempt,
+    processing_v1_publish,
+    processing_v1_result_key,
+)
 from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, make_record_id
-from bioimageflow_core import IOModel
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, Template
 from bioimageflow_core.types import ImageSpec, Semantic
 
 
@@ -56,6 +59,115 @@ class PathTable(DataFrameTool):
     def transform(self, df: pd.DataFrame, arguments) -> pd.DataFrame:
         type(self).executions += 1
         return pd.DataFrame({"path": [arguments.path]}, index=["row"])
+
+
+class SourceAssetWriter(ProcessingTool):
+    display_name = "Source Asset Writer"
+    environment = EnvironmentSpec(name="source_asset_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        text: str = "mask"
+
+    class Outputs(IOModel):
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("mask_{row_index}.txt")
+        count: int
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        assert context is not None
+        assert "cache/v1/results" in str(context.run_dir)
+        assert str(context.run_dir).endswith("/staging")
+        mask = Path(arguments.mask)
+        assert mask.parent == context.assets_dir
+        mask.write_text(arguments.text)
+        return self.Outputs(mask=mask, count=len(arguments.text))
+
+
+class SourceExternalPaths(ProcessingTool):
+    display_name = "Source External Paths"
+    environment = EnvironmentSpec(name="source_external_paths", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        directory: Path
+
+    class Outputs(IOModel):
+        path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+        label: str
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        return [
+            self.Outputs(path=path, label=path.stem)
+            for path in sorted(Path(arguments.directory).glob("*.txt"))
+        ]
+
+
+class FailingSourceAssetWriter(ProcessingTool):
+    display_name = "Failing Source Asset Writer"
+    environment = EnvironmentSpec(name="failing_source_asset_writer", dependencies={})
+
+    class Inputs(IOModel):
+        text: str = "partial"
+
+    class Outputs(IOModel):
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("mask_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        assert context is not None
+        Path(arguments.mask).write_text(arguments.text)
+        raise RuntimeError("boom")
+
+
+class EscapingSourceAssetWriter(ProcessingTool):
+    display_name = "Escaping Source Asset Writer"
+    environment = EnvironmentSpec(name="escaping_source_asset_writer", dependencies={})
+
+    class Inputs(IOModel):
+        directory: Path
+
+    class Outputs(IOModel):
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("mask_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        outside = Path(arguments.directory) / "outside.txt"
+        outside.write_text("outside")
+        return self.Outputs(mask=outside)
+
+
+class UnsafeTemplateSource(ProcessingTool):
+    display_name = "Unsafe Template Source"
+    environment = EnvironmentSpec(name="unsafe_template_source", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        text: str = "unsafe"
+
+    class Outputs(IOModel):
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("safe.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        Path(arguments.mask).write_text(arguments.text)
+        return self.Outputs(mask=arguments.mask)
+
+
+class ColumnBoundLegacyWriter(ProcessingTool):
+    display_name = "Column Bound Legacy Writer"
+    environment = EnvironmentSpec(name="column_bound_legacy_writer", dependencies={})
+
+    class Inputs(IOModel):
+        label: str
+
+    class Outputs(IOModel):
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("legacy_{row_index}.txt")
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        assert context is not None
+        output = Path(arguments.output)
+        output.write_text(arguments.label)
+        return self.Outputs(output=output)
 
 
 def _current_pointer_files(storage_path: Path) -> list[Path]:
@@ -305,3 +417,320 @@ def test_dataframe_tool_publish_rejects_symlinked_records_directory_before_writi
     with pytest.raises(CacheCorruptionError):
         dataframe_v1_publish(storage_path, node_name, sig_hash, pd.DataFrame({"value": [1]}))
     assert list(outside.iterdir()) == []
+
+
+def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    SourceAssetWriter.executions = 0
+    events: list[tuple[str, str]] = []
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="abc")
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("SourceAssetWriter_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "path": "assets/mask_0.txt",
+            "size": 3,
+        }
+    ]
+    assert (record_dir / "assets" / "mask_0.txt").read_text() == "abc"
+    assert first.loc["0", "mask"] == str(record_dir / "assets" / "mask_0.txt")
+    assert not (storage_path / "data" / "SourceAssetWriter_1").exists()
+
+    with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
+        second = wf.compute(SourceAssetWriter()(text="abc"))
+
+    pd.testing.assert_frame_equal(first, second)
+    assert SourceAssetWriter.executions == 1
+    assert ("SourceAssetWriter_1", "cached") in events
+
+
+def test_source_processing_tool_external_paths_stay_external_references(tmp_path: Path) -> None:
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    (source_dir / "a.txt").write_text("a")
+    (source_dir / "b.txt").write_text("b")
+    storage_path = tmp_path / "results"
+    SourceExternalPaths.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceExternalPaths()(directory=source_dir)
+        first = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("SourceExternalPaths_1", sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {"identity": "path", "kind": "external_path", "path": str(source_dir / "a.txt")},
+        {"identity": "path", "kind": "external_path", "path": str(source_dir / "b.txt")},
+    ]
+    assert set(first["path"]) == {str(source_dir / "a.txt"), str(source_dir / "b.txt")}
+    assert not (record_dir / "assets").exists()
+    assert not (storage_path / "data" / "SourceExternalPaths_1").exists()
+
+    with Workflow(storage_path=storage_path) as wf:
+        second = wf.compute(SourceExternalPaths()(directory=source_dir))
+
+    pd.testing.assert_frame_equal(first, second)
+    assert SourceExternalPaths.executions == 1
+
+
+def test_source_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        wf.compute(SourceAssetWriter()(text="plan"))
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="plan")
+        plan = wf.plan()
+
+    assert plan[node.name].status is NodePlanStatus.CACHED
+
+
+def test_source_processing_tool_default_input_value_affects_signature(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        explicit = SourceAssetWriter()(text="mask", name="source")
+        wf.compute(explicit)
+        explicit_sig_hash = wf.plan()[explicit.name].sig_hash
+
+    with Workflow(storage_path=storage_path) as wf:
+        defaulted = SourceAssetWriter()(name="source")
+        plan = wf.plan()
+
+    assert plan[defaulted.name].sig_hash == explicit_sig_hash
+    assert plan[defaulted.name].status is NodePlanStatus.CACHED
+
+
+def test_source_processing_tool_empty_output_template_override_does_not_claim_external_path(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    (source_dir / "a.txt").write_text("a")
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceExternalPaths()(directory=source_dir, output_templates={"path": ""})
+        df = wf.compute(node)
+        sig_hash = wf.plan()[node.name].sig_hash
+
+    result_key = processing_v1_result_key("SourceExternalPaths_1", sig_hash)
+    pointer = StorageV1(storage_path).load_current(result_key)
+    assert pointer is not None
+    assert list(df["path"]) == [str(source_dir / "a.txt")]
+
+
+def test_source_processing_tool_invalidate_removes_current_but_keeps_record(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    SourceAssetWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="invalidate")
+        wf.compute(node)
+        node_name = node.name
+        sig_hash = wf.plan()[node_name].sig_hash
+
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="invalidate")
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {node_name}
+    assert storage.load_current(result_key) is None
+    assert record_dir.exists()
+
+    with Workflow(storage_path=storage_path) as wf:
+        wf.compute(SourceAssetWriter()(text="invalidate"))
+
+    assert SourceAssetWriter.executions == 2
+
+
+def test_source_processing_tool_invalidate_removes_corrupt_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="corrupt")
+        wf.compute(node)
+        node_name = node.name
+        sig_hash = wf.plan()[node_name].sig_hash
+
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
+    current_path.write_text("{not json")
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="corrupt")
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {node_name}
+    assert not current_path.exists()
+
+
+def test_source_processing_tool_invalidate_removes_corrupt_current_with_default_inputs(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()()
+        wf.compute(node)
+        node_name = node.name
+        sig_hash = wf.plan()[node_name].sig_hash
+
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
+    current_path.write_text("{not json")
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()()
+        cleared = wf.invalidate([node.name])
+
+    assert cleared == {node_name}
+    assert not current_path.exists()
+
+
+def test_failed_source_processing_tool_does_not_publish_current(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = FailingSourceAssetWriter()(text="partial")
+        with pytest.raises(RuntimeError, match="boom"):
+            wf.compute(node)
+
+    assert _current_pointer_files(storage_path) == []
+    assert not (storage_path / "data" / "FailingSourceAssetWriter_1").exists()
+
+
+def test_source_processing_tool_rejects_templated_output_outside_staging(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = EscapingSourceAssetWriter()(directory=tmp_path)
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+
+    assert _current_pointer_files(storage_path) == []
+
+
+@pytest.mark.parametrize("template", ["../outside.txt", "/absolute.txt", r"nested\\backslash.txt"])
+def test_source_processing_tool_rejects_unsafe_output_template_before_execution(
+    tmp_path: Path,
+    template: str,
+) -> None:
+    storage_path = tmp_path / "results"
+    UnsafeTemplateSource.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = UnsafeTemplateSource()(output_templates={"mask": template})
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+
+    assert UnsafeTemplateSource.executions == 0
+    assert _current_pointer_files(storage_path) == []
+
+
+def test_source_processing_tool_rejects_symlinked_attempts_directory_before_execution(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    outside = tmp_path / "outside-attempts"
+    outside.mkdir()
+    SourceAssetWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="symlink-attempt")
+        sig_hash = wf.plan()[node.name].sig_hash
+        result_key = processing_v1_result_key(node.name, sig_hash)
+        attempts_dir = StorageV1(storage_path).result_dir(result_key) / "attempts"
+        attempts_dir.parent.mkdir(parents=True)
+        attempts_dir.symlink_to(outside)
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+
+    assert SourceAssetWriter.executions == 0
+    assert list(outside.iterdir()) == []
+    assert _current_pointer_files(storage_path) == []
+
+
+def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    node_name = "SourceAssetWriter_1"
+    sig_hash = "sig"
+    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+        storage_path,
+        node_name,
+        sig_hash,
+    )
+    source = assets_dir / "mask.txt"
+    source.write_text("first")
+    df = pd.DataFrame({"mask": [str(source)], "count": [5]}, index=["0"])
+    first = processing_v1_publish(
+        storage_path,
+        node_name,
+        sig_hash,
+        df,
+        result_key=result_key,
+        attempt_id=attempt_id,
+        staging_dir=staging_dir,
+        staging_assets_dir=assets_dir,
+        path_columns={"mask"},
+        owned_path_columns={"mask"},
+    )
+    record_dir = Path(first.loc["0", "mask"]).parents[1]
+    assets_record_dir = record_dir / "assets"
+    import shutil
+
+    shutil.rmtree(assets_record_dir)
+    outside = tmp_path / "outside-record-assets"
+    outside.mkdir()
+    assets_record_dir.symlink_to(outside)
+
+    with pytest.raises(CacheCorruptionError):
+        processing_v1_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+            df,
+            result_key=result_key,
+            attempt_id=attempt_id,
+            staging_dir=staging_dir,
+            staging_assets_dir=assets_dir,
+            path_columns={"mask"},
+            owned_path_columns={"mask"},
+        )
+    assert list(outside.iterdir()) == []
+
+
+def test_column_bound_processing_tool_still_uses_legacy_cache(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        node = ColumnBoundLegacyWriter()(label=table["label"])
+        df = wf.compute(node)
+
+    assert Path(df.loc["row", "output"]).read_text() == "v4"
+    assert (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
+    assert not [
+        path
+        for path in _current_pointer_files(storage_path)
+        if "ColumnBoundLegacyWriter" in path.read_text()
+    ]
