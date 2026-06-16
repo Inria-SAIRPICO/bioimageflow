@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
-from bioimageflow_core.tool import ProcessingTool
+from bioimageflow_core.tool import ProcessingTool, Template
 from bioimageflow_core.types import SharedArray
 from bioimageflow_core.environment import EnvironmentMismatchError
 from bioimageflow.cache import (
@@ -29,6 +29,9 @@ from bioimageflow.cache import (
     cache_load,
     dataframe_v1_lookup,
     dataframe_v1_publish,
+    processing_v1_lookup,
+    processing_v1_prepare_attempt,
+    processing_v1_publish,
 )
 from bioimageflow.node import IndexAlignmentError, Node
 from bioimageflow.storage import (
@@ -41,6 +44,7 @@ from bioimageflow.storage import (
     get_work_dir,
     get_rows_work_dir,
 )
+from bioimageflow.storage_v1 import CacheCorruptionError, validate_relative_posix_path
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
@@ -102,6 +106,42 @@ def topological_order(workflow: Any) -> list[str]:
     return list(TopologicalSorter(dep_graph).static_order())
 
 
+def source_processing_signature_material(node: Node) -> dict[str, Any]:
+    """Return the cache-signature material for source ProcessingTool nodes."""
+    assert isinstance(node.tool, ProcessingTool)
+    input_annotations = node.tool.Inputs._get_all_annotations()
+    assert node.tool.Outputs is not None
+    templates = get_output_templates(
+        node.tool.Outputs,
+        node.tool.Inputs,
+        node.output_templates,
+    )
+    signature_constants = dict(node._constant_bindings)
+    for field_name, annotation in input_annotations.items():
+        if field_name not in signature_constants and hasattr(node.tool.Inputs, field_name):
+            signature_constants[field_name] = getattr(node.tool.Inputs, field_name)
+        if field_name in signature_constants and is_path_type(annotation):
+            signature_constants[field_name] = _absolute_runtime_path(signature_constants[field_name])
+    return {
+        "constants": signature_constants,
+        "output_templates": templates,
+    }
+
+
+def _resolve_staged_output_path(assets_dir: Path, template: str, context: dict[str, Any]) -> str:
+    resolved = resolve_template(template, context)
+    try:
+        relative = validate_relative_posix_path(Path(resolved).as_posix())
+    except ValueError as exc:
+        raise CacheCorruptionError(f"Unsafe output template path: {resolved!r}") from exc
+    path = assets_dir / relative
+    try:
+        path.resolve().relative_to(assets_dir.resolve())
+    except ValueError as exc:
+        raise CacheCorruptionError(f"Output template path escapes staging assets: {resolved!r}") from exc
+    return str(path)
+
+
 def _to_python(val: Any) -> Any:
     """Convert numpy scalars to native Python types.
 
@@ -124,6 +164,34 @@ def _compute_engine_timeout(worker_timeout: float | None) -> float | None:
     if worker_timeout is None:
         return None
     return max(worker_timeout * 1.5, worker_timeout + 60.0)
+
+
+def _path_output_columns(tool: Any) -> set[str]:
+    outputs = getattr(tool, "Outputs", None)
+    if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+        return set()
+    return {
+        field_name
+        for field_name, annotation in outputs._get_all_annotations().items()
+        if is_path_type(annotation)
+    }
+
+
+def _explicit_template_output_columns(node: Node) -> set[str]:
+    outputs = getattr(node.tool, "Outputs", None)
+    if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+        return set()
+    columns = {
+        field_name
+        for field_name in outputs._get_all_annotations()
+        if isinstance(getattr(outputs, field_name, None), Template)
+    }
+    columns.update(
+        field_name
+        for field_name, template in node.output_templates.items()
+        if isinstance(template, str) and template
+    )
+    return columns
 
 
 class DisabledNodeError(Exception):
@@ -803,7 +871,11 @@ class DefaultEngine:
             if not node._column_bindings:
                 env_hash = compute_env_hash(node.tool.environment.dependencies)
                 sig_hash = self._compute_sig_hash(
-                    node, env_hash, {'constants': node._constant_bindings}, {}, workflow,
+                    node,
+                    env_hash,
+                    source_processing_signature_material(node),
+                    {},
+                    workflow,
                 )
             else:
                 input_annotations = node.tool.Inputs._get_all_annotations()
@@ -820,6 +892,17 @@ class DefaultEngine:
         # ── Cache lookup ──
         if isinstance(node.tool, DataFrameTool):
             df = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
+            if df is None:
+                return None, sig_hash
+            df = self._coerce_numeric_columns(df)
+            return self._normalize_path_output_columns(df, node.tool), sig_hash
+        if isinstance(node.tool, ProcessingTool) and not node._column_bindings:
+            df = processing_v1_lookup(
+                workflow.storage_path,
+                node.name,
+                sig_hash,
+                _path_output_columns(node.tool),
+            )
             if df is None:
                 return None, sig_hash
             df = self._coerce_numeric_columns(df)
@@ -938,32 +1021,35 @@ class DefaultEngine:
 
         aligned_index: list[Any] = ["0"]
 
-        # --- Signature hash ---
         env_hash = compute_env_hash(node.tool.environment.dependencies)
-        signature_constants = dict(node._constant_bindings)
-        self._normalize_path_arguments(signature_constants, input_annotations)
         sig_hash = self._compute_sig_hash(
             node,
             env_hash,
-            {
-                'constants': signature_constants,
-                'output_templates': templates,
-            },
+            source_processing_signature_material(node),
             {},
             workflow,
         )
 
         # --- Cache check ---
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if cached:
+        path_output_columns = _path_output_columns(node.tool)
+        cached = processing_v1_lookup(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            path_output_columns,
+        )
+        if cached is not None:
             self._emit_progress(workflow, node.name, "cached")
-            df = self._coerce_numeric_columns(cache_load(cached))
+            df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started")
-        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
+        result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+        )
 
         row_args = self._resolve_defaults(node, input_annotations)
         path_input_fields = [
@@ -975,23 +1061,33 @@ class DefaultEngine:
             results={}, idx='0',
         )
         for out_field, template in templates.items():
-            row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
+            row_args[out_field] = _resolve_staged_output_path(real_assets_dir, template, context)
         arguments_dicts = [row_args]
 
         # --- Dispatch & build output ---
         row_contexts, batch_context = self._build_execution_contexts(
-            hash_dir, real_assets_dir, aligned_index,
+            staging_dir, real_assets_dir, aligned_index,
         )
         raw_results = self._dispatch_tool(
             node.tool, arguments_dicts, workflow, node.name,
             row_contexts, batch_context,
         )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = processing_v1_publish(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            df,
+            result_key=result_key,
+            attempt_id=attempt_id,
+            staging_dir=staging_dir,
+            staging_assets_dir=real_assets_dir,
+            path_columns=path_output_columns,
+            owned_path_columns=_explicit_template_output_columns(node),
+        )
+        df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(workflow, node.name, "completed")
-
-        self._save_and_cleanup(node_dir, sig_hash, df, type(node.tool).__name__, workflow,
-                               hash_dir=hash_dir)
         return df, sig_hash
 
     def _execute_processing_tool_with_column_bindings(

@@ -166,11 +166,12 @@ class Workflow:
         externally (e.g., cancel + join + invalidate).
         """
         import shutil
-        from bioimageflow.cache import dataframe_v1_result_key
+        from bioimageflow.cache import compute_env_hash, dataframe_v1_result_key, processing_v1_result_key
         from bioimageflow.dataframe_tool import DataFrameTool
-        from bioimageflow.engine import DefaultEngine, topological_order
+        from bioimageflow.engine import DefaultEngine, source_processing_signature_material, topological_order
         from bioimageflow.storage import get_node_dir
         from bioimageflow.storage_v1 import StorageV1
+        from bioimageflow_core.tool import ProcessingTool
 
         targets: set[str] = set()
         for nid in node_ids:
@@ -203,17 +204,28 @@ class Workflow:
                         node, results, sig_hashes, self,
                     )
                 except Exception:
-                    sig_hash = engine._compute_sig_hash(
-                        node,
-                        "",
-                        self._dataframe_tool_signature_params(node),
-                        {
-                            arg.name: sig_hashes[arg]
-                            for arg in node._args
-                            if isinstance(arg, Node) and arg in sig_hashes
-                        },
-                        self,
-                    ) if isinstance(node.tool, DataFrameTool) else None
+                    if isinstance(node.tool, DataFrameTool):
+                        sig_hash = engine._compute_sig_hash(
+                            node,
+                            "",
+                            self._dataframe_tool_signature_params(node),
+                            {
+                                arg.name: sig_hashes[arg]
+                                for arg in node._args
+                                if isinstance(arg, Node) and arg in sig_hashes
+                            },
+                            self,
+                        )
+                    elif isinstance(node.tool, ProcessingTool) and not node._column_bindings:
+                        sig_hash = engine._compute_sig_hash(
+                            node,
+                            compute_env_hash(node.tool.environment.dependencies),
+                            source_processing_signature_material(node),
+                            {},
+                            self,
+                        )
+                    else:
+                        sig_hash = None
                 if sig_hash is not None:
                     sig_hashes[node] = sig_hash
                     plan_sig_hashes[name] = sig_hash
@@ -224,6 +236,12 @@ class Workflow:
             sig_hash = plan_sig_hashes.get(name)
             if isinstance(node.tool, DataFrameTool) and sig_hash:
                 result_key = dataframe_v1_result_key(name, sig_hash)
+                current_path = v1_storage.result_dir(result_key) / "current.json"
+                if current_path.exists():
+                    current_path.unlink()
+                    cleared.add(name)
+            if isinstance(node.tool, ProcessingTool) and not node._column_bindings and sig_hash:
+                result_key = processing_v1_result_key(name, sig_hash)
                 current_path = v1_storage.result_dir(result_key) / "current.json"
                 if current_path.exists():
                     current_path.unlink()

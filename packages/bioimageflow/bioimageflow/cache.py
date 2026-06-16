@@ -17,6 +17,7 @@ from bioimageflow.storage_v1 import (
     StorageV1,
     make_record_id,
     make_result_key,
+    validate_relative_posix_path,
 )
 
 
@@ -197,6 +198,17 @@ def dataframe_v1_result_key(node_name: str, sig_hash: str) -> str:
     )
 
 
+def processing_v1_result_key(node_name: str, sig_hash: str) -> str:
+    """Return the transitional v1 result key for a ProcessingTool node."""
+    return make_result_key(
+        {
+            "kind": "processing_tool",
+            "node": node_name,
+            "signature_hash": sig_hash,
+        }
+    )
+
+
 def _dataframe_v1_record_path(storage: StorageV1, result_key: str, record_id: str) -> Path:
     return storage.result_dir(result_key) / "records" / record_id / "dataframe.parquet"
 
@@ -291,3 +303,278 @@ def dataframe_v1_publish(
         return cache_load(_dataframe_v1_record_path(storage, result_key, pointer.record_id))
     except Exception as exc:
         raise CacheCorruptionError("Published v1 dataframe is unreadable.") from exc
+
+
+def processing_v1_prepare_attempt(
+    storage_path: str | Path,
+    node_name: str,
+    sig_hash: str,
+) -> tuple[str, str, Path, Path]:
+    """Create a v1 attempt staging tree for a ProcessingTool node."""
+    storage = StorageV1(storage_path)
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    attempt_id = storage.new_attempt_id()
+    result_dir = storage.result_dir(result_key)
+    result_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_existing_v1_dir(result_dir, storage.cache_root, "Result directory")
+    attempts_dir = _ensure_v1_child_dir(result_dir, "attempts", "Attempts directory")
+    attempt_dir = _ensure_v1_child_dir(attempts_dir, attempt_id, "Attempt directory")
+    staging_dir = _ensure_v1_child_dir(attempt_dir, "staging", "Attempt staging directory")
+    assets_dir = _ensure_v1_child_dir(staging_dir, "assets", "Attempt assets directory")
+    _ensure_v1_child_dir(staging_dir, "work", "Attempt work directory")
+    return result_key, attempt_id, staging_dir, assets_dir
+
+
+def _ensure_existing_v1_dir(path: Path, parent: Path, label: str) -> None:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError as exc:
+        raise CacheCorruptionError(f"{label} escapes its parent directory.") from exc
+    if path.is_symlink():
+        raise CacheCorruptionError(f"{label} must not be a symlink.")
+    if not path.is_dir():
+        raise CacheCorruptionError(f"{label} must be a directory.")
+
+
+def _ensure_v1_child_dir(parent: Path, name: str, label: str) -> Path:
+    validate_relative_posix_path(name)
+    path = parent / name
+    if path.exists() or path.is_symlink():
+        _ensure_existing_v1_dir(path, parent, label)
+    else:
+        path.mkdir()
+    return path
+
+
+def _ensure_v1_records_dir(result_dir: Path) -> Path:
+    records_dir = result_dir / "records"
+    if records_dir.exists() or records_dir.is_symlink():
+        try:
+            records_dir.resolve().relative_to(result_dir.resolve())
+        except ValueError as exc:
+            raise CacheCorruptionError("Records directory escapes result directory.") from exc
+        if records_dir.is_symlink():
+            raise CacheCorruptionError("Records directory must not be a symlink.")
+    else:
+        records_dir.mkdir(parents=True)
+    return records_dir
+
+
+def _ensure_v1_record_dir(result_dir: Path, record_id: str) -> Path:
+    records_dir = _ensure_v1_records_dir(result_dir)
+    record_dir = records_dir / record_id
+    if record_dir.exists() or record_dir.is_symlink():
+        try:
+            record_dir.resolve().relative_to(records_dir.resolve())
+        except ValueError as exc:
+            raise CacheCorruptionError("Record directory escapes records directory.") from exc
+        if record_dir.is_symlink():
+            raise CacheCorruptionError("Record directory must not be a symlink.")
+    else:
+        record_dir.mkdir(parents=True)
+    return record_dir
+
+
+def _rehydrate_processing_paths(
+    df: pd.DataFrame,
+    record_dir: Path,
+    path_columns: set[str],
+) -> pd.DataFrame:
+    if not path_columns:
+        return df
+    hydrated = df.copy()
+    for column in path_columns:
+        if column not in hydrated.columns:
+            continue
+
+        def _rehydrate(value: Any) -> Any:
+            if not isinstance(value, str) or not value.startswith("assets/"):
+                return value
+            path = record_dir / value
+            try:
+                path.resolve().relative_to(record_dir.resolve())
+            except ValueError as exc:
+                raise CacheCorruptionError("Cached asset path escapes record directory.") from exc
+            return str(path)
+
+        hydrated[column] = hydrated[column].map(_rehydrate)
+    return hydrated
+
+
+def processing_v1_lookup(
+    storage_path: str | Path,
+    node_name: str,
+    sig_hash: str,
+    path_columns: set[str],
+) -> pd.DataFrame | None:
+    """Load a ProcessingTool v1 cache hit, or return ``None`` on miss."""
+    storage = StorageV1(storage_path)
+    result_key = processing_v1_result_key(node_name, sig_hash)
+    pointer = storage.load_current(result_key)
+    if pointer is None:
+        return None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    try:
+        df = cache_load(record_dir / "dataframe.parquet")
+    except Exception as exc:
+        raise CacheCorruptionError("Cached v1 ProcessingTool dataframe is unreadable.") from exc
+    return _rehydrate_processing_paths(df, record_dir, path_columns)
+
+
+def _processing_manifest_entries_and_dataframe(
+    df: pd.DataFrame,
+    path_columns: set[str],
+    owned_path_columns: set[str],
+    staging_assets_dir: Path,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path]]:
+    stored = df.copy()
+    outputs: list[dict[str, Any]] = []
+    owned_assets: dict[str, Path] = {}
+    seen_outputs: set[tuple[str, str]] = set()
+    staging_root = staging_assets_dir.resolve()
+    for column in path_columns:
+        if column not in stored.columns:
+            continue
+        for index in stored.index:
+            value = stored.at[index, column]
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            path = Path(value)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            try:
+                relative = path.resolve().relative_to(staging_root)
+            except ValueError:
+                if column in owned_path_columns:
+                    raise CacheCorruptionError(
+                        f"Declared owned output asset is outside staging assets: {path}"
+                    )
+                external = path.as_posix()
+                entry_key = ("external_path", external)
+                if entry_key not in seen_outputs:
+                    outputs.append({"path": external, "kind": "external_path", "identity": "path"})
+                    seen_outputs.add(entry_key)
+                stored.at[index, column] = external
+                continue
+            try:
+                record_relative = validate_relative_posix_path(f"assets/{relative.as_posix()}")
+            except ValueError as exc:
+                raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
+            if not path.exists():
+                raise CacheCorruptionError(f"Declared output asset is missing: {path}")
+            if path.is_dir():
+                raise CacheCorruptionError(f"Declared output asset is a directory: {path}")
+            try:
+                path.resolve().relative_to(staging_root)
+            except ValueError as exc:
+                raise CacheCorruptionError(f"Declared output asset escapes staging assets: {path}") from exc
+            digest = _file_sha256(path)
+            size = path.stat().st_size
+            previous = owned_assets.get(record_relative)
+            if previous is not None and previous.resolve() != path.resolve():
+                raise CacheCorruptionError(f"Duplicate owned asset path: {record_relative}")
+            owned_assets[record_relative] = path
+            entry_key = ("owned_asset", record_relative)
+            if entry_key not in seen_outputs:
+                outputs.append(
+                    {
+                        "path": record_relative,
+                        "kind": "owned_asset",
+                        "size": size,
+                        "digest": digest,
+                    }
+                )
+                seen_outputs.add(entry_key)
+            stored.at[index, column] = record_relative
+    return stored, outputs, owned_assets
+
+
+def processing_v1_publish(
+    storage_path: str | Path,
+    node_name: str,
+    sig_hash: str,
+    df: pd.DataFrame,
+    *,
+    result_key: str,
+    attempt_id: str,
+    staging_dir: Path,
+    staging_assets_dir: Path,
+    path_columns: set[str],
+    owned_path_columns: set[str],
+) -> pd.DataFrame:
+    """Publish a source ProcessingTool attempt as a v1 immutable record."""
+    storage = StorageV1(storage_path)
+    stored_df, outputs, owned_assets = _processing_manifest_entries_and_dataframe(
+        df,
+        path_columns,
+        owned_path_columns,
+        staging_assets_dir,
+    )
+    staging_parquet = staging_dir / "dataframe.parquet"
+    _prepare_dataframe_for_parquet(stored_df).to_parquet(staging_parquet, index=True)
+    dataframe_digest = _file_sha256(staging_parquet)
+    manifest_material = {
+        "schema": "bioimageflow.cache.record.v1",
+        "result_key": result_key,
+        "dataframe": {
+            "path": "dataframe.parquet",
+            "digest": dataframe_digest,
+        },
+        "outputs": outputs,
+    }
+    record_id = make_record_id(manifest_material)
+    result_dir = storage.result_dir(result_key)
+    record_dir = _ensure_v1_record_dir(result_dir, record_id)
+    for relative, source in owned_assets.items():
+        parts = validate_relative_posix_path(relative).split("/")
+        if parts[0] != "assets":
+            raise CacheCorruptionError("Owned asset path must be under assets/.")
+        destination_parent = record_dir
+        for part in parts[:-1]:
+            destination_parent = _ensure_v1_child_dir(
+                destination_parent,
+                part,
+                "Record asset directory",
+            )
+        destination = destination_parent / parts[-1]
+        if destination.exists() or destination.is_symlink():
+            try:
+                destination.resolve().relative_to(record_dir.resolve())
+            except ValueError as exc:
+                raise CacheCorruptionError("Owned asset path escapes record directory.") from exc
+            if destination.is_symlink():
+                raise CacheCorruptionError("Owned asset must not be a symlink.")
+            if destination.is_dir():
+                raise CacheCorruptionError("Owned asset path is a directory.")
+            continue
+        tmp_asset = destination_parent / f".{destination.name}.{attempt_id}.tmp"
+        shutil.copy2(source, tmp_asset)
+        os.replace(tmp_asset, destination)
+    record_parquet = record_dir / "dataframe.parquet"
+    if not record_parquet.exists():
+        tmp_parquet = record_dir / f".dataframe.{attempt_id}.tmp"
+        shutil.copy2(staging_parquet, tmp_parquet)
+        os.replace(tmp_parquet, record_parquet)
+    manifest = RecordManifest(
+        result_key=result_key,
+        record_id=record_id,
+        dataframe_digest=dataframe_digest,
+        outputs=outputs,
+    )
+    manifest_path = record_dir / "manifest.json"
+    if not manifest_path.exists():
+        tmp_manifest = record_dir / f".manifest.{attempt_id}.tmp"
+        tmp_manifest.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
+        os.replace(tmp_manifest, manifest_path)
+    pointer = storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id=attempt_id,
+        run_id=f"run_{attempt_id}",
+    )
+    selected_record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    try:
+        selected_df = cache_load(selected_record_dir / "dataframe.parquet")
+    except Exception as exc:
+        raise CacheCorruptionError("Published v1 ProcessingTool dataframe is unreadable.") from exc
+    return _rehydrate_processing_paths(selected_df, selected_record_dir, path_columns)
