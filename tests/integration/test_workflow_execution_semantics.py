@@ -7,8 +7,10 @@ import pandas as pd
 import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
+from bioimageflow.cache import dataframe_v1_result_key
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import find_hash_dir, get_node_dir
+from bioimageflow.storage_v1 import StorageV1
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
 
 from .conftest import AddColumn, FileLoader, StubSegmenter, imageio_env
@@ -49,11 +51,16 @@ class TestDataFrameToolPlanCacheParity:
         assert cached_plan["FileLoader_1"].status is NodePlanStatus.CACHED
         assert cached_plan["AddColumn_1"].status is NodePlanStatus.CACHED
 
+        v1_storage = StorageV1(storage)
         for node_name, entry in cached_plan.items():
-            hash_dir = find_hash_dir(get_node_dir(storage, node_name), entry.sig_hash)
-            assert hash_dir is not None
-            assert (hash_dir / "dataframe.parquet").exists()
-            assert (hash_dir / "dataframe.csv").exists()
+            result_key = dataframe_v1_result_key(node_name, entry.sig_hash)
+            pointer = v1_storage.load_current(result_key)
+            assert pointer is not None
+            record_dir = v1_storage.result_dir(result_key) / "records" / pointer.record_id
+            assert (record_dir / "dataframe.parquet").exists()
+            assert (record_dir / "manifest.json").exists()
+        assert not (storage / "data" / "FileLoader_1").exists()
+        assert not (storage / "data" / "AddColumn_1").exists()
 
         events = []
         wf3, tagged3 = _build_loader_and_tagged(
