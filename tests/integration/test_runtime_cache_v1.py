@@ -1160,7 +1160,7 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
     assert record_dir.exists()
 
 
-def test_column_bound_shared_array_processing_tool_parameter_change_reports_out_of_date(tmp_path: Path) -> None:
+def test_column_bound_shared_array_processing_tool_upstream_change_reports_pending_upstream(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1176,7 +1176,9 @@ def test_column_bound_shared_array_processing_tool_parameter_change_reports_out_
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
         plan = wf.plan()
 
-    assert plan[node.name].status is NodePlanStatus.OUT_OF_DATE
+    assert plan[node.name].status is NodePlanStatus.PENDING_UPSTREAM
+    assert plan[node.name].pending_upstreams == ("CountingTable_1",)
+    assert plan[node.name].final_result_key is None
 
 
 def test_column_bound_shared_array_plan_and_invalidate_do_not_rehydrate_shared_memory(

@@ -7,7 +7,11 @@ only nodes whose inputs or parameters have changed are recomputed.
 How caching works
 -----------------
 
-Each execution produces a **signature hash** computed from:
+Each node has a v1 **result key** under ``storage_path/cache/v1/``.
+The result key identifies the reusable cache selection for the node's logical inputs, parameters, environment, and upstream cache state.
+Each successful execution publishes an immutable **record**, and ``current.json`` selects the record that cache hits must use.
+
+The implementation also computes a diagnostic logical signature from:
 
 - Tool class name and version
 - Environment hash (dependencies)
@@ -15,8 +19,9 @@ Each execution produces a **signature hash** computed from:
 - Upstream node hashes (recursive)
 - Source-code hash (``dev_mode`` only)
 
-If the signature hash matches a previous run, the cached DataFrame is loaded
-instead of re-executing the tool.
+This signature is exposed temporarily as ``NodePlan.sig_hash`` for debugging and compatibility, but it is not the public v1 cache identity.
+Use ``NodePlan.final_result_key`` and ``NodePlan.selected_record_id`` for cache/provenance state.
+If ``current.json`` selects a valid record for a node's final result key, the cached DataFrame is loaded instead of re-executing the tool.
 
 .. note::
 
@@ -34,16 +39,20 @@ Results are stored under the ``storage_path`` you pass to
 .. code-block:: text
 
    bif_data/
-   └── data/
-       └── <node_name>/
-           └── <YYYYMMDD_HHMMSS>_<hash[:12]>/
-               ├── dataframe.csv     # output DataFrame
-               ├── metadata.json     # execution metadata
-               ├── parameters.json   # resolved parameters
-               └── assets/           # output files (images, etc.)
+   └── cache/
+       └── v1/
+           └── results/
+               └── <result-shard>/
+                   └── <result-key>/
+                       ├── current.json
+                       └── records/
+                           └── <record-id>/
+                               ├── dataframe.parquet
+                               ├── manifest.json
+                               └── assets/
 
-Each cache entry directory carries a wall-clock timestamp and the first
-twelve characters of the signature hash (specs.md §7.2).
+Immutable records are not deleted by normal invalidation.
+Invalidation removes cache selection state such as ``current.json``.
 
 What invalidates the cache
 --------------------------
@@ -70,16 +79,18 @@ for scripts that need to see what ``compute()`` would do:
 
    plan = wf.plan()                          # dict[str, NodePlan]
    for name, entry in plan.items():
-       print(name, entry.status, entry.sig_hash[:12])
+       print(name, entry.status, entry.final_result_key, entry.selected_record_id)
 
 Each :class:`~bioimageflow.engine.NodePlan` carries:
 
 - ``node_name`` — scoped name (``"outer/inner_1"`` for sub-workflow internals)
-- ``sig_hash`` — byte-identical to what ``compute()`` would compute; empty
-  string for ``SKIPPED`` nodes
-- ``status`` — one of the four
+- ``final_result_key`` — v1 result key when all required upstream selected records are known
+- ``selected_record_id`` — selected immutable record ID when the node is cached
+- ``status`` — one of the five
   :class:`~bioimageflow.engine.NodePlanStatus` values below
 - ``upstream`` — scoped names of this node's direct upstreams
+- ``pending_upstreams`` — upstream nodes whose selected records must be produced before this node's final key is known
+- ``sig_hash`` — transitional diagnostic signature retained for compatibility
 
 .. list-table::
    :header-rows: 1
@@ -89,23 +100,23 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
      - Meaning
      - Suggested UI affordance
    * - ``CACHED``
-     - Current signature hash matches an existing cache entry; ``compute()``
-       would short-circuit.
+     - ``current.json`` selects a valid reusable record for the final result key; ``compute()`` would short-circuit if it consumes the same upstream records.
      - Green / "up to date"
    * - ``OUT_OF_DATE``
-     - The storage directory has entries from a previous run, but none match
-       the current hash. ``compute()`` would re-execute.
+     - Prior records exist for this node or lineage, but no selected record matches the current final result key.
      - Yellow / "needs rebuild"
    * - ``UNEXECUTED``
-     - No storage directory exists for this node yet — it has never run.
+     - No reusable record exists yet for this node/result lineage.
      - Grey / "not yet run"
+   * - ``PENDING_UPSTREAM``
+     - At least one upstream selected record is not known yet, so the final result key cannot be reported.
+     - Grey / "waiting on upstream"
    * - ``SKIPPED``
      - The node is disabled, or has a disabled upstream that prevents
-       execution. ``sig_hash`` is empty.
+       execution.
      - Struck-through / muted
 
-A sub-workflow node aggregates its internals: it reports ``CACHED`` only when
-*every* internal entry is cached, ``UNEXECUTED`` otherwise.
+A sub-workflow node aggregates its internals: it reports ``CACHED`` only when every internal entry is cached.
 
 ``plan()`` does **not** start Wetlands worker pools.
 It uses the direct planning path and does not run tool code.

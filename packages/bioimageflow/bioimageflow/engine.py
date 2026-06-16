@@ -30,6 +30,8 @@ from bioimageflow.cache import (
     cache_load,
     dataframe_v1_lookup,
     dataframe_v1_publish,
+    dataframe_v1_result_key,
+    iter_dataframe_v1_result_metadata,
     iter_processing_v1_result_metadata,
     processing_v1_lookup,
     processing_v1_prepare_attempt,
@@ -47,7 +49,7 @@ from bioimageflow.storage import (
     get_work_dir,
     get_rows_work_dir,
 )
-from bioimageflow.storage_v1 import CacheCorruptionError, validate_relative_posix_path
+from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, validate_relative_posix_path
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
@@ -239,6 +241,21 @@ def _processing_v1_has_other_current(storage_path: str | Path, node_name: str, s
     return False
 
 
+def _dataframe_v1_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
+    expected_key = dataframe_v1_result_key(node_name, sig_hash)
+    for metadata in iter_dataframe_v1_result_metadata(
+        storage_path,
+        {node_name: {sig_hash}},
+    ):
+        if (
+            metadata.get("node") != node_name
+            or metadata.get("result_key") == expected_key
+        ):
+            continue
+        return True
+    return False
+
+
 class DisabledNodeError(Exception):
     """Raised when all requested target nodes are disabled or unreachable."""
     pass
@@ -284,11 +301,16 @@ class NodePlanStatus(str, Enum):
     SKIPPED
         The node is disabled, or has a disabled upstream that prevents
         execution. ``sig_hash`` is empty.
+    PENDING_UPSTREAM
+        At least one upstream selected record is not known yet, so the
+        node's final result key cannot be determined from a stable v1
+        record graph snapshot.
     """
     CACHED = "cached"
     OUT_OF_DATE = "out_of_date"
     UNEXECUTED = "unexecuted"
     SKIPPED = "skipped"
+    PENDING_UPSTREAM = "pending_upstream"
 
 
 @dataclass(frozen=True)
@@ -300,15 +322,23 @@ class NodePlan:
     node_name
         Scoped node name (``"subworkflow/internal"`` for sub-workflow
         internals, plain name otherwise).
-    sig_hash
-        Signature hash — byte-identical to what ``compute()`` produces.
-        Empty string for ``skipped`` nodes.
+    final_result_key
+        V1 result key for this node when it can be computed from known
+        selected upstream records; ``None`` for skipped and pending nodes.
+    selected_record_id
+        Currently selected v1 record ID for ``final_result_key`` when the
+        node is cached; otherwise ``None``.
     status
         Per-node :class:`NodePlanStatus` — the canonical signal for
         external callers wanting to display "cached / out-of-date /
         unexecuted / skipped" in a GUI.
     upstream
         Scoped names of this node's direct upstreams.
+    pending_upstreams
+        Upstream node names whose selected records are not known yet.
+    sig_hash
+        Transitional diagnostic logical signature. It is retained for
+        existing callers but is not the public v1 cache identity field.
 
     ``cached`` and ``skipped`` are read-only convenience accessors
     derived from ``status`` (``cached == status is CACHED``,
@@ -318,6 +348,9 @@ class NodePlan:
     sig_hash: str
     status: NodePlanStatus
     upstream: tuple[str, ...]
+    final_result_key: str | None = None
+    selected_record_id: str | None = None
+    pending_upstreams: tuple[str, ...] = ()
 
     @property
     def cached(self) -> bool:
@@ -2317,18 +2350,17 @@ class DefaultEngine:
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
         """Return the cache status and signature hash of every node.
 
-        Walks the graph in topological order and reuses the same
-        sig-hash helpers as :meth:`execute` (``_compute_sig_hash`` /
-        ``_compute_processing_sig_hash``), so the hashes are
-        byte-identical to what ``compute()`` would produce. No tool code
-        runs, and no Wetlands environment is launched.
+        Walks the graph in topological order, computes diagnostic logical
+        signatures with the same helpers as :meth:`execute`, and reports v1
+        result-key/current-record state when enough upstream cache selections
+        are known. No tool code runs, and no Wetlands environment is launched.
 
         Sub-workflow internal nodes appear under scoped names
         (``"subworkflow_name/internal_name"``), matching
         :meth:`execute_steps`.
 
         Disabled nodes and nodes downstream of disabled nodes are
-        returned with ``skipped=True`` and ``sig_hash=""``.
+        returned with ``skipped=True`` and no final result key.
 
         Raises
         ------
@@ -2376,6 +2408,7 @@ class DefaultEngine:
         plan: dict[str, NodePlan],
     ) -> None:
         """Compute a NodePlan for a single node, recursing into sub-workflows."""
+        from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.sub_workflow import SubWorkflowNode
 
         if isinstance(node, SubWorkflowNode):
@@ -2393,18 +2426,36 @@ class DefaultEngine:
             )
             return
         sig_hashes[node] = sig_hash
-        if cached_df is not None:
+        upstream = tuple(self._plan_upstream_names(node))
+        pending_upstreams = tuple(
+            name
+            for name in upstream
+            if (entry := plan.get(name)) is not None
+            and entry.selected_record_id is None
+            and entry.status not in {NodePlanStatus.CACHED, NodePlanStatus.SKIPPED}
+        )
+        final_result_key = self._plan_final_result_key(node, sig_hash) if not pending_upstreams else None
+        selected_record_id = self._plan_selected_record_id(workflow, final_result_key)
+        if pending_upstreams:
+            status = NodePlanStatus.PENDING_UPSTREAM
+        elif cached_df is not None:
             status = NodePlanStatus.CACHED
         else:
-            from bioimageflow.storage import has_other_hash_dirs
-            node_dir = get_node_dir(workflow.storage_path, node.name)
-            if isinstance(node.tool, ProcessingTool):
+            if isinstance(node.tool, DataFrameTool):
+                has_prior_current = _dataframe_v1_has_other_current(
+                    workflow.storage_path,
+                    node.name,
+                    sig_hash,
+                )
+            elif isinstance(node.tool, ProcessingTool):
                 has_prior_current = _processing_v1_has_other_current(
                     workflow.storage_path,
                     node.name,
                     sig_hash,
                 )
             else:
+                from bioimageflow.storage import has_other_hash_dirs
+                node_dir = get_node_dir(workflow.storage_path, node.name)
                 has_prior_current = has_other_hash_dirs(node_dir, sig_hash)
             if has_prior_current:
                 status = NodePlanStatus.OUT_OF_DATE
@@ -2414,8 +2465,26 @@ class DefaultEngine:
             node.name,
             sig_hash,
             status,
-            tuple(self._plan_upstream_names(node)),
+            upstream,
+            final_result_key=final_result_key,
+            selected_record_id=selected_record_id,
+            pending_upstreams=pending_upstreams,
         )
+
+    def _plan_final_result_key(self, node: Node, sig_hash: str) -> str | None:
+        from bioimageflow.dataframe_tool import DataFrameTool
+
+        if isinstance(node.tool, DataFrameTool):
+            return dataframe_v1_result_key(node.name, sig_hash)
+        if isinstance(node.tool, ProcessingTool):
+            return processing_v1_result_key(node.name, sig_hash)
+        return None
+
+    def _plan_selected_record_id(self, workflow: Any, final_result_key: str | None) -> str | None:
+        if final_result_key is None:
+            return None
+        pointer = StorageV1(workflow.storage_path).load_current(final_result_key)
+        return pointer.record_id if pointer is not None else None
 
     def _plan_sub_workflow(
         self,
@@ -2494,7 +2563,7 @@ class DefaultEngine:
         for arg in node._args:
             if isinstance(arg, Node):
                 names.append(arg.name)
-        return names
+        return list(dict.fromkeys(names))
 
 
 class SequentialEngine(DefaultEngine):

@@ -8,6 +8,8 @@ The status enum lets external callers distinguish ``cached`` from
 from pathlib import Path
 
 from bioimageflow import NodePlanStatus, Workflow
+from bioimageflow.cache import dataframe_v1_result_key
+from bioimageflow.storage_v1 import StorageV1
 
 from .conftest import FileLoader, StubSegmenter
 
@@ -16,11 +18,18 @@ class TestNodePlanStatusBasics:
     def test_unexecuted_for_fresh_storage(self, tmp_path: Path) -> None:
         wf = Workflow(storage_path=tmp_path / "cache")
         with wf:
-            FileLoader()(path=str(tmp_path))
+            load = FileLoader()(path=str(tmp_path))
+            StubSegmenter()(input_image=load["path"])
         plan = wf.plan()
+        assert plan["FileLoader_1"].status is NodePlanStatus.UNEXECUTED
+        assert plan["FileLoader_1"].final_result_key is not None
+        assert plan["FileLoader_1"].selected_record_id is None
+        assert plan["FileLoader_1"].pending_upstreams == ()
+        assert plan["StubSegmenter_1"].status is NodePlanStatus.PENDING_UPSTREAM
+        assert plan["StubSegmenter_1"].final_result_key is None
+        assert plan["StubSegmenter_1"].selected_record_id is None
+        assert plan["StubSegmenter_1"].pending_upstreams == ("FileLoader_1",)
         for entry in plan.values():
-            assert entry.status is NodePlanStatus.UNEXECUTED
-            # Backwards-compat properties continue to read off status.
             assert entry.cached is False
             assert entry.skipped is False
 
@@ -44,6 +53,26 @@ class TestNodePlanStatusBasics:
         for entry in plan.values():
             assert entry.status is NodePlanStatus.CACHED
             assert entry.cached is True
+            assert entry.final_result_key is not None
+            assert entry.selected_record_id is not None
+            assert entry.pending_upstreams == ()
+
+    def test_cached_plan_exposes_selected_record_from_current_pointer(self, tmp_path: Path) -> None:
+        src = tmp_path / "files"
+        src.mkdir()
+        (src / "a.txt").write_text("a")
+
+        wf = Workflow(storage_path=tmp_path / "cache")
+        with wf:
+            node = FileLoader()(path=str(src))
+        wf.compute(node)
+
+        plan = wf.plan()
+        entry = plan[node.name]
+        assert entry.final_result_key == dataframe_v1_result_key(node.name, entry.sig_hash)
+        pointer = StorageV1(wf.storage_path).load_current(entry.final_result_key)
+        assert pointer is not None
+        assert entry.selected_record_id == pointer.record_id
 
     def test_out_of_date_after_param_change(self, tmp_path: Path) -> None:
         src = tmp_path / "files"
@@ -66,6 +95,32 @@ class TestNodePlanStatusBasics:
         seg = plan["StubSegmenter_1"]
         assert seg.status is NodePlanStatus.OUT_OF_DATE
         assert seg.cached is False
+        assert seg.final_result_key is not None
+        assert seg.selected_record_id is None
+        assert seg.pending_upstreams == ()
+
+    def test_dataframe_tool_out_of_date_after_parameter_change(self, tmp_path: Path) -> None:
+        src_a = tmp_path / "files_a"
+        src_b = tmp_path / "files_b"
+        src_a.mkdir()
+        src_b.mkdir()
+        (src_a / "a.txt").write_text("a")
+        (src_b / "b.txt").write_text("b")
+
+        def build(path: Path) -> Workflow:
+            wf = Workflow(storage_path=tmp_path / "cache")
+            with wf:
+                FileLoader()(path=str(path), name="loader")
+            return wf
+
+        build(src_a).compute()
+        plan = build(src_b).plan()
+        entry = plan["loader"]
+
+        assert entry.status is NodePlanStatus.OUT_OF_DATE
+        assert entry.final_result_key is not None
+        assert entry.selected_record_id is None
+        assert entry.pending_upstreams == ()
 
     def test_skipped_for_disabled(self, tmp_path: Path) -> None:
         wf = Workflow(storage_path=tmp_path / "cache")
@@ -76,6 +131,8 @@ class TestNodePlanStatusBasics:
         plan = wf.plan()
         assert plan[seg.name].status is NodePlanStatus.SKIPPED
         assert plan[seg.name].skipped is True
+        assert plan[seg.name].final_result_key is None
+        assert plan[seg.name].selected_record_id is None
 
 
 class TestNodePlanStatusValues:
@@ -86,3 +143,4 @@ class TestNodePlanStatusValues:
         assert NodePlanStatus.OUT_OF_DATE == "out_of_date"
         assert NodePlanStatus.UNEXECUTED == "unexecuted"
         assert NodePlanStatus.SKIPPED == "skipped"
+        assert NodePlanStatus.PENDING_UPSTREAM == "pending_upstream"

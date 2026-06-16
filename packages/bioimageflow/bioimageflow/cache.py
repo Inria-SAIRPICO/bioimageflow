@@ -211,9 +211,10 @@ def processing_v1_result_key(node_name: str, sig_hash: str) -> str:
     )
 
 
-def _write_processing_v1_result_metadata(
+def _write_v1_result_metadata(
     result_dir: Path,
     *,
+    kind: str,
     node_name: str,
     sig_hash: str,
     result_key: str,
@@ -222,7 +223,7 @@ def _write_processing_v1_result_metadata(
     metadata_path = result_dir / "result.json"
     metadata = {
         "schema": "bioimageflow.cache.result.v1",
-        "kind": "processing_tool",
+        "kind": kind,
         "node": node_name,
         "signature_hash": sig_hash,
         "result_key": result_key,
@@ -233,11 +234,49 @@ def _write_processing_v1_result_metadata(
         os.replace(tmp_path, metadata_path)
 
 
-def iter_processing_v1_result_metadata(
+def _write_processing_v1_result_metadata(
+    result_dir: Path,
+    *,
+    node_name: str,
+    sig_hash: str,
+    result_key: str,
+    attempt_id: str,
+) -> None:
+    _write_v1_result_metadata(
+        result_dir,
+        kind="processing_tool",
+        node_name=node_name,
+        sig_hash=sig_hash,
+        result_key=result_key,
+        attempt_id=attempt_id,
+    )
+
+
+def _write_dataframe_v1_result_metadata(
+    result_dir: Path,
+    *,
+    node_name: str,
+    sig_hash: str,
+    result_key: str,
+    attempt_id: str,
+) -> None:
+    _write_v1_result_metadata(
+        result_dir,
+        kind="dataframe_tool",
+        node_name=node_name,
+        sig_hash=sig_hash,
+        result_key=result_key,
+        attempt_id=attempt_id,
+    )
+
+
+def _iter_v1_result_metadata(
     storage_path: str | Path,
+    *,
+    kind: str,
+    result_key_for: Any,
     known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ProcessingTool v1 result metadata, inferring old records when possible."""
     results_root = Path(storage_path) / "cache" / "v1" / "results"
     if not results_root.exists():
         return []
@@ -255,24 +294,50 @@ def iter_processing_v1_result_metadata(
                 metadata = {}
             if (
                 metadata.get("schema") == "bioimageflow.cache.result.v1"
-                and metadata.get("kind") == "processing_tool"
+                and metadata.get("kind") == kind
             ):
                 rows.append(metadata)
                 continue
         result_key = result_dir.name
         for node_name, signatures in known_node_signatures.items():
             for sig_hash in signatures:
-                if processing_v1_result_key(node_name, sig_hash) == result_key:
+                if result_key_for(node_name, sig_hash) == result_key:
                     rows.append(
                         {
                             "schema": "bioimageflow.cache.result.v1",
-                            "kind": "processing_tool",
+                            "kind": kind,
                             "node": node_name,
                             "signature_hash": sig_hash,
                             "result_key": result_key,
                         }
                     )
     return rows
+
+
+def iter_dataframe_v1_result_metadata(
+    storage_path: str | Path,
+    known_node_signatures: dict[str, set[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return DataFrameTool v1 result metadata, inferring old records when possible."""
+    return _iter_v1_result_metadata(
+        storage_path,
+        kind="dataframe_tool",
+        result_key_for=dataframe_v1_result_key,
+        known_node_signatures=known_node_signatures,
+    )
+
+
+def iter_processing_v1_result_metadata(
+    storage_path: str | Path,
+    known_node_signatures: dict[str, set[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ProcessingTool v1 result metadata, inferring old records when possible."""
+    return _iter_v1_result_metadata(
+        storage_path,
+        kind="processing_tool",
+        result_key_for=processing_v1_result_key,
+        known_node_signatures=known_node_signatures,
+    )
 
 
 def _dataframe_v1_record_path(storage: StorageV1, result_key: str, record_id: str) -> Path:
@@ -359,6 +424,13 @@ def dataframe_v1_publish(
         tmp_manifest = record_dir / f".manifest.{attempt_id}.tmp"
         tmp_manifest.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
         os.replace(tmp_manifest, manifest_path)
+    _write_dataframe_v1_result_metadata(
+        result_dir,
+        node_name=node_name,
+        sig_hash=sig_hash,
+        result_key=result_key,
+        attempt_id=attempt_id,
+    )
     pointer = storage.select_current_record(
         result_key,
         candidate_record_id=record_id,
