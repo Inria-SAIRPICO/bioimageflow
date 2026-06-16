@@ -890,6 +890,8 @@ class DefaultEngine:
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str],
         workflow: Any,
+        *,
+        hydrate_assets: bool = True,
     ) -> tuple[pd.DataFrame | None, str | None]:
         """Check whether a node's result is already cached.
 
@@ -941,16 +943,14 @@ class DefaultEngine:
                 return None, sig_hash
             df = self._coerce_numeric_columns(df)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
-        if (
-            isinstance(node.tool, ProcessingTool)
-            and (not _has_shared_array_output(node.tool) or not node._column_bindings)
-        ):
+        if isinstance(node.tool, ProcessingTool):
             df = processing_v1_lookup(
                 workflow.storage_path,
                 node.name,
                 sig_hash,
                 _path_output_columns(node.tool),
                 shared_array_columns=_shared_array_output_columns(node.tool),
+                hydrate_assets=hydrate_assets,
             )
             if df is None:
                 return None, sig_hash
@@ -1236,26 +1236,15 @@ class DefaultEngine:
             node, input_annotations, upstream_nodes, sig_hashes, workflow,
         )
 
-        if _has_shared_array_output(node.tool):
-            return self._execute_processing_tool_with_column_bindings_legacy(
-                node,
-                results,
-                sig_hash,
-                upstream_nodes,
-                aligned_index,
-                input_annotations,
-                templates,
-                workflow,
-            )
-
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
+        shared_array_output_columns = _shared_array_output_columns(node.tool)
         cached = processing_v1_lookup(
             workflow.storage_path,
             node.name,
             sig_hash,
             path_output_columns,
-            shared_array_columns=set(),
+            shared_array_columns=shared_array_output_columns,
         )
         if cached is not None:
             self._emit_progress(workflow, node.name, "cached")
@@ -1297,7 +1286,7 @@ class DefaultEngine:
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
             owned_path_columns=_explicit_template_output_columns(node),
-            shared_array_columns=set(),
+            shared_array_columns=shared_array_output_columns,
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -2394,7 +2383,7 @@ class DefaultEngine:
             return
 
         cached_df, sig_hash = self._check_node_cache(
-            node, results, sig_hashes, workflow,
+            node, results, sig_hashes, workflow, hydrate_assets=False,
         )
         if sig_hash is None:
             # Non-cacheable top-level node (shouldn't happen outside SubWorkflowNode)
@@ -2409,10 +2398,7 @@ class DefaultEngine:
         else:
             from bioimageflow.storage import has_other_hash_dirs
             node_dir = get_node_dir(workflow.storage_path, node.name)
-            if (
-                isinstance(node.tool, ProcessingTool)
-                and (not _has_shared_array_output(node.tool) or not node._column_bindings)
-            ):
+            if isinstance(node.tool, ProcessingTool):
                 has_prior_current = _processing_v1_has_other_current(
                     workflow.storage_path,
                     node.name,

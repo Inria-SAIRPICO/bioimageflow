@@ -551,6 +551,7 @@ def processing_v1_lookup(
     sig_hash: str,
     path_columns: set[str],
     shared_array_columns: set[str] | None = None,
+    hydrate_assets: bool = True,
 ) -> pd.DataFrame | None:
     """Load a ProcessingTool v1 cache hit, or return ``None`` on miss."""
     storage = StorageV1(storage_path)
@@ -564,6 +565,8 @@ def processing_v1_lookup(
         df = cache_load(record_dir / "dataframe.parquet")
     except Exception as exc:
         raise CacheCorruptionError("Cached v1 ProcessingTool dataframe is unreadable.") from exc
+    if not hydrate_assets:
+        return df
     return _rehydrate_processing_assets(
         df,
         record_dir,
