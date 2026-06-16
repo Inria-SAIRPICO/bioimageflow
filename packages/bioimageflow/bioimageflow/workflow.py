@@ -79,6 +79,35 @@ class ProgressEvent:
     timestamp: float = 0.0
 
 
+def _clear_processing_v1_currents_for_node(
+    storage_path: str | Path,
+    node_name: str,
+    known_sig_hashes: set[str],
+) -> bool:
+    from bioimageflow.cache import iter_processing_v1_result_metadata
+    from bioimageflow.storage_v1 import StorageV1
+
+    results_root = Path(storage_path) / "cache" / "v1" / "results"
+    if not results_root.exists():
+        return False
+    cleared = False
+    storage = StorageV1(storage_path)
+    for metadata in iter_processing_v1_result_metadata(
+        storage_path,
+        {node_name: known_sig_hashes},
+    ):
+        if metadata.get("node") != node_name:
+            continue
+        result_key = metadata.get("result_key")
+        if not isinstance(result_key, str):
+            continue
+        current_path = storage.result_dir(result_key) / "current.json"
+        if current_path.exists():
+            current_path.unlink()
+            cleared = True
+    return cleared
+
+
 class Workflow:
     """Holds the DAG and provides configuration for execution."""
 
@@ -168,7 +197,12 @@ class Workflow:
         import shutil
         from bioimageflow.cache import compute_env_hash, dataframe_v1_result_key, processing_v1_result_key
         from bioimageflow.dataframe_tool import DataFrameTool
-        from bioimageflow.engine import DefaultEngine, source_processing_signature_material, topological_order
+        from bioimageflow.engine import (
+            DefaultEngine,
+            _has_shared_array_output,
+            source_processing_signature_material,
+            topological_order,
+        )
         from bioimageflow.storage import get_node_dir
         from bioimageflow.storage_v1 import StorageV1
         from bioimageflow_core.tool import ProcessingTool
@@ -224,6 +258,19 @@ class Workflow:
                             {},
                             self,
                         )
+                    elif isinstance(node.tool, ProcessingTool) and not _has_shared_array_output(node.tool):
+                        input_annotations = node.tool.Inputs._get_all_annotations()
+                        upstream_nodes = {
+                            cr.node.name: cr.node
+                            for cr in node._column_bindings.values()
+                        }
+                        sig_hash = engine._compute_processing_sig_hash(
+                            node,
+                            input_annotations,
+                            upstream_nodes,
+                            sig_hashes,
+                            self,
+                        )
                     else:
                         sig_hash = None
                 if sig_hash is not None:
@@ -240,11 +287,17 @@ class Workflow:
                 if current_path.exists():
                     current_path.unlink()
                     cleared.add(name)
-            if isinstance(node.tool, ProcessingTool) and not node._column_bindings and sig_hash:
+            if (
+                isinstance(node.tool, ProcessingTool)
+                and not _has_shared_array_output(node.tool)
+                and sig_hash
+            ):
                 result_key = processing_v1_result_key(name, sig_hash)
                 current_path = v1_storage.result_dir(result_key) / "current.json"
                 if current_path.exists():
                     current_path.unlink()
+                    cleared.add(name)
+                if _clear_processing_v1_currents_for_node(self.storage_path, name, {sig_hash}):
                     cleared.add(name)
             if node_dir.exists():
                 shutil.rmtree(node_dir)

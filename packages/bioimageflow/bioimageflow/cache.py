@@ -15,6 +15,7 @@ from bioimageflow.storage_v1 import (
     CacheCorruptionError,
     RecordManifest,
     StorageV1,
+    asset_digest_and_size,
     make_record_id,
     make_result_key,
     validate_relative_posix_path,
@@ -207,6 +208,70 @@ def processing_v1_result_key(node_name: str, sig_hash: str) -> str:
             "signature_hash": sig_hash,
         }
     )
+
+
+def _write_processing_v1_result_metadata(
+    result_dir: Path,
+    *,
+    node_name: str,
+    sig_hash: str,
+    result_key: str,
+    attempt_id: str,
+) -> None:
+    metadata_path = result_dir / "result.json"
+    metadata = {
+        "schema": "bioimageflow.cache.result.v1",
+        "kind": "processing_tool",
+        "node": node_name,
+        "signature_hash": sig_hash,
+        "result_key": result_key,
+    }
+    if not metadata_path.exists():
+        tmp_path = result_dir / f".result.{attempt_id}.json.tmp"
+        tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True))
+        os.replace(tmp_path, metadata_path)
+
+
+def iter_processing_v1_result_metadata(
+    storage_path: str | Path,
+    known_node_signatures: dict[str, set[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ProcessingTool v1 result metadata, inferring old records when possible."""
+    results_root = Path(storage_path) / "cache" / "v1" / "results"
+    if not results_root.exists():
+        return []
+    known_node_signatures = known_node_signatures or {}
+    rows: list[dict[str, Any]] = []
+    for result_dir in results_root.glob("*/*/rk_*"):
+        current_path = result_dir / "current.json"
+        if not current_path.exists():
+            continue
+        metadata_path = result_dir / "result.json"
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                metadata = {}
+            if (
+                metadata.get("schema") == "bioimageflow.cache.result.v1"
+                and metadata.get("kind") == "processing_tool"
+            ):
+                rows.append(metadata)
+                continue
+        result_key = result_dir.name
+        for node_name, signatures in known_node_signatures.items():
+            for sig_hash in signatures:
+                if processing_v1_result_key(node_name, sig_hash) == result_key:
+                    rows.append(
+                        {
+                            "schema": "bioimageflow.cache.result.v1",
+                            "kind": "processing_tool",
+                            "node": node_name,
+                            "signature_hash": sig_hash,
+                            "result_key": result_key,
+                        }
+                    )
+    return rows
 
 
 def _dataframe_v1_record_path(storage: StorageV1, result_key: str, record_id: str) -> Path:
@@ -462,28 +527,33 @@ def _processing_manifest_entries_and_dataframe(
                 raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
             if not path.exists():
                 raise CacheCorruptionError(f"Declared output asset is missing: {path}")
-            if path.is_dir():
-                raise CacheCorruptionError(f"Declared output asset is a directory: {path}")
             try:
                 path.resolve().relative_to(staging_root)
             except ValueError as exc:
                 raise CacheCorruptionError(f"Declared output asset escapes staging assets: {path}") from exc
-            digest = _file_sha256(path)
-            size = path.stat().st_size
+            size, digest = asset_digest_and_size(path)
             previous = owned_assets.get(record_relative)
             if previous is not None and previous.resolve() != path.resolve():
                 raise CacheCorruptionError(f"Duplicate owned asset path: {record_relative}")
+            for existing_relative, existing_path in owned_assets.items():
+                if existing_relative == record_relative:
+                    continue
+                if record_relative.startswith(f"{existing_relative}/") or existing_relative.startswith(f"{record_relative}/"):
+                    raise CacheCorruptionError(
+                        f"Overlapping owned asset paths are not supported: {existing_relative}, {record_relative}"
+                    )
             owned_assets[record_relative] = path
             entry_key = ("owned_asset", record_relative)
             if entry_key not in seen_outputs:
-                outputs.append(
-                    {
-                        "path": record_relative,
-                        "kind": "owned_asset",
-                        "size": size,
-                        "digest": digest,
-                    }
-                )
+                entry = {
+                    "path": record_relative,
+                    "kind": "owned_asset",
+                    "size": size,
+                    "digest": digest,
+                }
+                if path.is_dir():
+                    entry["asset_type"] = "directory"
+                outputs.append(entry)
                 seen_outputs.add(entry_key)
             stored.at[index, column] = record_relative
     return stored, outputs, owned_assets
@@ -524,6 +594,13 @@ def processing_v1_publish(
     }
     record_id = make_record_id(manifest_material)
     result_dir = storage.result_dir(result_key)
+    _write_processing_v1_result_metadata(
+        result_dir,
+        node_name=node_name,
+        sig_hash=sig_hash,
+        result_key=result_key,
+        attempt_id=attempt_id,
+    )
     record_dir = _ensure_v1_record_dir(result_dir, record_id)
     for relative, source in owned_assets.items():
         parts = validate_relative_posix_path(relative).split("/")
@@ -544,11 +621,14 @@ def processing_v1_publish(
                 raise CacheCorruptionError("Owned asset path escapes record directory.") from exc
             if destination.is_symlink():
                 raise CacheCorruptionError("Owned asset must not be a symlink.")
-            if destination.is_dir():
-                raise CacheCorruptionError("Owned asset path is a directory.")
+            if source.is_dir() != destination.is_dir():
+                raise CacheCorruptionError("Owned asset path has incompatible type.")
             continue
         tmp_asset = destination_parent / f".{destination.name}.{attempt_id}.tmp"
-        shutil.copy2(source, tmp_asset)
+        if source.is_dir():
+            shutil.copytree(source, tmp_asset)
+        else:
+            shutil.copy2(source, tmp_asset)
         os.replace(tmp_asset, destination)
     record_parquet = record_dir / "dataframe.parquet"
     if not record_parquet.exists():
