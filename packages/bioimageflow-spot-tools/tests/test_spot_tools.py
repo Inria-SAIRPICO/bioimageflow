@@ -116,7 +116,7 @@ def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
     labels_path = tmp_path / "labels.tif"
     iio.imwrite(labels_path, labels)
 
-    with Workflow(storage_path=str(tmp_path / "bif"), use_wetlands=False) as wf:
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
         assigned = AssignSpotsToLabels()(
             spot_id=detected["spot_id"],
@@ -138,7 +138,7 @@ def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
 def test_spot_colocalization_builds_workflow_graph(tmp_path: Path) -> None:
     image = _spot_image(tmp_path / "puncta.tif")
 
-    with Workflow(storage_path=str(tmp_path / "bif"), use_wetlands=False) as wf:
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
         matches = SpotColocalization()(
             detected,

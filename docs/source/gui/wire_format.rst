@@ -21,7 +21,7 @@ Top-level shape
 - ``nodes`` — list of node entries (see below).
 - ``edges`` — list of column-binding edges between nodes.
 - ``config`` — workflow-level settings: ``storage_path``, ``engine``,
-  ``max_executions``, ``max_age``.
+  ``execution``.
 - ``custom_tool_modules`` — optional source bundle for workflow-local
   custom tools. ``Workflow.export(path)`` writes this when needed;
   plain ``Workflow.to_dict()`` omits it unless called with
@@ -69,9 +69,8 @@ processing tool) round-trips as:
      ],
      "config": {
        "storage_path": "./bif_data",
-       "engine": "sequential",
-       "max_executions": 0,
-       "max_age": null
+       "engine": "direct",
+       "execution": "parallel"
      }
    }
 

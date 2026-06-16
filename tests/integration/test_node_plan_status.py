@@ -14,7 +14,7 @@ from .conftest import FileLoader, StubSegmenter
 
 class TestNodePlanStatusBasics:
     def test_unexecuted_for_fresh_storage(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path / "cache")
         with wf:
             FileLoader()(path=str(tmp_path))
         plan = wf.plan()
@@ -30,7 +30,7 @@ class TestNodePlanStatusBasics:
         (src / "a.txt").write_text("a")
 
         def build() -> Workflow:
-            wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+            wf = Workflow(storage_path=tmp_path / "cache")
             with wf:
                 load = FileLoader()(path=str(src))
                 StubSegmenter()(input_image=load["path"], diameter=20.0)
@@ -51,7 +51,7 @@ class TestNodePlanStatusBasics:
         (src / "a.txt").write_text("a")
 
         def build(diameter: float) -> Workflow:
-            wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+            wf = Workflow(storage_path=tmp_path / "cache")
             with wf:
                 load = FileLoader()(path=str(src))
                 StubSegmenter()(input_image=load["path"], diameter=diameter)
@@ -68,7 +68,7 @@ class TestNodePlanStatusBasics:
         assert seg.cached is False
 
     def test_skipped_for_disabled(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path / "cache")
         with wf:
             load = FileLoader()(path=str(tmp_path))
             seg = StubSegmenter()(input_image=load["path"])

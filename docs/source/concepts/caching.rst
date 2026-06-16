@@ -107,10 +107,8 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
 A sub-workflow node aggregates its internals: it reports ``CACHED`` only when
 *every* internal entry is cached, ``UNEXECUTED`` otherwise.
 
-``plan()`` does **not** start Wetlands worker pools — it instantiates an
-in-process :class:`~bioimageflow.engine.DefaultEngine` with
-``use_wetlands=False``. The hashes it returns are byte-identical to what
-``compute()`` would produce.
+``plan()`` does **not** start Wetlands worker pools.
+It uses the direct planning path and does not run tool code.
 
 Invalidating cache when a parameter changes
 -------------------------------------------
@@ -118,8 +116,8 @@ Invalidating cache when a parameter changes
 When a workflow lives in a long-running process (a GUI, a server) and an
 upstream parameter changes, you may want to clear cached results explicitly
 rather than rely on hash drift to trigger re-execution.
-:meth:`~bioimageflow.Workflow.invalidate` removes the cache directories of
-the named nodes — and, by default, the cache of every node transitively
+:meth:`~bioimageflow.Workflow.invalidate` clears the cache selection for the
+named nodes — and, by default, the selection of every node transitively
 downstream:
 
 .. code-block:: python
@@ -129,8 +127,7 @@ downstream:
 
    wf.invalidate(["segment"], cascade=False) # just "segment"
 
-The return value is the set of node names whose cache directories were
-actually removed (entries that didn't exist on disk are silently skipped).
+The return value identifies the affected cache selections.
 Passing an unknown name raises ``KeyError``.
 
 .. warning::
@@ -147,27 +144,15 @@ The recommended recipe is :meth:`~bioimageflow.Workflow.invalidate`:
 
 .. code-block:: python
 
-   wf.invalidate(["segment"])  # clears segment + everything downstream
+   wf.invalidate(["segment"])  # invalidates segment + everything downstream
    result = wf.compute(target)
 
 Changing a parameter value works as a fallback — even a trivial change
-produces a new hash. Manual ``rm -rf bif_data/data/<node>/`` works too but
-bypasses cascade tracking; prefer ``invalidate()``.
+produces a new cache key.
 
 Cache cleanup
 -------------
 
-Control cache growth with ``max_executions`` and ``max_age``:
-
-.. code-block:: python
-
-   # Keep only the 5 most recent executions per node
-   with Workflow(storage_path="./bif_data", max_executions=5) as wf:
-       ...
-
-   # Delete cache entries older than 7 days
-   from datetime import timedelta
-   with Workflow(storage_path="./bif_data", max_age=timedelta(days=7)) as wf:
-       ...
-
-Cleanup runs automatically at the end of ``wf.compute()``.
+``max_executions`` and ``max_age`` are removed from the clean ``Workflow`` API.
+Automatic deletion of published cache records is not part of v1 runtime execution.
+Future pruning must be exposed as an explicit storage maintenance operation.

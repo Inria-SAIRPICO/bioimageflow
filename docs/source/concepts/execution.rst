@@ -32,8 +32,8 @@ Execution pipeline
 
 7. **Cache save**: persist the output DataFrame and assets.
 
-8. **Cache cleanup**: if ``max_executions`` or ``max_age`` is set, remove old
-   cache entries.
+Automatic cache retention through ``max_executions`` or ``max_age`` is not part of the clean ``Workflow`` API.
+Future pruning must be an explicit storage maintenance operation.
 
 Index alignment
 ---------------
@@ -59,7 +59,7 @@ The default engine runs **independent nodes concurrently** and dispatches
 declared :class:`~bioimageflow_core.EnvironmentSpec`. See
 :doc:`../tutorials/parallelism` for ``max_workers``,
 :class:`~bioimageflow_core.ResourceSpec`, and per-environment overrides. A
-deterministic ``engine="sequential"`` mode is available for debugging.
+deterministic ``execution="sequential"`` mode is available for debugging.
 
 Storage layout
 --------------
@@ -115,4 +115,3 @@ See also
 
 - :doc:`caching` --- the signature-hash model, ``plan()``, ``invalidate()``,
   and the four ``NodePlanStatus`` values.
-

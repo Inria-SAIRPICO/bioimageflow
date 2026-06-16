@@ -26,10 +26,6 @@ def _example(name: str) -> Path:
     return root / "example-workflows" / name / "workflow.py"
 
 
-def _force_local_execution(wf: Any) -> None:
-    wf.use_wetlands = False
-
-
 def _write_multichannel_input(data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     image = np.zeros((3, 32, 32), dtype=np.uint16)
@@ -193,8 +189,6 @@ def test_cellpose_stardist_workflow_executes_with_fake_model_runtimes(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "model_runtime" / "bif"),
     )
-    _force_local_execution(wf)
-
     result = wf.compute(cellpose, stardist)
     cellpose_result = result["cellpose3_nuclei"]
     stardist_result = result["stardist_nuclei"]
@@ -253,8 +247,6 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"),
     )
-    _force_local_execution(wf)
-
     result = wf.compute(terminal)
     assert len(result) == 6
     assert int(result.iloc[0]["image_count"]) == 6

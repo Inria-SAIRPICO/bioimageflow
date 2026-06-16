@@ -27,7 +27,6 @@ from bioimageflow_core import (
 from bioimageflow import (
     DataFrameTool,
     Passthrough,
-    Workflow,
 )
 
 
@@ -498,15 +497,8 @@ class PrepareRegistration(DataFrameTool):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _disable_wetlands(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disable Wetlands in all tests — stub tools run in the main process."""
-    original_init = Workflow.__init__
-
-    def patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("use_wetlands", False)
-        original_init(self, *args, **kwargs)
-
-    monkeypatch.setattr(Workflow, "__init__", patched_init)
+def _use_direct_engine_by_default() -> None:
+    """Integration stub tools run through the direct engine by default."""
 
 
 @pytest.fixture

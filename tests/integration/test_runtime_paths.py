@@ -83,7 +83,6 @@ def test_runtime_paths_are_absolute_when_subprocess_uses_work_dir(
 
     with Workflow(
         storage_path=Path("relative_results"),
-        use_wetlands=False,
     ) as workflow:
         raw = source(directory=data_dir)
         checked = wrapper(input_image=raw["input_image"])

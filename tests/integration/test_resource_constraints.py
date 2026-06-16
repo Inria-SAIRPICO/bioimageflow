@@ -67,7 +67,7 @@ class TestSequentialEngineIgnoresResources:
         batch = StubBatchProcessor()
 
         with Workflow(
-            storage_path=tmp_workspace / "results", engine="sequential"
+            storage_path=tmp_workspace / "results", execution="sequential"
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
             embeddings = batch(input_image=raw["path"])

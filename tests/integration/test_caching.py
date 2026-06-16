@@ -329,45 +329,12 @@ class TestDeterministicSerialize:
 
 class TestCacheRetention:
 
-    def test_max_executions_zero_deletes_old(self, tmp_workspace):
-        """With max_executions=0, old results are deleted on new execution."""
-        load = FileLoader()
-        segment = StubSegmenter()
+    def test_max_executions_is_removed_from_workflow_api(self):
+        """Published-record pruning is no longer a Workflow constructor policy."""
+        with pytest.raises(TypeError, match="max_executions"):
+            Workflow(max_executions=3)
 
-        with Workflow(
-            storage_path=tmp_workspace / "results", max_executions=0
-        ) as wf:
-            raw = load(path=str(tmp_workspace / "data"))
-            masks = segment(input_image=raw["path"], diameter=30.0)
-            wf.compute(masks)
-
-        with Workflow(
-            storage_path=tmp_workspace / "results", max_executions=0
-        ) as wf:
-            raw = load(path=str(tmp_workspace / "data"))
-            masks = segment(input_image=raw["path"], diameter=50.0)
-            wf.compute(masks)
-
-        # Only the latest execution should be stored
-        node_dir = tmp_workspace / "results" / "data" / "StubSegmenter_1"
-        if node_dir.exists():
-            hash_dirs = [d for d in node_dir.iterdir() if d.is_dir()]
-            assert len(hash_dirs) <= 1
-
-    def test_max_executions_retains_history(self, tmp_workspace):
-        """With max_executions=3, up to 3 past results are kept."""
-        load = FileLoader()
-        segment = StubSegmenter()
-
-        for diameter in [10.0, 20.0, 30.0, 40.0]:
-            with Workflow(
-                storage_path=tmp_workspace / "results", max_executions=3
-            ) as wf:
-                raw = load(path=str(tmp_workspace / "data"))
-                masks = segment(input_image=raw["path"], diameter=diameter)
-                wf.compute(masks)
-
-        node_dir = tmp_workspace / "results" / "data" / "StubSegmenter_1"
-        if node_dir.exists():
-            hash_dirs = [d for d in node_dir.iterdir() if d.is_dir()]
-            assert len(hash_dirs) <= 3
+    def test_max_age_is_removed_from_workflow_api(self):
+        """Age-based cache cleanup belongs to an explicit maintenance API."""
+        with pytest.raises(TypeError, match="max_age"):
+            Workflow(max_age="7d")

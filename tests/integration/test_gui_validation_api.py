@@ -122,7 +122,7 @@ class TestCaptureErrors:
         assert inner[0] != outer[0] or inner[0].node != outer[0].node
 
     def test_capture_active_no_errors_workflow_still_usable(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             with wf.capture_errors() as errs:
                 load = FileLoader()(path=str(tmp_path))
@@ -139,7 +139,7 @@ class TestCaptureErrors:
 
 class TestFromDictToDict:
     def test_round_trip_strict(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"], diameter=25.0)
@@ -156,7 +156,7 @@ class TestFromDictToDict:
         assert seg2._constant_bindings.get("diameter") == 25.0
 
     def test_load_and_from_dict_equivalent(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"])
@@ -315,7 +315,7 @@ class TestValidate:
         assert wf.validate() == []
 
     def test_valid_workflow(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             load = FileLoader()(path=str(tmp_path))
             seg = StubSegmenter()(input_image=load["path"])
@@ -363,7 +363,7 @@ class TestValidate:
     def test_plan_raises_cycle_in_workflow_error(self) -> None:
         from bioimageflow import CycleInWorkflowError
 
-        wf = Workflow(use_wetlands=False)
+        wf = Workflow()
         with wf:
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])
@@ -385,7 +385,7 @@ class TestValidate:
 
 class TestPlan:
     def test_source_only_plan(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             FileLoader()(path=str(tmp_path))
         plan = wf.plan()
@@ -403,7 +403,7 @@ class TestPlan:
         (src / "b.txt").write_text("b")
 
         def build() -> Workflow:
-            wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+            wf = Workflow(storage_path=tmp_path / "cache")
             with wf:
                 load = FileLoader()(path=str(src))
                 StubSegmenter()(input_image=load["path"], diameter=20.0)
@@ -431,7 +431,7 @@ class TestPlan:
         src.mkdir()
         (src / "a.txt").write_text("a")
 
-        wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path / "cache")
         with wf:
             load = FileLoader()(path=str(src))
             StubSegmenter()(input_image=load["path"])
@@ -442,7 +442,7 @@ class TestPlan:
             assert plan_dev[name].sig_hash != plan_nodev[name].sig_hash
 
     def test_plan_disabled_node(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             load = FileLoader()(path=str(tmp_path))
             seg = StubSegmenter()(input_image=load["path"])
@@ -460,7 +460,7 @@ class TestPlan:
 
         monkeypatch.setattr(em.WetlandsEnvManager, "__init__", _boom)
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=True)
+        wf = Workflow(storage_path=tmp_path, engine="wetlands")
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"])
@@ -558,7 +558,7 @@ class TestSourceToolUpstream:
     def test_source_tool_with_upstream_raises(self, tmp_path: Path) -> None:
         from bioimageflow_common_tools import Files
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             other = Files()(path=str(tmp_path))
             with pytest.raises(SourceToolUpstreamError):
@@ -567,7 +567,7 @@ class TestSourceToolUpstream:
     def test_source_tool_kwargs_only_works(self, tmp_path: Path) -> None:
         from bioimageflow_common_tools import Files
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             Files()(path=str(tmp_path))
         # No exception → the workflow built fine.
@@ -599,7 +599,7 @@ class TestSerializeResolvedOutputsWireFormat:
             def resolve_outputs(cls, inputs=None):
                 return None
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             n = Dyn()()
             out = serialize_resolved_outputs(n)
@@ -609,7 +609,7 @@ class TestSerializeResolvedOutputsWireFormat:
     def test_generate_resolved_after_column_name(self, tmp_path: Path) -> None:
         from bioimageflow_common_tools import Generate
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             g = Generate()(column_name="sensitivity", values=[1, 2, 3])
             out = serialize_resolved_outputs(g)
@@ -621,7 +621,7 @@ class TestSerializeResolvedOutputsWireFormat:
         """parameter_space_exploration's exact wiring resolves at construction."""
         from bioimageflow_common_tools import CrossJoin, Files, Generate
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             files = Files()(path=str(tmp_path))
             sens = Generate()(column_name="sensitivity", values=[0.1, 0.2])
@@ -640,7 +640,7 @@ class TestSerializeResolvedOutputsWireFormat:
 
 class TestIntegration:
     def test_I1_full_round_trip(self, tmp_path: Path) -> None:
-        wf = Workflow(storage_path=tmp_path, use_wetlands=False)
+        wf = Workflow(storage_path=tmp_path)
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"], diameter=15.0)
@@ -706,7 +706,7 @@ class TestIntegration:
         (src / "a.txt").write_text("a")
 
         def build(diameter: float) -> Workflow:
-            wf = Workflow(storage_path=tmp_path / "cache", use_wetlands=False)
+            wf = Workflow(storage_path=tmp_path / "cache")
             with wf:
                 load = FileLoader()(path=str(src))
                 StubSegmenter()(input_image=load["path"], diameter=diameter)
@@ -737,7 +737,7 @@ class TestIntegration:
 
         monkeypatch.setattr(em.WetlandsEnvManager, "__init__", _boom)
 
-        wf = Workflow(storage_path=tmp_path, use_wetlands=True)
+        wf = Workflow(storage_path=tmp_path, engine="wetlands")
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"])

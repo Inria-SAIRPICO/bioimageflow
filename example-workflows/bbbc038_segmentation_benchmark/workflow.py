@@ -43,7 +43,7 @@ def build_workflow(
     storage = Path(storage_path)
     image_path, reference_path = _write_synthetic_bbbc038_fixture(storage / "data")
 
-    wf = Workflow(storage_path=str(storage / "bif"), use_wetlands=False)
+    wf = Workflow(storage_path=str(storage / "bif"))
     with wf:
         predicted = ThresholdSegment()(
             input_image=image_path,

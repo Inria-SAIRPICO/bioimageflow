@@ -79,8 +79,7 @@ def test_processing_tool_executes_through_published_wetlands(tmp_path: Path) -> 
         (data_dir / name).write_text(f"FAKE_{name}")
 
     with Workflow(
-        storage_path=tmp_path / "results",
-        use_wetlands=True,
+        storage_path=tmp_path / "results", engine="wetlands",
         max_workers=1,
     ) as wf:
         raw = FileLoader()(path=str(data_dir))
@@ -109,8 +108,7 @@ def test_configured_logging_routes_wetlands_worker_streams(
         (data_dir / "img_01.tif").write_text("FAKE")
 
         with Workflow(
-            storage_path=tmp_path / "results",
-            use_wetlands=True,
+            storage_path=tmp_path / "results", engine="wetlands",
             max_workers=1,
         ) as wf:
             raw = FileLoader()(path=str(data_dir))

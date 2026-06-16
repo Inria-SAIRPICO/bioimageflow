@@ -39,8 +39,7 @@ def test_cellpose_stardist_workflow_executes_with_real_model_runtimes(
     module = _load_module(_example("cellpose3_stardist"))
     wf, cellpose, stardist = module.build_segmentation_workflow(
         data_dir=str(data_dir),
-        storage_path=str(tmp_path / "cellpose_stardist" / "bif"),
-        use_wetlands=True,
+        storage_path=str(tmp_path / "cellpose_stardist" / "bif"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 
@@ -69,8 +68,7 @@ def test_parameter_space_workflow_executes_with_real_atlas_binary(
     module = _load_module(_example("parameter_space_exploration"))
     wf, terminal = module.build_parameter_space_workflow(
         data_dir=str(data_dir),
-        storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"),
-        use_wetlands=True,
+        storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 
@@ -89,8 +87,7 @@ def test_sairpico_workflow_executes_with_real_binaries(
 ) -> None:
     module = _load_module(_example("sairpico_restoration_smoke"))
     wf, terminal = module.build_workflow(
-        storage_path=str(tmp_path / "sairpico"),
-        use_wetlands=True,
+        storage_path=str(tmp_path / "sairpico"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 
@@ -114,8 +111,7 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
     module = _load_module(_example("fish_analysis"))
     wf, terminal = module.build_fish_workflow(
         storage_path=str(tmp_path / "fish_public" / "bif"),
-        data_dir=str(tmp_path / "fish_public" / "data"),
-        use_wetlands=True,
+        data_dir=str(tmp_path / "fish_public" / "data"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 
@@ -142,8 +138,7 @@ def test_specialized_workflow_acceptance_smoke(
 ) -> None:
     module = _load_module(_example(workflow_name))
     wf, terminal = module.build_workflow(
-        storage_path=str(tmp_path / workflow_name),
-        use_wetlands=True,
+        storage_path=str(tmp_path / workflow_name), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 

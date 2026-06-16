@@ -104,8 +104,10 @@ class ColumnRef:
 # Global name counter (used when no workflow context is active)
 _name_counter_lock = threading.Lock()
 _name_counters: dict[str, int] = {}
-_active_workflow: Any = None
-_active_workflow_lock = threading.Lock()
+_active_workflow: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "_bif_active_workflow",
+    default=None,
+)
 
 
 def _reset_name_counters() -> None:
@@ -122,14 +124,11 @@ def _get_next_name(tool_name: str) -> str:
 
 
 def get_active_workflow() -> Any:
-    with _active_workflow_lock:
-        return _active_workflow
+    return _active_workflow.get()
 
 
 def set_active_workflow(wf: Any) -> None:
-    global _active_workflow
-    with _active_workflow_lock:
-        _active_workflow = wf
+    _active_workflow.set(wf)
 
 
 class Node:

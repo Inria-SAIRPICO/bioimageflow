@@ -64,7 +64,7 @@ def build_fish_workflow(
     storage_path: str = "./fish_results",
     data_dir: str = "./data",
     debug: bool = False,
-    use_wetlands: bool = True,
+    engine: str = "direct",
     wetlands_config: dict | None = None,
 ) -> tuple:
     """Build and return the FISH analysis workflow and its terminal node.
@@ -83,7 +83,7 @@ def build_fish_workflow(
     """
     wf = Workflow(
         storage_path=storage_path,
-        use_wetlands=use_wetlands,
+        engine=engine,
         wetlands_config={**(wetlands_config or {}), "debug": debug},
     )
 
@@ -164,7 +164,7 @@ def build_fish_workflow(
 
 def build_synthetic_fish_workflow(
     storage_path: str = "./fish_synthetic_results",
-    use_wetlands: bool = False,
+    engine: str = "direct",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build a lightweight FISH-like workflow for tests and examples.
@@ -199,7 +199,7 @@ def build_synthetic_fish_workflow(
 
     wf = Workflow(
         storage_path=str(storage / "bif"),
-        use_wetlands=use_wetlands,
+        engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
@@ -277,7 +277,7 @@ def main() -> None:
 
     # Create an explicit engine for debugging and inspection
     engine = SequentialEngine(
-        use_wetlands=wf.use_wetlands,
+        use_wetlands=wf.engine_type == "wetlands",
         wetlands_config=wf.wetlands_config,
     )
 

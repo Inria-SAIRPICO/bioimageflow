@@ -280,8 +280,7 @@ def test_exported_sairpico_binary_tool_executes_real_cli(
     kwargs.pop("output_image")
 
     with Workflow(
-        storage_path=tmp_path / "results",
-        use_wetlands=True,
+        storage_path=tmp_path / "results", engine="wetlands",
         wetlands_config=complete_wetlands_config,
     ) as wf:
         output_node = case.tool_cls()(
