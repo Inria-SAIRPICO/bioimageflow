@@ -1,7 +1,6 @@
 """SAIRPICO CImg denoising tool."""
 
 from pathlib import Path
-import sys
 from typing import Annotated, Any, Literal, Optional
 
 from bioimageflow_core import (
@@ -15,11 +14,7 @@ from bioimageflow_core import (
     Template,
 )
 
-package_root = str(Path(__file__).resolve().parent.parent)
-if package_root not in sys.path:
-    sys.path.insert(0, package_root)
-
-from bioimageflow_sairpico_tools._common import (  # noqa: E402
+from ._common import (
     IntensityImage,
     _ensure_output_parent,
     _run_with_staged_output,

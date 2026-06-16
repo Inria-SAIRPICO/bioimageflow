@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 import ast
+import importlib
 import inspect
+import json
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -13,8 +15,10 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
+from bioimageflow.env_manager import _find_tool_file
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments, ProcessingTool
+from bioimageflow_core.worker import _load_module_from_file
 
 from bioimageflow_sairpico_tools import (
     CImgDenoising,
@@ -140,6 +144,58 @@ def test_importing_package_does_not_import_subprocess() -> None:
     __import__("bioimageflow_sairpico_tools")
 
     assert "subprocess" not in sys.modules
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "bioimageflow_sairpico_tools.simglib",
+        "bioimageflow_sairpico_tools.cimgdenoising",
+        "bioimageflow_sairpico_tools.hotspot",
+    ],
+)
+def test_runtime_module_imports_do_not_mutate_sys_path(module_name: str) -> None:
+    package_root = str(SAIRPICO_PACKAGE.parent)
+    original_path = list(sys.path)
+    try:
+        sys.path[:] = [entry for entry in sys.path if entry != package_root]
+        before = list(sys.path)
+        sys.modules.pop(module_name, None)
+
+        importlib.import_module(module_name)
+
+        assert sys.path == before
+    finally:
+        sys.path[:] = original_path
+
+
+@pytest.mark.parametrize(
+    ("tool_cls", "module_name"),
+    [
+        (GaussianPSF, "bioimageflow_sairpico_tools.simglib"),
+        (CImgDenoising, "bioimageflow_sairpico_tools.cimgdenoising"),
+        (HotspotDetection, "bioimageflow_sairpico_tools.hotspot"),
+    ],
+)
+def test_worker_loads_runtime_modules_as_packages(
+    tool_cls: type[ProcessingTool],
+    module_name: str,
+) -> None:
+    tool_file = _find_tool_file(tool_cls)
+    config = json.loads(tool_file)
+    assert config == {
+        "mode": "module",
+        "module": module_name,
+        "sys_path": str(SAIRPICO_PACKAGE.parent),
+    }
+
+    original_path = list(sys.path)
+    try:
+        sys.path[:] = [entry for entry in sys.path if entry != config["sys_path"]]
+        module = _load_module_from_file(tool_file)
+        assert getattr(module, tool_cls.__name__).__name__ == tool_cls.__name__
+    finally:
+        sys.path[:] = original_path
 
 
 def test_tools_are_isolated_by_runtime_module() -> None:
