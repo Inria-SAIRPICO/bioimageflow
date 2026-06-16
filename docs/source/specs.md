@@ -1915,7 +1915,7 @@ from bioimageflow import NodePlan, NodePlanStatus
 plan: dict[str, NodePlan] = workflow.plan()
 for name, entry in plan.items():
     print(name, entry.final_result_key, entry.selected_record_id, entry.status)
-    # entry.status is one of: CACHED, OUT_OF_DATE, UNEXECUTED, SKIPPED, PENDING_UPSTREAM
+    # entry.status is one of: CACHED, PRIOR_SELECTION_MISS, UNEXECUTED, SKIPPED, PENDING_UPSTREAM
     # entry.cached and entry.skipped are kept as boolean shortcuts
 ```
 
@@ -2401,7 +2401,7 @@ The `cached` and `skipped` booleans are read-only shortcuts (`cached == status i
 | Status | Meaning |
 |--------|---------|
 | `CACHED` | `current.json` selects a valid reusable record for the final result key; `compute()` would short-circuit if it consumes the same upstream record references. |
-| `OUT_OF_DATE` | Prior records exist for this node or result lineage, but no selected record matches the current final result key. |
+| `PRIOR_SELECTION_MISS` | The planned final result key has no selected current record, but the same node has another selected current record from prior result-key material. |
 | `UNEXECUTED` | No reusable record exists yet for this node/result lineage. |
 | `SKIPPED` | Node is disabled, or its upstream chain contains a disabled node. `final_result_key` and `selected_record_id` are `None`. |
 | `PENDING_UPSTREAM` | At least one consumed upstream selected record is not known until that upstream executes. `final_result_key` is `None`. |
@@ -3301,7 +3301,7 @@ env.exit()  # Shuts down all workers and releases resources
   - `Workflow.from_dict` gains orthogonal `validate_only` and `partial` flags. The legacy `collect_errors=` kwarg is **removed** (passing it raises `TypeError`); `validate_only=True, partial=True` is the equivalent.
   - The `Workflow.collect_errors()` context manager is **renamed** to `Workflow.capture_errors()`; the underlying `_error_capture` ContextVar is consistent. No alias.
   - `Workflow` exposes `errors`, `failed_nodes`, `is_partial` build-time properties and `invalidate(node_ids, *, cascade=True)` for cache cleanup. `invalidate` is **not** safe vs concurrent `compute()`.
-  - `Workflow.plan()` exposes v1 `NodePlanStatus` (`CACHED` / `OUT_OF_DATE` / `UNEXECUTED` / `SKIPPED` / `PENDING_UPSTREAM`) plus `final_result_key`, `selected_record_id`, `pending_upstreams`, and diagnostic `logical_signature` on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
+  - `Workflow.plan()` exposes v1 `NodePlanStatus` (`CACHED` / `PRIOR_SELECTION_MISS` / `UNEXECUTED` / `SKIPPED` / `PENDING_UPSTREAM`) plus `final_result_key`, `selected_record_id`, `pending_upstreams`, and diagnostic `logical_signature` on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
   - `ValidationError` adds an `edge_id: str | None` field, copied from the optional `id` key on wire-format edges. `validate()`'s deduplication includes `edge_id`, so two errors that differ only by `edge_id` are reported as distinct.
   - `serialize_constant` / `deserialize_constant` are public exports of `bioimageflow.validation`. `deserialize_constant` requires the typed envelope; bare-string input is no longer accepted.
   - New `bioimageflow.ToolRegistry` and `bioimageflow.ToolMetadata` for GUIs to enumerate tools without rebuilding loader plumbing. `install_package` (network) and `register_package` (in-process) are split so hot validation paths never touch the network.

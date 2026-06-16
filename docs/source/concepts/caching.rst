@@ -102,8 +102,8 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
    * - ``CACHED``
      - ``current.json`` selects a valid reusable record for the final result key; ``compute()`` would short-circuit if it consumes the same upstream records.
      - Green / "up to date"
-   * - ``OUT_OF_DATE``
-     - Prior records exist for this node or lineage, but no selected record matches the current final result key.
+   * - ``PRIOR_SELECTION_MISS``
+     - The planned final result key has no selected record, but the same node has another selected current record.
      - Yellow / "needs rebuild"
    * - ``UNEXECUTED``
      - No reusable record exists yet for this node/result lineage.

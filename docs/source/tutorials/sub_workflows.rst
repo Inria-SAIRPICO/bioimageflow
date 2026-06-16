@@ -123,7 +123,7 @@ reuses the cached output of ``segment_and_measure/convert_image``.
 In :meth:`~bioimageflow.Workflow.plan`, a sub-workflow node aggregates
 its internals: it reports ``CACHED`` only when *every* internal entry is
 cached, and ``UNEXECUTED`` otherwise. See :doc:`/concepts/caching` for
-the four ``NodePlanStatus`` values.
+the ``NodePlanStatus`` values.
 
 Nesting
 -------

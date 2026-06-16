@@ -124,7 +124,7 @@ where they call ``compute()``:
 - partially-completed nodes leave their cache entries in their previous
   state (the new entry is not committed);
 - subsequent ``plan()`` calls reflect the post-cancel state, so the GUI
-  can re-render "out of date" / "unexecuted" indicators correctly.
+  can re-render "needs rebuild" / "unexecuted" indicators correctly.
 
 A typical handler:
 

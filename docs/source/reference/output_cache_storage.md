@@ -448,7 +448,7 @@ Recommended plan entry fields:
 ```text
 final_result_key: str | None
 selected_record_id: str | None
-status: CACHED | OUT_OF_DATE | UNEXECUTED | SKIPPED | PENDING_UPSTREAM
+status: CACHED | PRIOR_SELECTION_MISS | UNEXECUTED | SKIPPED | PENDING_UPSTREAM
 pending_upstreams: tuple[str, ...]
 ```
 
