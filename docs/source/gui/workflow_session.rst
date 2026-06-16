@@ -87,7 +87,7 @@ the graph.
 Materialization
 ---------------
 
-Three methods cache their results across non-structural edits:
+The materialized workflow is reused across non-structural edits, validation is cached until a compute-affecting edit, and planning refreshes storage-facing cache state:
 
 - :meth:`~bioimageflow.WorkflowSession.to_workflow` — returns the
   built :class:`Workflow`. Internally calls
@@ -97,8 +97,9 @@ Three methods cache their results across non-structural edits:
 - :meth:`~bioimageflow.WorkflowSession.validate` — returns
   ``list[ValidationError]``: the union of build-time errors
   (``wf.errors``) and ``wf.validate()`` results, deduplicated.
-- :meth:`~bioimageflow.WorkflowSession.plan` — returns
-  ``dict[str, NodePlan]``: same shape as ``Workflow.plan()``.
+
+:meth:`~bioimageflow.WorkflowSession.plan` returns ``dict[str, NodePlan]`` with the same shape as ``Workflow.plan()``.
+It reuses the materialized workflow object when possible, but refreshes the v1 storage/current snapshot on every call so external ``compute()`` or ``invalidate()`` operations are reflected immediately.
 
 A fourth method, :meth:`~bioimageflow.WorkflowSession.to_dict`, returns
 a deep copy of the wire format — a snapshot suitable for export or for
