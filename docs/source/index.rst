@@ -61,7 +61,7 @@ Features
 - **DAG workflow engine** --- build pipelines by connecting tools, not writing glue code
 - **Two-package architecture** --- a zero-dependency core for workers, a pandas/pydantic orchestrator for the main process
 - **Typed image I/O** --- semantic, layout, and dtype constraints checked at graph-construction time
-- **Automatic caching** --- signature-hash based caching skips redundant computation
+- **Automatic caching** --- v1 result-key/current-record caching skips redundant computation
 - **Shared memory** --- zero-copy array transfer between tools
 - **Merge strategies** --- inner join, cross join, concat, and collect
 - **Output templating** --- declarative output path patterns

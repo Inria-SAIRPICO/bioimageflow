@@ -19,7 +19,7 @@ The implementation also computes a diagnostic logical signature from:
 - Upstream node hashes (recursive)
 - Source-code hash (``dev_mode`` only)
 
-This signature is exposed temporarily as ``NodePlan.sig_hash`` for debugging and compatibility, but it is not the public v1 cache identity.
+This signature is exposed as ``NodePlan.logical_signature`` for diagnostics, but it is not the public v1 cache identity.
 Use ``NodePlan.final_result_key`` and ``NodePlan.selected_record_id`` for cache/provenance state.
 If ``current.json`` selects a valid record for a node's final result key, the cached DataFrame is loaded instead of re-executing the tool.
 
@@ -57,7 +57,7 @@ Invalidation removes cache selection state such as ``current.json``.
 What invalidates the cache
 --------------------------
 
-Any of these changes produce a different signature hash:
+Any of these changes produce a different v1 result key:
 
 - **Parameter change**: e.g., ``sigma=1.0`` to ``sigma=2.0``
 - **Upstream change**: if a parent node's hash changes, all descendants
@@ -90,7 +90,7 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
   :class:`~bioimageflow.engine.NodePlanStatus` values below
 - ``upstream`` — scoped names of this node's direct upstreams
 - ``pending_upstreams`` — upstream nodes whose selected records must be produced before this node's final key is known
-- ``sig_hash`` — transitional diagnostic signature retained for compatibility
+- ``logical_signature`` — diagnostic logical signature, not a cache key
 
 .. list-table::
    :header-rows: 1

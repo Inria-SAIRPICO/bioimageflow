@@ -9,7 +9,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 - **DAG workflow engine** — build pipelines by connecting tools, not writing glue code
 - **Two-package architecture** — a zero-dependency core (`bioimageflow-core`) safe for worker processes, and an orchestrator (`bioimageflow`) for the main process
 - **Typed image I/O** — annotate inputs/outputs with semantic type, layout, and dtype constraints; reusable groups such as `SCALAR_IMAGE_SEMANTICS` cover common scalar image consumers
-- **Automatic caching** — signature-hash based caching skips redundant computation
+- **Automatic caching** — v1 result-key/current-record caching skips redundant computation
 - **Shared memory** — zero-copy array transfer between tools via `SharedArray`
 - **Merge strategies** — built-in inner join, cross join, concat, and collect operations
 - **Output templating** — declarative output path patterns with `{input.stem}`, `{row_index}`, etc.

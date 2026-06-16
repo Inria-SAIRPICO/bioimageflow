@@ -251,7 +251,7 @@ class Workflow:
         externally (e.g., cancel + join + invalidate).
         """
         import shutil
-        from bioimageflow.cache import compute_env_hash, dataframe_v1_result_key, processing_v1_result_key
+        from bioimageflow.cache import compute_env_hash
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.engine import (
             DefaultEngine,
@@ -277,10 +277,10 @@ class Workflow:
         engine = DefaultEngine(use_wetlands=False)
         try:
             plan = engine.plan(self)
-            plan_sig_hashes = {
-                name: entry.sig_hash
+            plan_logical_signatures = {
+                name: entry.logical_signature
                 for name, entry in plan.items()
-                if entry.sig_hash
+                if entry.logical_signature
             }
             plan_result_keys = {
                 name: entry.final_result_key
@@ -288,7 +288,7 @@ class Workflow:
                 if entry.final_result_key
             }
         except Exception:
-            plan_sig_hashes = {}
+            plan_logical_signatures = {}
             plan_result_keys = {}
             sig_hashes: dict[Node, str] = {}
             results: dict[Node, Any] = {}
@@ -336,38 +336,37 @@ class Workflow:
                         sig_hash = None
                 if sig_hash is not None:
                     sig_hashes[node] = sig_hash
-                    plan_sig_hashes[name] = sig_hash
+                    plan_logical_signatures[name] = sig_hash
         v1_storage = StorageV1(self.storage_path)
         for name in targets:
             node_dir = get_node_dir(self.storage_path, name)
             node = self._nodes[name]
-            sig_hash = plan_sig_hashes.get(name)
-            if isinstance(node.tool, DataFrameTool) and sig_hash:
-                result_key = plan_result_keys.get(name) or dataframe_v1_result_key(name, sig_hash)
-                selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
-                if selection is not None:
-                    invalidated.add(selection)
+            sig_hash = plan_logical_signatures.get(name)
+            result_key = plan_result_keys.get(name)
+            known_sig_hashes = {sig_hash} if sig_hash and result_key is not None else set()
+            if isinstance(node.tool, DataFrameTool):
+                if result_key is not None:
+                    selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                    if selection is not None:
+                        invalidated.add(selection)
                 invalidated.update(
                     _clear_v1_currents_for_node(
                         self.storage_path,
                         name,
-                        {sig_hash},
+                        known_sig_hashes,
                         kind="dataframe_tool",
                     )
                 )
-            if (
-                isinstance(node.tool, ProcessingTool)
-                and sig_hash
-            ):
-                result_key = plan_result_keys.get(name) or processing_v1_result_key(name, sig_hash)
-                selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
-                if selection is not None:
-                    invalidated.add(selection)
+            if isinstance(node.tool, ProcessingTool):
+                if result_key is not None:
+                    selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                    if selection is not None:
+                        invalidated.add(selection)
                 invalidated.update(
                     _clear_v1_currents_for_node(
                         self.storage_path,
                         name,
-                        {sig_hash},
+                        known_sig_hashes,
                         kind="processing_tool",
                     )
                 )

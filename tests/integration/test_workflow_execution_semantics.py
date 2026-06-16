@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
-from bioimageflow.cache import processing_v1_result_key
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import get_node_dir
 from bioimageflow.storage_v1 import StorageV1
@@ -16,8 +15,8 @@ from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Sem
 from .conftest import AddColumn, FileLoader, StubSegmenter, imageio_env
 
 
-def _processing_v1_current_exists(storage: Path, node_name: str, sig_hash: str) -> bool:
-    result_key = processing_v1_result_key(node_name, sig_hash)
+def _processing_v1_current_exists(storage: Path, result_key: str | None) -> bool:
+    assert result_key is not None
     return (StorageV1(storage).result_dir(result_key) / "current.json").exists()
 
 
@@ -129,8 +128,8 @@ class TestTargetExecution:
                 name="unselected",
             )
             plan = wf.plan()
-        assert _processing_v1_current_exists(storage, selected.name, plan[selected.name].sig_hash)
-        assert not _processing_v1_current_exists(storage, unselected.name, plan[unselected.name].sig_hash)
+        assert _processing_v1_current_exists(storage, plan[selected.name].final_result_key)
+        assert not _processing_v1_current_exists(storage, plan[unselected.name].final_result_key)
 
 
 class TestFailureAndCancellation:
@@ -288,8 +287,7 @@ class TestSubWorkflowPlanCache:
         assert plan["SegmentOnly_1"].status is NodePlanStatus.CACHED
         assert _processing_v1_current_exists(
             storage,
-            internal_name,
-            plan[internal_name].sig_hash,
+            plan[internal_name].final_result_key,
         )
         assert any(
             e.node_name == internal_name and e.status == "cached"

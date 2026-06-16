@@ -48,10 +48,10 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
      - Tuple of scoped names of this node's direct upstreams.
    * - ``pending_upstreams``
      - Tuple of scoped upstream names whose selected records are not known yet.
-   * - ``sig_hash``
-     - Transitional diagnostic logical signature. It is not the public cache
-       identity; use ``final_result_key`` and ``selected_record_id`` for cache
-       and provenance UI.
+   * - ``logical_signature``
+     - Diagnostic logical signature. It is not the public cache identity; use
+       ``final_result_key`` and ``selected_record_id`` for cache and provenance
+       UI.
    * - ``cached``
      - Read-only bool; ``status is CACHED``.
    * - ``skipped``

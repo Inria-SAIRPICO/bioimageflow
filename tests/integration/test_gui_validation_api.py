@@ -392,7 +392,7 @@ class TestPlan:
         assert "FileLoader_1" in plan
         entry = plan["FileLoader_1"]
         assert isinstance(entry, NodePlan)
-        assert entry.sig_hash != ""
+        assert entry.logical_signature != ""
         assert entry.cached is False  # no cache yet
         assert entry.skipped is False
 
@@ -422,7 +422,7 @@ class TestPlan:
         plan_post = wf2.plan()
         # Parity: same hashes
         for name in plan_pre:
-            assert plan_pre[name].sig_hash == plan_post[name].sig_hash
+            assert plan_pre[name].logical_signature == plan_post[name].logical_signature
         # All cached
         assert all(p.cached for p in plan_post.values())
 
@@ -439,7 +439,7 @@ class TestPlan:
         plan_nodev = wf.plan(dev_mode=False)
         # dev_mode should produce different hashes (source_hash included)
         for name in plan_dev:
-            assert plan_dev[name].sig_hash != plan_nodev[name].sig_hash
+            assert plan_dev[name].logical_signature != plan_nodev[name].logical_signature
 
     def test_plan_disabled_node(self, tmp_path: Path) -> None:
         wf = Workflow(storage_path=tmp_path)
@@ -718,14 +718,14 @@ class TestIntegration:
         p_after = build(20.0).plan()
         for name, entry in p_after.items():
             assert entry.cached is True
-            assert entry.sig_hash == p_before[name].sig_hash
+            assert entry.logical_signature == p_before[name].logical_signature
 
         # Change the constant → the changed node & its descendants cache-miss
         wf2 = build(99.0)
         p_changed = wf2.plan()
         assert p_changed["StubSegmenter_1"].cached is False
         # FileLoader is upstream, not affected
-        assert p_changed["FileLoader_1"].sig_hash == p_after["FileLoader_1"].sig_hash
+        assert p_changed["FileLoader_1"].logical_signature == p_after["FileLoader_1"].logical_signature
 
     def test_I4_no_wetlands_under_plan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
