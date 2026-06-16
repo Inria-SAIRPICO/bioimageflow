@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -152,7 +152,7 @@ def _is_missing(value: Any) -> bool:
 
 
 def _datetime_payload(value: datetime | pd.Timestamp) -> dict[str, str]:
-    timestamp = pd.Timestamp(value)
+    timestamp = cast(pd.Timestamp, pd.Timestamp(value))
     if timestamp.tzinfo is None:
         timestamp = timestamp.tz_localize(timezone.utc)
     else:
@@ -430,6 +430,8 @@ class RecordManifest:
             _validate_sha256_digest(str(output["digest"]), label="asset")
             if actual_digest != output["digest"]:
                 raise CacheCorruptionError(f"Record asset digest mismatch: {relative}")
+            if output.get("asset_role") == "shared_array":
+                self._validate_shared_array_asset(asset_path, relative, output, asset_type=asset_type)
             return
         if kind == "external_path":
             if not isinstance(output.get("path"), str) or output["path"] == "":
@@ -438,6 +440,48 @@ class RecordManifest:
                 raise CacheCorruptionError("Record manifest external path identity is invalid.")
             return
         raise CacheCorruptionError(f"Unsupported record output kind: {kind!r}")
+
+    def _validate_shared_array_asset(
+        self,
+        asset_path: Path,
+        relative: str,
+        output: dict[str, Any],
+        *,
+        asset_type: str,
+    ) -> None:
+        if asset_type != "file":
+            raise CacheCorruptionError(f"Record shared-array asset must be a file: {relative}")
+        if not relative.startswith("assets/shm/"):
+            raise CacheCorruptionError(f"Record shared-array asset path is invalid: {relative}")
+        array = output.get("array")
+        if not isinstance(array, dict):
+            raise CacheCorruptionError(f"Record shared-array metadata is missing: {relative}")
+        if not isinstance(array.get("column"), str) or array["column"] == "":
+            raise CacheCorruptionError(f"Record shared-array column is invalid: {relative}")
+        if not isinstance(array.get("row_index"), str):
+            raise CacheCorruptionError(f"Record shared-array row index is invalid: {relative}")
+        if array.get("format") != "npy":
+            raise CacheCorruptionError(f"Record shared-array format is invalid: {relative}")
+        if array.get("order") != "C":
+            raise CacheCorruptionError(f"Record shared-array order is invalid: {relative}")
+        shape = array.get("shape")
+        if not isinstance(shape, list) or not all(isinstance(item, int) and item >= 0 for item in shape):
+            raise CacheCorruptionError(f"Record shared-array shape is invalid: {relative}")
+        dtype = array.get("dtype")
+        if not isinstance(dtype, str) or dtype == "":
+            raise CacheCorruptionError(f"Record shared-array dtype is invalid: {relative}")
+        try:
+            import numpy as np
+
+            loaded = np.load(asset_path, allow_pickle=False)
+        except Exception as exc:
+            raise CacheCorruptionError(f"Record shared-array asset is unreadable: {relative}") from exc
+        if list(loaded.shape) != shape:
+            raise CacheCorruptionError(f"Record shared-array shape mismatch: {relative}")
+        if str(loaded.dtype) != dtype:
+            raise CacheCorruptionError(f"Record shared-array dtype mismatch: {relative}")
+        if not loaded.flags.c_contiguous:
+            raise CacheCorruptionError(f"Record shared-array order mismatch: {relative}")
 
 
 @dataclass(frozen=True)
