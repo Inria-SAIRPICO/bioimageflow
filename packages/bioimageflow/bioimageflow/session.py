@@ -58,7 +58,6 @@ class WorkflowSession:
         # re-resolution.
         self._workflow_cache: Workflow | None = None
         self._validate_cache: list[ValidationError] | None = None
-        self._plan_cache: dict[str, NodePlan] | None = None
 
     # ------------------------------------------------------------------
     # Dict shape helpers
@@ -81,13 +80,12 @@ class WorkflowSession:
     def _invalidate_structural(self) -> None:
         self._workflow_cache = None
         self._validate_cache = None
-        self._plan_cache = None
 
     def _invalidate_compute_caches(self) -> None:
         # Edits that don't require a workflow rebuild still invalidate
-        # the validate/plan caches.
+        # the validation cache. ``plan()`` intentionally refreshes the
+        # storage-facing cache snapshot on every call.
         self._validate_cache = None
-        self._plan_cache = None
 
     # ------------------------------------------------------------------
     # Mutating operations
@@ -240,13 +238,9 @@ class WorkflowSession:
         return list(unique)
 
     def plan(self) -> dict[str, NodePlan]:
-        """Return the cached :meth:`Workflow.plan` for the current state."""
-        if self._plan_cache is not None:
-            return dict(self._plan_cache)
+        """Return a fresh :meth:`Workflow.plan` for the current state."""
         wf = self.to_workflow()
-        plan = wf.plan()
-        self._plan_cache = plan
-        return dict(plan)
+        return dict(wf.plan())
 
     # ------------------------------------------------------------------
     # Class methods

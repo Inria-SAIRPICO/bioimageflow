@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from bioimageflow import WorkflowSession, Workflow
+from bioimageflow import NodePlanStatus
 
 
 def _two_node_data(tmp_path: Path) -> dict:
@@ -37,6 +38,15 @@ def _two_node_data(tmp_path: Path) -> dict:
         ],
         "config": {"storage_path": str(tmp_path)},
     }
+
+
+def _session_data_with_storage(tmp_path: Path) -> dict:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "image.txt").write_text("image")
+    data = _two_node_data(data_dir)
+    data["config"]["storage_path"] = str(tmp_path / "cache")
+    return data
 
 
 class TestRoundTrip:
@@ -170,3 +180,32 @@ class TestValidateAndPlan:
         plan = s.plan()
         assert "load" in plan
         assert "seg" in plan
+
+    def test_plan_refreshes_when_external_compute_populates_current(self, tmp_path: Path) -> None:
+        data = _session_data_with_storage(tmp_path)
+        s = WorkflowSession(data)
+
+        first = s.plan()
+        assert first["load"].status is NodePlanStatus.UNEXECUTED
+
+        wf = s.to_workflow()
+        wf.compute(wf.nodes["load"])
+
+        refreshed = s.plan()
+        assert refreshed["load"].status is NodePlanStatus.CACHED
+        assert refreshed["load"].selected_record_id is not None
+
+    def test_plan_refreshes_when_external_invalidate_removes_current(self, tmp_path: Path) -> None:
+        data = _session_data_with_storage(tmp_path)
+        s = WorkflowSession(data)
+        wf = s.to_workflow()
+        wf.compute(wf.nodes["load"])
+
+        cached = s.plan()
+        assert cached["load"].status is NodePlanStatus.CACHED
+
+        wf.invalidate(["load"], cascade=False)
+
+        refreshed = s.plan()
+        assert refreshed["load"].status is NodePlanStatus.UNEXECUTED
+        assert refreshed["load"].selected_record_id is None
