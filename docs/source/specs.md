@@ -2544,6 +2544,7 @@ workspace/
           result.json
           record.bioimageflow-link.json
           outputs/
+    latest-success.bioimageflow-link.json
   latest/
     <node-key>.bioimageflow-link.json
   provenance_graph.json
