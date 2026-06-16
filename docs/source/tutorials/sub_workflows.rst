@@ -107,9 +107,9 @@ execution time. Every internal node is given a scoped name of the form
        segment_and_measure/threshold
        segment_and_measure/measure
 
-The scoped form is what shows up in cache directories, ``plan()``
-results, ``compute_steps()`` iteration, and ``ProgressEvent.node_name``
-during execution.
+The scoped form is what shows up in ``plan()`` results, ``compute_steps()``
+iteration, ``ProgressEvent.node_name`` during execution, and the node component
+used to derive v1 result keys.
 
 Per-internal-node caching
 -------------------------

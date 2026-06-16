@@ -4,11 +4,11 @@ Planning and Cache State
 Hosts that want to render "this node is cached / out of date / not yet
 run / skipped" without executing anything use
 :meth:`Workflow.plan <bioimageflow.Workflow.plan>`. Hosts that want to
-clear cache directories explicitly use
+clear selected cache records explicitly use
 :meth:`Workflow.invalidate <bioimageflow.Workflow.invalidate>`.
 
-The deeper signature-hash model — what feeds the hash, how cache
-directories are named — lives in :doc:`/concepts/caching`.
+The deeper v1 cache model — result keys, selected records, and current
+pointers — lives in :doc:`/concepts/caching`.
 
 Workflow.plan()
 ---------------
@@ -19,7 +19,7 @@ Workflow.plan()
 
    plan = wf.plan()
    for name, entry in plan.items():
-       print(name, entry.status, entry.sig_hash[:12])
+       print(name, entry.status, entry.final_result_key, entry.selected_record_id)
 
 It uses the direct planning path — **no Wetlands worker pools are launched** and no tool code runs.
 
@@ -37,13 +37,21 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
    * - ``node_name``
      - Scoped name (``"outer/inner"`` for sub-workflow internals; plain
        name otherwise).
-   * - ``sig_hash``
-     - The signature hash, byte-identical to what ``compute()`` would
-       produce. Empty string for ``SKIPPED`` nodes.
+   * - ``final_result_key``
+     - V1 result key when it can be computed from known selected upstream
+       records. ``None`` for skipped and pending-upstream nodes.
+   * - ``selected_record_id``
+     - Selected v1 record ID for ``final_result_key`` when the node is cached.
    * - ``status``
-     - One of the four :class:`NodePlanStatus` values below.
+     - One of the :class:`NodePlanStatus` values below.
    * - ``upstream``
      - Tuple of scoped names of this node's direct upstreams.
+   * - ``pending_upstreams``
+     - Tuple of scoped upstream names whose selected records are not known yet.
+   * - ``sig_hash``
+     - Transitional diagnostic logical signature. It is not the public cache
+       identity; use ``final_result_key`` and ``selected_record_id`` for cache
+       and provenance UI.
    * - ``cached``
      - Read-only bool; ``status is CACHED``.
    * - ``skipped``
@@ -60,21 +68,24 @@ NodePlanStatus → UI mapping
      - Meaning
      - Suggested affordance
    * - ``CACHED``
-     - Current signature hash matches an existing cache entry;
-       ``compute()`` would short-circuit.
+     - The planned v1 result key has a selected current record; ``compute()``
+       would short-circuit.
      - Green / "up to date"
    * - ``OUT_OF_DATE``
-     - The storage directory contains entries from previous runs, but
-       none match the current hash. ``compute()`` would re-execute.
+     - The node has historical cache state, but no selected record for the
+       planned v1 result key. ``compute()`` would re-execute.
      - Yellow / "needs rebuild"
    * - ``UNEXECUTED``
-     - No storage directory exists for this node yet — it has never
-       run.
+     - No known v1 cache record exists for this node yet.
      - Grey / "not yet run"
    * - ``SKIPPED``
      - The node is disabled, or has a disabled upstream that prevents
-       execution. ``sig_hash`` is empty.
+       execution. ``final_result_key`` and ``selected_record_id`` are empty.
      - Struck-through / muted
+   * - ``PENDING_UPSTREAM``
+     - At least one consumed upstream selected record is not known until that
+       upstream executes, so the final result key cannot be determined yet.
+     - Grey / "pending upstream"
 
 Sub-workflow aggregation
 ------------------------

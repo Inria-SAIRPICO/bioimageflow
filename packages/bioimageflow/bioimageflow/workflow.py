@@ -78,6 +78,8 @@ class ProgressEvent:
     current: int | None = None
     maximum: int | None = None
     timestamp: float = 0.0
+    result_key: str | None = None
+    record_id: str | None = None
 
 
 @dataclass(frozen=True)

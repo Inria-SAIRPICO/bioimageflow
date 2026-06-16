@@ -14,8 +14,10 @@ Execution pipeline
    after its dependencies. Uses Kahn's algorithm; cycles are detected and
    rejected.
 
-3. **Cache lookup**: for each node, compute its signature hash and check if a
-   cached result exists. If so, load the cached DataFrame and skip execution.
+3. **Cache lookup**: for each node, derive its v1 result key from the node,
+   resolved inputs, tool identity, environment identity, and selected upstream
+   records. If ``current.json`` selects a reusable record, load it and skip
+   execution.
 
 4. **Input resolution**: for each row, resolve column bindings and constants
    into concrete values. Output path templates are resolved at this stage.
@@ -30,7 +32,8 @@ Execution pipeline
 6. **Result assembly**: collect outputs into a DataFrame. For ProcessingTools,
    each ``Outputs`` instance becomes a row.
 
-7. **Cache save**: persist the output DataFrame and assets.
+7. **Cache publication**: publish the output DataFrame and owned assets as an
+   immutable v1 record, then select it through ``current.json``.
 
 Automatic cache retention through ``max_executions`` or ``max_age`` is not part of the clean ``Workflow`` API.
 Future pruning must be an explicit storage maintenance operation.
@@ -67,37 +70,32 @@ Storage layout
 .. code-block:: text
 
    {storage_path}/
-   └── data/
-       └── {node_name}/
-           └── {YYYYMMDD_HHMMSS}_{hash[:12]}/
-               ├── dataframe.csv     # output DataFrame
-               ├── metadata.json     # tool class name, version, timestamp
-               ├── parameters.json   # resolved parameter values
-               └── assets/           # output files
+   ├── cache/
+   │   └── v1/
+   │       └── results/
+   │           └── {shard}/{shard}/{result_key}/
+   │               ├── result.json
+   │               ├── current.json
+   │               ├── attempts/{attempt_id}/staging/
+   │               └── records/{record_id}/
+   │                   ├── manifest.json
+   │                   ├── dataframe.parquet
+   │                   └── assets/
+   ├── runs/
+   └── latest/
 
-Each cache entry lives in a directory named with a wall-clock timestamp and
-the first twelve characters of the signature hash (specs.md §7.2). The
-``assets/`` directory contains files produced by ProcessingTools (images,
-reports, etc.). Output path templates resolve to paths within this directory.
+``cache/v1`` is the canonical machine-readable cache root. ``runs/`` and
+``latest/`` are human-facing provenance views over selected records and are
+not used to decide cache hits.
 
-Signature hash
---------------
+Result keys
+-----------
 
-The signature hash uniquely identifies an execution configuration:
-
-.. code-block:: text
-
-   SHA256(
-       tool_name
-     + tool_version
-     + environment_hash
-     + sorted(resolved_parameters)
-     + sorted(upstream_signature_hashes)
-     + source_hash (dev_mode only)
-   )
-
-Any change to inputs, parameters, tool version, or upstream results produces a
-different hash, triggering re-execution.
+The v1 result key is the public cache identity. It changes when any logical
+input to the node's result changes, including selected upstream records. The
+engine may keep a diagnostic logical signature internally during migration,
+but public planning, progress, invalidation, and run-view APIs use
+``result_key`` and ``record_id``.
 
 Progress events
 ---------------
@@ -110,8 +108,11 @@ The engine emits :class:`~bioimageflow.ProgressEvent` objects via the
 - ``completed``: node execution finished
 - ``cached``: node result loaded from cache (no execution)
 
+Cache-related events expose v1 ``result_key`` / ``record_id`` values, never
+legacy cache directory names or diagnostic signature hashes.
+
 See also
 --------
 
-- :doc:`caching` --- the signature-hash model, ``plan()``, ``invalidate()``,
-  and the four ``NodePlanStatus`` values.
+- :doc:`caching` --- the v1 result-key/current-record model, ``plan()``,
+  ``invalidate()``, and ``NodePlanStatus`` values.
