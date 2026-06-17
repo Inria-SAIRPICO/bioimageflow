@@ -10,6 +10,7 @@ import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments
+from bioimageflow_core import BaseTool
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -43,6 +44,30 @@ def test_common_exports_exclude_moved_heavy_tools() -> None:
     assert (
         importlib.util.find_spec("bioimageflow_common_tools.stardist_segmenter") is None
     )
+
+
+def test_common_package_all_exports_only_public_tools() -> None:
+    import bioimageflow_common_tools as common
+
+    assert sorted(common.__all__) == [
+        "Collect",
+        "Concat",
+        "ConnectedComponents",
+        "CrossJoin",
+        "ExtractChannel",
+        "Files",
+        "FilterTableRows",
+        "Generate",
+        "InnerJoin",
+        "JoinOnColumn",
+        "LabelOverlaps",
+        "Mosaic",
+        "SelectColumns",
+        "TableFromCsv",
+        "WriteTable",
+    ]
+    assert "table" not in common.__all__
+    assert all(issubclass(getattr(common, name), BaseTool) for name in common.__all__)
 
 
 def test_common_docs_separate_public_tools_from_legacy_module_docs() -> None:

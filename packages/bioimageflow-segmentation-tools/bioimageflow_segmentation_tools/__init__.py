@@ -10,3 +10,16 @@ from .classical import SplitTouchingObjects as SplitTouchingObjects
 from .classical import ThresholdSegment as ThresholdSegment
 from .classical import WatershedSegment as WatershedSegment
 from .stardist_segmenter import StarDistSegmenter as StarDistSegmenter
+
+__all__ = [
+    "Cellpose3",
+    "DistanceWatershedSegment",
+    "FilterLabels",
+    "LocalThresholdSegment",
+    "OtsuThresholdSegment",
+    "PostprocessLabels",
+    "SplitTouchingObjects",
+    "StarDistSegmenter",
+    "ThresholdSegment",
+    "WatershedSegment",
+]

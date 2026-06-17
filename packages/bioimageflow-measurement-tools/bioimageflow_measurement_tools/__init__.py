@@ -12,3 +12,16 @@ from .measurements import (
     ShapeProperties as ShapeProperties,
     SummarizeTable as SummarizeTable,
 )
+
+__all__ = [
+    "AggregatePerImage",
+    "CountLabels",
+    "DiceIoU",
+    "IntensityProperties",
+    "LabelBenchmark",
+    "NormalizeFeatures",
+    "ObjectMatchingMetrics",
+    "RegionProperties",
+    "ShapeProperties",
+    "SummarizeTable",
+]

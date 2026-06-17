@@ -9,8 +9,28 @@ import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments
+from bioimageflow_core import BaseTool
 
 pytestmark = pytest.mark.package_tools
+
+
+def test_measurement_package_all_exports_only_public_tools() -> None:
+    import bioimageflow_measurement_tools as measurement
+
+    assert sorted(measurement.__all__) == [
+        "AggregatePerImage",
+        "CountLabels",
+        "DiceIoU",
+        "IntensityProperties",
+        "LabelBenchmark",
+        "NormalizeFeatures",
+        "ObjectMatchingMetrics",
+        "RegionProperties",
+        "ShapeProperties",
+        "SummarizeTable",
+    ]
+    assert "measurements" not in measurement.__all__
+    assert all(issubclass(getattr(measurement, name), BaseTool) for name in measurement.__all__)
 
 
 def test_measurement_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
