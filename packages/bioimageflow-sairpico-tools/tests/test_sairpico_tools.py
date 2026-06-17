@@ -16,7 +16,7 @@ import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.env_manager import _find_tool_file
-from bioimageflow.storage_v1 import StorageV1
+from bioimageflow.storage import Storage
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments, ProcessingTool
 from bioimageflow_core.worker import _load_module_from_file
@@ -685,7 +685,7 @@ def test_hotspot_to_spots_publishes_zero_spot_count_metadata(tmp_path: Path) -> 
     [run_dir] = [path for path in (storage_path / "runs").iterdir() if path.is_dir()]
     run_result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
     result_key = run_result["result_key"]
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id

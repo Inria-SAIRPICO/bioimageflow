@@ -74,16 +74,30 @@ def test_installation_docs_name_supported_python_matrix() -> None:
     assert "Python 3.10, 3.11, and 3.12" in installation
 
 
-def test_specs_document_transitional_result_key_and_record_identity_limits() -> None:
+def test_specs_document_selected_record_result_keys_and_record_identity_limits() -> None:
     specs = _text("docs/source/specs.md")
     storage_reference = _text("docs/source/reference/output_cache_storage.md")
 
+    forbidden = [
+        "result-key composition is still transitional",
+        "upstream diagnostic signatures rather than selected upstream record IDs",
+        "final_result_key` is derived from `NodePlan.logical_signature",
+    ]
     for text in [specs, storage_reference]:
-        assert "result-key composition is still transitional" in text
+        for fragment in forbidden:
+            assert fragment not in text
+        assert "Selected upstream record references" in text
         assert "diagnostic logical signature" in text
 
     assert "publication currently hashes the staged Parquet file bytes" in storage_reference
     assert "Parquet writer metadata is part of the implemented record ID today" in storage_reference
+
+
+def test_api_reference_marks_storage_as_current_low_level_api() -> None:
+    orchestrator = _text("docs/source/reference/api/orchestrator.rst")
+
+    assert "Low-level cache storage primitives for the current ``cache/v1`` storage layout." in orchestrator
+    assert "Legacy timestamp/hash cache-directory helpers are internal migration behavior" in orchestrator
 
 
 def test_specs_do_not_claim_shared_memory_cleanup_cli_exists() -> None:

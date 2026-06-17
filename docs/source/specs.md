@@ -2336,10 +2336,6 @@ def run_process_row(tool_class_name, arguments_dict, context_dict=None):
 Before reusable cache lookup, each node derives a v1 result key when every consumed upstream selected record is known.
 The result key answers: "what computation is this, over which exact selected upstream records?"
 
-Current runtime note: Phase 10 code uses the v1 storage layout and `rk_...` result-key tokens, but result-key composition is still transitional.
-The implementation wraps the node's diagnostic logical signature (`sig_hash`) as the `rk_...` key, and that signature still contains upstream diagnostic signatures rather than selected upstream record IDs.
-The material below is the clean target contract for the next result-key hardening step.
-
 Result-key material includes every value that can affect logical output and cache validity:
 
 - BioImageFlow cache schema version.
@@ -2365,7 +2361,7 @@ storage_path/cache/v1/results/<result-shard>/<result-key>/
 The legacy `sig_hash` name is not part of the clean v1 public planning API.
 Implementations may keep diagnostic signatures internally, and `NodePlan.logical_signature` exposes the diagnostic value when callers need it.
 Public cache APIs use result keys and selected record IDs.
-In the current transitional implementation, `NodePlan.final_result_key` is derived from `NodePlan.logical_signature`; callers should still treat the result key as the public opaque cache token and should not parse or persist the logical signature.
+Callers should treat `NodePlan.final_result_key` as the public opaque cache token and should not parse or persist the diagnostic logical signature.
 
 ### 6.2 Current Record Selection
 

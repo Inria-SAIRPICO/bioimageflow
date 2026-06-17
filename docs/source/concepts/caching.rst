@@ -16,7 +16,7 @@ The implementation also computes a diagnostic logical signature from:
 - Tool class name and version
 - Environment hash (dependencies)
 - Resolved parameter values
-- Upstream node hashes (recursive)
+- Selected upstream record references when available, with diagnostic fallback material while a plan is pending
 - Source-code hash (``dev_mode`` only)
 
 This signature is exposed as ``NodePlan.logical_signature`` for diagnostics, but it is not the public v1 cache identity.

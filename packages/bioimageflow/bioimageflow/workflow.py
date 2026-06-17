@@ -92,13 +92,13 @@ class InvalidatedSelection:
     status: Literal["removed", "corrupt_removed"] = "removed"
 
 
-def _remove_v1_current_selection(
-    storage: "StorageV1",
+def _remove_current_selection(
+    storage: "Storage",
     result_key: str,
     *,
     node_name: str,
 ) -> InvalidatedSelection | None:
-    from bioimageflow.storage_v1 import CacheCorruptionError
+    from bioimageflow.storage import CacheCorruptionError
 
     current_path = storage.result_dir(result_key) / "current.json"
     if not current_path.exists():
@@ -124,25 +124,25 @@ def _remove_v1_current_selection(
     )
 
 
-def _clear_v1_currents_for_node(
+def _clear_currents_for_node(
     storage_path: str | Path,
     node_name: str,
     known_sig_hashes: set[str],
     *,
     kind: Literal["dataframe_tool", "processing_tool"],
 ) -> set[InvalidatedSelection]:
-    from bioimageflow.cache import iter_dataframe_v1_result_metadata, iter_processing_v1_result_metadata
-    from bioimageflow.storage_v1 import StorageV1
+    from bioimageflow.cache import iter_dataframe_result_metadata, iter_processing_result_metadata
+    from bioimageflow.storage import Storage
 
     results_root = Path(storage_path) / "cache" / "v1" / "results"
     if not results_root.exists():
         return set()
     invalidated: set[InvalidatedSelection] = set()
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     metadata_iter = (
-        iter_dataframe_v1_result_metadata
+        iter_dataframe_result_metadata
         if kind == "dataframe_tool"
-        else iter_processing_v1_result_metadata
+        else iter_processing_result_metadata
     )
     for metadata in metadata_iter(
         storage_path,
@@ -153,14 +153,14 @@ def _clear_v1_currents_for_node(
         result_key = metadata.get("result_key")
         if not isinstance(result_key, str):
             continue
-        selection = _remove_v1_current_selection(storage, result_key, node_name=node_name)
+        selection = _remove_current_selection(storage, result_key, node_name=node_name)
         if selection is not None:
             invalidated.add(selection)
     return invalidated
 
 
 if TYPE_CHECKING:
-    from bioimageflow.storage_v1 import StorageV1
+    from bioimageflow.storage import Storage
 
 
 class Workflow:
@@ -258,8 +258,8 @@ class Workflow:
             source_processing_signature_material,
             topological_order,
         )
-        from bioimageflow.storage import get_node_dir
-        from bioimageflow.storage_v1 import StorageV1
+        from bioimageflow.legacy_storage import get_node_dir
+        from bioimageflow.storage import Storage
         from bioimageflow_core.tool import ProcessingTool
 
         targets: set[str] = set()
@@ -337,7 +337,7 @@ class Workflow:
                 if sig_hash is not None:
                     sig_hashes[node] = sig_hash
                     plan_logical_signatures[name] = sig_hash
-        v1_storage = StorageV1(self.storage_path)
+        storage = Storage(self.storage_path)
         for name in targets:
             node_dir = get_node_dir(self.storage_path, name)
             node = self._nodes[name]
@@ -346,11 +346,11 @@ class Workflow:
             known_sig_hashes = {sig_hash} if sig_hash and result_key is not None else set()
             if isinstance(node.tool, DataFrameTool):
                 if result_key is not None:
-                    selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                    selection = _remove_current_selection(storage, result_key, node_name=name)
                     if selection is not None:
                         invalidated.add(selection)
                 invalidated.update(
-                    _clear_v1_currents_for_node(
+                    _clear_currents_for_node(
                         self.storage_path,
                         name,
                         known_sig_hashes,
@@ -359,11 +359,11 @@ class Workflow:
                 )
             if isinstance(node.tool, ProcessingTool):
                 if result_key is not None:
-                    selection = _remove_v1_current_selection(v1_storage, result_key, node_name=name)
+                    selection = _remove_current_selection(storage, result_key, node_name=name)
                     if selection is not None:
                         invalidated.add(selection)
                 invalidated.update(
-                    _clear_v1_currents_for_node(
+                    _clear_currents_for_node(
                         self.storage_path,
                         name,
                         known_sig_hashes,
@@ -824,9 +824,9 @@ class Workflow:
             self._finish_run_view("succeeded", update_latest_success=True)
 
     def _start_run_view(self, targets: list[Node]) -> None:
-        from bioimageflow.storage_v1 import StorageV1
+        from bioimageflow.storage import Storage
 
-        storage = StorageV1(self.storage_path)
+        storage = Storage(self.storage_path)
         run_id = f"run_{storage.new_attempt_id()}"
         started_at = datetime.now(timezone.utc).isoformat()
         target_nodes = [target.name for target in targets]
@@ -849,9 +849,9 @@ class Workflow:
         self._run_view_context = None
         if context is None:
             return
-        from bioimageflow.storage_v1 import StorageV1
+        from bioimageflow.storage import Storage
 
-        storage = StorageV1(self.storage_path)
+        storage = Storage(self.storage_path)
         run_id = str(context["run_id"])
         storage.write_run_metadata(
             run_id,

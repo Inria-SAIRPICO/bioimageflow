@@ -98,10 +98,9 @@ Result keys
 -----------
 
 The v1 result key is the public cache identity exposed by planning, progress,
-invalidation, and run-view APIs. Current runtime result keys are transitional:
-they wrap the node's diagnostic logical signature in a v1 ``rk_...`` key while
-the storage layout already uses immutable records and ``current.json``.
-The target v1 material is documented in :doc:`../reference/output_cache_storage`.
+invalidation, and run-view APIs. It includes the node's logical inputs and
+selected upstream record references when upstream records are available.
+The full v1 material is documented in :doc:`../reference/output_cache_storage`.
 
 Progress events
 ---------------

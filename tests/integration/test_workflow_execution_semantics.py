@@ -8,16 +8,16 @@ import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
 from bioimageflow.engine import WorkflowCancelledError
-from bioimageflow.storage import get_node_dir
-from bioimageflow.storage_v1 import StorageV1
+from bioimageflow.legacy_storage import get_node_dir
+from bioimageflow.storage import Storage
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
 
 from .conftest import AddColumn, FileLoader, StubSegmenter, imageio_env
 
 
-def _processing_v1_current_exists(storage: Path, result_key: str | None) -> bool:
+def _processing_current_exists(storage: Path, result_key: str | None) -> bool:
     assert result_key is not None
-    return (StorageV1(storage).result_dir(result_key) / "current.json").exists()
+    return (Storage(storage).result_dir(result_key) / "current.json").exists()
 
 
 def _build_loader_and_tagged(
@@ -56,14 +56,14 @@ class TestDataFrameToolPlanCacheParity:
         assert cached_plan["FileLoader_1"].status is NodePlanStatus.CACHED
         assert cached_plan["AddColumn_1"].status is NodePlanStatus.CACHED
 
-        v1_storage = StorageV1(storage)
+        storage_view = Storage(storage)
         for node_name, entry in cached_plan.items():
             assert entry.final_result_key is not None
             result_key = entry.final_result_key
-            pointer = v1_storage.load_current(result_key)
+            pointer = storage_view.load_current(result_key)
             assert pointer is not None
             assert entry.selected_record_id == pointer.record_id
-            record_dir = v1_storage.result_dir(result_key) / "records" / pointer.record_id
+            record_dir = storage_view.result_dir(result_key) / "records" / pointer.record_id
             assert (record_dir / "dataframe.parquet").exists()
             assert (record_dir / "manifest.json").exists()
         assert not (storage / "data" / "FileLoader_1").exists()
@@ -128,8 +128,8 @@ class TestTargetExecution:
                 name="unselected",
             )
             plan = wf.plan()
-        assert _processing_v1_current_exists(storage, plan[selected.name].final_result_key)
-        assert not _processing_v1_current_exists(storage, plan[unselected.name].final_result_key)
+        assert _processing_current_exists(storage, plan[selected.name].final_result_key)
+        assert not _processing_current_exists(storage, plan[unselected.name].final_result_key)
 
 
 class TestFailureAndCancellation:
@@ -285,7 +285,7 @@ class TestSubWorkflowPlanCache:
         assert internal_name in plan
         assert plan[internal_name].status is NodePlanStatus.CACHED
         assert plan["SegmentOnly_1"].status is NodePlanStatus.CACHED
-        assert _processing_v1_current_exists(
+        assert _processing_current_exists(
             storage,
             plan[internal_name].final_result_key,
         )

@@ -8,7 +8,7 @@ and from ``unexecuted`` (never run) without inspecting the storage layout.
 from pathlib import Path
 
 from bioimageflow import NodePlanStatus, Workflow
-from bioimageflow.storage_v1 import StorageV1
+from bioimageflow.storage import Storage
 
 from .conftest import FileLoader, StubSegmenter
 
@@ -71,7 +71,7 @@ class TestNodePlanStatusBasics:
         assert entry.logical_signature
         assert not hasattr(entry, "sig_hash")
         assert entry.final_result_key is not None
-        pointer = StorageV1(wf.storage_path).load_current(entry.final_result_key)
+        pointer = Storage(wf.storage_path).load_current(entry.final_result_key)
         assert pointer is not None
         assert entry.selected_record_id == pointer.record_id
 

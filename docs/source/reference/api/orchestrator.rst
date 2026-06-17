@@ -46,6 +46,9 @@ Cache
 Storage
 -------
 
+Low-level cache storage primitives for the current ``cache/v1`` storage layout.
+Legacy timestamp/hash cache-directory helpers are internal migration behavior and are not part of this public module.
+
 .. automodule:: bioimageflow.storage
    :members:
    :undoc-members:

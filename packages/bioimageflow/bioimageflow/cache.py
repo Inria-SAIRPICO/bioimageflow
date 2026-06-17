@@ -12,11 +12,10 @@ from typing import Any
 
 import pandas as pd
 
-from bioimageflow.storage import ensure_dirs, find_hash_dir, create_hash_dir
-from bioimageflow.storage_v1 import (
+from bioimageflow.storage import (
     CacheCorruptionError,
     RecordManifest,
-    StorageV1,
+    Storage,
     asset_digest_and_size,
     canonical_scalar_payload,
     make_record_id,
@@ -89,7 +88,7 @@ def compute_signature_hash(
     upstream_hashes: dict[str, str],
     source_hash: str | None = None,
 ) -> str:
-    """Compute the signature hash for a node."""
+    """Compute the logical digest for a node."""
     parts = [tool_name, str(tool_version), env_hash]
     if source_hash is not None:
         parts.append(source_hash)
@@ -99,55 +98,6 @@ def compute_signature_hash(
         parts.append(f"{name}:{h}")
     combined = "|".join(parts)
     return hashlib.sha256(combined.encode()).hexdigest()
-
-
-def cache_lookup(node_dir: Path, sig_hash: str) -> Path | None:
-    """Check if a cached result exists. Returns Path to the cache file or None.
-
-    Prefers Parquet; falls back to CSV for backwards compatibility.
-    """
-    hash_dir = find_hash_dir(node_dir, sig_hash)
-    if hash_dir is not None:
-        parquet_path = hash_dir / "dataframe.parquet"
-        if parquet_path.exists():
-            return parquet_path
-        csv_path = hash_dir / "dataframe.csv"
-        if csv_path.exists():
-            return csv_path
-    return None
-
-
-def cache_save(
-    node_dir: Path,
-    sig_hash: str,
-    df: pd.DataFrame,
-    metadata: dict[str, Any] | None = None,
-    parameters: dict[str, Any] | None = None,
-    hash_dir: Path | None = None,
-) -> None:
-    """Save a DataFrame and metadata to the cache.
-
-    Writes Parquet (lossless) as the primary format and CSV as a
-    human-readable secondary output.
-
-    If *hash_dir* is provided (already created during execution), reuse it.
-    Otherwise create a new timestamped hash directory.
-    """
-    if hash_dir is None:
-        hash_dir = create_hash_dir(node_dir, sig_hash)
-    else:
-        ensure_dirs(hash_dir)
-    df_save = _prepare_dataframe_for_parquet(df)
-    df_save.to_parquet(hash_dir / "dataframe.parquet", index=True)
-    df_save.to_csv(hash_dir / "dataframe.csv", index=True)
-    if metadata:
-        (hash_dir / "metadata.json").write_text(
-            json.dumps(metadata, indent=2, default=str)
-        )
-    if parameters:
-        (hash_dir / "parameters.json").write_text(
-            json.dumps(parameters, indent=2, default=str)
-        )
 
 
 def cache_load(cache_path: Path) -> pd.DataFrame:
@@ -191,29 +141,29 @@ def _file_sha256(path: Path) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-def dataframe_v1_result_key(node_name: str, sig_hash: str) -> str:
-    """Return the transitional v1 result key for a DataFrameTool node."""
+def dataframe_result_key(node_name: str, sig_hash: str) -> str:
+    """Return the result key for a DataFrameTool node."""
     return make_result_key(
         {
             "kind": "dataframe_tool",
             "node": node_name,
-            "signature_hash": sig_hash,
+            "logical_digest": sig_hash,
         }
     )
 
 
-def processing_v1_result_key(node_name: str, sig_hash: str) -> str:
-    """Return the transitional v1 result key for a ProcessingTool node."""
+def processing_result_key(node_name: str, sig_hash: str) -> str:
+    """Return the result key for a ProcessingTool node."""
     return make_result_key(
         {
             "kind": "processing_tool",
             "node": node_name,
-            "signature_hash": sig_hash,
+            "logical_digest": sig_hash,
         }
     )
 
 
-def _write_v1_result_metadata(
+def _write_result_metadata(
     result_dir: Path,
     *,
     kind: str,
@@ -227,7 +177,7 @@ def _write_v1_result_metadata(
         "schema": "bioimageflow.cache.result.v1",
         "kind": kind,
         "node": node_name,
-        "signature_hash": sig_hash,
+        "logical_digest": sig_hash,
         "result_key": result_key,
     }
     if not metadata_path.exists():
@@ -236,7 +186,7 @@ def _write_v1_result_metadata(
         os.replace(tmp_path, metadata_path)
 
 
-def _write_processing_v1_result_metadata(
+def _write_processing_result_metadata(
     result_dir: Path,
     *,
     node_name: str,
@@ -244,7 +194,7 @@ def _write_processing_v1_result_metadata(
     result_key: str,
     attempt_id: str,
 ) -> None:
-    _write_v1_result_metadata(
+    _write_result_metadata(
         result_dir,
         kind="processing_tool",
         node_name=node_name,
@@ -254,7 +204,7 @@ def _write_processing_v1_result_metadata(
     )
 
 
-def _write_dataframe_v1_result_metadata(
+def _write_dataframe_result_metadata(
     result_dir: Path,
     *,
     node_name: str,
@@ -262,7 +212,7 @@ def _write_dataframe_v1_result_metadata(
     result_key: str,
     attempt_id: str,
 ) -> None:
-    _write_v1_result_metadata(
+    _write_result_metadata(
         result_dir,
         kind="dataframe_tool",
         node_name=node_name,
@@ -272,7 +222,7 @@ def _write_dataframe_v1_result_metadata(
     )
 
 
-def _iter_v1_result_metadata(
+def _iter_result_metadata(
     storage_path: str | Path,
     *,
     kind: str,
@@ -309,69 +259,69 @@ def _iter_v1_result_metadata(
                             "schema": "bioimageflow.cache.result.v1",
                             "kind": kind,
                             "node": node_name,
-                            "signature_hash": sig_hash,
+                            "logical_digest": sig_hash,
                             "result_key": result_key,
                         }
                     )
     return rows
 
 
-def iter_dataframe_v1_result_metadata(
+def iter_dataframe_result_metadata(
     storage_path: str | Path,
     known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return DataFrameTool v1 result metadata, inferring old records when possible."""
-    return _iter_v1_result_metadata(
+    return _iter_result_metadata(
         storage_path,
         kind="dataframe_tool",
-        result_key_for=dataframe_v1_result_key,
+        result_key_for=dataframe_result_key,
         known_node_signatures=known_node_signatures,
     )
 
 
-def iter_processing_v1_result_metadata(
+def iter_processing_result_metadata(
     storage_path: str | Path,
     known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return ProcessingTool v1 result metadata, inferring old records when possible."""
-    return _iter_v1_result_metadata(
+    return _iter_result_metadata(
         storage_path,
         kind="processing_tool",
-        result_key_for=processing_v1_result_key,
+        result_key_for=processing_result_key,
         known_node_signatures=known_node_signatures,
     )
 
 
-def _dataframe_v1_record_path(storage: StorageV1, result_key: str, record_id: str) -> Path:
+def _dataframe_record_path(storage: Storage, result_key: str, record_id: str) -> Path:
     return storage.result_dir(result_key) / "records" / record_id / "dataframe.parquet"
 
 
-def dataframe_v1_lookup(
+def dataframe_lookup(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
 ) -> pd.DataFrame | None:
     """Load a DataFrameTool v1 cache hit, or return ``None`` on miss."""
-    storage = StorageV1(storage_path)
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
+    storage = Storage(storage_path)
+    result_key = dataframe_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
     if pointer is None:
         return None
     try:
-        return cache_load(_dataframe_v1_record_path(storage, result_key, pointer.record_id))
+        return cache_load(_dataframe_record_path(storage, result_key, pointer.record_id))
     except Exception as exc:
         raise CacheCorruptionError("Cached v1 dataframe is unreadable.") from exc
 
 
-def dataframe_v1_publish(
+def dataframe_publish(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """Publish a DataFrameTool result through the v1 immutable record model."""
-    storage = StorageV1(storage_path)
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
+    storage = Storage(storage_path)
+    result_key = dataframe_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
     run_id = f"run_{attempt_id}"
     result_dir = storage.result_dir(result_key)
@@ -426,7 +376,7 @@ def dataframe_v1_publish(
         tmp_manifest = record_dir / f".manifest.{attempt_id}.tmp"
         tmp_manifest.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
         os.replace(tmp_manifest, manifest_path)
-    _write_dataframe_v1_result_metadata(
+    _write_dataframe_result_metadata(
         result_dir,
         node_name=node_name,
         sig_hash=sig_hash,
@@ -440,32 +390,32 @@ def dataframe_v1_publish(
         run_id=run_id,
     )
     try:
-        return cache_load(_dataframe_v1_record_path(storage, result_key, pointer.record_id))
+        return cache_load(_dataframe_record_path(storage, result_key, pointer.record_id))
     except Exception as exc:
         raise CacheCorruptionError("Published v1 dataframe is unreadable.") from exc
 
 
-def processing_v1_prepare_attempt(
+def processing_prepare_attempt(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
 ) -> tuple[str, str, Path, Path]:
     """Create a v1 attempt staging tree for a ProcessingTool node."""
-    storage = StorageV1(storage_path)
-    result_key = processing_v1_result_key(node_name, sig_hash)
+    storage = Storage(storage_path)
+    result_key = processing_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
     result_dir = storage.result_dir(result_key)
     result_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_existing_v1_dir(result_dir, storage.cache_root, "Result directory")
-    attempts_dir = _ensure_v1_child_dir(result_dir, "attempts", "Attempts directory")
-    attempt_dir = _ensure_v1_child_dir(attempts_dir, attempt_id, "Attempt directory")
-    staging_dir = _ensure_v1_child_dir(attempt_dir, "staging", "Attempt staging directory")
-    assets_dir = _ensure_v1_child_dir(staging_dir, "assets", "Attempt assets directory")
-    _ensure_v1_child_dir(staging_dir, "work", "Attempt work directory")
+    _ensure_existing_storage_dir(result_dir, storage.cache_root, "Result directory")
+    attempts_dir = _ensure_record_child_dir(result_dir, "attempts", "Attempts directory")
+    attempt_dir = _ensure_record_child_dir(attempts_dir, attempt_id, "Attempt directory")
+    staging_dir = _ensure_record_child_dir(attempt_dir, "staging", "Attempt staging directory")
+    assets_dir = _ensure_record_child_dir(staging_dir, "assets", "Attempt assets directory")
+    _ensure_record_child_dir(staging_dir, "work", "Attempt work directory")
     return result_key, attempt_id, staging_dir, assets_dir
 
 
-def _ensure_existing_v1_dir(path: Path, parent: Path, label: str) -> None:
+def _ensure_existing_storage_dir(path: Path, parent: Path, label: str) -> None:
     try:
         path.resolve().relative_to(parent.resolve())
     except ValueError as exc:
@@ -476,17 +426,17 @@ def _ensure_existing_v1_dir(path: Path, parent: Path, label: str) -> None:
         raise CacheCorruptionError(f"{label} must be a directory.")
 
 
-def _ensure_v1_child_dir(parent: Path, name: str, label: str) -> Path:
+def _ensure_record_child_dir(parent: Path, name: str, label: str) -> Path:
     validate_relative_posix_path(name)
     path = parent / name
     if path.exists() or path.is_symlink():
-        _ensure_existing_v1_dir(path, parent, label)
+        _ensure_existing_storage_dir(path, parent, label)
     else:
         path.mkdir()
     return path
 
 
-def _ensure_v1_records_dir(result_dir: Path) -> Path:
+def _ensure_records_dir(result_dir: Path) -> Path:
     records_dir = result_dir / "records"
     if records_dir.exists() or records_dir.is_symlink():
         try:
@@ -500,8 +450,8 @@ def _ensure_v1_records_dir(result_dir: Path) -> Path:
     return records_dir
 
 
-def _ensure_v1_record_dir(result_dir: Path, record_id: str) -> Path:
-    records_dir = _ensure_v1_records_dir(result_dir)
+def _ensure_record_dir(result_dir: Path, record_id: str) -> Path:
+    records_dir = _ensure_records_dir(result_dir)
     record_dir = records_dir / record_id
     if record_dir.exists() or record_dir.is_symlink():
         try:
@@ -619,7 +569,7 @@ def _rehydrate_processing_assets(
     return _rehydrate_processing_paths(hydrated, record_dir, path_columns)
 
 
-def processing_v1_lookup(
+def processing_lookup(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
@@ -628,8 +578,8 @@ def processing_v1_lookup(
     hydrate_assets: bool = True,
 ) -> pd.DataFrame | None:
     """Load a ProcessingTool v1 cache hit, or return ``None`` on miss."""
-    storage = StorageV1(storage_path)
-    result_key = processing_v1_result_key(node_name, sig_hash)
+    storage = Storage(storage_path)
+    result_key = processing_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
     if pointer is None:
         return None
@@ -906,7 +856,7 @@ def _processing_manifest_entries_and_dataframe(
     return stored, outputs, owned_assets
 
 
-def processing_v1_publish(
+def processing_publish(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
@@ -923,7 +873,7 @@ def processing_v1_publish(
     declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
 ) -> pd.DataFrame:
     """Publish a source ProcessingTool attempt as a v1 immutable record."""
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     stored_df, outputs, owned_assets = _processing_manifest_entries_and_dataframe(
         df,
         path_columns,
@@ -947,21 +897,21 @@ def processing_v1_publish(
     }
     record_id = make_record_id(manifest_material)
     result_dir = storage.result_dir(result_key)
-    _write_processing_v1_result_metadata(
+    _write_processing_result_metadata(
         result_dir,
         node_name=node_name,
         sig_hash=sig_hash,
         result_key=result_key,
         attempt_id=attempt_id,
     )
-    record_dir = _ensure_v1_record_dir(result_dir, record_id)
+    record_dir = _ensure_record_dir(result_dir, record_id)
     for relative, source in owned_assets.items():
         parts = validate_relative_posix_path(relative).split("/")
         if parts[0] != "assets":
             raise CacheCorruptionError("Owned asset path must be under assets/.")
         destination_parent = record_dir
         for part in parts[:-1]:
-            destination_parent = _ensure_v1_child_dir(
+            destination_parent = _ensure_record_child_dir(
                 destination_parent,
                 part,
                 "Record asset directory",
