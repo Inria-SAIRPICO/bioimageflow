@@ -9,11 +9,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bioimageflow.storage_v1 import (
+from bioimageflow.storage import (
     CacheCorruptionError,
     CurrentPointer,
     RecordManifest,
-    StorageV1,
+    Storage,
     canonical_dataframe_digest,
     canonical_json_bytes,
     canonical_scalar_payload,
@@ -44,7 +44,7 @@ def _record_id_for(result_key: str, dataframe_digest: str, outputs: list[dict[st
 
 
 def _write_record(
-    storage: StorageV1,
+    storage: Storage,
     result_key: str,
     *,
     dataframe_digest: str | None = None,
@@ -378,7 +378,7 @@ def test_make_record_id_excludes_execution_metadata() -> None:
 
 
 def test_current_pointer_guarded_update_first_valid_policy(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     result_dir = storage.result_dir(result_key)
     record_a = _write_record(storage, result_key)
@@ -408,7 +408,7 @@ def test_current_pointer_guarded_update_first_valid_policy(tmp_path: Path) -> No
 
 
 def test_select_current_record_rejects_unsafe_record_id(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
 
     with pytest.raises(ValueError):
@@ -421,7 +421,7 @@ def test_select_current_record_rejects_unsafe_record_id(tmp_path: Path) -> None:
 
 
 def test_select_current_record_rejects_invalid_manifest(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_id = make_record_id(
         {
@@ -445,7 +445,7 @@ def test_select_current_record_rejects_invalid_manifest(tmp_path: Path) -> None:
 
 
 def test_select_current_record_rejects_symlinked_record_directory(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_id = _record_id_for(result_key, _file_digest(b"parquet"), [])
     outside_record = tmp_path / "outside-record"
@@ -472,7 +472,7 @@ def test_select_current_record_rejects_symlinked_record_directory(tmp_path: Path
 
 
 def test_load_current_raises_on_corrupt_pointer(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     result_dir = storage.result_dir(result_key)
     result_dir.mkdir(parents=True)
@@ -483,7 +483,7 @@ def test_load_current_raises_on_corrupt_pointer(tmp_path: Path) -> None:
 
 
 def test_load_current_raises_on_non_mapping_pointer(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     result_dir = storage.result_dir(result_key)
     result_dir.mkdir(parents=True)
@@ -510,7 +510,7 @@ def test_current_pointer_from_dict_rejects_invalid_selected_by() -> None:
 
 
 def test_load_current_raises_on_invalid_manifest_path(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     result_dir = storage.result_dir(result_key)
     result_dir.mkdir(parents=True)
@@ -530,7 +530,7 @@ def test_load_current_raises_on_invalid_manifest_path(tmp_path: Path) -> None:
 
 
 def test_load_current_validates_selected_manifest(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_id = _write_record(storage, result_key)
     selected = storage.select_current_record(
@@ -560,7 +560,7 @@ def test_current_pointer_round_trip() -> None:
 
 
 def test_run_metadata_and_node_result_view_write_selected_record(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     asset_output = {
         "path": "assets/mask.tif",
@@ -623,7 +623,7 @@ def test_run_metadata_and_node_result_view_write_selected_record(tmp_path: Path)
 
 
 def test_run_node_result_view_exposes_scalar_outputs_without_links(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "hotspot"})
     scalar_output = {
         "kind": "scalar_output",
@@ -660,7 +660,7 @@ def test_run_node_result_view_exposes_scalar_outputs_without_links(tmp_path: Pat
 
 
 def test_latest_views_point_to_run_views_and_successful_run(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "table"})
     record_id = _write_record(storage, result_key)
     storage.select_current_record(
@@ -704,7 +704,7 @@ def test_latest_views_point_to_run_views_and_successful_run(tmp_path: Path) -> N
 
 
 def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_a = _write_record(storage, result_key)
 
@@ -736,7 +736,7 @@ def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> Non
 
 
 def test_run_view_writes_do_not_mutate_current_pointer(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_id = _write_record(storage, result_key)
     storage.select_current_record(
@@ -773,7 +773,7 @@ def test_run_view_writes_do_not_mutate_current_pointer(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("status", ["running", "failed", "cancelled"])
 def test_latest_success_requires_succeeded_run_metadata(tmp_path: Path, status: str) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     storage.write_run_metadata(
         "run_005",
         workflow_identity="workflow-e",
@@ -787,7 +787,7 @@ def test_latest_success_requires_succeeded_run_metadata(tmp_path: Path, status: 
 
 
 def test_latest_success_rejects_malformed_or_mismatched_run_metadata(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     run_dir = storage.run_dir("run_006")
     run_dir.mkdir(parents=True)
     (run_dir / "run.json").write_text("{not json")
@@ -802,7 +802,7 @@ def test_latest_success_rejects_malformed_or_mismatched_run_metadata(tmp_path: P
 
 
 def test_latest_node_validates_complete_run_node_view(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_id = _write_record(storage, result_key)
     storage.select_current_record(
@@ -875,7 +875,7 @@ def test_latest_node_validates_complete_run_node_view(tmp_path: Path) -> None:
 
 
 def test_latest_node_validates_output_pointer_digest(tmp_path: Path) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     asset_output = {
         "path": "assets/mask.tif",
@@ -928,7 +928,7 @@ def test_run_view_primitives_reject_unsafe_path_segments(
     method_name: str,
     args: tuple[str, ...],
 ) -> None:
-    storage = StorageV1(tmp_path)
+    storage = Storage(tmp_path)
     method = getattr(storage, method_name)
 
     with pytest.raises(ValueError):

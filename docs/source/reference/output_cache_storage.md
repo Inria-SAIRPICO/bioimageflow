@@ -91,10 +91,6 @@ Collision-safe normalized run-view keys are a remaining v1 hardening task; until
 `<result-key>` is the final cache lookup key.
 It answers: "what computation is this, over which exact selected upstream records?"
 
-Current runtime note: result-key composition is still transitional.
-Phase 10 code already stores records under v1 `rk_...` result-key directories, but those result keys are transitional wrappers around the node's diagnostic logical signature (`sig_hash`), which itself still includes upstream diagnostic signatures rather than selected upstream record IDs.
-The upstream-record-reference material below is the clean target contract and should not be documented as fully implemented until result-key composition is changed and tested.
-
 The result key must include every value that can affect the logical result and cache validity, including:
 
 - BioImageFlow cache schema version.

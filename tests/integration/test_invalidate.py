@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from bioimageflow import NodePlanStatus, Workflow
-from bioimageflow.storage_v1 import StorageV1
+from bioimageflow.storage import Storage
 
 from .conftest import FileLoader, StubSegmenter, StubStats
 
@@ -28,22 +28,22 @@ def _build_chain(tmp_path: Path) -> Workflow:
     return wf
 
 
-def _dataframe_v1_current_exists(wf: Workflow, node_name: str) -> bool:
+def _dataframe_current_exists(wf: Workflow, node_name: str) -> bool:
     entry = wf.plan()[node_name]
     assert entry.final_result_key is not None
     result_key = entry.final_result_key
-    return (StorageV1(wf.storage_path).result_dir(result_key) / "current.json").exists()
+    return (Storage(wf.storage_path).result_dir(result_key) / "current.json").exists()
 
 
-def _processing_v1_current_exists(wf: Workflow, node_name: str) -> bool:
+def _processing_current_exists(wf: Workflow, node_name: str) -> bool:
     entry = wf.plan()[node_name]
     assert entry.final_result_key is not None
     result_key = entry.final_result_key
-    return (StorageV1(wf.storage_path).result_dir(result_key) / "current.json").exists()
+    return (Storage(wf.storage_path).result_dir(result_key) / "current.json").exists()
 
 
-def _v1_current_exists(wf: Workflow, result_key: str) -> bool:
-    return (StorageV1(wf.storage_path).result_dir(result_key) / "current.json").exists()
+def _current_exists(wf: Workflow, result_key: str) -> bool:
+    return (Storage(wf.storage_path).result_dir(result_key) / "current.json").exists()
 
 
 class TestInvalidate:
@@ -56,9 +56,9 @@ class TestInvalidate:
         assert seg_key is not None
         assert stats_key is not None
 
-        assert _dataframe_v1_current_exists(wf, "FileLoader_1")
+        assert _dataframe_current_exists(wf, "FileLoader_1")
         for n in ("StubSegmenter_1", "StubStats_1"):
-            assert _processing_v1_current_exists(wf, n)
+            assert _processing_current_exists(wf, n)
 
         cleared = wf.invalidate(["StubSegmenter_1"])
         # Returns the removed v1 selections — segmentation + stats (downstream).
@@ -70,9 +70,9 @@ class TestInvalidate:
         assert all(selection.selected_record_id.startswith("rec_") for selection in cleared)
 
         # Disk reflects the same.
-        assert not _v1_current_exists(wf, seg_key)
-        assert not _v1_current_exists(wf, stats_key)
-        assert _dataframe_v1_current_exists(wf, "FileLoader_1")
+        assert not _current_exists(wf, seg_key)
+        assert not _current_exists(wf, stats_key)
+        assert _dataframe_current_exists(wf, "FileLoader_1")
 
     def test_no_cascade(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)
@@ -83,7 +83,7 @@ class TestInvalidate:
         cleared = wf.invalidate(["StubSegmenter_1"], cascade=False)
         assert _invalidated_node_names(cleared) == {"StubSegmenter_1"}
         # Downstream cache survives.
-        assert _v1_current_exists(wf, stats_key)
+        assert _current_exists(wf, stats_key)
 
     def test_pending_downstream_invalidation_uses_metadata_not_logical_signature(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)
@@ -100,13 +100,13 @@ class TestInvalidate:
         pending = wf.plan()["StubStats_1"]
         assert pending.status is NodePlanStatus.PENDING_UPSTREAM
         assert pending.final_result_key is None
-        assert _v1_current_exists(wf, stats_key)
+        assert _current_exists(wf, stats_key)
 
         cleared = wf.invalidate(["StubStats_1"], cascade=False)
 
         assert _invalidated_node_names(cleared) == {"StubStats_1"}
-        assert not _v1_current_exists(wf, stats_key)
-        assert not _v1_current_exists(wf, seg_key)
+        assert not _current_exists(wf, stats_key)
+        assert not _current_exists(wf, seg_key)
 
     def test_no_cascade_leaves_downstream_pending_when_upstream_selection_is_removed(self, tmp_path: Path) -> None:
         wf = _build_chain(tmp_path)
@@ -141,4 +141,4 @@ class TestInvalidate:
         wf.invalidate(["FileLoader_1"])
         wf2 = _build_chain(tmp_path)
         wf2.compute()
-        assert _dataframe_v1_current_exists(wf2, "FileLoader_1")
+        assert _dataframe_current_exists(wf2, "FileLoader_1")

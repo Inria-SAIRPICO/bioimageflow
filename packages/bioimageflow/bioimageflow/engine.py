@@ -15,7 +15,6 @@ from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
 from typing import Annotated, Any, cast, get_args, get_origin, TYPE_CHECKING, Union
 
-import numpy as np
 import pandas as pd
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
@@ -25,31 +24,19 @@ from bioimageflow_core.environment import EnvironmentMismatchError
 from bioimageflow.cache import (
     compute_env_hash,
     compute_signature_hash,
-    cache_lookup,
-    cache_save,
-    cache_load,
-    dataframe_v1_lookup,
-    dataframe_v1_publish,
-    dataframe_v1_result_key,
-    iter_dataframe_v1_result_metadata,
-    iter_processing_v1_result_metadata,
-    processing_v1_lookup,
-    processing_v1_prepare_attempt,
-    processing_v1_publish,
-    processing_v1_result_key,
+    dataframe_lookup,
+    dataframe_publish,
+    dataframe_result_key,
+    iter_dataframe_result_metadata,
+    iter_processing_result_metadata,
+    processing_lookup,
+    processing_prepare_attempt,
+    processing_publish,
+    processing_result_key,
 )
 from bioimageflow.node import IndexAlignmentError, Node
-from bioimageflow.storage import (
-    create_hash_dir,
-    find_hash_dir,
-    get_assets_dir,
-    get_batch_work_dir,
-    get_hash_dir,
-    get_node_dir,
-    get_work_dir,
-    get_rows_work_dir,
-)
-from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, validate_relative_posix_path
+from bioimageflow.legacy_storage import get_node_dir
+from bioimageflow.storage import CacheCorruptionError, Storage, validate_relative_posix_path
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
@@ -73,6 +60,22 @@ def _safe_work_dir_name(position: int, row_index: Any) -> str:
     sanitized = sanitized[:48]
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
     return f"{position:06d}_{sanitized}_{digest}"
+
+
+def _assets_dir(run_dir: Path) -> Path:
+    return run_dir / "assets"
+
+
+def _work_dir(run_dir: Path) -> Path:
+    return run_dir / "work"
+
+
+def _rows_work_dir(run_dir: Path) -> Path:
+    return _work_dir(run_dir) / "rows"
+
+
+def _batch_work_dir(run_dir: Path) -> Path:
+    return _work_dir(run_dir) / "batch"
 
 
 def _absolute_runtime_path(value: Any) -> Any:
@@ -278,9 +281,9 @@ def _shared_array_output_columns(tool: Any) -> set[str]:
     }
 
 
-def _processing_v1_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
-    expected_key = processing_v1_result_key(node_name, sig_hash)
-    for metadata in iter_processing_v1_result_metadata(
+def _processing_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
+    expected_key = processing_result_key(node_name, sig_hash)
+    for metadata in iter_processing_result_metadata(
         storage_path,
         {node_name: {sig_hash}},
     ):
@@ -293,9 +296,9 @@ def _processing_v1_has_other_current(storage_path: str | Path, node_name: str, s
     return False
 
 
-def _dataframe_v1_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
-    expected_key = dataframe_v1_result_key(node_name, sig_hash)
-    for metadata in iter_dataframe_v1_result_metadata(
+def _dataframe_has_other_current(storage_path: str | Path, node_name: str, sig_hash: str) -> bool:
+    expected_key = dataframe_result_key(node_name, sig_hash)
+    for metadata in iter_dataframe_result_metadata(
         storage_path,
         {node_name: {sig_hash}},
     ):
@@ -603,7 +606,7 @@ class NodeStep:
         if self._cached_df is not None:
             self._df = self._cached_df
             assert self._sig_hash is not None
-            result_key = self._engine._node_v1_result_key(self._node, self._sig_hash)
+            result_key = self._engine._node_result_key(self._node, self._sig_hash)
             self._engine._write_run_node_view(
                 self._workflow,
                 self._node,
@@ -616,7 +619,7 @@ class NodeStep:
                     self._node.name,
                     "cached",
                     result_key=result_key,
-                    record_id=self._engine._selected_v1_record_id(self._workflow, result_key),
+                    record_id=self._engine._selected_record_id(self._workflow, result_key),
                 )
             self._executed = True
             return self._df
@@ -933,12 +936,12 @@ class DefaultEngine:
         from bioimageflow.dataframe_tool import DataFrameTool
 
         if isinstance(node.tool, DataFrameTool):
-            result_key = dataframe_v1_result_key(node.name, sig_hash)
+            result_key = dataframe_result_key(node.name, sig_hash)
         elif isinstance(node.tool, ProcessingTool):
-            result_key = processing_v1_result_key(node.name, sig_hash)
+            result_key = processing_result_key(node.name, sig_hash)
         else:
             return
-        storage = StorageV1(workflow.storage_path)
+        storage = Storage(workflow.storage_path)
         pointer = storage.load_current(result_key)
         if pointer is None:
             return
@@ -953,19 +956,19 @@ class DefaultEngine:
         )
         storage.update_latest_node(node_key, run_id)
 
-    def _selected_v1_record_id(self, workflow: Any, result_key: str) -> str | None:
-        pointer = StorageV1(workflow.storage_path).load_current(result_key)
+    def _selected_record_id(self, workflow: Any, result_key: str) -> str | None:
+        pointer = Storage(workflow.storage_path).load_current(result_key)
         if pointer is None:
             return None
         return pointer.record_id
 
-    def _node_v1_result_key(self, node: Node, sig_hash: str) -> str | None:
+    def _node_result_key(self, node: Node, sig_hash: str) -> str | None:
         from bioimageflow.dataframe_tool import DataFrameTool
 
         if isinstance(node.tool, DataFrameTool):
-            return dataframe_v1_result_key(node.name, sig_hash)
+            return dataframe_result_key(node.name, sig_hash)
         if isinstance(node.tool, ProcessingTool):
-            return processing_v1_result_key(node.name, sig_hash)
+            return processing_result_key(node.name, sig_hash)
         return None
 
     # ── Graph traversal ────────────────────────────────────────────────
@@ -1088,12 +1091,12 @@ class DefaultEngine:
         # ── Compute signature hash ──
         if isinstance(node.tool, DataFrameTool):
             _arguments, args_dict = self._resolve_constant_arguments(node)
-            upstream_hashes = {
-                arg.name: sig_hashes[arg]
-                for arg in node._args
-                if isinstance(arg, Node) and arg in sig_hashes
-            }
-            sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_hashes, workflow)
+            upstream_identities = self._upstream_identity_map(
+                workflow,
+                [arg for arg in node._args if isinstance(arg, Node) and arg in sig_hashes],
+                sig_hashes,
+            )
+            sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_identities, workflow)
         elif isinstance(node.tool, ProcessingTool):
             if not node._column_bindings:
                 env_hash = compute_env_hash(node.tool.environment.dependencies)
@@ -1118,13 +1121,13 @@ class DefaultEngine:
 
         # ── Cache lookup ──
         if isinstance(node.tool, DataFrameTool):
-            df = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
+            df = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
             if df is None:
                 return None, sig_hash
             df = self._coerce_numeric_columns(df)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
         if isinstance(node.tool, ProcessingTool):
-            df = processing_v1_lookup(
+            df = processing_lookup(
                 workflow.storage_path,
                 node.name,
                 sig_hash,
@@ -1136,19 +1139,7 @@ class DefaultEngine:
                 return None, sig_hash
             df = self._coerce_numeric_columns(df)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
-
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if not cached:
-            return None, sig_hash
-
-        df = self._coerce_numeric_columns(cache_load(cached))
-        # Restore shared arrays for ProcessingTools with column bindings
-        if isinstance(node.tool, ProcessingTool):
-            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
-            if cached_hash_dir is not None:
-                df = self._restore_shared_arrays(df, cached_hash_dir)
-        return df, sig_hash
+        return None, sig_hash
 
     # ── Node dispatch ──────────────────────────────────────────────────
 
@@ -1159,7 +1150,7 @@ class DefaultEngine:
         sig_hashes: dict[Node, str],
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
-        """Execute a single node, return (DataFrame, signature_hash)."""
+        """Execute a single node, returning its DataFrame and logical digest."""
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.sub_workflow import SubWorkflowNode
 
@@ -1199,13 +1190,15 @@ class DefaultEngine:
                if isinstance(arg, Node) and arg in results]
         arguments, args_dict = self._resolve_constant_arguments(node)
 
-        upstream_hashes = {arg.name: sig_hashes[arg]
-                          for arg in node._args
-                          if isinstance(arg, Node) and arg in sig_hashes}
-        sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_hashes, workflow)
+        upstream_identities = self._upstream_identity_map(
+            workflow,
+            [arg for arg in node._args if isinstance(arg, Node) and arg in sig_hashes],
+            sig_hashes,
+        )
+        sig_hash = self._compute_sig_hash(node, "", args_dict, upstream_identities, workflow)
 
-        result_key = dataframe_v1_result_key(node.name, sig_hash)
-        cached = dataframe_v1_lookup(workflow.storage_path, node.name, sig_hash)
+        result_key = dataframe_result_key(node.name, sig_hash)
+        cached = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
         if cached is not None:
             self._set_node_cache_hit(node, True)
             self._emit_progress(
@@ -1213,7 +1206,7 @@ class DefaultEngine:
                 node.name,
                 "cached",
                 result_key=result_key,
-                record_id=self._selected_v1_record_id(workflow, result_key),
+                record_id=self._selected_record_id(workflow, result_key),
             )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
@@ -1230,14 +1223,14 @@ class DefaultEngine:
         df.index = df.index.astype(str)
 
         df = self._coerce_numeric_columns(
-            dataframe_v1_publish(workflow.storage_path, node.name, sig_hash, df)
+            dataframe_publish(workflow.storage_path, node.name, sig_hash, df)
         )
         self._emit_progress(
             workflow,
             node.name,
             "completed",
             result_key=result_key,
-            record_id=self._selected_v1_record_id(workflow, result_key),
+            record_id=self._selected_record_id(workflow, result_key),
         )
         df = self._normalize_path_output_columns(df, node.tool)
         self._set_node_cache_hit(node, False)
@@ -1277,8 +1270,8 @@ class DefaultEngine:
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
-        result_key = processing_v1_result_key(node.name, sig_hash)
-        cached = processing_v1_lookup(
+        result_key = processing_result_key(node.name, sig_hash)
+        cached = processing_lookup(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1292,14 +1285,14 @@ class DefaultEngine:
                 node.name,
                 "cached",
                 result_key=result_key,
-                record_id=self._selected_v1_record_id(workflow, result_key),
+                record_id=self._selected_record_id(workflow, result_key),
             )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
-        result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
+        result_key, attempt_id, staging_dir, real_assets_dir = processing_prepare_attempt(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1329,7 +1322,7 @@ class DefaultEngine:
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
         owned_path_columns = _explicit_template_output_columns(node)
         declared_path_columns = set(templates)
-        df = processing_v1_publish(
+        df = processing_publish(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1360,75 +1353,9 @@ class DefaultEngine:
             node.name,
             "completed",
             result_key=result_key,
-            record_id=self._selected_v1_record_id(workflow, result_key),
+            record_id=self._selected_record_id(workflow, result_key),
         )
         self._set_node_cache_hit(node, False)
-        return df, sig_hash
-
-    def _execute_source_processing_tool_legacy(
-        self,
-        node: Node,
-        sig_hash: str,
-        input_annotations: dict[str, Any],
-        templates: dict[str, str],
-        workflow: Any,
-    ) -> tuple[pd.DataFrame, str]:
-        """Execute source SharedArray tools on the legacy cache path until Phase 6."""
-        tool = cast(ProcessingTool, node.tool)
-        aligned_index: list[Any] = ["0"]
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if cached:
-            self._emit_progress(workflow, node.name, "cached")
-            df = self._coerce_numeric_columns(cache_load(cached))
-            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
-            if cached_hash_dir is not None:
-                df = self._restore_shared_arrays(df, cached_hash_dir)
-            return self._normalize_path_output_columns(df, node.tool), sig_hash
-
-        self._emit_progress(workflow, node.name, "started")
-        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
-
-        row_args = self._resolve_defaults(node, input_annotations)
-        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
-        context = self._build_template_context(
-            node.name,
-            "0",
-            row_args,
-            path_input_fields=path_input_fields,
-            upstream_nodes={},
-            results={},
-            idx="0",
-        )
-        for out_field, template in templates.items():
-            row_args[out_field] = str(real_assets_dir / resolve_template(template, context))
-        arguments_dicts = [row_args]
-
-        row_contexts, batch_context = self._build_execution_contexts(
-            hash_dir,
-            real_assets_dir,
-            aligned_index,
-        )
-        raw_results = self._dispatch_tool(
-            tool,
-            arguments_dicts,
-            workflow,
-            node.name,
-            row_contexts,
-            batch_context,
-        )
-        df = self._build_output_dataframe(raw_results, aligned_index, tool)
-        df = self._normalize_path_output_columns(df, tool)
-        self._emit_progress(workflow, node.name, "completed")
-        df = self._persist_shared_arrays(df, hash_dir)
-        self._save_and_cleanup(
-            node_dir,
-            sig_hash,
-            df,
-            type(node.tool).__name__,
-            workflow,
-            hash_dir=hash_dir,
-        )
         return df, sig_hash
 
     def _execute_processing_tool_with_column_bindings(
@@ -1462,8 +1389,8 @@ class DefaultEngine:
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
-        result_key = processing_v1_result_key(node.name, sig_hash)
-        cached = processing_v1_lookup(
+        result_key = processing_result_key(node.name, sig_hash)
+        cached = processing_lookup(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1477,14 +1404,14 @@ class DefaultEngine:
                 node.name,
                 "cached",
                 result_key=result_key,
-                record_id=self._selected_v1_record_id(workflow, result_key),
+                record_id=self._selected_record_id(workflow, result_key),
             )
             df = self._coerce_numeric_columns(cached)
             return self._normalize_path_output_columns(df, node.tool), sig_hash
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
-        result_key, attempt_id, staging_dir, real_assets_dir = processing_v1_prepare_attempt(
+        result_key, attempt_id, staging_dir, real_assets_dir = processing_prepare_attempt(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1520,7 +1447,7 @@ class DefaultEngine:
         df = self._build_output_dataframe(raw_results, execution_index, node.tool)
         owned_path_columns = _explicit_template_output_columns(node)
         declared_path_columns = set(templates)
-        df = processing_v1_publish(
+        df = processing_publish(
             workflow.storage_path,
             node.name,
             sig_hash,
@@ -1551,64 +1478,9 @@ class DefaultEngine:
             node.name,
             "completed",
             result_key=result_key,
-            record_id=self._selected_v1_record_id(workflow, result_key),
+            record_id=self._selected_record_id(workflow, result_key),
         )
         self._set_node_cache_hit(node, False)
-        return df, sig_hash
-
-    def _execute_processing_tool_with_column_bindings_legacy(
-        self,
-        node: Node,
-        results: dict[Node, pd.DataFrame],
-        sig_hash: str,
-        upstream_nodes: dict[str, Node],
-        aligned_index: list[Any],
-        input_annotations: dict[str, Any],
-        templates: dict[str, str],
-        workflow: Any,
-    ) -> tuple[pd.DataFrame, str]:
-        """Execute shared-array-producing column-bound tools on the legacy cache path."""
-        tool = cast(ProcessingTool, node.tool)
-        node_dir = get_node_dir(workflow.storage_path, node.name)
-        cached = cache_lookup(node_dir, sig_hash)
-        if cached:
-            self._emit_progress(workflow, node.name, "cached")
-            df = self._coerce_numeric_columns(cache_load(cached))
-            cached_hash_dir = find_hash_dir(node_dir, sig_hash)
-            if cached_hash_dir is not None:
-                df = self._restore_shared_arrays(df, cached_hash_dir)
-            return self._normalize_path_output_columns(df, node.tool), sig_hash
-
-        self._emit_progress(workflow, node.name, "started")
-        hash_dir, real_assets_dir = self._prepare_output_dir(node_dir, sig_hash)
-
-        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
-        arguments_dicts = self._resolve_all_row_arguments(
-            node, aligned_index, results, upstream_nodes,
-            input_annotations, templates, path_input_fields, workflow,
-        )
-        self._fixup_output_paths(arguments_dicts, templates, real_assets_dir)
-
-        row_contexts, batch_context = self._build_execution_contexts(
-            hash_dir, real_assets_dir, aligned_index,
-        )
-        raw_results = self._dispatch_tool(
-            tool, arguments_dicts, workflow, node.name,
-            row_contexts, batch_context,
-        )
-        df = self._build_output_dataframe(raw_results, aligned_index, tool)
-        df = self._normalize_path_output_columns(df, tool)
-        self._emit_progress(workflow, node.name, "completed")
-
-        df = self._persist_shared_arrays(df, hash_dir)
-        self._save_and_cleanup(
-            node_dir,
-            sig_hash,
-            df,
-            type(node.tool).__name__,
-            workflow,
-            hash_dir=hash_dir,
-        )
         return df, sig_hash
 
     # ── Argument resolution ────────────────────────────────────────────
@@ -1701,8 +1573,8 @@ class DefaultEngine:
                 node.name, str(idx), row_args, path_input_fields,
                 upstream_nodes, results, idx, timestamp,
             )
-            template_assets_dir = assets_dir or get_assets_dir(
-                get_hash_dir(get_node_dir(workflow.storage_path, node.name), "pending")
+            template_assets_dir = assets_dir or _assets_dir(
+                get_node_dir(workflow.storage_path, node.name) / "pending"
             )
             for out_field, template in templates.items():
                 if assets_dir is None:
@@ -1869,6 +1741,28 @@ class DefaultEngine:
 
     # ── Signature hashing ──────────────────────────────────────────────
 
+    def _upstream_identity_map(
+        self,
+        workflow: Any,
+        upstream_nodes: list[Node],
+        sig_hashes: dict[Node, str],
+    ) -> dict[str, str]:
+        """Return cache identity material for upstream nodes."""
+        identities: dict[str, str] = {}
+        storage = Storage(workflow.storage_path)
+        for upstream in upstream_nodes:
+            sig_hash = sig_hashes[upstream]
+            result_key = self._node_result_key(upstream, sig_hash)
+            if result_key is None:
+                identities[upstream.name] = f"signature:{sig_hash}"
+                continue
+            pointer = storage.load_current(result_key)
+            if pointer is None:
+                identities[upstream.name] = f"signature:{sig_hash}"
+            else:
+                identities[upstream.name] = f"record:{result_key}:{pointer.record_id}"
+        return identities
+
     def _compute_sig_hash(
         self,
         node: Node,
@@ -1877,7 +1771,7 @@ class DefaultEngine:
         upstream_hashes: dict[str, str],
         workflow: Any,
     ) -> str:
-        """Compute signature hash for any node type."""
+        """Compute the logical digest for any node type."""
         tool_version = get_tool_version(node.tool)
         source_hash = get_source_hash(type(node.tool)) if workflow._dev_mode else None
         return compute_signature_hash(
@@ -1893,17 +1787,20 @@ class DefaultEngine:
         sig_hashes: dict[Node, str],
         workflow: Any,
     ) -> str:
-        """Compute signature hash for a non-source ProcessingTool."""
+        """Compute the logical digest for a non-source ProcessingTool."""
         env_hash = compute_env_hash(cast(ProcessingTool, node.tool).environment.dependencies)
         assert node.tool.Outputs is not None
         missing = [n.name for n in upstream_nodes.values() if n not in sig_hashes]
         if missing:
             raise RuntimeError(
-                f"Cannot compute signature hash for node: upstream nodes "
+                f"Cannot compute logical digest for node: upstream nodes "
                 f"{missing} have not been executed yet."
             )
-        upstream_hash_map = {n.name: sig_hashes[n]
-                            for n in upstream_nodes.values()}
+        upstream_hash_map = self._upstream_identity_map(
+            workflow,
+            list(upstream_nodes.values()),
+            sig_hashes,
+        )
         signature_constants = dict(node._constant_bindings)
         self._normalize_path_arguments(signature_constants, input_annotations)
         signature_defaults = {
@@ -1931,11 +1828,6 @@ class DefaultEngine:
 
     # ── Dispatch & output construction ─────────────────────────────────
 
-    def _prepare_output_dir(self, node_dir: Path, sig_hash: str) -> tuple[Path, Path]:
-        """Create a timestamped output directory. Returns (hash_dir, assets_dir)."""
-        hash_dir = create_hash_dir(node_dir, sig_hash)
-        return hash_dir, get_assets_dir(hash_dir)
-
     def _build_execution_contexts(
         self,
         run_dir: Path,
@@ -1943,9 +1835,9 @@ class DefaultEngine:
         aligned_index: list[Any],
     ) -> tuple[list[ExecutionContext], ExecutionContext]:
         """Create per-row and batch ProcessingTool execution contexts."""
-        work_dir = get_work_dir(run_dir)
+        work_dir = _work_dir(run_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
-        rows_dir = get_rows_work_dir(run_dir)
+        rows_dir = _rows_work_dir(run_dir)
         rows_dir.mkdir(parents=True, exist_ok=True)
         row_contexts: list[ExecutionContext] = []
         for position, row_index in enumerate(aligned_index):
@@ -1963,7 +1855,7 @@ class DefaultEngine:
                 )
             )
 
-        batch_dir = get_batch_work_dir(run_dir)
+        batch_dir = _batch_work_dir(run_dir)
         batch_dir.mkdir(parents=True, exist_ok=True)
         batch_context = ExecutionContext(
             run_dir=run_dir,
@@ -2387,28 +2279,6 @@ class DefaultEngine:
         output_df.index = output_df.index.astype(str)
         return output_df
 
-    # ── Cache persistence ──────────────────────────────────────────────
-
-    def _save_and_cleanup(
-        self,
-        node_dir: Path,
-        sig_hash: str,
-        df: pd.DataFrame,
-        tool_name: str,
-        workflow: Any,
-        parameters: dict[str, Any] | None = None,
-        hash_dir: Path | None = None,
-    ) -> None:
-        """Save results to cache.
-
-        Legacy retention deletion is intentionally disabled for the clean API.
-        V1 cache pruning will be an explicit storage maintenance operation.
-        """
-        cache_save(node_dir, sig_hash, df, metadata={
-            "tool": tool_name,
-            "timestamp": time.time(),
-        }, parameters=parameters, hash_dir=hash_dir)
-
     # ── Index alignment ────────────────────────────────────────────────
 
     def _align_dataframes_for_merge(self, dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
@@ -2553,47 +2423,6 @@ class DefaultEngine:
             return d
         return {k: str(v) if isinstance(v, Path) else v for k, v in vars(outputs).items()}
 
-    def _persist_shared_arrays(self, df: pd.DataFrame, hash_dir: Path) -> pd.DataFrame:
-        """Save SharedArray columns to .npy files for caching."""
-        assets_dir = get_assets_dir(hash_dir)
-        for col in df.columns:
-            for idx in df.index:
-                val = df.at[idx, col]
-                if isinstance(val, SharedArray):
-                    try:
-                        from bioimageflow_core.shm import open_shared_array
-                        safe_idx = str(idx).replace('::', '_')
-                        npy_path = assets_dir / f"shm_{col}_{safe_idx}.npy"
-                        with open_shared_array(val) as arr:
-                            np.save(str(npy_path), arr)
-                    except (OSError, ValueError) as e:
-                        logger.warning(
-                            "Failed to persist SharedArray col=%s idx=%s: %s", col, idx, e
-                        )
-        return df
-
-    def _restore_shared_arrays(self, df: pd.DataFrame, hash_dir: Path) -> pd.DataFrame:
-        """Restore SharedArray columns from .npy files on cache load."""
-        assets_dir = get_assets_dir(hash_dir)
-        for col in df.columns:
-            for idx in df.index:
-                val = df.at[idx, col]
-                if isinstance(val, str):
-                    safe_idx = str(idx).replace('::', '_')
-                    npy_path = assets_dir / f"shm_{col}_{safe_idx}.npy"
-                    if npy_path.exists():
-                        try:
-                            from bioimageflow_core.shm import create_shared_output
-                            data = np.load(str(npy_path))
-                            with create_shared_output(data) as ref:
-                                df.at[idx, col] = ref  # type: ignore[call-overload]
-                        except (OSError, ValueError) as e:
-                            logger.warning(
-                                "Failed to restore SharedArray col=%s idx=%s: %s",
-                                col, idx, e,
-                            )
-        return df
-
     def _coerce_numeric_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert string columns that look numeric to numeric dtype."""
         for col in df.columns:
@@ -2733,19 +2562,19 @@ class DefaultEngine:
             status = NodePlanStatus.CACHED
         else:
             if isinstance(node.tool, DataFrameTool):
-                has_prior_current = _dataframe_v1_has_other_current(
+                has_prior_current = _dataframe_has_other_current(
                     workflow.storage_path,
                     node.name,
                     sig_hash,
                 )
             elif isinstance(node.tool, ProcessingTool):
-                has_prior_current = _processing_v1_has_other_current(
+                has_prior_current = _processing_has_other_current(
                     workflow.storage_path,
                     node.name,
                     sig_hash,
                 )
             else:
-                from bioimageflow.storage import has_other_hash_dirs
+                from bioimageflow.legacy_storage import has_other_hash_dirs
                 node_dir = get_node_dir(workflow.storage_path, node.name)
                 has_prior_current = has_other_hash_dirs(node_dir, sig_hash)
             if has_prior_current:
@@ -2766,15 +2595,15 @@ class DefaultEngine:
         from bioimageflow.dataframe_tool import DataFrameTool
 
         if isinstance(node.tool, DataFrameTool):
-            return dataframe_v1_result_key(node.name, sig_hash)
+            return dataframe_result_key(node.name, sig_hash)
         if isinstance(node.tool, ProcessingTool):
-            return processing_v1_result_key(node.name, sig_hash)
+            return processing_result_key(node.name, sig_hash)
         return None
 
     def _plan_selected_record_id(self, workflow: Any, final_result_key: str | None) -> str | None:
         if final_result_key is None:
             return None
-        pointer = StorageV1(workflow.storage_path).load_current(final_result_key)
+        pointer = Storage(workflow.storage_path).load_current(final_result_key)
         return pointer.record_id if pointer is not None else None
 
     def _plan_sub_workflow(

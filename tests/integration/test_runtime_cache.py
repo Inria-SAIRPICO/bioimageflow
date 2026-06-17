@@ -12,11 +12,11 @@ from bioimageflow import NodePlanStatus, ProgressEvent, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
 from bioimageflow.sub_workflow import SubWorkflow
 from bioimageflow.cache import (
-    dataframe_v1_result_key,
-    processing_v1_prepare_attempt,
-    processing_v1_publish,
+    dataframe_result_key,
+    processing_prepare_attempt,
+    processing_publish,
 )
-from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, make_record_id
+from bioimageflow.storage import CacheCorruptionError, CurrentPointer, RecordManifest, Storage, make_record_id
 from bioimageflow_core import Arguments, EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool, Template
 from bioimageflow_core.types import ImageSpec, Semantic, SharedArray
 
@@ -439,6 +439,46 @@ def _parquet_digest(df: pd.DataFrame, path: Path) -> str:
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
+def _write_manual_dataframe_record(storage: Storage, result_key: str, df: pd.DataFrame) -> str:
+    scratch = storage.result_dir(result_key) / "manual.parquet"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    dataframe_digest = _parquet_digest(df, scratch)
+    record_id = make_record_id(
+        {
+            "schema": "bioimageflow.cache.record.v1",
+            "result_key": result_key,
+            "dataframe": {
+                "path": "dataframe.parquet",
+                "digest": dataframe_digest,
+            },
+            "outputs": [],
+        }
+    )
+    record_dir = storage.result_dir(result_key) / "records" / record_id
+    record_dir.mkdir(parents=True, exist_ok=True)
+    scratch.replace(record_dir / "dataframe.parquet")
+    manifest = RecordManifest(
+        result_key=result_key,
+        record_id=record_id,
+        dataframe_digest=dataframe_digest,
+        outputs=[],
+    )
+    (record_dir / "manifest.json").write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
+    return record_id
+
+
+def _force_current_record(storage: Storage, result_key: str, record_id: str) -> None:
+    pointer = CurrentPointer(
+        result_key=result_key,
+        record_id=record_id,
+        manifest=f"records/{record_id}/manifest.json",
+        attempt_id="manual",
+        run_id="manual",
+    )
+    current_path = storage.result_dir(result_key) / "current.json"
+    current_path.write_text(json.dumps(pointer.to_dict(), indent=2, sort_keys=True))
+
+
 def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
@@ -452,7 +492,7 @@ def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path:
     current = json.loads(current_files[0].read_text())
     result_key = current["result_key"]
     record_id = current["record_id"]
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     assert pointer.record_id == record_id
@@ -517,7 +557,7 @@ def test_compute_writes_run_view_for_dataframe_cache_miss_and_hit(tmp_path: Path
     assert first_result["schema"] == "bioimageflow.run.node_result.v1"
     assert first_result["node_key"] == node_name
     assert first_result["cache_hit"] is False
-    assert StorageV1(storage_path).load_current(first_result["result_key"]).record_id == first_result["record_id"]
+    assert Storage(storage_path).load_current(first_result["result_key"]).record_id == first_result["record_id"]
     assert (first_run / "nodes" / node_name / "record.bioimageflow-link.json").exists()
     assert _latest_success_run_dir(storage_path) == first_run
 
@@ -729,6 +769,40 @@ def test_chained_dataframe_tools_use_v1_cache_for_each_node(tmp_path: Path) -> N
     assert ("DoubleValue_1", "cached") in events
 
 
+def test_downstream_result_key_tracks_selected_upstream_record(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    CountingTable.executions = 0
+    DoubleValue.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        doubled = DoubleValue()(table)
+        first = wf.compute(doubled)
+        table_result_key = _planned_result_key(wf, table.name)
+        first_downstream_key = _planned_result_key(wf, doubled.name)
+
+    assert first.loc["row", "double"] == 8
+    storage = Storage(storage_path)
+    alternate_record_id = _write_manual_dataframe_record(
+        storage,
+        table_result_key,
+        pd.DataFrame({"value": [99], "label": ["alternate"]}, index=["row"]),
+    )
+    _force_current_record(storage, table_result_key, alternate_record_id)
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = CountingTable()(value=4)
+        doubled = DoubleValue()(table)
+        plan = wf.plan()
+        assert plan[table.name].selected_record_id == alternate_record_id
+        assert plan[doubled.name].final_result_key != first_downstream_key
+        second = wf.compute(doubled)
+
+    assert second.loc["row", "double"] == 198
+    assert CountingTable.executions == 1
+    assert DoubleValue.executions == 2
+
+
 def test_dataframe_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -790,7 +864,7 @@ def test_dataframe_tool_invalidate_removes_v1_current_but_keeps_record(tmp_path:
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -823,7 +897,7 @@ def test_dataframe_tool_invalidate_removes_corrupt_v1_current(tmp_path: Path) ->
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
+    current_path = Storage(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
     with Workflow(storage_path=storage_path) as wf:
@@ -846,7 +920,7 @@ def test_dataframe_tool_invalidate_removes_prior_signature_current(tmp_path: Pat
         wf.compute(node)
         old_result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     old_pointer = storage.load_current(old_result_key)
     assert old_pointer is not None
 
@@ -868,7 +942,7 @@ def test_dataframe_tool_corrupt_v1_dataframe_file_raises_cache_corruption(tmp_pa
         wf.compute(CountingTable()(value=11))
     [current_path] = _current_pointer_files(storage_path)
     current = json.loads(current_path.read_text())
-    record_dir = StorageV1(storage_path).result_dir(current["result_key"]) / "records" / current["record_id"]
+    record_dir = Storage(storage_path).result_dir(current["result_key"]) / "records" / current["record_id"]
     (record_dir / "dataframe.parquet").write_text("not parquet")
 
     with Workflow(storage_path=storage_path) as wf:
@@ -877,13 +951,13 @@ def test_dataframe_tool_corrupt_v1_dataframe_file_raises_cache_corruption(tmp_pa
 
 
 def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writing(tmp_path: Path) -> None:
-    from bioimageflow.cache import dataframe_v1_publish
+    from bioimageflow.cache import dataframe_publish
 
     storage_path = tmp_path / "results"
     node_name = "CountingTable_1"
     sig_hash = "sig"
     df = pd.DataFrame({"value": [1]})
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
+    result_key = dataframe_result_key(node_name, sig_hash)
     dataframe_digest = _parquet_digest(df, tmp_path / "expected.parquet")
     parquet_content = b"PAR1"
     record_id = make_record_id(
@@ -897,7 +971,7 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
             "outputs": [],
         }
     )
-    records_dir = StorageV1(storage_path).result_dir(result_key) / "records"
+    records_dir = Storage(storage_path).result_dir(result_key) / "records"
     records_dir.mkdir(parents=True)
     outside = tmp_path / "outside-record"
     outside.mkdir()
@@ -905,25 +979,25 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
     (records_dir / record_id).symlink_to(outside)
 
     with pytest.raises(CacheCorruptionError):
-        dataframe_v1_publish(storage_path, node_name, sig_hash, df)
+        dataframe_publish(storage_path, node_name, sig_hash, df)
     assert (outside / "dataframe.parquet").read_bytes() == parquet_content
 
 
 def test_dataframe_tool_publish_rejects_symlinked_records_directory_before_writing(tmp_path: Path) -> None:
-    from bioimageflow.cache import dataframe_v1_publish
+    from bioimageflow.cache import dataframe_publish
 
     storage_path = tmp_path / "results"
     node_name = "CountingTable_1"
     sig_hash = "sig"
-    result_key = dataframe_v1_result_key(node_name, sig_hash)
-    records_dir = StorageV1(storage_path).result_dir(result_key) / "records"
+    result_key = dataframe_result_key(node_name, sig_hash)
+    records_dir = Storage(storage_path).result_dir(result_key) / "records"
     records_dir.parent.mkdir(parents=True)
     outside = tmp_path / "outside-records"
     outside.mkdir()
     records_dir.symlink_to(outside)
 
     with pytest.raises(CacheCorruptionError):
-        dataframe_v1_publish(storage_path, node_name, sig_hash, pd.DataFrame({"value": [1]}))
+        dataframe_publish(storage_path, node_name, sig_hash, pd.DataFrame({"value": [1]}))
     assert list(outside.iterdir()) == []
 
 
@@ -937,7 +1011,7 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
         first = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -975,7 +1049,7 @@ def test_zero_row_processing_tool_publishes_written_template_asset_without_senti
 
     assert first.empty
     assert list(first.columns) == ["mask", "count"]
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1011,7 +1085,7 @@ def test_zero_row_processing_tool_publishes_written_default_template_asset(
         result_key = _planned_result_key(wf, node.name)
 
     assert result.empty
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1072,7 +1146,7 @@ def test_source_processing_tool_external_paths_stay_external_references(tmp_path
         first = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1134,7 +1208,7 @@ def test_source_processing_tool_empty_output_template_override_does_not_claim_ex
         df = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    pointer = StorageV1(storage_path).load_current(result_key)
+    pointer = Storage(storage_path).load_current(result_key)
     assert pointer is not None
     assert list(df["path"]) == [str(source_dir / "a.txt")]
 
@@ -1149,7 +1223,7 @@ def test_source_processing_tool_invalidate_removes_current_but_keeps_record(tmp_
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1181,7 +1255,7 @@ def test_source_processing_tool_invalidate_removes_corrupt_current(tmp_path: Pat
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
+    current_path = Storage(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1205,7 +1279,7 @@ def test_source_processing_tool_invalidate_removes_corrupt_current_with_default_
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    current_path = StorageV1(storage_path).result_dir(result_key) / "current.json"
+    current_path = Storage(storage_path).result_dir(result_key) / "current.json"
     current_path.write_text("{not json")
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1265,7 +1339,7 @@ def test_source_processing_tool_rejects_symlinked_attempts_directory_before_exec
     with Workflow(storage_path=storage_path) as wf:
         node = SourceAssetWriter()(text="symlink-attempt")
         result_key = _planned_result_key(wf, node.name)
-        attempts_dir = StorageV1(storage_path).result_dir(result_key) / "attempts"
+        attempts_dir = Storage(storage_path).result_dir(result_key) / "attempts"
         attempts_dir.parent.mkdir(parents=True)
         attempts_dir.symlink_to(outside)
         with pytest.raises(CacheCorruptionError):
@@ -1280,7 +1354,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
     storage_path = tmp_path / "results"
     node_name = "SourceAssetWriter_1"
     sig_hash = "sig"
-    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
         storage_path,
         node_name,
         sig_hash,
@@ -1288,7 +1362,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
     source = assets_dir / "mask.txt"
     source.write_text("first")
     df = pd.DataFrame({"mask": [str(source)], "count": [5]}, index=["0"])
-    first = processing_v1_publish(
+    first = processing_publish(
         storage_path,
         node_name,
         sig_hash,
@@ -1310,7 +1384,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
     assets_record_dir.symlink_to(outside)
 
     with pytest.raises(CacheCorruptionError):
-        processing_v1_publish(
+        processing_publish(
             storage_path,
             node_name,
             sig_hash,
@@ -1329,7 +1403,7 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(tmp_path:
     storage_path = tmp_path / "results"
     node_name = "ZeroRowAssetWriter_1"
     sig_hash = "sig"
-    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
         storage_path,
         node_name,
         sig_hash,
@@ -1338,7 +1412,7 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(tmp_path:
     source.write_text("blank")
     df = pd.DataFrame(columns=pd.Index(["mask", "count"]))
 
-    result = processing_v1_publish(
+    result = processing_publish(
         storage_path,
         node_name,
         sig_hash,
@@ -1353,9 +1427,9 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(tmp_path:
     )
 
     assert result.empty
-    pointer = StorageV1(storage_path).load_current(result_key)
+    pointer = Storage(storage_path).load_current(result_key)
     assert pointer is not None
-    record_dir = StorageV1(storage_path).result_dir(result_key) / "records" / pointer.record_id
+    record_dir = Storage(storage_path).result_dir(result_key) / "records" / pointer.record_id
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
@@ -1374,7 +1448,7 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
     storage_path = tmp_path / "results"
     node_name = "DirectoryTool_1"
     sig_hash = "sig"
-    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
         storage_path,
         node_name,
         sig_hash,
@@ -1390,7 +1464,7 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
     )
 
     with pytest.raises(CacheCorruptionError, match="Overlapping owned asset paths"):
-        processing_v1_publish(
+        processing_publish(
             storage_path,
             node_name,
             sig_hash,
@@ -1415,7 +1489,7 @@ def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cach
         first = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1455,7 +1529,7 @@ def test_column_bound_zero_row_processing_tool_publishes_written_template_assets
 
     assert first.empty
     assert list(first.columns) == ["output", "count"]
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1493,7 +1567,7 @@ def test_column_bound_zero_row_processing_tool_publishes_declared_scalar_outputs
     assert result.empty
     assert list(result.columns) == ["spot_id", "spot_count"]
     assert ColumnBoundZeroRowScalarWriter.executions == 2
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1551,7 +1625,7 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1575,7 +1649,7 @@ def test_column_bound_processing_tool_invalidate_removes_prior_signature_current
         wf.compute(node)
         old_result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     assert storage.load_current(old_result_key) is not None
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1607,7 +1681,7 @@ def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_c
         wf.compute(node_a, node_b)
         plan = wf.plan()
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     key_a = plan["writer_a"].final_result_key
     key_b = plan["writer_b"].final_result_key
     assert key_a is not None
@@ -1638,7 +1712,7 @@ def test_column_bound_processing_tool_preserves_nested_owned_asset_paths(tmp_pat
         df = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1670,7 +1744,7 @@ def test_column_bound_processing_tool_rejects_unsafe_output_template_before_exec
         result_key = _planned_result_key(wf, node.name)
 
     assert ColumnBoundLegacyWriter.executions == 0
-    assert not (StorageV1(storage_path).result_dir(result_key) / "current.json").exists()
+    assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
 def test_column_bound_processing_tool_rejects_templated_output_outside_staging(tmp_path: Path) -> None:
@@ -1683,7 +1757,7 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(t
             wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    assert not (StorageV1(storage_path).result_dir(result_key) / "current.json").exists()
+    assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
 def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(
@@ -1708,7 +1782,7 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
         assert str(array.dtype) == "uint8"
         assert int(array.sum()) == 8
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1783,7 +1857,7 @@ def test_column_bound_shared_array_processing_tool_upstream_change_reports_pendi
         node_name = "ColumnBoundSharedMemoryWriter_1"
         old_result_key = _planned_result_key(wf, node_name)
 
-    assert StorageV1(storage_path).load_current(old_result_key) is not None
+    assert Storage(storage_path).load_current(old_result_key) is not None
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=5)
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
@@ -1837,7 +1911,7 @@ def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_pe
         result_key = _planned_result_key(wf, node.name)
 
     assert ColumnBoundSharedMemoryWriter.executions == 2
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1878,7 +1952,7 @@ def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_cu
         wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1904,7 +1978,7 @@ def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_co
         wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -1936,7 +2010,7 @@ def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehy
         assert str(array.dtype) == "uint8"
         assert int(array.sum()) == 0
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -2009,7 +2083,7 @@ def test_source_shared_array_processing_tool_missing_asset_raises_cache_corrupti
         wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -2046,7 +2120,7 @@ def test_source_path_or_shared_array_output_handles_path_values(tmp_path: Path) 
     result_path = Path(first.loc["0", "result"])
     assert result_path.name == "flex_0.txt"
     assert result_path.read_text() == "path-result"
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
@@ -2088,7 +2162,7 @@ def test_source_path_or_shared_array_output_handles_shared_array_values(tmp_path
     with open_shared_array(first.loc["0", "result"]) as array:
         assert int(array.sum()) == 4
 
-    storage = StorageV1(storage_path)
+    storage = Storage(storage_path)
     pointer = storage.load_current(result_key)
     assert pointer is not None
     record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
