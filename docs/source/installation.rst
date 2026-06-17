@@ -6,6 +6,8 @@ Requirements
 
 - Python >= 3.10
 
+BioImageFlow's deterministic CI test matrix runs on Python 3.10, 3.11, and 3.12.
+
 Install from PyPI
 -----------------
 
@@ -65,8 +67,8 @@ workspace:
    cd bioimageflow
    uv sync
 
-This installs both packages in editable mode along with development dependencies
-(pytest, sphinx, etc.).
+This installs all workspace packages in editable mode along with development
+dependencies (pytest, sphinx, etc.).
 
 Package structure
 -----------------

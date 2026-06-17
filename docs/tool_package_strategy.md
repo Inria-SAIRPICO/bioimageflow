@@ -6,6 +6,10 @@ not to integrate every attractive bioimage library. The goal is to define a
 small set of optional tool packages that make real, demonstrable workflows
 possible, with public data and measurable expected outputs.
 
+Status: this is a strategy and candidate-roadmap document, not the authoritative package metadata contract.
+Current package dependencies, release rules, CI gates, and package-owned docs are documented in `docs/source/reference/tool_packages.md` and in each `packages/*/docs/index.md`.
+Older dependency lists below should be read as planning inventories unless they explicitly describe an implemented package page.
+
 ## Starting Point
 
 BioImageFlow is designed for optional tool packages:

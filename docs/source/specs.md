@@ -6,7 +6,7 @@
 
 BioImageFlow addresses three challenges in bioimage analysis:
 
-1. **Environment Isolation:** Tools often require conflicting dependencies (e.g., different Python versions, conflicting CUDA libraries). Each tool runs in its own isolated Conda environment.
+1. **Environment Isolation:** Tools often require conflicting dependencies (e.g., different Python versions, conflicting CUDA libraries). `ProcessingTool` classes declare `EnvironmentSpec` objects and run in isolated Conda environments when workflows use the Wetlands engine.
 2. **Data Provenance:** Every execution is hashed and cached, making it possible to trace exactly which parameters and logic produced a specific result.
 3. **Type Safety:** A rich typing system prevents wiring errors such as feeding a CSV file to a tool that expects a segmentation mask.
 
@@ -39,14 +39,16 @@ BioImageFlow is split into two packages:
 
 **`bioimageflow-core`** — The shared foundation. Installed in the main process **and** in every tool worker environment. Contains the type system, tool base classes (`BaseTool` and `ProcessingTool`), argument passing, and I/O dispatch helpers. It declares NumPy because shared-memory helpers expose NumPy array views, and it avoids orchestrator-only dependencies such as pandas, pydantic, and image IO stacks.
 
-**`bioimageflow`** — The orchestrator. Installed only in the main process. Contains the graph engine, execution engines, column resolution, cache management, workflow coordination, `DataFrameTool` base class, and merge strategies. Depends on `bioimageflow-core`, `pandas`, `pydantic`, and the runtime engine dependencies used by the local executor. Distributed execution and Parsl integration are deferred and are not current v1 behavior.
+**`bioimageflow`** — The orchestrator. Installed only in the main process. Contains the graph engine, execution engines, column resolution, cache management, workflow coordination, and `DataFrameTool` base class. Depends on `bioimageflow-core`, `pandas`, `pydantic`, and the runtime engine dependencies used by the local executor. Distributed execution and Parsl integration are deferred and are not current v1 behavior.
+
+Common source, merge, conversion, and glue tools live in the first-party `bioimageflow-common-tools` companion package, not in the orchestrator package.
 
 This split ensures that worker environments carry only the minimal footprint needed to run tool logic, while the main process has the full orchestration capabilities.
 
 ```text
 bioimageflow-core (all environments)       bioimageflow (main process only)
 ├── types.py        # Type system          ├── dataframe_tool.py # DataFrameTool base class
-├── environment.py  # EnvironmentSpec      ├── merge.py        # Built-in merge DataFrameTools
+├── environment.py  # EnvironmentSpec      ├── registry.py     # Tool registry
 ├── tool.py         # BaseTool,            ├── resolution.py   # Column resolver
 │                   #   ProcessingTool,    ├── template.py     # Output templating
 │                   #   IOModel, GUIMeta   ├── cache.py        # Hash & cache
@@ -292,7 +294,7 @@ BioImageFlow provides two kinds of tools, each with a single execution context:
 - **`ProcessingTool`** — runs computation in an isolated Wetlands environment. Every method the tool author implements (`process_row`, `process_batch`) executes in the worker.
 - **`DataFrameTool`** — transforms DataFrames in the main process. The single `transform` method has full access to Pandas.
 
-Both inherit from `BaseTool`, which provides shared identity attributes (`name`, `category`, `tags`, `Inputs`) and graph wiring via `__call__`.
+Both inherit from `BaseTool`, which provides shared metadata attributes (`display_name`, `documentation`, `category`, `tags`, `Inputs`) and graph wiring via `__call__`.
 
 ### 3.1 EnvironmentSpec
 
@@ -370,7 +372,7 @@ from typing import Annotated
 from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImageSpec, Semantic, Template
 
 class ExtractChannel(ProcessingTool):
-    name = "extract_channel"
+    display_name = "Extract Channel"
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
@@ -579,7 +581,7 @@ from typing import Annotated
 from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, Category, Template
 
 class MySegmenter(ProcessingTool):
-    name = "my_segmenter"
+    display_name = "My Segmenter"
     documentation = "Segments cells."
     category = Category.SEGMENTATION
     tags = ["segmentation"]
@@ -609,7 +611,7 @@ class CellposeBase(ProcessingTool):
     tags = ["cellpose"]
 
 class CellposeSegmenter(CellposeBase):
-    name = "cellpose_segmenter"
+    display_name = "Cellpose Segmenter"
     documentation = "Segments cells using the Cellpose algorithm."
 
     class Inputs(IOModel):
@@ -625,7 +627,7 @@ class CellposeSegmenter(CellposeBase):
         ...
 
 class CellposeTrain(CellposeBase):
-    name = "cellpose_train"
+    display_name = "Cellpose Train"
     documentation = "Trains a custom Cellpose model."
     tags = ["cellpose", "training"]
 
@@ -647,7 +649,7 @@ class CellposeTrain(CellposeBase):
 **A tool not related to cellpose can still share the environment directly:**
 ```python
 class SomeOtherTool(ProcessingTool):
-    name = "other_tool"
+    display_name = "Other Tool"
     environment = cellpose_env  # Reuses the cellpose environment without inheriting
     ...
 ```
@@ -656,7 +658,7 @@ class SomeOtherTool(ProcessingTool):
 
 | Attribute       | Type               | Description                                        |
 |----------------|--------------------|----------------------------------------------------|
-| `name`          | `str`              | Unique identifier for the tool                     |
+| `display_name`  | `str`              | Human-readable tool label; falls back to class name when empty |
 | `documentation` | `str`              | Human-readable description                         |
 | `category`      | `Category \| None` | High-level functional category (optional)          |
 | `tags`          | `list[str]`        | Searchable tags                                    |
@@ -752,12 +754,12 @@ class DataFrameTool(BaseTool):
 
 ```python
 class FilterRows(DataFrameTool):
-    name = "filter_rows"
+    display_name = "Filter Rows"
 
     class Outputs(Passthrough): pass  # Output schema = input schema (all columns preserved)
 
 class CountLabelOverlaps(DataFrameTool):
-    name = "count_label_overlaps"
+    display_name = "Count Label Overlaps"
 
     class Outputs(IOModel):
         image1: str
@@ -782,7 +784,7 @@ A merge-only tool overrides `merge_dataframes` and keeps the default `transform`
 
 | Attribute       | Type                                    | Description                                    |
 |----------------|-----------------------------------------|------------------------------------------------|
-| `name`          | `str`                                   | Unique identifier for the tool                 |
+| `display_name`  | `str`                                   | Human-readable tool label; falls back to class name when empty |
 | `documentation` | `str`                                   | Human-readable description                     |
 | `category`      | `Category \| None`                      | High-level functional category (optional)      |
 | `tags`          | `list[str]`                             | Searchable tags                                |
@@ -811,7 +813,7 @@ class Generate(DataFrameTool):
 
 `resolve_outputs` returns a dict whose values match the per-field shape produced by `serialize_output_schema` (`{"type": str, "default": Any | None, "image_spec": dict | None}`), or `None` when the schema is unresolvable from the supplied inputs. The default implementation delegates to `serialize_output_schema(cls)` for tools that declare a static `Outputs` class. Implementations must be pure (no I/O, no side effects).
 
-Built-in merge tools (`InnerJoin`, `CrossJoin`, `JoinOnColumn`, `Concat`, `Collect`) instead override `resolve_merge_schema(cls, upstream_schemas, inputs)` because their output columns depend on the *upstream* schemas, not just on their own inputs. The `Node.get_output_schema()` algorithm (next paragraph) prefers `resolve_merge_schema` over `resolve_outputs` when a merge tool overrides it.
+Common-tools merge tools (`InnerJoin`, `CrossJoin`, `JoinOnColumn`, `Concat`, `Collect`) instead override `resolve_merge_schema(cls, upstream_schemas, inputs)` because their output columns depend on the *upstream* schemas, not just on their own inputs. The `Node.get_output_schema()` algorithm (next paragraph) prefers `resolve_merge_schema` over `resolve_outputs` when a merge tool overrides it.
 
 **`Node.get_output_schema()`.** Public method on `Node` that resolves the node's output schema as currently configured. Algorithm:
 
@@ -830,7 +832,7 @@ from bioimageflow_core import IOModel, Arguments
 
 class ColumnRegex(DataFrameTool):
     """Create dynamically named columns from a regex pattern."""
-    name = "column_regex"
+    display_name = "Column Regex"
     tags = ["dataframe", "regex"]
 
     class Inputs(IOModel):
@@ -850,7 +852,7 @@ class ColumnRegex(DataFrameTool):
 
 class FilterRows(DataFrameTool):
     """Filter DataFrame rows by column value constraints."""
-    name = "filter_rows"
+    display_name = "Filter Rows"
     tags = ["dataframe", "filter"]
 
     class Outputs(Passthrough): pass  # All input columns are preserved
@@ -874,7 +876,7 @@ class FilterRows(DataFrameTool):
 
 class CountLabelOverlaps(DataFrameTool):
     """Count the number (or average number) of overlapping labels."""
-    name = "count_label_overlaps"
+    display_name = "Count Label Overlaps"
     tags = ["aggregation"]
 
     class Inputs(IOModel):
@@ -907,12 +909,12 @@ class CountLabelOverlaps(DataFrameTool):
 
 **Built-in merge DataFrameTools:**
 
-BioImageFlow provides built-in DataFrameTools for common merge operations in `bioimageflow.merge`. These override `merge_dataframes` and use the default `transform` (identity):
+BioImageFlow provides DataFrameTools for common merge operations through the `bioimageflow_common_tools` companion package. These override `merge_dataframes` and use the default `transform` (identity):
 
 ```python
 class InnerJoin(DataFrameTool):
     """Inner join upstream DataFrames on index (default merge behavior)."""
-    name = "inner_join"
+    display_name = "Inner Join"
 
     class Inputs(IOModel):
         pass
@@ -932,14 +934,14 @@ class InnerJoin(DataFrameTool):
 
 class CrossJoin(DataFrameTool):
     """Cross join for combinatorial expansion."""
-    name = "cross_join"
+    display_name = "Cross Join"
     class Inputs(IOModel):
         suffixes: tuple = ("_left", "_right")
 
 
 class JoinOnColumn(DataFrameTool):
     """Join upstream DataFrames on a named column (not index)."""
-    name = "join_on_column"
+    display_name = "Join On Column"
     class Inputs(IOModel):
         join_column: str
         how: str = "inner"
@@ -948,7 +950,7 @@ class JoinOnColumn(DataFrameTool):
 
 class Concat(DataFrameTool):
     """Concatenate DataFrames vertically."""
-    name = "concat"
+    display_name = "Concat"
     class Inputs(IOModel):
         pass
 
@@ -957,7 +959,7 @@ class Collect(DataFrameTool):
     """Gather columns from multiple ancestor nodes into one DataFrame.
     Convenience alias for InnerJoin — makes intent explicit when combining
     scattered columns from different pipeline branches."""
-    name = "collect"
+    display_name = "Collect"
     class Outputs(Passthrough): pass
     class Inputs(IOModel):
         pass
@@ -1085,7 +1087,7 @@ from typing import Annotated
 from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, GUIMeta, Connectable, Template
 
 class CellposeSegmenter(ProcessingTool):
-    name = "cellpose_segmenter"
+    display_name = "Cellpose Segmenter"
     environment = cellpose_env
 
     class Inputs(IOModel):
@@ -1221,7 +1223,7 @@ When a tool needs data from multiple upstream sources, the DataFrames must be ex
 **Usage:**
 
 ```python
-from bioimageflow.merge import CrossJoin, JoinOnColumn
+from bioimageflow_common_tools import CrossJoin, JoinOnColumn
 
 # Combinatorial pairing
 paired = CrossJoin()(set_a, set_b)
@@ -1345,7 +1347,7 @@ This applies everywhere: `__init__.py`, tool modules, SubWorkflow `build()` meth
 
 #### Tool Store
 
-Tool packages are installed in a **tool store** — a directory under `~/.bioimageflow/tool_packages/` that holds versioned copies of each package. Multiple versions of the same package coexist as distinct directory trees:
+Tool packages are installed in a **tool store** — a directory that holds versioned copies of each package. The default resolution order is `BIOIMAGEFLOW_TOOL_STORE`, then `BIOIMAGEFLOW_HOME/tool_packages`, then `~/.bioimageflow/tool_packages`. Multiple versions of the same package coexist as distinct directory trees:
 
 ```text
 ~/.bioimageflow/tool_packages/
@@ -1365,7 +1367,7 @@ Tool packages are installed in a **tool store** — a directory under `~/.bioima
         ...
 ```
 
-Packages are installed via `pip install --target <dir> simpleitk-tools==X.Y.Z`, executed through Wetlands' pixi installation (no separate `pip` or `uv` on `PATH` required). The tool store path can be overridden via the `BIOIMAGEFLOW_TOOL_STORE` environment variable.
+Packages are installed via `pip install --target <dir> simpleitk-tools==X.Y.Z`, executed through Wetlands' pixi installation (no separate `pip` or `uv` on `PATH` required). Set `BIOIMAGEFLOW_TOOL_STORE` when a workflow needs an explicit shared or project-local store.
 
 #### Versioned Loading
 
@@ -1642,7 +1644,7 @@ registered = register(input_image=paired["image_path"], reference=paired["refere
 ```python
 class DicomLoader(ProcessingTool):
     """List DICOM files and extract metadata — requires pydicom, isolated from main process."""
-    name = "dicom_loader"
+    display_name = "DICOM Loader"
     environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom"]})
 
     class Inputs(IOModel):
@@ -1672,7 +1674,7 @@ segmented = segment(input_image=dicoms["path"])
 **Multi-source workflow with explicit merge:**
 
 ```python
-from bioimageflow.merge import CrossJoin, JoinOnColumn
+from bioimageflow_common_tools import CrossJoin, JoinOnColumn
 
 mri = load_images(path="./mri/")
 ct = load_images(path="./ct/")
@@ -1698,7 +1700,7 @@ registered = register(
 
 ### 4.2 Nodes and Edges
 
-- **Nodes** wrap a tool instance and its configuration (explicit arguments). Each node has a unique **node name** — either user-provided via `name=` in `__call__` or auto-generated from the tool's `name` attribute and a counter (e.g., `cellpose_segmenter_1`, `cellpose_segmenter_2`). Node names must be unique within a Workflow; the tool's `name` (class-level) may repeat across multiple nodes.
+- **Nodes** wrap a tool instance and its configuration (explicit arguments). Each node has a unique **node name** — either user-provided via `name=` in `__call__` or auto-generated from the tool class name and a counter (e.g., `CellposeSegmenter_1`, `CellposeSegmenter_2`). Node names must be unique within a Workflow; a tool class can be instantiated by multiple nodes.
 - **Edges** represent data dependency: an edge from Node A to Node B means Node B references columns from Node A (via `ColumnRef`) or receives Node A's output DataFrame (via positional argument to a DataFrameTool).
 - **`ColumnRef`** is created by subscripting a Node: `node["col"]`. It records the upstream node and column name. The engine validates column existence at construction time using `Node.get_output_schema()` (see §3.5), which covers both static `Outputs` and dynamic-but-resolvable schemas — `Generate(column_name="x")["x"]` validates immediately, and a fully-configured merge tool (e.g. `CrossJoin(Files(...), Generate(column_name="sensitivity", ...))`) validates the union of upstream column names. Validation is deferred to execution time only when the schema cannot be resolved (e.g. an upstream merge whose own upstream is unresolvable).
 - The graph must remain a DAG. Cycles are detected synchronously inside `__call__()` when the edge is created, providing instant feedback in scripts and notebooks.
@@ -1770,7 +1772,7 @@ out = wf.compute()                  # -> dict[str, DataFrame] if multiple termin
 df = wf.compute(results)            # -> DataFrame
 
 # Multiple terminals: returns dict keyed by node name
-out = wf.compute(results, masks)    # -> {"measure_stats_1": DataFrame, "cellpose_segmenter_1": DataFrame}
+out = wf.compute(results, masks)    # -> {"MeasureStats_1": DataFrame, "CellposeSegmenter_1": DataFrame}
 
 # Node.compute() always targets one node
 df = results.compute()              # -> DataFrame
@@ -2333,6 +2335,10 @@ def run_process_row(tool_class_name, arguments_dict, context_dict=None):
 Before reusable cache lookup, each node derives a v1 result key when every consumed upstream selected record is known.
 The result key answers: "what computation is this, over which exact selected upstream records?"
 
+Current runtime note: Phase 10 code uses the v1 storage layout and `rk_...` result-key tokens, but result-key composition is still transitional.
+The implementation wraps the node's diagnostic logical signature (`sig_hash`) as the `rk_...` key, and that signature still contains upstream diagnostic signatures rather than selected upstream record IDs.
+The material below is the clean target contract for the next result-key hardening step.
+
 Result-key material includes every value that can affect logical output and cache validity:
 
 - BioImageFlow cache schema version.
@@ -2358,6 +2364,7 @@ storage_path/cache/v1/results/<result-shard>/<result-key>/
 The legacy `sig_hash` name is not part of the clean v1 public planning API.
 Implementations may keep diagnostic signatures internally, and `NodePlan.logical_signature` exposes the diagnostic value when callers need it.
 Public cache APIs use result keys and selected record IDs.
+In the current transitional implementation, `NodePlan.final_result_key` is derived from `NodePlan.logical_signature`; callers should still treat the result key as the public opaque cache token and should not parse or persist the logical signature.
 
 ### 6.2 Current Record Selection
 
@@ -2536,17 +2543,17 @@ workspace/
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json
+                attempt.json              # optional/future in current runtime
                 staging/
                   dataframe.parquet
-                  dataframe.csv
+                  dataframe.csv           # optional debug artifact
                   assets/
                   work/
             records/
               <record-id>/
                 manifest.json
                 dataframe.parquet
-                dataframe.csv
+                dataframe.csv             # optional debug artifact
                 assets/
             current.json
             conflicts/
@@ -2641,8 +2648,8 @@ def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
 - **Allocation:** Tools create shared memory segments using `create_shared_output()`, which uses the `bif_` namespace prefix.
 - **Ownership:** When a tool returns a `SharedArray` in its outputs, the engine assumes full ownership. Since `create_shared_output` closes the tool's handle automatically, ownership transfer is enforced by the API.
 - **Consumption:** Downstream tools read shared memory via `load_image()` (Path/SharedArray dispatch) or `open_shared_array()` directly.
-- **Garbage Collection:** The engine performs topology-aware GC. A shared memory segment is unlinked when all direct downstream consumers in the DAG have completed successfully, or the row containing the reference is filtered out by all downstream branches.
-- **Crash Safety:** The engine registers an `atexit` handler that cleans up all tracked `bif_*` segments on abnormal termination. A CLI utility (`bioimageflow clean-shm`) is provided to manually wipe orphaned segments left by hard crashes (SIGKILL, OOM).
+- **Garbage Collection:** The current helper closes local shared-memory handles but does not unlink segments automatically. Topology-aware unlinking is deferred.
+- **Crash Safety:** No `bioimageflow clean-shm` CLI is currently provided. Manual orphan cleanup and process-exit cleanup tooling are deferred.
 - **Persistence:** Shared memory is volatile. If caching is requested for a source or column-bound `ProcessingTool` node that produced shared memory outputs, the engine publishes each non-null `SharedArray` output cell as a durable v1 record-owned `.npy` asset under the reserved `assets/shm/` namespace. When the node is subsequently loaded from cache, the engine reads each durable asset back into a fresh `SharedArray` before dispatching to downstream tools, thereby strictly respecting the `ImageShared` interface contract.
 
 When a tool stores a `SharedArray` in an output DataFrame column, it carries the shared memory name, array shape, and dtype — sufficient for downstream tools to attach and read the data. Since `SharedArray` is a frozen dataclass defined in `bioimageflow-core`, it is picklable and can cross the serialization boundary.
@@ -2808,14 +2815,13 @@ from bioimageflow_core import (
 )
 from bioimageflow_core.io import load_image, save_image
 from bioimageflow_core.shm import create_shared_output, open_shared_array
+from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect
 
 # === bioimageflow (main process only) ===
 from bioimageflow import (
     DataFrameTool, Passthrough,
     Workflow,
     SubWorkflow,
-    # Built-in merge tools
-    InnerJoin, CrossJoin, JoinOnColumn, Concat, Collect,
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,
     require_tool_packages,
@@ -2856,7 +2862,7 @@ from typing import Annotated
 from bioimageflow_core import IOModel, ImageSpec, Semantic, Arguments
 
 class SegmentAndMeasure(SubWorkflow):
-    name = "segment_and_measure"
+    display_name = "Segment and Measure"
 
     class Inputs(IOModel):
         image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
@@ -2894,12 +2900,12 @@ class SegmentAndMeasure(SubWorkflow):
 
 | Attribute  | Type               | Description                                   |
 |-----------|-------------------|-----------------------------------------------|
-| `name`     | `str`              | Unique identifier for the sub-workflow         |
+| `display_name` | `str`          | Human-readable sub-workflow label; falls back to class name when empty |
 | `Inputs`   | `IOModel subclass` | Declared inputs (exposed to parent workflow)   |
 | `Outputs`  | `IOModel subclass` | Declared outputs (exposed to parent workflow)  |
 
 **Concrete `SubWorkflow` subclasses must:**
-- Declare `name`, `Inputs`, and `Outputs` as class attributes.
+- Declare `display_name`, `Inputs`, and `Outputs` as class attributes.
 - Override `build(self, inputs)` → `dict[str, ColumnRef]` mapping each `Outputs` field to an internal node column.
 
 ### 14.2 Using a Sub-Workflow
@@ -2949,7 +2955,7 @@ At execution time, the engine **flattens** the sub-workflow into its constituent
 **Consequences of flattening:**
 - **Caching:** Each internal node caches independently using the same v1 result-key/current-record semantics as a top-level node.
 - **Environment reuse:** Internal `ProcessingTool`s with the same `EnvironmentSpec` as parent-level tools share the same Wetlands environment.
-- **Name scoping:** Internal node names are prefixed with the sub-workflow node name: `"segment_and_measure_1/cellpose_segmenter_1"`. Node keys and result-key material preserve the same scoping.
+- **Name scoping:** Internal node names are prefixed with the sub-workflow node name: `"SegmentAndMeasure_1/CellposeSegmenter_1"`. Node keys and result-key material preserve the same scoping.
 
 ### 14.6 Debugging with `compute_steps`
 
@@ -2965,9 +2971,9 @@ for step in wf.compute_steps(results):
 
 This yields steps like:
 ```
-Next: file_loader_1 (env: None)
-Next: segment_and_measure_1/cellpose_segmenter_1 (env: cellpose)
-Next: segment_and_measure_1/stub_stats_1 (env: imageio)
+Next: FileLoader_1 (env: None)
+Next: SegmentAndMeasure_1/CellposeSegmenter_1 (env: cellpose)
+Next: SegmentAndMeasure_1/MeasureStats_1 (env: imageio)
 ```
 
 ### 14.7 Cache Scope
@@ -2975,9 +2981,9 @@ Next: segment_and_measure_1/stub_stats_1 (env: imageio)
 Internal nodes use scoped node keys in v1 result-key material and in human-facing run views:
 
 ```text
-segment_and_measure_1/cellpose_segmenter_1
-segment_and_measure_1/stub_stats_1
-file_loader_1
+SegmentAndMeasure_1/CellposeSegmenter_1
+SegmentAndMeasure_1/MeasureStats_1
+FileLoader_1
 ```
 
 The canonical cache remains under `storage_path/cache/v1/`.
@@ -2989,7 +2995,7 @@ Sub-workflow scoping affects node keys and result-key material; it does not crea
 
 ```text
 {
-  "name": "segment_and_measure_1",
+  "name": "SegmentAndMeasure_1",
   "type": "sub_workflow",
   "sub_workflow_module": "my_tools.pipelines",
   "sub_workflow_class": "SegmentAndMeasure",

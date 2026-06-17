@@ -19,6 +19,34 @@ uv run pytest -m package_tools
 The root test suite also discovers package-local tests through the repository
 pytest configuration.
 
+## Release and CI Contract
+
+The orchestrator, core package, and companion tool packages are released with lockstep versions so workflow examples and package docs describe one coherent BioImageFlow distribution.
+Every package declares Python `>=3.10`; the deterministic CI matrix validates Python 3.10, 3.11, and 3.12.
+
+Package metadata separates distribution dependencies from isolated runtime dependencies.
+Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
+Heavy or tool-specific runtimes belong in the tool's `EnvironmentSpec`, not in the package import path.
+Package-local `uv.sources` entries mirror first-party runtime dependencies so editable workspace runs and built artifacts use the same package graph.
+
+The regular CI gate for package and documentation changes includes:
+
+```bash
+uv run ruff check .
+uv run pyright
+uv run pytest -m "not slow"
+uv run pytest tests/unit/test_package_artifacts.py
+uv build --all-packages --out-dir dist/packages
+uv run sphinx-build -W --keep-going docs/source docs/_build/html
+```
+
+The complete-test jobs are manual or scheduled because they may require optional model runtimes, Wetlands environment creation, or heavier package fixtures.
+Those jobs are useful release evidence, but deterministic unit, package-artifact, and documentation checks remain the required proof for ordinary package changes.
+
+Wheels exclude package documentation, package tests, generated build outputs, and local caches.
+Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.
+Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
+
 ## Package-Owned Documentation
 
 The sections below include the package-owned Markdown files from

@@ -25,7 +25,10 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
 
    class Threshold(ProcessingTool):
        display_name = "Threshold"
-       environment = EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})
+       environment = EnvironmentSpec(
+           name="imageio",
+           dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
+       )
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -50,9 +53,9 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
        raw = files(path="/data/images", pattern="*.tif")
-       masks = threshold(image=raw["path"], cutoff=100.0)
+       masks = threshold(image=raw["path"], cutoff=100.0, name="threshold")
        result = wf.compute(masks)
 
 Features

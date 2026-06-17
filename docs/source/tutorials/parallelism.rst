@@ -1,40 +1,43 @@
 Parallelism
 ===========
 
-BioImageFlow's default engine runs work in parallel out of the box —
-independent DAG branches concurrently, and rows of a
-:class:`~bioimageflow_core.ProcessingTool` in parallel across worker
-processes. This page covers the knobs that size that parallelism.
+BioImageFlow has two local execution backends.
+The default ``engine="direct"`` runs tool code in the orchestrator process and
+uses ``execution="parallel"`` to schedule ready independent nodes concurrently.
+The ``engine="wetlands"`` backend runs :class:`~bioimageflow_core.ProcessingTool`
+methods in isolated worker processes and is the backend that supports row-level
+worker-process parallelism. This page covers the knobs that size those modes.
 
-What's parallel by default
---------------------------
+What can run in parallel
+------------------------
 
-Two sources of concurrency:
+Two sources of local concurrency are available:
 
 - **Independent DAG branches** run **concurrently**. Two ``ProcessingTool``
-  nodes whose declared environments differ can launch their Wetlands
-  process pools side-by-side.
-- **Rows of a single ProcessingTool** run **in parallel** across the
-  worker processes of that tool's environment pool. Pool sizing is
-  controlled by ``max_workers`` (see below).
+  nodes with no unresolved dependencies may be scheduled at the same time
+  when ``execution="parallel"`` is used.
+- **Rows of a single ProcessingTool** run **in parallel** only with
+  ``engine="wetlands"``, across the worker processes of that tool's
+  environment pool. Pool sizing is controlled by ``max_workers`` (see below).
 
 DataFrameTools always run in the main process; their
 ``transform`` / ``merge_dataframes`` calls are not parallelised.
 
-Workflow-level baseline
------------------------
+Workflow-level Wetlands baseline
+--------------------------------
 
-``Workflow(max_workers=N)`` sets the default per-environment worker count
-for tools that don't override it:
+``Workflow(max_workers=N)`` sets the default Wetlands per-environment worker
+count for tools that don't override it:
 
 .. code-block:: python
 
    from bioimageflow import Workflow
 
-   with Workflow(max_workers=4) as wf:
+   with Workflow(max_workers=4, engine="wetlands") as wf:
        ...
 
-The default is ``max_workers=1`` — a single worker per environment.
+The default is ``max_workers=1`` — a single worker per Wetlands environment.
+The setting is ignored by the direct engine for row dispatch.
 
 Per-environment overrides
 -------------------------
@@ -53,7 +56,7 @@ that environment:
    cellpose = Cellpose3()                    # has its own EnvironmentSpec
    filter_tool = FilterByArea()              # uses GENERAL_ENV
 
-   with Workflow(max_workers=4) as wf:
+   with Workflow(max_workers=4, engine="wetlands") as wf:
        wf.get_environment(cellpose).max_workers = 1   # GPU tool — keep serial
        wf.get_environment(GENERAL_ENV).max_workers = 8
 
@@ -71,7 +74,7 @@ worker-specific configuration:
 .. code-block:: python
 
    gpu_tool = MyGPUTool()
-   with Workflow() as wf:
+   with Workflow(engine="wetlands") as wf:
        env = wf.get_environment(gpu_tool)
        env.max_workers = 4
        env.worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
@@ -100,9 +103,9 @@ Fields:
   meaning no limit beyond ``max_workers``).
 - ``memory`` — string hint for system memory.
 
-The default engine honours ``gpu``: when a tool's ``ResourceSpec`` has
+The Wetlands backend honours ``gpu``: when a tool's ``ResourceSpec`` has
 ``gpu >= 1`` and no explicit ``worker_env`` is set on its environment,
-the engine auto-installs
+the backend auto-installs
 ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``. The Parsl
 engine is reserved for richer resource scheduling; the contract for
 ``cpu`` / ``memory`` / ``max_concurrent`` lives with that implementation.
@@ -141,8 +144,8 @@ Worked example: a GPU tool with row-level parallelism
 -----------------------------------------------------
 
 A tool declares ``ResourceSpec(gpu=1)`` and lives in its own environment.
-The workflow runs four rows of it in parallel, each pinned to a distinct
-GPU:
+With ``engine="wetlands"``, the workflow runs four rows of it in parallel,
+each pinned to a distinct GPU:
 
 .. code-block:: python
 
@@ -163,7 +166,7 @@ GPU:
            ...
 
    segment = Segment()
-   with Workflow() as wf:
+   with Workflow(engine="wetlands") as wf:
        wf.get_environment(segment).max_workers = 4    # 4 worker processes
        images = files(path="/data", pattern="*.tif")
        masks = segment(image=images["path"])
@@ -176,7 +179,6 @@ Parsl engine
 ------------
 
 ``engine="parsl"`` is reserved for a future Parsl-backed engine that
-will translate ``ResourceSpec`` into Parsl resource requests. The
-default engine is the only implemented engine today; the wire-format
-``engine`` field is preserved through ``to_dict`` / ``from_dict`` so
-graphs authored against future engines round-trip.
+will translate ``ResourceSpec`` into Parsl resource requests. The implemented
+engines today are ``direct`` and ``wetlands``; distributed execution is
+deferred.

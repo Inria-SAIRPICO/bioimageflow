@@ -350,7 +350,8 @@ def test_readme_quick_start_declares_imported_processing_dependencies() -> None:
     }
 
     for text in docs.values():
-        assert 'EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})' in text
+        assert 'dependencies={"python": "3.10", "pip": ["imageio", "numpy"]}' in text
+        assert 'Workflow(storage_path="./bif_data", engine="wetlands")' in text
         assert "from skimage.io import imread, imsave" not in text
         assert re.search(r"import imageio\.v3 as iio", text) is not None
 
@@ -358,7 +359,8 @@ def test_readme_quick_start_declares_imported_processing_dependencies() -> None:
 def test_sphinx_quickstart_declares_imported_processing_dependencies() -> None:
     quickstart = (ROOT / "docs" / "source" / "quickstart.rst").read_text()
 
-    assert 'EnvironmentSpec(name="imageio", dependencies={"imageio": "*"})' in quickstart
+    assert 'dependencies={"python": "3.10", "pip": ["imageio", "numpy"]}' in quickstart
+    assert 'Workflow(storage_path="./bif_data", engine="wetlands")' in quickstart
     assert "from skimage.io import imread, imsave" not in quickstart
     assert re.search(r"import imageio\.v3 as iio", quickstart) is not None
 

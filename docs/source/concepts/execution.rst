@@ -54,15 +54,22 @@ For explosion tools (one-to-many), child indices use ``::`` separators:
 Downstream tools receiving both parent and child data use the parent prefix to
 align rows correctly.
 
-Default engine
---------------
+Engines and scheduling
+----------------------
 
-The default engine runs **independent nodes concurrently** and dispatches
-**rows in parallel** across Wetlands worker processes — one process pool per
-declared :class:`~bioimageflow_core.EnvironmentSpec`. See
-:doc:`../tutorials/parallelism` for ``max_workers``,
-:class:`~bioimageflow_core.ResourceSpec`, and per-environment overrides. A
-deterministic ``execution="sequential"`` mode is available for debugging.
+The default engine is ``engine="direct"`` with ``execution="parallel"``.
+It runs :class:`~bioimageflow.DataFrameTool` objects and
+:class:`~bioimageflow_core.ProcessingTool` methods in the orchestrator process.
+The parallel scheduling policy may execute ready independent nodes concurrently,
+but row-level worker-process parallelism is only used by
+``engine="wetlands"``.
+
+Use ``engine="wetlands"`` when processing tools should run in isolated Wetlands
+worker environments. In that backend, ``max_workers`` and
+per-environment overrides control worker-process pools and row dispatch.
+See :doc:`../tutorials/parallelism` for ``max_workers``,
+:class:`~bioimageflow_core.ResourceSpec`, and per-environment overrides.
+Use ``execution="sequential"`` for single-node-at-a-time debugging.
 
 Storage layout
 --------------
@@ -74,7 +81,6 @@ Storage layout
    │   └── v1/
    │       └── results/
    │           └── {shard}/{shard}/{result_key}/
-   │               ├── result.json
    │               ├── current.json
    │               ├── attempts/{attempt_id}/staging/
    │               └── records/{record_id}/
@@ -91,11 +97,11 @@ not used to decide cache hits.
 Result keys
 -----------
 
-The v1 result key is the public cache identity. It changes when any logical
-input to the node's result changes, including selected upstream records. The
-engine may keep a diagnostic logical signature internally during migration,
-but public planning, progress, invalidation, and run-view APIs use
-``result_key`` and ``record_id``.
+The v1 result key is the public cache identity exposed by planning, progress,
+invalidation, and run-view APIs. Current runtime result keys are transitional:
+they wrap the node's diagnostic logical signature in a v1 ``rk_...`` key while
+the storage layout already uses immutable records and ``current.json``.
+The target v1 material is documented in :doc:`../reference/output_cache_storage`.
 
 Progress events
 ---------------

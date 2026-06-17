@@ -12,27 +12,27 @@ small enough to test with generated arrays.
 
 ## Tools
 
-- [RegionProperties](#regionproperties): area, centroid, and bounding
+- <a href="tools/region_properties.md">RegionProperties</a>: area, centroid, and bounding
   box per label.
-- [ShapeProperties](#shapeproperties): deterministic extended shape
+- <a href="tools/shape_properties.md">ShapeProperties</a>: deterministic extended shape
   features per label.
-- [IntensityProperties](#intensityproperties): intensity summary per
+- <a href="tools/intensity_properties.md">IntensityProperties</a>: intensity summary per
   label.
-- [CountLabels](#countlabels): count objects and labeled pixels.
-- [SummarizeTable](#summarizetable): summarize numeric table columns.
-- [LabelBenchmark](#labelbenchmark): foreground pixel agreement
+- <a href="tools/count_labels.md">CountLabels</a>: count objects and labeled pixels.
+- <a href="tools/summarize_table.md">SummarizeTable</a>: summarize numeric table columns.
+- <a href="tools/label_benchmark.md">LabelBenchmark</a>: foreground pixel agreement
   between predicted and reference labels.
-- [ObjectMatchingMetrics](#objectmatchingmetrics): greedy object matching
+- <a href="tools/object_matching_metrics.md">ObjectMatchingMetrics</a>: greedy object matching
   from predicted labels to reference labels.
-- [DiceIoU](#diceiou): binary foreground Dice and IoU for masks or labels.
-- [AggregatePerImage](#aggregateperimage): per-image summaries from
+- <a href="tools/dice_iou.md">DiceIoU</a>: binary foreground Dice and IoU for masks or labels.
+- <a href="tools/aggregate_per_image.md">AggregatePerImage</a>: per-image summaries from
   object-level feature tables.
-- [NormalizeFeatures](#normalizefeatures): z-score, robust, or min-max
+- <a href="tools/normalize_features.md">NormalizeFeatures</a>: z-score, robust, or min-max
   normalization for feature columns.
 
 ## Demo Workflow
 
-- [Object measurement workflow](#object-measurement-workflow): measure label
+- <a href="workflows/object_measurement.md">Object measurement workflow</a>: measure label
   geometry, intensity, counts, and summary tables from generated fixtures.
 
 ## Tests and Demo Data

@@ -1,6 +1,7 @@
 """Documentation contracts for package dependency and backend wording."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).parents[2]
@@ -28,11 +29,12 @@ def test_restoration_numpy_baseline_docs_do_not_advertise_scipy_or_skimage_backe
 
 def test_restoration_package_docs_describe_skimage_as_optional_for_specific_tools() -> None:
     text = _text("packages/bioimageflow-restoration-tools/docs/index.md")
+    lowered = text.lower()
 
-    assert "install-time libraries are imageio and numpy" in text.lower()
-    assert "restoreimage" in text
-    assert "benchmarkrestoration" in text
-    assert "optional scikit-image" in text.lower()
+    assert "install-time libraries are imageio and numpy" in lowered
+    assert "restoreimage" in lowered
+    assert "benchmarkrestoration" in lowered
+    assert "optional scikit-image" in lowered
 
 
 def test_segmentation_index_separates_install_time_libraries_from_model_environments() -> None:
@@ -64,3 +66,38 @@ def test_spot_and_tracking_docs_include_pandas_for_dataframe_tools() -> None:
     ]:
         text = _text(path)
         assert "pandas" in text.lower()
+
+
+def test_segmentation_docs_do_not_list_tifffile_as_install_time_dependency() -> None:
+    text = _text("packages/bioimageflow-segmentation-tools/docs/index.md")
+    install_line = next(line for line in text.splitlines() if line.startswith("Install-time libraries"))
+
+    assert "tifffile" not in install_line.lower()
+    assert "EnvironmentSpec" in text
+
+
+def test_package_index_links_are_standalone_relative_links() -> None:
+    offenders = []
+    link_pattern = re.compile(r"\[[^\]]+\]\((#[^)]+)\)")
+
+    for path in sorted((ROOT / "packages").glob("*/docs/index.md")):
+        for anchor in link_pattern.findall(path.read_text()):
+            offenders.append(f"{path.relative_to(ROOT)}: {anchor}")
+
+    assert offenders == []
+
+
+def test_tool_package_reference_documents_release_and_ci_contract() -> None:
+    text = _text("docs/source/reference/tool_packages.md")
+
+    for required in [
+        "Release and CI Contract",
+        "lockstep versions",
+        "Python `>=3.10`",
+        "uv run ruff check .",
+        "uv run pyright",
+        'uv run pytest -m "not slow"',
+        "uv build --all-packages --out-dir dist/packages",
+        "complete-test jobs are manual or scheduled",
+    ]:
+        assert required in text

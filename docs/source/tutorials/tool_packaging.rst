@@ -269,7 +269,10 @@ Cleanup:
 Tool store
 ----------
 
-Versioned packages are installed in ``~/.bioimageflow/tool_packages/``:
+Versioned packages are installed in the BioImageFlow tool store.
+The path is resolved from ``BIOIMAGEFLOW_TOOL_STORE``, then
+``BIOIMAGEFLOW_HOME / "tool_packages"``, then
+``~/.bioimageflow/tool_packages``:
 
 .. code-block:: text
 
@@ -288,8 +291,6 @@ Versioned packages are installed in ``~/.bioimageflow/tool_packages/``:
 
 Packages are installed automatically by ``require_tool_packages`` or
 ``Workflow.load()`` when version info is present in a serialized workflow.
-The store path can be overridden via the ``BIOIMAGEFLOW_TOOL_STORE``
-environment variable.
 
 ``require_tool_packages`` uses Wetlands' Pixi installation to run
 ``pip install --target`` for missing packages. If a script needs a

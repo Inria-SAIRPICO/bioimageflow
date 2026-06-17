@@ -11,33 +11,33 @@ the current public tools are lightweight and suitable for fast CI tests.
 
 ## Tools
 
-- [ReadImage](#readimage): read an image and write a workflow-local
+- <a href="tools/read_image.md">ReadImage</a>: read an image and write a workflow-local
   copy.
-- [ReadImageMetadata](#readimagemetadata): report shape, dtype,
+- <a href="tools/read_image_metadata.md">ReadImageMetadata</a>: report shape, dtype,
   dimensionality, and a lightweight axes guess.
-- [ValidateImageLayout](#validateimagelayout): check declared layout
+- <a href="tools/validate_image_layout.md">ValidateImageLayout</a>: check declared layout
   length, required axes, and optional minimum sizes.
-- [ConvertImageFormat](#convertimageformat): select optional scene,
+- <a href="tools/convert_image_format.md">ConvertImageFormat</a>: select optional scene,
   channel, Z, or T dimensions and convert to imageio outputs, OME-TIFF, or
   minimal OME-Zarr by output suffix.
-- [ConvertToOmeTiff](#converttoometiff): convert an image file to
+- <a href="tools/convert_to_ome_tiff.md">ConvertToOmeTiff</a>: convert an image file to
   OME-TIFF with axis metadata.
-- [ConvertToOmeZarr](#converttoomezarr): convert an image file to a
+- <a href="tools/convert_to_ome_zarr.md">ConvertToOmeZarr</a>: convert an image file to a
   single-scale OME-Zarr v2 directory.
-- [SelectScene](#selectscene): extract scene 0 from ordinary images or
+- <a href="tools/select_scene.md">SelectScene</a>: extract scene 0 from ordinary images or
   a TIFF series by index.
-- [SelectTimepoint](#selecttimepoint): select one T index from a
+- <a href="tools/select_timepoint.md">SelectTimepoint</a>: select one T index from a
   declared layout.
-- [SelectChannel](#selectchannel): select one C index from a declared
+- <a href="tools/select_channel.md">SelectChannel</a>: select one C index from a declared
   layout.
-- [SelectZRange](#selectzrange): select a start-inclusive,
+- <a href="tools/select_z_range.md">SelectZRange</a>: select a start-inclusive,
   stop-exclusive Z slab from a declared layout.
-- [SelectDimensions](#selectdimensions): select a channel, z plane, or
+- <a href="tools/select_dimensions.md">SelectDimensions</a>: select a channel, z plane, or
   timepoint from declared axis layouts.
 
 ## Demo Workflow
 
-- [OME normalization workflow](#ome-normalization-workflow): read, slice,
+- <a href="workflows/ome_normalization.md">OME normalization workflow</a>: read, slice,
   and export a tiny OME-compatible image fixture.
 
 ## Tests and Demo Data

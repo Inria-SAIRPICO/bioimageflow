@@ -80,10 +80,12 @@ def test_common_docs_separate_public_tools_from_legacy_module_docs() -> None:
     assert "## Public Tools" in index
     assert "## Legacy Module Documentation" in index
     public_tools = index.split("## Legacy Module Documentation", maxsplit=1)[0]
-    assert "[Files]" in public_tools
-    assert "[Mosaic]" in public_tools
-    assert "[Atlas]" not in public_tools
-    assert "[ConvertImage]" not in public_tools
+    assert "Files" in public_tools
+    assert 'href="tools/files.md"' in public_tools
+    assert "Mosaic" in public_tools
+    assert 'href="tools/mosaic.md"' in public_tools
+    assert "Atlas" not in public_tools
+    assert "ConvertImage" not in public_tools
 
 
 def test_common_pyproject_declares_public_tool_runtime_dependencies() -> None:
