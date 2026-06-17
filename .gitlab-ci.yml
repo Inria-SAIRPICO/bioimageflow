@@ -5,6 +5,7 @@ stages:
   - test
   - build
   - docs
+  - complete
 
 variables:
   UV_CACHE_DIR: .uv-cache
@@ -29,8 +30,21 @@ pyright:
   script:
     - uv run pyright
 
-tests:
+tests:python3.10:
   stage: test
+  image: ghcr.io/astral-sh/uv:python3.10-bookworm
+  script:
+    - uv run pytest -m "not slow"
+
+tests:python3.11:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm
+  script:
+    - uv run pytest -m "not slow"
+
+tests:python3.12:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm
   script:
     - uv run pytest -m "not slow"
 
@@ -56,3 +70,33 @@ docs:
     when: always
     paths:
       - docs/_build/html/
+
+.complete-test-job:
+  stage: complete
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success
+    - when: manual
+
+complete-wetlands:
+  extends: .complete-test-job
+  script:
+    - uv run pytest -m "complete and wetlands" --run-complete -rsx
+
+complete-public-data:
+  extends: .complete-test-job
+  variables:
+    BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS: "1"
+  script:
+    - uv run pytest -m "complete and public_data" --run-complete -rsx
+
+complete-external-binaries:
+  extends: .complete-test-job
+  script:
+    - uv run pytest -m "complete and external_binary" --run-complete -rsx
+
+complete-model-runtimes:
+  extends: .complete-test-job
+  script:
+    - uv run pytest -m "complete and model_runtime" --run-complete -rsx

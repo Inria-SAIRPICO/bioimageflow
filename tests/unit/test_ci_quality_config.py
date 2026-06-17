@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import sys
 
+import yaml
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - Python < 3.11
@@ -18,6 +20,10 @@ ROOT = Path(__file__).parents[2]
 
 def _pyproject() -> dict:
     return tomllib.loads((ROOT / "pyproject.toml").read_text())
+
+
+def _gitlab_ci() -> dict:
+    return yaml.safe_load((ROOT / ".gitlab-ci.yml").read_text())
 
 
 def test_ruff_policy_is_explicit() -> None:
@@ -60,8 +66,41 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
 
     for command in expected_commands:
         assert command in ci_text
-    assert "--run-complete" not in ci_text
     assert "ghcr.io/astral-sh/uv:python3.10-bookworm" in ci_text
+
+
+def test_gitlab_ci_has_supported_python_test_matrix() -> None:
+    ci_config = _gitlab_ci()
+
+    for version in ["3.10", "3.11", "3.12"]:
+        job = ci_config[f"tests:python{version}"]
+        assert job["stage"] == "test"
+        assert job["image"] == f"ghcr.io/astral-sh/uv:python{version}-bookworm"
+        assert job["script"] == ['uv run pytest -m "not slow"']
+
+
+def test_gitlab_ci_complete_jobs_are_optional_and_separate() -> None:
+    ci_config = _gitlab_ci()
+    template = ci_config[".complete-test-job"]
+
+    assert template["stage"] == "complete"
+    assert template["allow_failure"] is True
+    assert template["rules"] == [
+        {"if": '$CI_PIPELINE_SOURCE == "schedule"', "when": "on_success"},
+        {"when": "manual"},
+    ]
+    for job_name, selector in {
+        "complete-wetlands": 'complete and wetlands',
+        "complete-public-data": 'complete and public_data',
+        "complete-external-binaries": 'complete and external_binary',
+        "complete-model-runtimes": 'complete and model_runtime',
+    }.items():
+        job = ci_config[job_name]
+        assert job["extends"] == ".complete-test-job"
+        assert job["script"] == [f'uv run pytest -m "{selector}" --run-complete -rsx']
+
+    public_data_job = ci_config["complete-public-data"]
+    assert public_data_job["variables"] == {"BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS": "1"}
 
 
 def test_contributor_docs_match_ci_quality_commands() -> None:
@@ -78,6 +117,8 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
     ]:
         assert command in docs_text
 
+    assert "Python 3.10, 3.11, and 3.12" in docs_text
+    assert 'uv run pytest -m "complete and wetlands" --run-complete -rsx' in docs_text
     assert "open build/html/index.html" in readme_text
 
 

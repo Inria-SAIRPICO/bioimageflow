@@ -27,6 +27,8 @@ CI runs the deterministic default tier with slow tests excluded:
 uv run pytest -m "not slow"
 ```
 
+The GitLab CI regular-test matrix runs that command on Python 3.10, 3.11, and 3.12.
+
 Package-local regular tests can be run with:
 
 ```bash
@@ -67,6 +69,21 @@ To run one complete Wetlands package or workflow slice:
 uv run pytest packages/bioimageflow-sairpico-tools/tests -m "complete and wetlands" --run-complete
 uv run pytest tests/priority_workflows -m "complete and wetlands" --run-complete
 ```
+
+GitLab CI also defines manual or scheduled complete-test jobs that are separate from the required deterministic gates:
+
+```bash
+uv run pytest -m "complete and wetlands" --run-complete -rsx
+uv run pytest -m "complete and public_data" --run-complete -rsx
+uv run pytest -m "complete and external_binary" --run-complete -rsx
+uv run pytest -m "complete and model_runtime" --run-complete -rsx
+```
+
+The Wetlands job is an umbrella portability selector.
+Resource-specific jobs are focused reruns for triage, so scheduled complete pipelines may intentionally select some tests more than once.
+Public-data cases selected by the umbrella Wetlands job still require `BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS=1`; otherwise they skip with the same actionable reason as a local run.
+
+Those jobs are allowed to fail in CI because they depend on service availability, downloads, optional model runtimes, or external binaries rather than only on deterministic product behavior.
 
 The remaining valid complete-test gates are:
 
