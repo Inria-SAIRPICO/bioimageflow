@@ -1,4 +1,4 @@
-# BioImageFlow Segmentation Tools
+# bioimageflow-segmentation-tools
 
 Segmentation-focused tool package for BioImageFlow.
 

@@ -28,7 +28,7 @@ pip install bioimageflow
 For development:
 
 ```bash
-git clone https://github.com/your-org/bioimageflow.git
+git clone https://gitlab.inria.fr/sairpico/bioimageflow.git
 cd bioimageflow
 uv sync
 ```
@@ -62,7 +62,7 @@ class FileLoader(DataFrameTool):
 # 2. Define a processing tool (runs in an isolated environment)
 class Threshold(ProcessingTool):
     name = "threshold"
-    environment = EnvironmentSpec(name="base", dependencies={})
+    environment = EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})
 
     class Inputs:
         image: Annotated[Path, ImageSpec()]
@@ -74,12 +74,12 @@ class Threshold(ProcessingTool):
         )
 
     def process_row(self, arguments: Arguments) -> "Threshold.Outputs":
+        import imageio.v3 as iio
         import numpy as np
-        from skimage.io import imread, imsave
 
-        img = imread(arguments.image)
+        img = iio.imread(arguments.image)
         mask = (img > arguments.cutoff).astype(np.uint8) * 255
-        imsave(str(arguments.mask), mask)
+        iio.imwrite(arguments.mask, mask)
         return self.Outputs(mask=arguments.mask)
 
 

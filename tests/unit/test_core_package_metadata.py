@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 import sys
 
@@ -13,6 +14,42 @@ else:  # pragma: no cover - Python < 3.11
 
 
 ROOT = Path(__file__).parents[2]
+FIRST_PARTY_DISTRIBUTIONS = {
+    "bioimageflow",
+    "bioimageflow-common-tools",
+    "bioimageflow-core",
+    "bioimageflow-io-tools",
+    "bioimageflow-measurement-tools",
+    "bioimageflow-restoration-tools",
+    "bioimageflow-sairpico-tools",
+    "bioimageflow-segmentation-tools",
+    "bioimageflow-spot-tools",
+    "bioimageflow-tracking-tools",
+}
+EXPECTED_PROJECT_URLS = {
+    "Homepage": "https://gitlab.inria.fr/sairpico/bioimageflow",
+    "Repository": "https://gitlab.inria.fr/sairpico/bioimageflow",
+    "Issues": "https://gitlab.inria.fr/sairpico/bioimageflow/-/issues",
+}
+BASE_CLASSIFIERS = {
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Image Processing",
+}
+HEAVY_OR_DEFERRED_DEPENDENCY_NAMES = {
+    "big-fish",
+    "btrack",
+    "cellpose",
+    "laptrack",
+    "parsl",
+    "simpleitk",
+    "stardist",
+    "tensorflow",
+}
 
 
 def _pyproject(path: Path) -> dict:
@@ -39,6 +76,11 @@ def _package_pyprojects() -> list[Path]:
 
 def _project(path: Path) -> dict:
     return _pyproject(path)["project"]
+
+
+def _pytest_marker_names_from_pyproject() -> set[str]:
+    markers = _pyproject(ROOT / "pyproject.toml")["tool"]["pytest"]["ini_options"]["markers"]
+    return {marker.split(":", 1)[0] for marker in markers}
 
 
 def _dependency_entries(dependencies: list[str], package_name: str) -> list[str]:
@@ -170,6 +212,155 @@ def test_publishable_packages_declare_existing_readmes() -> None:
             offenders[str(path.relative_to(ROOT))] = readme
 
     assert offenders == {}
+
+
+def test_repository_declares_bsd_4_clause_license() -> None:
+    license_path = ROOT / "LICENSE"
+
+    assert license_path.is_file()
+    assert "BSD 4-Clause License" in license_path.read_text()
+
+
+def test_publishable_packages_declare_release_metadata() -> None:
+    offenders: dict[str, list[str]] = {}
+
+    for path in _package_pyprojects():
+        project = _project(path)
+        missing = []
+        if project.get("authors") != [{"name": "BioImageFlow Contributors"}]:
+            missing.append("authors")
+        if project.get("license") != "BSD-4-Clause":
+            missing.append("license")
+        if project.get("license-files") != ["LICENSE"]:
+            missing.append("license-files")
+        if project.get("urls") != EXPECTED_PROJECT_URLS:
+            missing.append("urls")
+        if not BASE_CLASSIFIERS.issubset(set(project.get("classifiers", []))):
+            missing.append("classifiers")
+        keywords = set(project.get("keywords", []))
+        if not {"bioimageflow", "bioimage-analysis", "workflow"}.issubset(keywords):
+            missing.append("keywords")
+        if missing:
+            offenders[str(path.relative_to(ROOT))] = missing
+
+    assert offenders == {}
+
+
+def test_publishable_package_readme_titles_include_distribution_name() -> None:
+    offenders: dict[str, str] = {}
+
+    for path in _package_pyprojects():
+        project = _project(path)
+        title = (path.parent / project["readme"]).read_text().splitlines()[0]
+        if project["name"] not in title:
+            offenders[str(path.relative_to(ROOT))] = title
+
+    assert offenders == {}
+
+
+def test_no_release_extras_are_declared() -> None:
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "pyproject.toml", *_package_pyprojects()]
+        if "optional-dependencies" in _pyproject(path).get("project", {})
+    ]
+
+    assert offenders == []
+
+
+def test_package_uv_sources_match_first_party_runtime_dependencies() -> None:
+    offenders: dict[str, dict[str, set[str]]] = {}
+
+    for path in _package_pyprojects():
+        pyproject = _pyproject(path)
+        project = pyproject["project"]
+        dependencies = {
+            _dependency_name(dependency)
+            for dependency in project.get("dependencies", [])
+            if _dependency_name(dependency) in FIRST_PARTY_DISTRIBUTIONS
+        }
+        sources = set(pyproject.get("tool", {}).get("uv", {}).get("sources", {}))
+        if dependencies != sources:
+            offenders[str(path.relative_to(ROOT))] = {
+                "dependencies": dependencies,
+                "sources": sources,
+            }
+
+    assert offenders == {}
+
+
+def test_root_dependency_groups_do_not_define_heavy_or_deferred_runtime_surfaces() -> None:
+    groups = _pyproject(ROOT / "pyproject.toml").get("dependency-groups", {})
+    offenders: dict[str, list[str]] = {}
+
+    for group_name, dependencies in groups.items():
+        heavy = sorted(
+            dependency
+            for dependency in dependencies
+            if _dependency_name(dependency) in HEAVY_OR_DEFERRED_DEPENDENCY_NAMES
+        )
+        if heavy:
+            offenders[group_name] = heavy
+
+    assert offenders == {}
+
+
+def test_pytest_marker_registry_matches_pyproject() -> None:
+    namespace: dict[str, object] = {}
+    exec((ROOT / "conftest.py").read_text(), namespace)
+    registered_marker_entries = namespace["REGISTERED_TEST_MARKERS"]
+    complete_marker_entries = namespace["COMPLETE_TEST_MARKERS"]
+    assert isinstance(registered_marker_entries, list)
+    assert isinstance(complete_marker_entries, list)
+
+    registered_markers = {
+        marker.split(":", 1)[0]
+        for marker in registered_marker_entries
+        if isinstance(marker, str)
+    }
+    external_markers = {
+        marker.split(":", 1)[0]
+        for marker in complete_marker_entries
+        if isinstance(marker, str)
+    }
+
+    assert registered_markers == _pytest_marker_names_from_pyproject()
+    assert external_markers < registered_markers
+
+
+def test_docs_do_not_contain_placeholder_repository_urls() -> None:
+    docs = [
+        ROOT / "README.md",
+        ROOT / "docs" / "source" / "installation.rst",
+        ROOT / "docs" / "source" / "conf.py",
+    ]
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in docs
+        if "github.com/your-org/bioimageflow" in path.read_text()
+    ]
+
+    assert offenders == []
+
+
+def test_readme_quick_start_declares_imported_processing_dependencies() -> None:
+    docs = {
+        "README.md": (ROOT / "README.md").read_text(),
+        "docs/source/index.rst": (ROOT / "docs" / "source" / "index.rst").read_text(),
+    }
+
+    for text in docs.values():
+        assert 'EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})' in text
+        assert "from skimage.io import imread, imsave" not in text
+        assert re.search(r"import imageio\.v3 as iio", text) is not None
+
+
+def test_sphinx_quickstart_declares_imported_processing_dependencies() -> None:
+    quickstart = (ROOT / "docs" / "source" / "quickstart.rst").read_text()
+
+    assert 'EnvironmentSpec(name="imageio", dependencies={"imageio": "*"})' in quickstart
+    assert "from skimage.io import imread, imsave" not in quickstart
+    assert re.search(r"import imageio\.v3 as iio", quickstart) is not None
 
 
 def test_docs_python_requirement_matches_v1_contract() -> None:
