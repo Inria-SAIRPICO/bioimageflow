@@ -1,11 +1,11 @@
 [project]
 name = "bioimageflow-segmentation-tools"
-version = "0.1.0"
+version = "0.1.6"
 description = "Segmentation tools for BioImageFlow"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bioimageflow-core>=0.1.6",
-    "bioimageflow>=0.1.4",
     "imageio",
     "numpy",
     "scikit-image",

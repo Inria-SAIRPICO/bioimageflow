@@ -1,7 +1,8 @@
 [project]
 name = "bioimageflow-io-tools"
-version = "0.1.0"
+version = "0.1.6"
 description = "Lightweight image IO tools for BioImageFlow"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bioimageflow-core>=0.1.6",

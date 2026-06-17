@@ -1,13 +1,15 @@
 [project]
 name = "bioimageflow-tracking-tools"
-version = "0.1.0"
+version = "0.1.6"
 description = "Object extraction and lightweight tracking tools for BioImageFlow"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bioimageflow-core>=0.1.6",
-    "bioimageflow>=0.1.4",
+    "bioimageflow>=0.1.6",
     "imageio",
     "numpy",
+    "pandas",
 ]
 
 [tool.uv.sources]

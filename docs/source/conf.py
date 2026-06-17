@@ -13,7 +13,7 @@ sys.path.insert(0, str(root / "packages" / "bioimageflow"))
 project = "BioImageFlow"
 copyright = "2026, BioImageFlow Contributors"
 author = "BioImageFlow Contributors"
-release = "0.1.0"
+release = "0.1.6"
 
 # -- General configuration ---------------------------------------------------
 

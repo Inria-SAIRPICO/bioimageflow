@@ -20,8 +20,18 @@ Heavy model dependencies are declared in isolated `EnvironmentSpec` objects and 
 ## Example
 
 ```python
+from bioimageflow_core import Arguments
 from bioimageflow_segmentation_tools import ThresholdSegment
 
 segment = ThresholdSegment()
-node = segment(input_image=raw["path"], threshold=128.0)
+result = segment.process_row(
+    Arguments(
+        input_image="input.tif",
+        threshold=128.0,
+        labels="labels.tif",
+        above=True,
+    )
+)
 ```
+
+Workflow graph construction with `segment(...)` requires installing the main-process `bioimageflow` orchestrator alongside this package.
