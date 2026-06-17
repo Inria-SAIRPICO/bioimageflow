@@ -64,9 +64,11 @@ Key classes:
 - :class:`~bioimageflow.Node` / :class:`~bioimageflow.ColumnRef` --- graph
   primitives
 - :class:`~bioimageflow.DataFrameTool` --- main-process DataFrame transforms
-- Merge strategies: :class:`~bioimageflow.InnerJoin`,
-  :class:`~bioimageflow.CrossJoin`, :class:`~bioimageflow.JoinOnColumn`,
-  :class:`~bioimageflow.Concat`, :class:`~bioimageflow.Collect`
+- Merge strategies: :class:`~bioimageflow_common_tools.InnerJoin`,
+  :class:`~bioimageflow_common_tools.CrossJoin`,
+  :class:`~bioimageflow_common_tools.JoinOnColumn`,
+  :class:`~bioimageflow_common_tools.Concat`,
+  :class:`~bioimageflow_common_tools.Collect`
 
 Plus ``WorkflowSession``, ``ToolRegistry``, and the validation surface for
 GUI / platform integrators — see the :doc:`GUI / Platform Integrators tree

@@ -11,22 +11,22 @@ Big-FISH remains a future optional evaluation backend, not a current default dep
 
 ## Tools
 
-- [DetectSpots](#detectspots): LoG, DoG, or local-maxima spot
+- <a href="tools/detect_spots.md">DetectSpots</a>: LoG, DoG, or local-maxima spot
   detection.
-- [AssignSpotsToLabels](#assignspotstolabels): sample label values
+- <a href="tools/assign_spots_to_labels.md">AssignSpotsToLabels</a>: sample label values
   at spot coordinates.
-- [SpotSummary](#spotsummary): aggregate assigned spot counts and
+- <a href="tools/spot_summary.md">SpotSummary</a>: aggregate assigned spot counts and
   intensities per label.
-- [FilterSpots](#filterspots): filter spot dataframe rows by numeric thresholds and masks.
-- [RenderSpots](#renderspots): render coordinates to label or mask images.
-- [SpotsToLabels](#spotstolabels): create spot label images from dataframe rows or masks.
-- [SpotColocalization](#spotcolocalization): match two upstream spot dataframes by distance.
-- [SpotQualityMetrics](#spotqualitymetrics): compute SNR, local background,
+- <a href="tools/filter_spots.md">FilterSpots</a>: filter spot dataframe rows by numeric thresholds and masks.
+- <a href="tools/render_spots.md">RenderSpots</a>: render coordinates to label or mask images.
+- <a href="tools/spots_to_labels.md">SpotsToLabels</a>: create spot label images from dataframe rows or masks.
+- <a href="tools/spot_colocalization.md">SpotColocalization</a>: match two upstream spot dataframes by distance.
+- <a href="tools/spot_quality_metrics.md">SpotQualityMetrics</a>: compute SNR, local background,
   and nearest-neighbor distances.
 
 ## Demo Workflow
 
-- [Puncta analysis workflow](#puncta-analysis-workflow): detect puncta,
+- <a href="workflows/puncta_analysis.md">Puncta analysis workflow</a>: detect puncta,
   assign them to labels, and summarize per-object signal.
 
 ## Tests and Demo Data

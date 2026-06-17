@@ -11,20 +11,20 @@ SAIRPICO command-line restoration tools live in `bioimageflow-sairpico-tools`.
 
 ## Tools
 
-- [RestoreImage](#restoreimage): apply a TV, bilateral, Gaussian, or
+- <a href="tools/restore_image.md">RestoreImage</a>: apply a TV, bilateral, Gaussian, or
   unsharp-style restoration baseline.
-- [BenchmarkRestoration](#benchmarkrestoration): generate a synthetic clean/degraded/restored benchmark and dataframe metrics.
-- [GaussianDenoise](#gaussiandenoise): Gaussian smoothing baseline.
-- [MedianDenoise](#mediandenoise): median denoising baseline.
-- [BackgroundSubtract](#backgroundsubtract): subtract a smoothed background
+- <a href="tools/benchmark_restoration.md">BenchmarkRestoration</a>: generate a synthetic clean/degraded/restored benchmark and dataframe metrics.
+- <a href="tools/gaussian_denoise.md">GaussianDenoise</a>: Gaussian smoothing baseline.
+- <a href="tools/median_denoise.md">MedianDenoise</a>: median denoising baseline.
+- <a href="tools/background_subtract.md">BackgroundSubtract</a>: subtract a smoothed background
   estimate.
-- [UnsharpMask](#unsharpmask): sharpen by adding high-frequency residuals.
-- [RichardsonLucyRestoration](#richardsonlucyrestoration): lightweight
+- <a href="tools/unsharp_mask.md">UnsharpMask</a>: sharpen by adding high-frequency residuals.
+- <a href="tools/richardson_lucy_restoration.md">RichardsonLucyRestoration</a>: lightweight
   Richardson-Lucy deconvolution baseline.
 
 ## Demo Workflow
 
-- [Restoration benchmark workflow](#restoration-benchmark-workflow):
+- <a href="workflows/restoration_benchmark.md">Restoration benchmark workflow</a>:
   generate clean/degraded/restored images and verify metric improvement.
 
 ## Tests and Demo Data

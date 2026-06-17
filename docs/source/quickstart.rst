@@ -76,7 +76,10 @@ Declare its inputs, outputs, and the environment it needs:
 
    class InvertImage(ProcessingTool):
        display_name = "Invert"
-       environment = EnvironmentSpec(name="imageio", dependencies={"imageio": "*"})
+       environment = EnvironmentSpec(
+           name="imageio",
+           dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
+       )
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -113,15 +116,15 @@ Wire tools together inside a :class:`~bioimageflow.Workflow` context manager:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
        images = files(path="/data/raw", pattern="*.tif")
-       inverted = invert(image=images["path"])
+       inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)
 
    print(result)
    #    inverted
-   # 0  bif_data/data/invert/20260101_120000_abc123def456/assets/image1_inv.tif
-   # 1  bif_data/data/invert/20260101_120000_abc123def456/assets/image2_inv.tif
+   # 0  /.../bif_data/cache/v1/results/.../records/rec_.../assets/image1_inv.tif
+   # 1  /.../bif_data/cache/v1/results/.../records/rec_.../assets/image2_inv.tif
 
 What happens:
 
@@ -130,10 +133,10 @@ What happens:
    column of the source node.
 3. ``wf.compute(inverted)`` executes the DAG in topological order.
 
-The result is a pandas DataFrame with one column per output field. Each cached
-node lives under
-``./bif_data/data/<node_name>/<timestamp>_<hash>/``, with the output DataFrame
-in ``dataframe.csv`` and any image outputs under ``assets/`` —
+The result is a pandas DataFrame with one column per output field.
+Owned output assets are stored in immutable v1 records under
+``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/`` and the
+run view under ``./bif_data/runs/`` points back to the selected record.
 :doc:`concepts/caching` covers the cache lifecycle, ``plan()`` and
 ``invalidate()``. Wetlands environments for this run are kept under
 ``./wetlands`` because the script called ``configure_wetlands()``.
@@ -146,9 +149,9 @@ that inputs, parameters, and tool versions haven't changed:
 
 .. code-block:: python
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
        images = files(path="/data/raw", pattern="*.tif")
-       inverted = invert(image=images["path"])
+       inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)  # cache hit, no recomputation
 
 Next steps

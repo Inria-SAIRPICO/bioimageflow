@@ -2,19 +2,20 @@ Merge Strategies
 ================
 
 When a tool needs data from multiple upstream nodes, the framework must combine
-their DataFrames. BioImageFlow provides several built-in merge strategies as
-:class:`~bioimageflow.DataFrameTool` subclasses.
+their DataFrames. ``bioimageflow-common-tools`` provides several merge
+strategies as :class:`~bioimageflow.DataFrameTool` subclasses.
 
 InnerJoin (default)
 -------------------
 
-:class:`~bioimageflow.InnerJoin` joins DataFrames on their index. This is the
+:class:`~bioimageflow_common_tools.InnerJoin` joins DataFrames on their index. This is the
 default behaviour when a ProcessingTool receives inputs from multiple upstream
 nodes.
 
 .. code-block:: python
 
-   from bioimageflow import InnerJoin, Workflow
+   from bioimageflow import Workflow
+   from bioimageflow_common_tools import InnerJoin
 
    join = InnerJoin()
 
@@ -28,12 +29,12 @@ nodes.
 CrossJoin
 ---------
 
-:class:`~bioimageflow.CrossJoin` produces the Cartesian product of two
+:class:`~bioimageflow_common_tools.CrossJoin` produces the Cartesian product of two
 DataFrames. Useful for applying every parameter combination to every image:
 
 .. code-block:: python
 
-   from bioimageflow import CrossJoin
+   from bioimageflow_common_tools import CrossJoin
 
    cross = CrossJoin()
 
@@ -54,12 +55,12 @@ Use ``suffixes`` to resolve column name conflicts:
 JoinOnColumn
 ------------
 
-:class:`~bioimageflow.JoinOnColumn` joins on a named column rather than the
+:class:`~bioimageflow_common_tools.JoinOnColumn` joins on a named column rather than the
 index:
 
 .. code-block:: python
 
-   from bioimageflow import JoinOnColumn
+   from bioimageflow_common_tools import JoinOnColumn
 
    join = JoinOnColumn()
 
@@ -79,12 +80,12 @@ Parameters:
 Concat
 ------
 
-:class:`~bioimageflow.Concat` stacks DataFrames vertically. Use it to combine
+:class:`~bioimageflow_common_tools.Concat` stacks DataFrames vertically. Use it to combine
 results from parallel branches:
 
 .. code-block:: python
 
-   from bioimageflow import Concat
+   from bioimageflow_common_tools import Concat
 
    concat = Concat()
 
@@ -97,13 +98,13 @@ results from parallel branches:
 Collect
 -------
 
-:class:`~bioimageflow.Collect` gathers specific columns from multiple ancestor
+:class:`~bioimageflow_common_tools.Collect` gathers specific columns from multiple ancestor
 nodes into a single DataFrame. Its output uses
 :class:`~bioimageflow.Passthrough`, preserving input columns:
 
 .. code-block:: python
 
-   from bioimageflow import Collect
+   from bioimageflow_common_tools import Collect
 
    collect = Collect()
 
@@ -133,7 +134,7 @@ Construction-time column validation
 
 When both upstream nodes have a known schema, the merged schema is also known
 at construction time, and ``node["col"]`` validates immediately. For example,
-:class:`~bioimageflow.CrossJoin` of two :class:`~bioimageflow_common_tools.Generate`
+:class:`~bioimageflow_common_tools.CrossJoin` of two :class:`~bioimageflow_common_tools.Generate`
 nodes resolves to the union of their declared column names:
 
 .. code-block:: python

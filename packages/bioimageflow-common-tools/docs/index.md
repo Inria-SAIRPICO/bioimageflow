@@ -13,26 +13,26 @@ The package is intended for users who need to assemble or inspect workflows with
 
 ## Public Tools
 
-- [Files](#files): create a source table from files in a directory.
-- [TableFromCsv](#tablefromcsv): load CSV or TSV metadata as a source
+- <a href="tools/files.md">Files</a>: create a source table from files in a directory.
+- <a href="tools/table_from_csv.md">TableFromCsv</a>: load CSV or TSV metadata as a source
   table.
-- [Generate](#generate): create a source table from literal values.
-- [InnerJoin](#innerjoin): merge upstream rows on their index.
-- [CrossJoin](#crossjoin): create all row combinations.
-- [JoinOnColumn](#joinoncolumn): join tables on a named column.
-- [Concat](#concat): append rows from multiple tables.
-- [Collect](#collect): collect ancestor columns into one table.
-- [FilterTableRows](#filtertablerows): filter rows by a simple
+- <a href="tools/generate.md">Generate</a>: create a source table from literal values.
+- <a href="tools/inner_join.md">InnerJoin</a>: merge upstream rows on their index.
+- <a href="tools/cross_join.md">CrossJoin</a>: create all row combinations.
+- <a href="tools/join_on_column.md">JoinOnColumn</a>: join tables on a named column.
+- <a href="tools/concat.md">Concat</a>: append rows from multiple tables.
+- <a href="tools/collect.md">Collect</a>: collect ancestor columns into one table.
+- <a href="tools/filter_table_rows.md">FilterTableRows</a>: filter rows by a simple
   predicate.
-- [SelectColumns](#selectcolumns): keep and optionally rename columns.
-- [WriteTable](#writetable): persist an upstream table to CSV or TSV.
-- [ExtractChannel](#extractchannel): write one channel from a
+- <a href="tools/select_columns.md">SelectColumns</a>: keep and optionally rename columns.
+- <a href="tools/write_table.md">WriteTable</a>: persist an upstream table to CSV or TSV.
+- <a href="tools/extract_channel.md">ExtractChannel</a>: write one channel from a
   channel-first image.
-- [ConnectedComponents](#connectedcomponents): label foreground
+- <a href="tools/connected_components.md">ConnectedComponents</a>: label foreground
   components in a binary image.
-- [LabelOverlaps](#labeloverlaps): count pixel overlaps between label
+- <a href="tools/label_overlaps.md">LabelOverlaps</a>: count pixel overlaps between label
   images.
-- [Mosaic](#mosaic): build a grid image from workflow rows.
+- <a href="tools/mosaic.md">Mosaic</a>: build a grid image from workflow rows.
 
 ## Legacy Module Documentation
 
@@ -40,17 +40,17 @@ These wrappers remain documented for existing workflows, but they are not
 re-exported from `bioimageflow_common_tools` and should not be treated as
 current public common-tools APIs.
 
-- [Atlas](#atlas): legacy module-level wrapper for the Atlas spot detection
+- <a href="tools/atlas.md">Atlas</a>: legacy module-level wrapper for the Atlas spot detection
   CLI, currently used by existing FISH examples. Its core dependency is the
   external Atlas CLI from the `bioimageit::atlas` conda package.
-- [ConvertImage](#convertimage): legacy module-level bioio conversion wrapper.
+- <a href="tools/convert_image.md">ConvertImage</a>: legacy module-level bioio conversion wrapper.
   Prefer `bioimageflow-io-tools` for new simple OME normalization workflows.
   Its core dependencies are bioio, bioio writer plugins, Pillow, NumPy, and
   tifffile.
 
 ## Demo Workflow
 
-- [Common glue workflow](#common-glue-workflow): source discovery,
+- <a href="workflows/common_glue.md">Common glue workflow</a>: source discovery,
   parameter generation, and table expansion.
 
 ## Tests and Demo Data

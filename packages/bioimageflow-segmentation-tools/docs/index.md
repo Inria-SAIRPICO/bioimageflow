@@ -5,34 +5,35 @@ threshold/watershed workflows and optional deep-learning models. It is the
 package to install when a workflow needs label images from intensity,
 probability, or binary inputs.
 
-Install-time libraries are imageio, NumPy, scikit-image, and tifffile.
+Install-time libraries are imageio, NumPy, and scikit-image.
+Classical tool runtime environments include tifffile where file-format handling needs it.
 Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in isolated `EnvironmentSpec` environments and are imported inside `process_row`, so graph construction and schema tests remain lightweight.
 
 ## Tools
 
-- [ThresholdSegment](#thresholdsegment): threshold and connected
+- <a href="tools/threshold_segment.md">ThresholdSegment</a>: threshold and connected
   component labeling.
-- [OtsuThresholdSegment](#otsuthresholdsegment): global Otsu thresholding
+- <a href="tools/otsu_threshold_segment.md">OtsuThresholdSegment</a>: global Otsu thresholding
   with connected-component labeling.
-- [LocalThresholdSegment](#localthresholdsegment): Sauvola adaptive
+- <a href="tools/local_threshold_segment.md">LocalThresholdSegment</a>: Sauvola adaptive
   thresholding with connected-component labeling.
-- [WatershedSegment](#watershedsegment): marker-controlled foreground
+- <a href="tools/watershed_segment.md">WatershedSegment</a>: marker-controlled foreground
   splitting.
-- [DistanceWatershedSegment](#distancewatershedsegment): marker-free
+- <a href="tools/distance_watershed_segment.md">DistanceWatershedSegment</a>: marker-free
   distance-transform watershed.
-- [SplitTouchingObjects](#splittouchingobjects): split clumped label masks
+- <a href="tools/split_touching_objects.md">SplitTouchingObjects</a>: split clumped label masks
   with distance watershed semantics.
-- [FilterLabels](#filterlabels): filter labels by area, border contact,
+- <a href="tools/filter_labels.md">FilterLabels</a>: filter labels by area, border contact,
   intensity, and shape.
-- [PostprocessLabels](#postprocesslabels): minimum-size filtering and
+- <a href="tools/postprocess_labels.md">PostprocessLabels</a>: minimum-size filtering and
   sequential relabeling.
-- [Cellpose3](#cellpose3): Cellpose v3 pretrained model wrapper.
-- [StarDistSegmenter](#stardistsegmenter): StarDist 2D pretrained
+- <a href="tools/cellpose3.md">Cellpose3</a>: Cellpose v3 pretrained model wrapper.
+- <a href="tools/stardist_segmenter.md">StarDistSegmenter</a>: StarDist 2D pretrained
   model wrapper.
 
 ## Demo Workflow
 
-- [BBBC038 segmentation benchmark](#bbbc038-segmentation-benchmark-workflow):
+- <a href="workflows/bbbc038_segmentation_benchmark.md">BBBC038 segmentation benchmark</a>:
   synthetic nuclei segmentation with a path to public BBBC038 validation.
 
 ## Tests and Demo Data

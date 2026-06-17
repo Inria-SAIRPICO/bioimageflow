@@ -11,7 +11,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 - **Typed image I/O** — annotate inputs/outputs with semantic type, layout, and dtype constraints; reusable groups such as `SCALAR_IMAGE_SEMANTICS` cover common scalar image consumers
 - **Automatic caching** — v1 result-key/current-record caching skips redundant computation
 - **Shared memory** — zero-copy array transfer between tools via `SharedArray`
-- **Merge strategies** — built-in inner join, cross join, concat, and collect operations
+- **Companion merge strategies** — inner join, cross join, concat, and collect tools from `bioimageflow-common-tools`
 - **Output templating** — declarative output path patterns with `{input.stem}`, `{row_index}`, etc.
 - **Environment isolation** — each tool declares its own `EnvironmentSpec` so dependencies never conflict
 
@@ -46,7 +46,7 @@ from bioimageflow import Workflow, DataFrameTool
 
 # 1. Define a source tool (DataFrameTool produces a DataFrame)
 class FileLoader(DataFrameTool):
-    name = "file_loader"
+    display_name = "File Loader"
 
     class Inputs:
         folder: str
@@ -61,8 +61,11 @@ class FileLoader(DataFrameTool):
 
 # 2. Define a processing tool (runs in an isolated environment)
 class Threshold(ProcessingTool):
-    name = "threshold"
-    environment = EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})
+    display_name = "Threshold"
+    environment = EnvironmentSpec(
+        name="imageio",
+        dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
+    )
 
     class Inputs:
         image: Annotated[Path, ImageSpec()]
@@ -84,12 +87,16 @@ class Threshold(ProcessingTool):
 
 
 # 3. Build and run the workflow
+from bioimageflow import configure_wetlands
+
 threshold = Threshold()
 loader = FileLoader()
 
-with Workflow(storage_path="./bif_data") as wf:
+configure_wetlands(wetlands_instance_path="./wetlands")
+
+with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
     raw = loader(folder="/data/images")
-    masks = threshold(image=raw["path"], cutoff=100.0)
+    masks = threshold(image=raw["path"], cutoff=100.0, name="threshold")
     result = wf.compute(masks)
 
 print(result)  # DataFrame with a 'mask' column of output paths
@@ -105,7 +112,7 @@ bioimageflow-core          bioimageflow
 │  ImageSpec, groups   │   │  Node, ColumnRef          │
 │  ProcessingTool      │   │  SequentialEngine         │
 │  IOModel, Arguments  │   │  DataFrameTool            │
-│  EnvironmentSpec     │   │  Merge strategies         │
+│  EnvironmentSpec     │   │  Tool registry            │
 │  SharedArray, I/O    │   │  Cache, Storage, Template │
 └─────────────────────┘   └──────────────────────────┘
 ```

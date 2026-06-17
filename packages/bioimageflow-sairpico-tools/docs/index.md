@@ -7,22 +7,22 @@ the original binaries in conda-backed `EnvironmentSpec` definitions.
 
 The public tools are:
 
-- [GaussianPSF](#gaussianpsf): generate a 3D Gaussian PSF with
+- <a href="tools/gaussian_psf.md">GaussianPSF</a>: generate a 3D Gaussian PSF with
   `simggaussian3dpsf`.
-- [GibsonLanniPSF](#gibsonlannipsf): generate a 3D Gibson-Lanni PSF
+- <a href="tools/gibson_lanni_psf.md">GibsonLanniPSF</a>: generate a 3D Gibson-Lanni PSF
   with `simggibsonlannipsf`.
-- [RichardsonLucyDeconvolution](#richardsonlucydeconvolution): run
+- <a href="tools/richardson_lucy_deconvolution.md">RichardsonLucyDeconvolution</a>: run
   2D, 2D-slice, or 3D Richardson-Lucy deconvolution.
-- [WienerDeconvolution](#wienerdeconvolution): run 2D, 2D-slice, or
+- <a href="tools/wiener_deconvolution.md">WienerDeconvolution</a>: run 2D, 2D-slice, or
   3D Wiener deconvolution.
-- [SpitfireDeconvolution](#spitfiredeconvolution): run 2D, 2D-slice,
+- <a href="tools/spitfire_deconvolution.md">SpitfireDeconvolution</a>: run 2D, 2D-slice,
   or 3D SPITFIR(e) deconvolution.
-- [MedianDenoising](#mediandenoising): run 2D, 3D, or 4D median
+- <a href="tools/median_denoising.md">MedianDenoising</a>: run 2D, 3D, or 4D median
   filtering.
-- [CImgDenoising](#cimgdenoising): run the CImg `denoise` command.
-- [HotspotDetection](#hotspotdetection): run `hotSpotDetection` for
+- <a href="tools/cimg_denoising.md">CImgDenoising</a>: run the CImg `denoise` command.
+- <a href="tools/hotspot_detection.md">HotspotDetection</a>: run `hotSpotDetection` for
   sparse hotspot detection.
-- [HotspotToSpots](#hotspottospots): convert hotspot images into spot tables.
+- <a href="tools/hotspot_to_spots.md">HotspotToSpots</a>: convert hotspot images into spot tables.
 
 The package declares three environments:
 
@@ -46,4 +46,4 @@ workflow builders.
 
 Demo workflow:
 
-- [SAIRPICO restoration smoke](#sairpico-restoration-smoke-workflow)
+- <a href="workflows/sairpico_restoration_smoke.md">SAIRPICO restoration smoke</a>

@@ -150,8 +150,9 @@ Combining branches with explicit join semantics is covered in
 Named nodes
 -----------
 
-By default, nodes take the tool's ``name`` attribute. Use the ``name`` keyword
-to disambiguate multiple uses of the same tool:
+By default, nodes derive their storage name from the tool class name and a
+numeric disambiguator. Use the call-time ``name`` keyword to assign stable
+node identities or disambiguate multiple uses of the same tool:
 
 .. code-block:: python
 

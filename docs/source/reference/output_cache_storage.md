@@ -30,18 +30,18 @@ All paths below are rooted at `Workflow.storage_path`.
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json
+                attempt.json              # optional/future in current runtime
                 staging/
                   dataframe.parquet
-                  dataframe.csv
+                  dataframe.csv           # optional debug artifact
                   assets/
                   work/
-                failed.json
+                failed.json               # optional/future in current runtime
             records/
               <record-id>/
                 manifest.json
                 dataframe.parquet
-                dataframe.csv
+                dataframe.csv             # optional debug artifact
                 assets/
             current.json
             conflicts/
@@ -74,7 +74,7 @@ It is used in user-facing paths and run manifests.
 The node key is not the cache key.
 Renaming a display label may change the human-facing node key without changing cache identity, depending on workflow identity rules.
 
-Node keys must be normalized before use as path segments:
+The target v1 contract normalizes node keys before use as path segments:
 
 - Use UTF-8 text normalized to NFC.
 - Forbid empty segments, `.` and `..`.
@@ -83,10 +83,17 @@ Node keys must be normalized before use as path segments:
 - Bound the encoded segment length.
 - Append a short stable disambiguator when two display names normalize to the same storage segment.
 
+Current runtime run views use validated scoped node names directly.
+Collision-safe normalized run-view keys are a remaining v1 hardening task; until that is wired in, workflow node names must already be safe path segments.
+
 ### Result Key
 
 `<result-key>` is the final cache lookup key.
 It answers: "what computation is this, over which exact selected upstream records?"
+
+Current runtime note: result-key composition is still transitional.
+Phase 10 code already stores records under v1 `rk_...` result-key directories, but those result keys are transitional wrappers around the node's diagnostic logical signature (`sig_hash`), which itself still includes upstream diagnostic signatures rather than selected upstream record IDs.
+The upstream-record-reference material below is the clean target contract and should not be documented as fully implemented until result-key composition is changed and tested.
 
 The result key must include every value that can affect the logical result and cache validity, including:
 
@@ -155,7 +162,7 @@ It answers: "which worker tried to compute this?"
 Attempt IDs are not deterministic and are not part of cache identity.
 They exist so concurrent workers do not write into the same mutable directory.
 
-Attempt IDs must be globally unique enough for distributed execution and should be lexicographically time-sortable.
+Attempt IDs must be unique enough for concurrent local attempts and should be lexicographically time-sortable.
 A ULID-style identifier is appropriate.
 
 Example:
@@ -306,11 +313,12 @@ Anything else is ignored for cache lookup or reported as corruption.
 
 ## Dataframe Contract
 
-`dataframe.parquet` is mandatory and canonical for every reusable record.
+`dataframe.parquet` is mandatory for every reusable record.
 `dataframe.csv` is optional human/debug output and is never authoritative.
 
-The record ID must not hash incidental Parquet writer metadata.
-Instead, it hashes a canonical dataframe digest plus declared asset digests.
+Current runtime note: publication currently hashes the staged Parquet file bytes when building record identity.
+That means Parquet writer metadata is part of the implemented record ID today.
+The canonical dataframe digest rules below describe the target cross-worker contract and must be wired into publication before distributed or heterogeneous-worker execution is treated as supported.
 
 V1 canonical dataframe digest rules:
 
@@ -524,7 +532,7 @@ runs/<run-id>/
 - Requested target nodes.
 - Overall status.
 
-`nodes/<node-key>/result.json` records the exact selected record used by that node in that run:
+`nodes/<node-key>/result.json` records the selected record used by that node in that run:
 
 ```json
 {
@@ -541,6 +549,10 @@ runs/<run-id>/
 `record.bioimageflow-link.json` is a pointer file to the selected canonical record.
 `outputs/` may contain pointer files to individual user-facing artifacts for convenient browsing.
 Only `owned_asset` manifest entries create output pointer files; `external_path` and `scalar_output` entries remain metadata in `result.json`.
+
+Current runtime validation checks a run node view against the record currently selected by `current.json`.
+Historical run views may fail that validator after invalidation or manual cache-selection changes even though the files still record what the run used.
+Long-lived immutable run-history validation is a remaining hardening task.
 
 Example:
 
@@ -627,6 +639,9 @@ V1 invalidation changes cache selection state; it does not delete record directo
 Invalidating a node removes or tombstones `current.json` for affected result keys and downstream result keys according to workflow dependency rules.
 Invalidation must use the same per-result-key guarded metadata update discipline as publication, or coordinate externally with active compute operations for the same workflow storage path.
 
+During the migration from the legacy layout, `Workflow.invalidate()` also removes a matching legacy `storage_path/data/<node>` tree when present.
+That is transitional cleanup of old human-facing output directories, not v1 record pruning.
+
 The legacy `max_executions` and `max_age` Workflow settings are removed from the clean v1 public API and must not delete `records/<record-id>/`.
 If legacy configuration is encountered during migration, it must be ignored for v1 cache records or handled by an explicit migration layer outside the clean v1 API.
 
@@ -710,7 +725,7 @@ Repair must not silently choose a different current record when the existing sta
 
 ## Compatibility With Legacy Storage
 
-This document intentionally replaces the legacy storage shape documented in the exhaustive specification:
+This document intentionally replaces the legacy storage shape used by older releases and historical documentation:
 
 ```text
 data/<node_name>/<YYYYMMDD_HHMMSS>_<hash12>/
