@@ -37,6 +37,25 @@ def _int_id(row: dict[str, Any], column: str, default: int | None = None) -> int
     return int(float(value))
 
 
+def _positive_uint32_id(row: dict[str, Any], column: str, default: int | None = None) -> int:
+    import numpy as np
+
+    raw_value = row.get(column, "")
+    if raw_value in {"", None}:
+        if default is None:
+            raise ValueError(f"Spot table row is missing required column {column!r}.")
+        raw_value = default
+    numeric_value = float(raw_value)
+    if not np.isfinite(numeric_value) or not numeric_value.is_integer():
+        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
+    value = int(numeric_value)
+    if value <= 0:
+        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
+    if value > np.iinfo(np.uint32).max:
+        raise ValueError(f"{column} must be <= {np.iinfo(np.uint32).max}.")
+    return value
+
+
 def _argument(arguments: Arguments, name: str, default: Any) -> Any:
     return getattr(arguments, name, default)
 
@@ -197,7 +216,11 @@ class RenderSpots(ProcessingTool):
     class Outputs(IOModel):
         output_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
+            ImageSpec(
+                semantics={Semantic.BINARY, Semantic.LABEL},
+                layouts={Layout.PLANAR},
+                dtypes={"uint8", "uint32"},
+            ),
             GUIMeta("Rendered spots"),
         ] = Template("rendered_spots.tif")
         spot_count: Annotated[int, GUIMeta("Spot count")]
@@ -215,14 +238,15 @@ class RenderSpots(ProcessingTool):
             return []
         arguments = arguments_list[0]
         shape = _shape_from_arguments(arguments)
-        image = np.zeros(shape, dtype=np.uint16)
+        label_mode = bool(_argument(arguments, "label_mode", True))
+        image = np.zeros(shape, dtype=np.uint32 if label_mode else np.uint8)
         for index, row_arguments in enumerate(arguments_list, start=1):
             row = {
                 "spot_id": _argument(row_arguments, "spot_id", index),
                 "y": _argument(row_arguments, "y", None),
                 "x": _argument(row_arguments, "x", None),
             }
-            value = _int_id(row, "spot_id", index) if _argument(arguments, "label_mode", True) else 1
+            value = _positive_uint32_id(row, "spot_id", index) if label_mode else 1
             y, x = _spot_coordinate(row, shape=shape)
             _draw_disk(
                 image,
@@ -286,7 +310,7 @@ class SpotsToLabels(ProcessingTool):
     class Outputs(IOModel):
         label_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
+            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}),
             GUIMeta("Spot labels"),
         ] = Template("spots_labels.tif")
         label_count: Annotated[int, GUIMeta("Label count")]
@@ -306,8 +330,10 @@ class SpotsToLabels(ProcessingTool):
         mask_image = _argument(arguments, "mask_image", None)
         if mask_image is not None:
             mask = iio.imread(mask_image) > 0
-            labels = np.zeros(mask.shape, dtype=np.uint16)
+            labels = np.zeros(mask.shape, dtype=np.uint32)
             components = _components(mask)
+            if len(components) > np.iinfo(np.uint32).max:
+                raise ValueError("SpotsToLabels produced more labels than uint32 can store.")
             for label, component in enumerate(components, start=1):
                 for y, x in component:
                     labels[y, x] = label
@@ -322,9 +348,9 @@ class SpotsToLabels(ProcessingTool):
                 for index, row_arguments in enumerate(arguments_list, start=1)
             ]
             shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
-            labels = np.zeros(shape, dtype=np.uint16)
+            labels = np.zeros(shape, dtype=np.uint32)
             for index, row in enumerate(rows, start=1):
-                value = _int_id(row, "spot_id", index)
+                value = _positive_uint32_id(row, "spot_id", index)
                 y, x = _spot_coordinate(row, shape=shape)
                 _draw_disk(
                     labels,

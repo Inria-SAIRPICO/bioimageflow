@@ -6,7 +6,9 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
+from bioimageflow.validation import serialize_output_schema
 from bioimageflow_core import Arguments
+import bioimageflow_spot_tools.detection as spot_detection
 from bioimageflow_spot_tools import (
     AssignSpotsToLabels,
     DetectSpots,
@@ -54,6 +56,48 @@ def test_detect_spots_finds_synthetic_puncta(tmp_path: Path) -> None:
     labels = iio.imread(result[0].output_labels)
     assert labels.max() == 3
     assert {spot.spot_id for spot in result} == {1, 2, 3}
+
+
+def test_spot_label_output_schemas_declare_uint32_label_contract() -> None:
+    detect_schema = serialize_output_schema(DetectSpots)
+    render_schema = serialize_output_schema(RenderSpots)
+    labels_schema = serialize_output_schema(SpotsToLabels)
+
+    assert detect_schema["output_labels"]["image_spec"]["dtypes"] == ["uint32"]
+    assert render_schema["output_image"]["image_spec"]["dtypes"] == ["uint32", "uint8"]
+    assert render_schema["output_image"]["image_spec"]["semantics"] == ["binary", "label"]
+    assert labels_schema["label_image"]["image_spec"]["dtypes"] == ["uint32"]
+
+
+def test_detect_spots_writes_uint32_labels_for_large_spot_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_image = tmp_path / "puncta.tif"
+    iio.imwrite(input_image, np.ones((2, 2), dtype=np.float32))
+    large_spot_id = int(np.iinfo(np.uint16).max) + 1
+    monkeypatch.setattr(
+        spot_detection,
+        "_local_maxima",
+        lambda *_args, **_kwargs: [(0, 0)] * large_spot_id,
+    )
+
+    result = DetectSpots().process_row(
+        Arguments(
+            input_image=str(input_image),
+            method="local_maxima",
+            sigma=1.0,
+            sigma_ratio=1.6,
+            threshold=0.0,
+            min_distance=1,
+            output_labels=str(tmp_path / "spots.tif"),
+        )
+    )
+
+    labels = iio.imread(result[0].output_labels)
+    assert labels.dtype == np.uint32
+    assert int(labels[0, 0]) == large_spot_id
+    assert result[0].spot_count == large_spot_id
 
 
 def test_detect_spots_log_method_finds_synthetic_puncta(tmp_path: Path) -> None:
@@ -206,6 +250,112 @@ def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) ->
     assert label_image[9, 12] == 11
     assert rendered.spot_count == 2
     assert labels.label_count == 2
+
+
+def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) -> None:
+    result = RenderSpots().process_batch(
+        [
+            Arguments(
+                spot_id=70000,
+                y=4,
+                x=5,
+                image_shape="16,16",
+                radius=1,
+                label_mode=False,
+                output_image=tmp_path / "mask.tif",
+            )
+        ]
+    )[0][0]
+
+    mask = iio.imread(result.output_image)
+    assert mask.dtype == np.uint8
+    assert set(np.unique(mask)) == {0, 1}
+    assert result.spot_count == 1
+
+
+def test_spot_label_renderers_preserve_ids_above_uint16(tmp_path: Path) -> None:
+    large_spot_id = int(np.iinfo(np.uint16).max) + 17
+    spot = Arguments(
+        spot_id=large_spot_id,
+        y=4,
+        x=5,
+        image_shape="16,16",
+        radius=0,
+        label_mode=True,
+    )
+
+    rendered = RenderSpots().process_batch(
+        [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")]
+    )[0][0]
+    labels = SpotsToLabels().process_batch(
+        [Arguments(**vars(spot), label_image=tmp_path / "labels.tif")]
+    )[0][0]
+
+    rendered_image = iio.imread(rendered.output_image)
+    label_image = iio.imread(labels.label_image)
+    assert rendered_image.dtype == np.uint32
+    assert label_image.dtype == np.uint32
+    assert int(rendered_image[4, 5]) == large_spot_id
+    assert int(label_image[4, 5]) == large_spot_id
+
+
+def test_spot_label_renderers_accept_integer_like_label_ids(tmp_path: Path) -> None:
+    rendered = RenderSpots().process_batch(
+        [
+            Arguments(
+                spot_id="1.0",
+                y=4,
+                x=5,
+                image_shape="16,16",
+                radius=0,
+                label_mode=True,
+                output_image=tmp_path / "rendered.tif",
+            )
+        ]
+    )[0][0]
+    labels = SpotsToLabels().process_batch(
+        [
+            Arguments(
+                spot_id=1.0,
+                y=4,
+                x=5,
+                image_shape="16,16",
+                radius=0,
+                label_image=tmp_path / "labels.tif",
+            )
+        ]
+    )[0][0]
+
+    assert int(iio.imread(rendered.output_image)[4, 5]) == 1
+    assert int(iio.imread(labels.label_image)[4, 5]) == 1
+
+
+@pytest.mark.parametrize(
+    "spot_id",
+    [0, -1, 1.5, int(np.iinfo(np.uint32).max) + 1],
+)
+def test_spot_label_renderers_reject_invalid_label_ids(
+    tmp_path: Path,
+    spot_id: int | float,
+) -> None:
+    spot = Arguments(
+        spot_id=spot_id,
+        y=4,
+        x=5,
+        image_shape="16,16",
+        radius=0,
+        label_mode=True,
+    )
+
+    with pytest.raises(ValueError, match="positive integer|<="):
+        RenderSpots().process_batch(
+            [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")]
+        )
+
+    with pytest.raises(ValueError, match="positive integer|<="):
+        SpotsToLabels().process_batch(
+            [Arguments(**vars(spot), label_image=tmp_path / "labels.tif")]
+        )
 
 
 def test_spot_coordinate_tools_reject_missing_required_coordinates(

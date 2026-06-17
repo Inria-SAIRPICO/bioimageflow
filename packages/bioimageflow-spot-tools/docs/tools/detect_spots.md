@@ -35,8 +35,10 @@ DetectSpots().process_row(
 ## Expected Results
 
 The label image marks one pixel per detected spot, and the workflow output dataframe contains one row per accepted local maximum.
+The label image is written as `uint32`; background is `0`, and detected spots use positive sequential IDs.
 
 ## Failure Modes
 
 Invalid methods raise `ValueError`; non-2D inputs raise `ValueError`; missing
 files fail through imageio.
+Producing more labels than `uint32` can store raises `ValueError`.

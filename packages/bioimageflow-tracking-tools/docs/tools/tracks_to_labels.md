@@ -23,7 +23,9 @@ TracksToLabels().process_batch([
 ## Expected Results
 
 The output label stack contains track IDs at the pixels occupied by the source labels.
+The output is written as `uint32`; background is `0`, and positive track IDs are preserved exactly.
 
 ## Failure Modes
 
 Missing track fields, unreadable label images, or unwritable output paths raise errors.
+`track_id` and source `label` values must be positive integers no larger than the `uint32` maximum.

@@ -42,6 +42,20 @@ def _int(row: dict[str, Any], column: str, default: int | None = None) -> int:
     return int(round(_float(row, column, float_default)))
 
 
+def _positive_uint32(row: dict[str, Any], column: str) -> int:
+    import numpy as np
+
+    raw_value = _float(row, column)
+    if not np.isfinite(raw_value) or not raw_value.is_integer():
+        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
+    value = int(raw_value)
+    if value <= 0:
+        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
+    if value > np.iinfo(np.uint32).max:
+        raise ValueError(f"{column} must be <= {np.iinfo(np.uint32).max}.")
+    return value
+
+
 def _argument(arguments: Arguments, name: str, default: Any) -> Any:
     return getattr(arguments, name, default)
 
@@ -125,7 +139,7 @@ class TracksToLabels(ProcessingTool):
     class Outputs(IOModel):
         output_label_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR_TIME}),
+            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR_TIME}, dtypes={"uint32"}),
             GUIMeta("Track labels"),
         ] = Template("{label_image.stem}_tracks.tif")
         track_count: Annotated[int, GUIMeta("Track count")]
@@ -153,11 +167,11 @@ class TracksToLabels(ProcessingTool):
         source = iio.imread(arguments.label_image)
         if source.ndim == 2:
             source = source[np.newaxis, ...]
-        output_image = np.zeros(source.shape, dtype=np.uint16)
+        output_image = np.zeros(source.shape, dtype=np.uint32)
         for row in tracks:
             frame = _int(row, "frame")
-            label = _int(row, "label")
-            track_id = _int(row, "track_id")
+            label = _positive_uint32(row, "label")
+            track_id = _positive_uint32(row, "track_id")
             if 0 <= frame < source.shape[0]:
                 output_image[frame][source[frame] == label] = track_id
         output = Path(arguments.output_label_image)
@@ -166,7 +180,7 @@ class TracksToLabels(ProcessingTool):
         return [[
             self.Outputs(
                 output_label_image=output,
-                track_count=len({_int(row, "track_id") for row in tracks}),
+                track_count=len({_positive_uint32(row, "track_id") for row in tracks}),
             )
         ]]
 

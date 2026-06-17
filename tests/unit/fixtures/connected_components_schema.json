@@ -41,7 +41,7 @@
       "display_name": "Label image",
       "group": null,
       "image_spec": {
-        "dtypes": [],
+        "dtypes": ["uint32"],
         "formats": [],
         "layouts": ["YX", "ZYX"],
         "semantics": ["label"]
