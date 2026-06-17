@@ -270,6 +270,24 @@ class ColumnBoundZeroRowWriter(ProcessingTool):
         return []
 
 
+class ColumnBoundZeroRowScalarWriter(ProcessingTool):
+    display_name = "Column Bound Zero Row Scalar Writer"
+    environment = EnvironmentSpec(name="column_bound_zero_row_scalar_writer", dependencies={})
+    executions = 0
+    zero_row_scalar_outputs = {"spot_count": 0}
+
+    class Inputs(IOModel):
+        label: str
+
+    class Outputs(IOModel):
+        spot_id: int
+        spot_count: int
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        return []
+
+
 class EscapingColumnBoundWriter(ProcessingTool):
     display_name = "Escaping Column Bound Writer"
     environment = EnvironmentSpec(name="escaping_column_bound_writer", dependencies={})
@@ -1457,6 +1475,55 @@ def test_column_bound_zero_row_processing_tool_publishes_written_template_assets
 
     pd.testing.assert_frame_equal(first, second)
     assert ColumnBoundZeroRowWriter.executions == 2
+
+
+def test_column_bound_zero_row_processing_tool_publishes_declared_scalar_outputs(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    ColumnBoundZeroRowScalarWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        node = ColumnBoundZeroRowScalarWriter()(label=table["label"])
+        result = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+        node_name = node.name
+
+    assert result.empty
+    assert list(result.columns) == ["spot_id", "spot_count"]
+    assert ColumnBoundZeroRowScalarWriter.executions == 2
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "kind": "scalar_output",
+            "output_column": "spot_count",
+            "row_index": "a",
+            "value": {"kind": "signed_integer", "value": "0"},
+        },
+        {
+            "kind": "scalar_output",
+            "output_column": "spot_count",
+            "row_index": "b",
+            "value": {"kind": "signed_integer", "value": "0"},
+        },
+    ]
+
+    [run_dir] = _run_dirs(storage_path)
+    run_result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
+    assert run_result["outputs"] == manifest["outputs"]
+    assert not (run_dir / "nodes" / node_name / "outputs").exists()
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        second = wf.compute(ColumnBoundZeroRowScalarWriter()(label=table["label"]))
+
+    pd.testing.assert_frame_equal(result, second)
+    assert ColumnBoundZeroRowScalarWriter.executions == 2
 
 
 def test_column_bound_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ from bioimageflow.storage_v1 import (
     StorageV1,
     canonical_dataframe_digest,
     canonical_json_bytes,
+    canonical_scalar_payload,
     make_node_keys,
     make_result_key,
     make_record_id,
@@ -168,6 +169,12 @@ def test_canonical_dataframe_digest_rejects_unsafe_record_asset_path() -> None:
         )
 
 
+def test_canonical_scalar_payload_matches_dataframe_cell_encoding() -> None:
+    assert canonical_scalar_payload(0) == {"kind": "signed_integer", "value": "0"}
+    assert canonical_scalar_payload("Cafe\u0301") == {"kind": "string", "value": "Caf\u00e9"}
+    assert canonical_scalar_payload(None) == {"kind": "null", "value": None}
+
+
 def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> None:
     result_key = make_result_key({"node": "segment"})
     dataframe_digest = _file_digest(b"parquet")
@@ -218,6 +225,62 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
     )
     with pytest.raises(CacheCorruptionError):
         bad_manifest.validate(bad_record_dir)
+
+
+def test_record_manifest_validation_accepts_scalar_outputs(tmp_path: Path) -> None:
+    result_key = make_result_key({"node": "hotspot"})
+    dataframe_digest = _file_digest(b"parquet")
+    output = {
+        "kind": "scalar_output",
+        "output_column": "spot_count",
+        "row_index": "0",
+        "value": {"kind": "signed_integer", "value": "0"},
+    }
+    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    record_dir = tmp_path / "records" / record_id
+    record_dir.mkdir(parents=True)
+    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+
+    manifest = RecordManifest(
+        result_key=result_key,
+        record_id=record_id,
+        dataframe_digest=dataframe_digest,
+        outputs=[output],
+    )
+
+    manifest.validate(record_dir)
+    assert manifest.to_dict()["outputs"] == [output]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"kind": "scalar_output", "output_column": "", "row_index": "0", "value": {"kind": "signed_integer", "value": "0"}},
+        {"kind": "scalar_output", "output_column": "spot_count", "row_index": "", "value": {"kind": "signed_integer", "value": "0"}},
+        {"kind": "scalar_output", "output_column": "spot_count", "row_index": "0", "value": 0},
+        {"kind": "scalar_output", "output_column": "spot_count", "row_index": "0", "value": {"kind": "external_path", "value": "/tmp/a"}},
+        {"kind": "scalar_output", "output_column": "spot_count", "row_index": "0", "value": {"kind": "signed_integer", "value": "1.5"}},
+    ],
+)
+def test_record_manifest_validation_rejects_invalid_scalar_outputs(
+    tmp_path: Path,
+    output: dict[str, object],
+) -> None:
+    result_key = make_result_key({"node": "hotspot"})
+    dataframe_digest = _file_digest(b"parquet")
+    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    record_dir = tmp_path / "records" / record_id
+    record_dir.mkdir(parents=True)
+    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    manifest = RecordManifest(
+        result_key=result_key,
+        record_id=record_id,
+        dataframe_digest=dataframe_digest,
+        outputs=[output],
+    )
+
+    with pytest.raises(CacheCorruptionError):
+        manifest.validate(record_dir)
 
 
 def test_record_manifest_validation_rejects_symlink_asset_escape(tmp_path: Path) -> None:
@@ -559,6 +622,43 @@ def test_run_metadata_and_node_result_view_write_selected_record(tmp_path: Path)
     assert output_link["target"].endswith(f"records/{record_id}/assets/mask.tif")
 
 
+def test_run_node_result_view_exposes_scalar_outputs_without_links(tmp_path: Path) -> None:
+    storage = StorageV1(tmp_path)
+    result_key = make_result_key({"node": "hotspot"})
+    scalar_output = {
+        "kind": "scalar_output",
+        "output_column": "spot_count",
+        "row_index": "0",
+        "value": {"kind": "signed_integer", "value": "0"},
+    }
+    record_id = _write_record(storage, result_key, outputs=[scalar_output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_scalar",
+    )
+    storage.write_run_metadata(
+        "run_scalar",
+        workflow_identity="workflow-scalar",
+        engine="local",
+        status="running",
+        target_nodes=["HotspotToSpots_1"],
+    )
+
+    result_path = storage.write_run_node_result(
+        "run_scalar",
+        "HotspotToSpots_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+
+    result = json.loads(result_path.read_text())
+    assert result["outputs"] == [scalar_output]
+    assert not (tmp_path / "runs" / "run_scalar" / "nodes" / "HotspotToSpots_1" / "outputs").exists()
+
+
 def test_latest_views_point_to_run_views_and_successful_run(tmp_path: Path) -> None:
     storage = StorageV1(tmp_path)
     result_key = make_result_key({"node": "table"})
@@ -757,6 +857,20 @@ def test_latest_node_validates_complete_run_node_view(tmp_path: Path) -> None:
     (node_dir / "result.json").write_text(json.dumps(result))
 
     with pytest.raises(CacheCorruptionError, match="identifier"):
+        storage.update_latest_node("Segment_1", "run_007")
+
+    storage.write_run_node_result(
+        "run_007",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=True,
+    )
+    result = json.loads((node_dir / "result.json").read_text())
+    result["outputs"] = [{"kind": "scalar_output", "output_column": "count", "row_index": "0", "value": {"kind": "signed_integer", "value": "0"}}]
+    (node_dir / "result.json").write_text(json.dumps(result))
+
+    with pytest.raises(CacheCorruptionError, match="outputs"):
         storage.update_latest_node("Segment_1", "run_007")
 
 

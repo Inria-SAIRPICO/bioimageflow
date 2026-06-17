@@ -16,6 +16,7 @@ Keep this tool public because `HotspotDetection` produces an image-like hotspot 
 - `spot_count`.
 
 No spot CSV artifact is written because BioImageFlow records these rows in the output dataframe.
+If no connected components pass the threshold, direct `process_row()` returns an empty list and workflow execution records `spot_count=0` as manifest-only scalar metadata.
 
 ## Dependencies and Core Libraries
 
@@ -35,6 +36,7 @@ HotspotToSpots().process_row(
 ## Expected Results
 
 Synthetic hotspot masks produce one dataframe row per connected component with stable centroid and area values.
+Blank hotspot masks produce no dataframe rows; the selected v1 record manifest and run node result expose `spot_count=0` as `scalar_output` metadata.
 
 ## Failure Modes
 
