@@ -16,6 +16,13 @@ else:  # pragma: no cover - Python < 3.11
 
 
 ROOT = Path(__file__).parents[2]
+FAST_TEST_SELECTOR = (
+    "not slow and not acceptance and not packaging and not package_tools and not complete "
+    "and not wetlands and not public_data and not external_binary and not sairpico_binary "
+    "and not model_runtime"
+)
+ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
+PACKAGE_TOOLS_TEST_SELECTOR = "package_tools and not complete"
 
 
 def _pyproject() -> dict:
@@ -41,6 +48,15 @@ def test_pytest_uses_strict_marker_configuration() -> None:
     assert "--strict-markers" in pytest_config["addopts"]
 
 
+def test_pytest_registers_non_fast_deterministic_markers() -> None:
+    marker_names = {
+        marker.split(":", 1)[0]
+        for marker in _pyproject()["tool"]["pytest"]["ini_options"]["markers"]
+    }
+
+    assert {"acceptance", "packaging", "slow"} <= marker_names
+
+
 def test_pyright_is_an_implementation_gate_for_this_phase() -> None:
     pyright = json.loads((ROOT / "pyrightconfig.json").read_text())
 
@@ -58,8 +74,10 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
         "uv sync --locked --all-packages --group dev",
         "uv run ruff check .",
         "uv run pyright",
-        'uv run pytest -m "not slow"',
+        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
         "uv run pytest tests/unit/test_package_artifacts.py",
+        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
+        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
         "uv build --all-packages --out-dir dist/packages",
         "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
     ]
@@ -76,7 +94,23 @@ def test_gitlab_ci_has_supported_python_test_matrix() -> None:
         job = ci_config[f"tests:python{version}"]
         assert job["stage"] == "test"
         assert job["image"] == f"ghcr.io/astral-sh/uv:python{version}-bookworm"
-        assert job["script"] == ['uv run pytest -m "not slow"']
+        assert job["script"] == [f'uv run pytest -m "{FAST_TEST_SELECTOR}"']
+
+
+def test_gitlab_ci_has_deterministic_acceptance_job() -> None:
+    ci_config = _gitlab_ci()
+    job = ci_config["tests:acceptance"]
+
+    assert job["stage"] == "test"
+    assert job["script"] == [f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"']
+
+
+def test_gitlab_ci_has_deterministic_package_tools_job() -> None:
+    ci_config = _gitlab_ci()
+    job = ci_config["tests:package-tools"]
+
+    assert job["stage"] == "test"
+    assert job["script"] == [f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"']
 
 
 def test_gitlab_ci_complete_jobs_are_optional_and_separate() -> None:
@@ -107,15 +141,26 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
     docs_text = (ROOT / "docs/source/reference/testing.md").read_text()
     readme_text = (ROOT / "README.md").read_text()
 
-    for command in [
+    required_docs_commands = [
         "uv run ruff check .",
         "uv run pyright",
-        'uv run pytest -m "not slow"',
+        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
         "uv run pytest tests/unit/test_package_artifacts.py",
+        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
+        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
         "uv build --all-packages --out-dir dist/packages",
         "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
-    ]:
+    ]
+    for command in required_docs_commands:
         assert command in docs_text
+
+    for command in [
+        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
+        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
+        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
+        "uv run pytest tests/unit/test_package_artifacts.py",
+    ]:
+        assert command in readme_text
 
     assert "Python 3.10, 3.11, and 3.12" in docs_text
     assert 'uv run pytest -m "complete and wetlands" --run-complete -rsx' in docs_text
@@ -160,45 +205,66 @@ def _module_pytestmark_names(module: ast.Module) -> set[str]:
     return names
 
 
-def test_slow_tests_are_also_external_tier_tests() -> None:
-    external_markers = {
-        "wetlands",
-        "complete",
-        "public_data",
-        "external_binary",
-        "sairpico_binary",
-        "model_runtime",
+def test_deterministic_non_fast_markers_are_not_external_resource_markers() -> None:
+    namespace: dict[str, object] = {}
+    exec((ROOT / "conftest.py").read_text(), namespace)
+
+    external_marker_names = namespace["EXTERNAL_TEST_MARKER_NAMES"]
+
+    assert not {"acceptance", "package_tools", "packaging", "slow"}.intersection(
+        external_marker_names
+    )
+
+
+def test_package_artifact_tests_are_packaging_marked() -> None:
+    module = ast.parse((ROOT / "tests/unit/test_package_artifacts.py").read_text())
+
+    assert "packaging" in _module_pytestmark_names(module)
+
+
+def test_deterministic_acceptance_test_modules_are_acceptance_marked() -> None:
+    expected_modules = [
+        "tests/integration/test_end_to_end.py",
+        "tests/specialized_tool_workflows/test_example_workflows.py",
+    ]
+
+    missing = []
+    for relative_path in expected_modules:
+        module = ast.parse((ROOT / relative_path).read_text())
+        if "acceptance" not in _module_pytestmark_names(module):
+            missing.append(relative_path)
+
+    assert missing == []
+
+
+def test_priority_workflow_execution_tests_are_acceptance_marked() -> None:
+    module_path = ROOT / "tests/priority_workflows/test_workflows.py"
+    module = ast.parse(module_path.read_text(), filename=str(module_path))
+
+    acceptance_test_names = {
+        "test_synthetic_fish_workflow_executes",
+        "test_bbbc038_segmentation_benchmark_constructs_and_executes",
+        "test_ome_normalization_executes_tiny_fixture",
+        "test_cellpose_stardist_workflow_executes_with_fake_model_runtimes",
+        "test_parameter_space_workflow_executes_with_fake_atlas_binary",
+        "test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary",
     }
-    violations = []
+    markers_by_test = {
+        statement.name: _pytest_mark_names(statement)
+        for statement in module.body
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
 
-    for path in sorted([*ROOT.glob("tests/**/test_*.py"), *ROOT.glob("packages/*/tests/test_*.py")]):
-        module = ast.parse(path.read_text(), filename=str(path))
-        module_markers = _module_pytestmark_names(module)
-        class_markers: dict[str, set[str]] = {}
-        for statement in module.body:
-            if isinstance(statement, ast.ClassDef):
-                class_markers[statement.name] = set().union(
-                    *[_pytest_mark_names(decorator) for decorator in statement.decorator_list],
-                    set(),
-                )
-                functions = [
-                    child
-                    for child in statement.body
-                    if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                    and child.name.startswith("test")
-                ]
-                for function in functions:
-                    markers = set(module_markers)
-                    markers.update(class_markers[statement.name])
-                    for decorator in function.decorator_list:
-                        markers.update(_pytest_mark_names(decorator))
-                    if "slow" in markers and not markers.intersection(external_markers):
-                        violations.append(f"{path.relative_to(ROOT)}::{statement.name}::{function.name}")
-            elif isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef) and statement.name.startswith("test"):
-                markers = set(module_markers)
-                for decorator in statement.decorator_list:
-                    markers.update(_pytest_mark_names(decorator))
-                if "slow" in markers and not markers.intersection(external_markers):
-                    violations.append(f"{path.relative_to(ROOT)}::{statement.name}")
+    missing = [
+        test_name
+        for test_name in sorted(acceptance_test_names)
+        if "acceptance" not in markers_by_test[test_name]
+    ]
+    assert missing == []
 
-    assert violations == []
+    assert "acceptance" not in markers_by_test[
+        "test_fish_heavy_workflow_constructs_with_package_imports"
+    ]
+    assert "acceptance" not in markers_by_test[
+        "test_cellpose_stardist_workflow_constructs_with_package_imports"
+    ]

@@ -1,40 +1,74 @@
 # Testing Reference
 
-BioImageFlow uses two pytest levels so daily development stays fast while package maintainers can still run realistic validation with public data, real binaries, and optional model runtimes.
+BioImageFlow uses multiple pytest levels so daily development stays fast while package maintainers can still run deterministic high-level validation and realistic validation with public data, real binaries, and optional model runtimes.
 
-## Regular Tests
+## Local Default Tests
 
-Regular tests are the default.
-They must be deterministic, fast enough for agent development, and runnable without network access or private external binaries.
+The default local pytest run executes deterministic tests and skips only the complete/resource tiers that require `--run-complete`.
+It is useful before broad finalization, but it is broader than the CI fast matrix because it still includes deterministic non-fast markers such as `acceptance`, `packaging`, and `slow`.
 
-Regular tests should:
-
-- use tiny generated fixtures or committed demo data;
-- mock downloads, external binaries, model runtimes, and long-running tools;
-- cover every public tool schema, successful execution path, output contract, and important failure mode;
-- build and execute example workflows on the smallest useful fixture;
-- write outputs only under pytest temporary directories.
-
-Run the regular suite with:
+Run the default local suite with:
 
 ```bash
 uv run pytest
 ```
 
-CI runs the deterministic default tier with slow tests excluded:
+## Fast Tests
+
+Fast tests are the required CI development loop.
+They must be deterministic, fast enough for agent development, and runnable without network access or private external binaries.
+
+Fast tests should:
+
+- use tiny generated fixtures or committed demo data;
+- mock downloads, external binaries, model runtimes, and long-running tools;
+- cover public tool schemas, core mechanisms, successful execution paths, output contracts, and important failure modes;
+- write outputs only under pytest temporary directories.
+
+CI runs the required fast matrix with deterministic non-fast and complete/resource tiers excluded:
 
 ```bash
-uv run pytest -m "not slow"
+uv run pytest -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 ```
 
 The GitLab CI regular-test matrix runs that command on Python 3.10, 3.11, and 3.12.
 
-Package-local regular tests can be run with:
+Package-local regular tests are a separate deterministic required tier and can be run with:
 
 ```bash
 uv run pytest packages/bioimageflow-io-tools/tests
-uv run pytest -m package_tools
+uv run pytest -m "package_tools and not complete"
 ```
+
+## Deterministic Non-Fast Tests
+
+Deterministic non-fast tests are required coverage, but they are not part of every Python-version matrix job.
+Use these markers when coverage is valuable but too broad or artifact-oriented for the fast loop:
+
+- `acceptance`: high-level workflow or example coverage that executes deterministic scenarios;
+- `packaging`: build artifact, wheel, sdist, or package metadata artifact checks;
+- `package_tools`: package-local deterministic coverage that is required in a separate CI job;
+- `slow`: deterministic or external tests excluded from the fast development loop.
+
+Run deterministic acceptance coverage with:
+
+```bash
+uv run pytest -m "acceptance and not complete"
+```
+
+Run package artifact checks with:
+
+```bash
+uv run pytest tests/unit/test_package_artifacts.py
+```
+
+Run deterministic package-tool coverage with:
+
+```bash
+uv run pytest -m "package_tools and not complete"
+```
+
+GitLab CI runs deterministic acceptance, package-tool, and packaging commands in explicit jobs, separate from the Python-version fast matrix.
 
 ## Complete Tests
 
@@ -50,7 +84,7 @@ Add one or more specific resource markers when relevant:
 - `external_binary`: requires a non-Python command-line program;
 - `sairpico_binary`: requires real SAIRPICO binaries;
 - `model_runtime`: requires optional model runtimes or model downloads;
-- `slow`: takes materially longer than the regular package tests.
+- `slow`: takes materially longer than the fast package tests.
 
 Reserve resource markers for tests that actually require those resources.
 External resource markers are descriptive selectors, and the external markers listed below also keep service-dependent tests out of the default pytest run.
@@ -111,7 +145,9 @@ Before broad finalization, run:
 ```bash
 uv run ruff check .
 uv run pyright
-uv run pytest -m "not slow"
+uv run pytest -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest -m "acceptance and not complete"
+uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
 uv run sphinx-build -W --keep-going docs/source docs/_build/html

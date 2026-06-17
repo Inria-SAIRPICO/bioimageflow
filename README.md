@@ -155,8 +155,14 @@ uv run pyright
 # Run regular tests
 uv run pytest
 
-# Run the CI default deterministic test tier
-uv run pytest -m "not slow"
+# Run the CI fast deterministic test tier
+uv run pytest -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+
+# Run deterministic acceptance tests
+uv run pytest -m "acceptance and not complete"
+
+# Run deterministic package-tool tests
+uv run pytest -m "package_tools and not complete"
 
 # Run only unit tests
 uv run pytest tests/unit/

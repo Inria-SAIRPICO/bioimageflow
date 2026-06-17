@@ -7,6 +7,7 @@ These tests combine multiple features into realistic pipeline scenarios.
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from bioimageflow_common_tools import Collect, Concat, JoinOnColumn
 from bioimageflow import Workflow
@@ -22,6 +23,9 @@ from .conftest import (
     StubStats,
     StubTiler,
 )
+
+
+pytestmark = pytest.mark.acceptance
 
 
 class TestBioImageAnalysisPipeline:

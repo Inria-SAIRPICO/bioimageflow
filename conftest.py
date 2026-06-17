@@ -19,7 +19,9 @@ COMPLETE_TEST_MARKERS = [
 ]
 REGISTERED_TEST_MARKERS = [
     *COMPLETE_TEST_MARKERS,
-    "slow: optional public-data or heavy dependency tests",
+    "slow: deterministic or external tests excluded from the fast development loop",
+    "acceptance: deterministic high-level workflow or example coverage excluded from the fast development loop",
+    "packaging: build artifact, wheel, sdist, or package metadata artifact checks",
     "package_tools: tests owned by optional tool packages",
 ]
 

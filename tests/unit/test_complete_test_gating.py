@@ -16,6 +16,12 @@ EXTERNAL_TIER_MARKERS = (
     "sairpico_binary",
     "model_runtime",
 )
+DETERMINISTIC_NON_FAST_MARKERS = (
+    "acceptance",
+    "package_tools",
+    "packaging",
+    "slow",
+)
 
 COMPLETE_RESOURCE_TEST_FILES = (
     "tests/priority_workflows/test_complete_workflows.py",
@@ -131,6 +137,27 @@ def test_run_complete_enables_external_tier_markers(
     result = pytester.runpytest("--run-complete")
 
     result.assert_outcomes(failed=1)
+
+
+@pytest.mark.parametrize("marker", DETERMINISTIC_NON_FAST_MARKERS)
+def test_deterministic_non_fast_markers_are_not_complete_gated(
+    pytester,
+    marker: str,
+) -> None:
+    pytester.makeconftest(_root_conftest())
+    pytester.makepyfile(
+        f"""
+        import pytest
+
+        @pytest.mark.{marker}
+        def test_deterministic_non_fast():
+            assert True
+        """
+    )
+
+    result = pytester.runpytest("-rs")
+
+    result.assert_outcomes(passed=1)
 
 
 def test_external_marker_names_in_param_ids_do_not_skip_regular_tests(

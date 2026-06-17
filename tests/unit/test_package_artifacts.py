@@ -13,6 +13,9 @@ import zipfile
 import pytest
 
 
+pytestmark = pytest.mark.packaging
+
+
 ROOT = Path(__file__).parents[2]
 TOOL_PACKAGE_NAMES = {
     "bioimageflow-common-tools",

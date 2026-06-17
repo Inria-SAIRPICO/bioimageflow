@@ -56,7 +56,9 @@ addopts = ["--strict-config", "--strict-markers"]
 filterwarnings = []
 markers = [
     "wetlands: tests that execute real Wetlands worker processes",
-    "slow: optional public-data or heavy dependency tests",
+    "slow: deterministic or external tests excluded from the fast development loop",
+    "acceptance: deterministic high-level workflow or example coverage excluded from the fast development loop",
+    "packaging: build artifact, wheel, sdist, or package metadata artifact checks",
     "complete: optional complete tests that may use real binaries, public data, model runtimes, or longer workflows",
     "public_data: tests that download or use public datasets",
     "external_binary: tests that require non-Python command-line tools",

@@ -4,6 +4,9 @@ import importlib.util
 import pytest
 
 
+pytestmark = pytest.mark.acceptance
+
+
 def _load_module(path: Path):
     spec = importlib.util.spec_from_file_location(path.parent.name, path)
     assert spec is not None

@@ -102,6 +102,7 @@ def test_fish_heavy_workflow_constructs_with_package_imports(tmp_path: Path) -> 
     } <= set(wf.nodes)
 
 
+@pytest.mark.acceptance
 def test_synthetic_fish_workflow_executes(tmp_path: Path) -> None:
     module = _load_module(_example("fish_analysis"))
 
@@ -120,6 +121,7 @@ def test_synthetic_fish_workflow_executes(tmp_path: Path) -> None:
     assert int(result["spot_count_1"].iloc[0]) >= 1
 
 
+@pytest.mark.acceptance
 def test_bbbc038_segmentation_benchmark_constructs_and_executes(tmp_path: Path) -> None:
     module = _load_module(_example("bbbc038_segmentation_benchmark"))
 
@@ -134,6 +136,7 @@ def test_bbbc038_segmentation_benchmark_constructs_and_executes(tmp_path: Path) 
     assert row["foreground_iou"] > 0.95
 
 
+@pytest.mark.acceptance
 def test_ome_normalization_executes_tiny_fixture(tmp_path: Path) -> None:
     module = _load_module(_example("ome_normalization"))
 
@@ -176,6 +179,7 @@ def test_cellpose_stardist_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
+@pytest.mark.acceptance
 def test_cellpose_stardist_workflow_executes_with_fake_model_runtimes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -218,6 +222,7 @@ def test_parameter_space_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
+@pytest.mark.acceptance
 def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -274,6 +279,7 @@ def test_fish_sub_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
+@pytest.mark.acceptance
 def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
