@@ -5,8 +5,8 @@ Every connected non-zero region receives a unique integer label.
 
 The input is `input_image`, a planar or volumetric binary image. Outputs are
 `output_image`, a UInt32 label image, and `num_labels`, the number of connected
-components. The core library is SimpleITK, which handles both IO and connected
-component labeling.
+components. The core libraries are SimpleITK for input IO and connected
+component labeling, plus tifffile for UInt32 TIFF output.
 
 Use it after thresholding, spot detection, or mask cleanup when instance labels
 are needed. Empty foreground produces a label count of zero. Missing files or
@@ -14,7 +14,7 @@ unsupported formats fail through SimpleITK.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, SimpleITK, and NumPy for counting labels.
+BioImageFlow core APIs, SimpleITK, tifffile, and NumPy for counting labels.
 
 ## Assumptions
 
@@ -37,5 +37,4 @@ It is written as `uint32`; background is `0`, and labels are positive component 
 
 ## Failure Modes
 
-Unsupported formats, missing files, and SimpleITK write failures stop
-execution.
+Unsupported formats, missing files, and output write failures stop execution.

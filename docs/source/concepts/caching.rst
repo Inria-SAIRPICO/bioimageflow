@@ -66,6 +66,10 @@ Any of these changes produce a different v1 result key:
 - **Source code change** (``dev_mode`` only): modifying the tool's Python
   source
 
+External file references are path-based in the current v1 cache.
+If an input file is modified in place without changing its path, the cache may still select the existing record.
+Change the path, change an explicit parameter, or call ``Workflow.invalidate(...)`` when file contents change at a stable path.
+
 Inspecting cache state without executing
 ----------------------------------------
 

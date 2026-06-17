@@ -28,8 +28,9 @@ declaring the dependencies a tool needs:
 
 The ``name`` is a stable identifier — multiple tools sharing the same
 ``name`` must declare **identical** dependencies, or
-:class:`~bioimageflow_core.EnvironmentMismatchError` is raised at
-construction time. The ``dependencies`` dict mirrors the Wetlands
+:class:`~bioimageflow_core.EnvironmentMismatchError` is raised when a
+workflow containing those reachable tools is planned or computed.
+The ``dependencies`` dict mirrors the Wetlands
 schema; the most common keys are ``python`` and ``pip``.
 
 GENERAL_ENV
@@ -75,19 +76,20 @@ tool needs per row:
      - Optional string hint, e.g. ``"8GB"``.
    * - ``max_concurrent``
      - ``0``
-     - Upper bound on simultaneous rows; ``0`` means no extra cap
-       beyond ``max_workers``.
+     - Reserved scheduling hint. Direct and Wetlands v1 do not enforce
+       it; use ``Workflow(max_workers=...)`` or
+       ``Workflow.get_environment(...).max_workers`` for local worker
+       pool sizing.
    * - ``memory``
      - ``None``
      - Optional string hint for system memory.
 
-The default engine reads the spec for two effects:
+Current local engines read the spec for one effect:
 
 - When ``gpu >= 1`` and the environment has no explicit ``worker_env``,
   the engine auto-installs
   ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`` so each
-  worker is pinned to a distinct GPU.
-- ``max_concurrent`` clamps the per-environment pool size when set.
+  Wetlands worker is pinned to a distinct GPU.
 
 The Parsl engine is reserved for richer scheduling — full ``cpu`` /
 ``memory`` / ``max_concurrent`` semantics ship with that

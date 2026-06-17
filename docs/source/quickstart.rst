@@ -145,7 +145,7 @@ Re-running is free
 ------------------
 
 Run the same workflow again and it completes instantly --- the cache recognises
-that inputs, parameters, and tool versions haven't changed:
+that input references, parameters, and tool versions haven't changed:
 
 .. code-block:: python
 

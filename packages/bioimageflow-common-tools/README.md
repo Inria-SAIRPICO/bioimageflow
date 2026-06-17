@@ -22,7 +22,7 @@ specialized optional packages.
 ## Dependencies
 
 Install-time libraries are BioImageFlow, pandas, imageio, NumPy, and Pillow.
-`ConnectedComponents` uses SimpleITK from its isolated `EnvironmentSpec` runtime rather than requiring SimpleITK in the main process.
+`ConnectedComponents` uses SimpleITK and tifffile from its isolated `EnvironmentSpec` runtime rather than requiring them in the main process.
 New domain-specific tools should live in their own packages instead of expanding this package's scope.
 
 ## Tests

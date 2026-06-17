@@ -19,6 +19,8 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 
 - Python >= 3.10
 
+`bioimageflow-core` supports Python >= 3.9 for isolated Wetlands worker environments that must run legacy binary dependencies, but the user-facing orchestrator and first-party tool packages target Python >= 3.10.
+
 ## Installation
 
 ```bash

@@ -1,9 +1,8 @@
 """Tracking table filters, validation, rendering, and summaries."""
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -17,6 +16,25 @@ from bioimageflow_core import (
     Semantic,
     Template,
 )
+
+if TYPE_CHECKING:
+    from bioimageflow import DataFrameTool as DataFrameTool
+    from bioimageflow import Passthrough as Passthrough
+else:
+    try:
+        from bioimageflow import DataFrameTool as DataFrameTool
+        from bioimageflow import Passthrough as Passthrough
+    except ModuleNotFoundError:
+        class DataFrameTool:  # type: ignore[no-redef]
+            """Unavailable outside the orchestrator environment."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError(
+                    "DataFrameTool classes require the bioimageflow orchestrator package."
+                )
+
+        class Passthrough(IOModel):  # type: ignore[no-redef]
+            """Fallback schema base for worker-only imports."""
 
 
 def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:

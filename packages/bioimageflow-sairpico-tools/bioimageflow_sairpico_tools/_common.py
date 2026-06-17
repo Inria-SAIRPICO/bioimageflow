@@ -35,6 +35,7 @@ simglib_env = EnvironmentSpec(
 cimgdenoising_env = EnvironmentSpec(
     name="cimgdenoising",
     dependencies={
+        "python": "3.9",
         "conda": ["bioimageit::cimgdenoising==1.0.0"],
         "channels": ["conda-forge", "bioimageit"],
     },

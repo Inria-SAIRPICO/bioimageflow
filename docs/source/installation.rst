@@ -7,6 +7,7 @@ Requirements
 - Python >= 3.10
 
 BioImageFlow's deterministic CI test matrix runs on Python 3.10, 3.11, and 3.12.
+The worker-safe ``bioimageflow-core`` package supports Python >= 3.9 because it is installed into isolated Wetlands worker environments, including legacy external-binary environments whose dependencies require Python 3.9.
 
 Install from PyPI
 -----------------

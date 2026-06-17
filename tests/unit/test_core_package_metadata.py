@@ -38,6 +38,8 @@ BASE_CLASSIFIERS = {
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Image Processing",
 }
 HEAVY_OR_DEFERRED_DEPENDENCY_NAMES = {
@@ -156,13 +158,22 @@ def test_first_party_package_versions_are_lockstep() -> None:
     assert versions == {path: expected for path in versions}
 
 
-def test_first_party_packages_target_python310() -> None:
+def test_first_party_packages_target_supported_python_floors() -> None:
     requires_python = {
         str(path.relative_to(ROOT)): _project(path)["requires-python"]
         for path in _package_pyprojects()
     }
 
-    assert requires_python == {path: ">=3.10" for path in requires_python}
+    expected = {path: ">=3.10" for path in requires_python}
+    expected["packages/bioimageflow-core/pyproject.toml"] = ">=3.9"
+
+    assert requires_python == expected
+
+
+def test_core_declares_python39_worker_runtime_classifier() -> None:
+    core = _project(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
+
+    assert "Programming Language :: Python :: 3.9" in core["classifiers"]
 
 
 def test_first_party_packages_require_numpy_declaring_core_version() -> None:
@@ -244,6 +255,18 @@ def test_publishable_packages_declare_release_metadata() -> None:
             offenders[str(path.relative_to(ROOT))] = missing
 
     assert offenders == {}
+
+
+def test_top_level_runtime_packages_define_explicit_public_exports() -> None:
+    import bioimageflow
+    import bioimageflow_core
+
+    for module in [bioimageflow, bioimageflow_core]:
+        exports = getattr(module, "__all__", None)
+        assert isinstance(exports, list)
+        assert exports == sorted(exports)
+        assert len(exports) == len(set(exports))
+        assert all(hasattr(module, name) for name in exports)
 
 
 def test_publishable_package_readme_titles_include_distribution_name() -> None:

@@ -93,7 +93,8 @@ def test_tool_package_reference_documents_release_and_ci_contract() -> None:
     for required in [
         "Release and CI Contract",
         "lockstep versions",
-        "Python `>=3.10`",
+        "tool packages declare Python `>=3.10`",
+        "`bioimageflow-core` declares Python `>=3.9`",
         "uv run ruff check .",
         "uv run pyright",
         'uv run pytest -m "not slow"',

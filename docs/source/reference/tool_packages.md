@@ -22,7 +22,8 @@ pytest configuration.
 ## Release and CI Contract
 
 The orchestrator, core package, and companion tool packages are released with lockstep versions so workflow examples and package docs describe one coherent BioImageFlow distribution.
-Every package declares Python `>=3.10`; the deterministic CI matrix validates Python 3.10, 3.11, and 3.12.
+The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
+The deterministic CI matrix validates the main development/runtime surface on Python 3.10, 3.11, and 3.12, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
 
 Package metadata separates distribution dependencies from isolated runtime dependencies.
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
@@ -46,6 +47,8 @@ Those jobs are useful release evidence, but deterministic unit, package-artifact
 Wheels exclude package documentation, package tests, generated build outputs, and local caches.
 Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.
 Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
+Publishing is currently manual and outside CI deployment.
+Release operators must publish only artifacts produced after the deterministic gates above pass; CI intentionally builds and stores artifacts but does not upload them to an index.
 
 ## Package-Owned Documentation
 
