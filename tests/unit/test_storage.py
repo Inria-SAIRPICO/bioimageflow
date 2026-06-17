@@ -1,4 +1,4 @@
-"""Contract tests for v1 output/cache storage primitives."""
+"""Contract tests for output/cache storage primitives."""
 
 from __future__ import annotations
 

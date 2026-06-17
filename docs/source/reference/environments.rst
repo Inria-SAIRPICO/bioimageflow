@@ -76,7 +76,7 @@ tool needs per row:
      - Optional string hint, e.g. ``"8GB"``.
    * - ``max_concurrent``
      - ``0``
-     - Reserved scheduling hint. Direct and Wetlands v1 do not enforce
+     - Reserved scheduling hint. Direct and Wetlands do not enforce
        it; use ``Workflow(max_workers=...)`` or
        ``Workflow.get_environment(...).max_workers`` for local worker
        pool sizing.

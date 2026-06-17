@@ -7,7 +7,7 @@ yet run / skipped" without executing anything use
 clear selected cache records explicitly use
 :meth:`Workflow.invalidate <bioimageflow.Workflow.invalidate>`.
 
-The deeper v1 cache model — result keys, selected records, and current
+The deeper cache model — result keys, selected records, and current
 pointers — lives in :doc:`/concepts/caching`.
 
 Workflow.plan()
@@ -41,7 +41,7 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
      - V1 result key when it can be computed from known selected upstream
        records. ``None`` for skipped and pending-upstream nodes.
    * - ``selected_record_id``
-     - Selected v1 record ID for ``final_result_key`` when the node is cached.
+     - Selected record ID for ``final_result_key`` when the node is cached.
    * - ``status``
      - One of the :class:`NodePlanStatus` values below.
    * - ``upstream``
@@ -68,15 +68,15 @@ NodePlanStatus → UI mapping
      - Meaning
      - Suggested affordance
    * - ``CACHED``
-     - The planned v1 result key has a selected current record; ``compute()``
+     - The planned result key has a selected current record; ``compute()``
        would short-circuit.
      - Green / "up to date"
    * - ``PRIOR_SELECTION_MISS``
-     - The planned v1 result key has no selected record, but the same node has
+     - The planned result key has no selected record, but the same node has
        another selected current record. ``compute()`` would re-execute.
      - Yellow / "needs rebuild"
    * - ``UNEXECUTED``
-     - No known v1 cache record exists for this node yet.
+     - No known cache record exists for this node yet.
      - Grey / "not yet run"
    * - ``SKIPPED``
      - The node is disabled, or has a disabled upstream that prevents
@@ -101,7 +101,7 @@ Workflow.invalidate()
 
 When a long-lived host changes a parameter and wants to clear cached
 results explicitly, :meth:`Workflow.invalidate
-<bioimageflow.Workflow.invalidate>` removes v1 cache selections for
+<bioimageflow.Workflow.invalidate>` removes cache selections for
 the named nodes:
 
 .. code-block:: python
@@ -113,7 +113,7 @@ the named nodes:
 
 Returns ``InvalidatedSelection`` entries for actual ``current.json`` pointers that were removed.
 Each entry includes the node name, result key, selected record ID when readable, and a removal status.
-Entries that had no selected v1 cache record are silently skipped.
+Entries that had no selected cache record are silently skipped.
 ``KeyError`` is raised when any name is unknown.
 
 .. warning::

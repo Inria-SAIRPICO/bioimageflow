@@ -494,7 +494,8 @@ class TestWorkerTimeoutPlumbing:
     def test_env_manager_omits_worker_timeout_when_none(self, monkeypatch):
         """When ``worker_timeout=None``, do not pass the kwarg at all.
 
-        This keeps forward compatibility if an older wetlands is installed.
+        This keeps the manager compatible with Wetlands versions that do not
+        accept the keyword.
         """
         from bioimageflow.env_manager import WetlandsEnvManager
 

@@ -55,7 +55,7 @@ This package is the orchestrator. It:
 1. **Builds the DAG** from tool calls and column bindings
 2. **Resolves inputs** by matching column references and constants
 3. **Executes nodes** in topological order
-4. **Manages caching** via v1 result keys and selected records
+4. **Manages caching** via result keys and selected records
 5. **Stores results** as DataFrames and asset files
 
 Key classes:
@@ -130,5 +130,5 @@ Data flow
 
 Each node receives a DataFrame from its upstream nodes, executes its tool, and
 produces a new DataFrame. The DataFrame and any owned file assets are persisted
-as immutable v1 records under ``cache/v1/results/.../<result-key>/records/<record-id>/``.
+as immutable records under ``cache/v1/results/.../<result-key>/records/<record-id>/``.
 ``current.json`` selects the record used by cache hits.

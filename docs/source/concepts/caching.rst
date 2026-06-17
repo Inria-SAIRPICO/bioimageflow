@@ -7,7 +7,7 @@ only nodes whose inputs or parameters have changed are recomputed.
 How caching works
 -----------------
 
-Each node has a v1 **result key** under ``storage_path/cache/v1/``.
+Each node has a **result key** under ``storage_path/cache/v1/``.
 The result key identifies the reusable cache selection for the node's logical inputs, parameters, environment, and upstream cache state.
 Each successful execution publishes an immutable **record**, and ``current.json`` selects the record that cache hits must use.
 
@@ -19,7 +19,7 @@ The implementation also computes a diagnostic logical signature from:
 - Selected upstream record references when available, with diagnostic fallback material while a plan is pending
 - Source-code hash (``dev_mode`` only)
 
-This signature is exposed as ``NodePlan.logical_signature`` for diagnostics, but it is not the public v1 cache identity.
+This signature is exposed as ``NodePlan.logical_signature`` for diagnostics, but it is not the public cache identity.
 Use ``NodePlan.final_result_key`` and ``NodePlan.selected_record_id`` for cache/provenance state.
 If ``current.json`` selects a valid record for a node's final result key, the cached DataFrame is loaded instead of re-executing the tool.
 
@@ -57,7 +57,7 @@ Invalidation removes cache selection state such as ``current.json``.
 What invalidates the cache
 --------------------------
 
-Any of these changes produce a different v1 result key:
+Any of these changes produce a different result key:
 
 - **Parameter change**: e.g., ``sigma=1.0`` to ``sigma=2.0``
 - **Upstream change**: if a parent node's hash changes, all descendants
@@ -66,7 +66,7 @@ Any of these changes produce a different v1 result key:
 - **Source code change** (``dev_mode`` only): modifying the tool's Python
   source
 
-External file references are path-based in the current v1 cache.
+External file references are path-based in the current cache.
 If an input file is modified in place without changing its path, the cache may still select the existing record.
 Change the path, change an explicit parameter, or call ``Workflow.invalidate(...)`` when file contents change at a stable path.
 
@@ -88,7 +88,7 @@ for scripts that need to see what ``compute()`` would do:
 Each :class:`~bioimageflow.engine.NodePlan` carries:
 
 - ``node_name`` — scoped name (``"outer/inner_1"`` for sub-workflow internals)
-- ``final_result_key`` — v1 result key when all required upstream selected records are known
+- ``final_result_key`` — result key when all required upstream selected records are known
 - ``selected_record_id`` — selected immutable record ID when the node is cached
 - ``status`` — one of the five
   :class:`~bioimageflow.engine.NodePlanStatus` values below
@@ -142,7 +142,7 @@ downstream:
 
    wf.invalidate(["segment"], cascade=False) # just "segment"
 
-The return value is a set of ``InvalidatedSelection`` entries for v1 ``current.json`` pointers that were actually removed.
+The return value is a set of ``InvalidatedSelection`` entries for ``current.json`` pointers that were actually removed.
 Each entry reports the node name, result key, selected record ID when it was readable, and whether the pointer was removed normally or as corrupt metadata.
 Passing an unknown name raises ``KeyError``.
 
@@ -169,6 +169,5 @@ produces a new cache key.
 Cache cleanup
 -------------
 
-``max_executions`` and ``max_age`` are removed from the clean ``Workflow`` API.
-Automatic deletion of published cache records is not part of v1 runtime execution.
-Future pruning must be exposed as an explicit storage maintenance operation.
+Automatic deletion of published cache records is not part of runtime execution.
+Published-record pruning is an explicit storage maintenance operation.

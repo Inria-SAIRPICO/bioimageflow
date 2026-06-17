@@ -3,7 +3,7 @@ Tool Packaging and Versioning
 
 BioImageFlow distributes tools as standard Python packages. The versioned
 loading system allows multiple versions of the same package to coexist in a
-single process, enabling reproducible workflows and gradual migrations.
+single process, enabling reproducible workflows.
 
 Package boundary rules
 ----------------------
@@ -14,12 +14,8 @@ runtime assets. Keep package boundaries explicit:
 
 - A package owns its tools, sub-workflows, tests, fixtures, documentation,
   examples, and small runtime assets.
-- Package examples must import from that package, not from old in-repo or
-  workflow-local locations.
+- Package examples must import from that package.
 - Each public tool and workflow exported by the package must have tests.
-- Package changes do not need backward compatibility shims during the
-  current migration. Update examples and downstream workflow docs to the new
-  package names instead of preserving old imports.
 - ``ProcessingTool`` modules may import only the standard library and
   ``bioimageflow-core`` at module import time. Tool-specific dependencies
   are imported inside ``process_row`` or ``process_batch``.
@@ -253,9 +249,9 @@ versions of the same package simultaneously:
    assert SegV1 is not SegV2  # different classes
 
    with Workflow() as wf:
-       old = SegV1()(image=raw["path"])
-       new = SegV2()(image=raw["path"])
-       merged = Concat()(old, new)
+       result_v1 = SegV1()(image=raw["path"])
+       result_v2 = SegV2()(image=raw["path"])
+       merged = Concat()(result_v1, result_v2)
        wf.compute(merged)
 
 Cleanup:

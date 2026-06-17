@@ -1,7 +1,6 @@
 # Output and Cache Storage Specification
 
-This document defines the target v1 on-disk layout for BioImageFlow workflow outputs and cache storage.
-It is a clean v1 target contract and does not preserve the legacy timestamp plus hash directory layout.
+This document defines the on-disk layout for BioImageFlow workflow outputs and cache storage.
 `docs/source/specs.md` summarizes the same public contract.
 
 The canonical cache is the source of truth.
@@ -14,7 +13,7 @@ The human-facing output tree is a derived view over the canonical cache.
 - Cache identity must not depend on runtime-only details such as hostnames, process IDs, temporary paths, scheduler job IDs, or shared-memory segment names.
 - Cache records are immutable once visible to readers.
 - Human-friendly paths may be mutable, but cache lookup must never depend on them.
-- The v1 policy surface must stay small: one current-record policy, no background garbage collector, no automatic deletion of records, and no rich retention system.
+- The storage policy surface must stay small: one current-record policy, no background garbage collector, no automatic deletion of records, and no rich retention system.
 - The layout must be versioned so incompatible future formats can coexist.
 
 ## Top-Level Layout
@@ -30,13 +29,13 @@ All paths below are rooted at `Workflow.storage_path`.
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json              # optional/future in current runtime
+                attempt.json              # optional runtime metadata
                 staging/
                   dataframe.parquet
                   dataframe.csv           # optional debug artifact
                   assets/
                   work/
-                failed.json               # optional/future in current runtime
+                failed.json               # optional failure metadata
             records/
               <record-id>/
                 manifest.json
@@ -74,7 +73,7 @@ It is used in user-facing paths and run manifests.
 The node key is not the cache key.
 Renaming a display label may change the human-facing node key without changing cache identity, depending on workflow identity rules.
 
-The target v1 contract normalizes node keys before use as path segments:
+BioImageFlow normalizes node keys before use as path segments:
 
 - Use UTF-8 text normalized to NFC.
 - Forbid empty segments, `.` and `..`.
@@ -83,8 +82,8 @@ The target v1 contract normalizes node keys before use as path segments:
 - Bound the encoded segment length.
 - Append a short stable disambiguator when two display names normalize to the same storage segment.
 
-Current runtime run views use validated scoped node names directly.
-Collision-safe normalized run-view keys are a remaining v1 hardening task; until that is wired in, workflow node names must already be safe path segments.
+Runtime run views use validated scoped node names directly.
+Workflow node names must be valid storage path segments before they can appear in user-facing run-view paths.
 
 ### Result Key
 
@@ -105,7 +104,7 @@ The result key must include every value that can affect the logical result and c
 - Output contract version when output schema changes affect cache compatibility.
 
 An upstream record reference contains the upstream node key, upstream result key, upstream record ID, and the statically declared binding or selector through which the value is consumed.
-V1 uses the whole upstream record ID.
+The current layout uses the whole upstream record ID.
 It does not attempt per-row or per-column content hashing.
 
 The result key must not include:
@@ -121,13 +120,13 @@ The result key must not include:
 - Shared-memory segment names.
 - Human-facing output symlink paths.
 
-If any consumed upstream value has no selected immutable record, the downstream node cannot produce a reusable result key in v1.
+If any consumed upstream value has no selected immutable record, the downstream node cannot produce a reusable result key for reusable caching.
 The downstream execution may still run, but cache lookup and reusable cache write are disabled for that path.
 
 External references are durable values outside the record directory, such as source image paths discovered by a file-listing source node.
-V1 external reference identity is path-based to preserve the current BioImageFlow cache semantics.
+External reference identity is path-based to preserve the current BioImageFlow cache semantics.
 The identity material is the normalized absolute path string plus the declared reference kind.
-Content digests, size, and mtime-based invalidation are deferred to a later explicit input-fingerprinting feature.
+Input content fingerprinting is outside the current path-based external-reference contract.
 
 The result key should be encoded as a namespaced digest token, for example:
 
@@ -135,7 +134,7 @@ The result key should be encoded as a namespaced digest token, for example:
 rk_<base32-sha256>
 ```
 
-The exact digest encoding is part of the v1 storage contract.
+The exact digest encoding is part of the storage contract.
 The digest length must be collision-resistant enough that cache corruption by digest collision is not a practical concern.
 
 ### Result Shard
@@ -168,7 +167,7 @@ Example:
 ```
 
 Two workers computing the same `<result-key>` must create different attempt directories.
-Multiple workers writing into the same attempt directory is a bug unless a future engine explicitly implements a single-writer claim protocol.
+Engines must either publish from distinct attempt directories or implement a single-writer claim protocol.
 
 ### Record ID
 
@@ -238,13 +237,13 @@ A record has passed the publication protocol and may be reused by cache lookup.
 After publication, the engine must not modify files inside `records/<record-id>/`.
 If a new execution produces different content for the same result key, it creates a different record directory.
 
-V1 automatic garbage collection must not delete record directories.
-Published-record pruning is a future explicit user operation.
+Automatic garbage collection must not delete record directories.
+Published-record pruning is an explicit user operation.
 
 ### `current.json`
 
 `current.json` points to the selected reusable record for one result key.
-V1 has one selection policy: `first-valid`.
+The current layout has one selection policy: `first-valid`.
 
 `current.json` is not the source of truth for record contents.
 The source of truth is `records/<record-id>/manifest.json` plus the files declared by that manifest.
@@ -347,7 +346,7 @@ Before computing the record ID and writing the published dataframe, the engine c
 - Two outputs resolving to the same canonical `assets/...` path are an error unless the tool returns the same file and the manifest records it once.
 - Absolute paths, `..`, symlink escapes, and platform-specific aliases must not appear in record-owned path columns.
 - Source-tool and `DataFrameTool` path columns are external references unless explicitly declared as owned assets.
-- A legitimate external path, such as a source file path emitted by a source node, is represented as a declared external reference and included in result-key hash material using the v1 path-based external identity.
+- A legitimate external path, such as a source file path emitted by a source node, is represented as a declared external reference and included in result-key hash material using the path-based external identity.
 
 Manifest entries distinguish owned assets from external references:
 
@@ -465,7 +464,7 @@ If any upstream node would need execution before its selected record is known, t
 The plan entry should report a pending-upstream status rather than a fake final key.
 
 A diagnostic logical signature may exist for debugging, but it is not a cache lookup key and must not be presented as byte-identical to compute.
-The public API must not reuse one field, such as `sig_hash`, for both final result keys and diagnostic signatures.
+Final result keys and diagnostic signatures are separate fields.
 
 Recommended plan entry fields:
 
@@ -579,7 +578,7 @@ The latest view should be updated after the run view has been written.
 Updating `latest/<node-key>` must be atomic:
 
 1. Create a temporary pointer file in the same parent directory.
-2. Atomically replace the old latest entry with the temporary entry.
+2. Atomically replace the existing latest entry with the temporary entry.
 
 If a workflow run fails or is cancelled, the engine may still update `latest/<node-key>` for nodes that successfully resolved to a selected record before the failure.
 It must not update `runs/latest-success.bioimageflow-link.json` unless the whole requested workflow run completed successfully.
@@ -635,12 +634,6 @@ V1 invalidation changes cache selection state; it does not delete record directo
 Invalidating a node removes or tombstones `current.json` for affected result keys and downstream result keys according to workflow dependency rules.
 Invalidation must use the same per-result-key guarded metadata update discipline as publication, or coordinate externally with active compute operations for the same workflow storage path.
 
-During the migration from the legacy layout, `Workflow.invalidate()` also removes a matching legacy `storage_path/data/<node>` tree when present.
-That is transitional cleanup of old human-facing output directories, not v1 record pruning.
-
-The legacy `max_executions` and `max_age` Workflow settings are removed from the clean v1 public API and must not delete `records/<record-id>/`.
-If legacy configuration is encountered during migration, it must be ignored for v1 cache records or handled by an explicit migration layer outside the clean v1 API.
-
 V1 core does not define a background garbage collector.
 An explicit `cleanup_transients()` operation may remove transient, non-canonical state:
 
@@ -649,14 +642,14 @@ An explicit `cleanup_transients()` operation may remove transient, non-canonical
 - Stale temporary record directories.
 
 `cleanup_transients()` must not delete `records/<record-id>/` directories.
-Published-record pruning is a future explicit user operation and requires its own retention policy, dry-run behavior, and active-reader protection.
+Published-record pruning is an explicit user operation and requires its own retention policy, dry-run behavior, and active-reader protection.
 
 Transient cleanup may remove an attempt or temporary record directory only when both are true:
 
 - The target is older than the configured stale threshold.
-- The caller has established that no compute or publish operation can still be using it, either by external coordination or by a future lease mechanism.
+- The caller has established that no compute or publish operation can still be using it, either by external coordination or by a lease mechanism.
 
-Leases, pins, reader protection, and automatic record pruning are deferred from v1.
+Automatic record pruning is not part of the cache contract.
 
 ## Shared Memory Interaction
 
@@ -719,15 +712,9 @@ A repair command may:
 
 Repair must not silently choose a different current record when the existing state contains conflicts unless the user requested that policy.
 
-## Compatibility With Legacy Storage
+## Storage Summary
 
-This document intentionally replaces the legacy storage shape used by older releases and historical documentation:
-
-```text
-data/<node_name>/<YYYYMMDD_HHMMSS>_<hash12>/
-```
-
-The replacement separates logical computation identity, execution attempts, immutable records, and human-facing views:
+The storage layout separates logical computation identity, execution attempts, immutable records, and human-facing views:
 
 ```text
 cache/v1/results/<result-shard>/<result-key>/

@@ -61,7 +61,7 @@ class TestInvalidate:
             assert _processing_current_exists(wf, n)
 
         cleared = wf.invalidate(["StubSegmenter_1"])
-        # Returns the removed v1 selections — segmentation + stats (downstream).
+        # Returns the removed selections: segmentation + stats (downstream).
         names = _invalidated_node_names(cleared)
         assert "StubSegmenter_1" in names
         assert "StubStats_1" in names

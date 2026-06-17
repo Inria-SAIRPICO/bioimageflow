@@ -37,7 +37,7 @@ Fields:
    * - ``result_key``
      - V1 result key when the event is tied to a cacheable node result.
    * - ``record_id``
-     - Selected v1 record ID for ``"completed"`` and ``"cached"`` events.
+     - Selected record ID for ``"completed"`` and ``"cached"`` events.
    * - ``row``
      - Index of the current row (per-row events).
    * - ``total_rows``
@@ -53,8 +53,8 @@ Fields:
      - Wall-clock seconds-since-epoch.
 
 ``result_key`` and ``record_id`` are the only cache identities exposed by
-progress events. They are never legacy cache directory names or diagnostic
-signature hashes. During a cache miss, ``"started"`` can include
+progress events. Diagnostic signatures are separate debug values and are not
+cache keys. During a cache miss, ``"started"`` can include
 ``result_key`` while ``record_id`` remains empty until publication succeeds.
 
 The engine **serializes callbacks via an internal lock** — your

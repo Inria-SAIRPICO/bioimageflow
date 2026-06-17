@@ -8,7 +8,6 @@ import pytest
 
 from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
 from bioimageflow.engine import WorkflowCancelledError
-from bioimageflow.legacy_storage import get_node_dir
 from bioimageflow.storage import Storage
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
 
@@ -177,9 +176,7 @@ class TestFailureAndCancellation:
         assert plan["FileLoader_1"].status is NodePlanStatus.CACHED
         assert plan["StubSegmenter_1"].status is NodePlanStatus.CACHED
         assert plan["FailingConsumer_1"].status is NodePlanStatus.UNEXECUTED
-        failed_dir = get_node_dir(storage, "FailingConsumer_1")
-        assert not list(failed_dir.glob("*/dataframe.parquet"))
-        assert not list(failed_dir.glob("*/dataframe.csv"))
+        assert not any(Storage(storage).cache_root.rglob("FailingConsumer_1"))
 
         cached_events = []
         with Workflow(
@@ -237,9 +234,7 @@ class TestFailureAndCancellation:
         assert masks.name == "CancellingSegmenter_1"
         assert plan["FileLoader_1"].status is NodePlanStatus.CACHED
         assert plan["CancellingSegmenter_1"].status is NodePlanStatus.UNEXECUTED
-        cancelled_dir = get_node_dir(storage, "CancellingSegmenter_1")
-        assert not list(cancelled_dir.glob("*/dataframe.parquet"))
-        assert not list(cancelled_dir.glob("*/dataframe.csv"))
+        assert not any(Storage(storage).cache_root.rglob("CancellingSegmenter_1"))
 
 
 class TestSubWorkflowPlanCache:

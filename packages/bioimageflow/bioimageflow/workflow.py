@@ -84,7 +84,7 @@ class ProgressEvent:
 
 @dataclass(frozen=True)
 class InvalidatedSelection:
-    """A v1 cache selection removed by :meth:`Workflow.invalidate`."""
+    """A cache selection removed by :meth:`Workflow.invalidate`."""
 
     node_name: str
     result_key: str
@@ -229,9 +229,9 @@ class Workflow:
         *,
         cascade: bool = True,
     ) -> set[InvalidatedSelection]:
-        """Remove v1 cache selections for the given nodes.
+        """Remove cache selections for the given nodes.
 
-        Returns the v1 selections whose ``current.json`` pointers were
+        Returns the selections whose ``current.json`` pointers were
         removed. ``cascade=True`` (the default) also removes selections
         for every node transitively downstream of each input node, so a
         subsequent run recomputes or reselects everything that depended on
@@ -250,7 +250,6 @@ class Workflow:
         to invalidate while a compute is in flight must coordinate
         externally (e.g., cancel + join + invalidate).
         """
-        import shutil
         from bioimageflow.cache import compute_env_hash
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.engine import (
@@ -258,7 +257,6 @@ class Workflow:
             source_processing_signature_material,
             topological_order,
         )
-        from bioimageflow.legacy_storage import get_node_dir
         from bioimageflow.storage import Storage
         from bioimageflow_core.tool import ProcessingTool
 
@@ -339,7 +337,6 @@ class Workflow:
                     plan_logical_signatures[name] = sig_hash
         storage = Storage(self.storage_path)
         for name in targets:
-            node_dir = get_node_dir(self.storage_path, name)
             node = self._nodes[name]
             sig_hash = plan_logical_signatures.get(name)
             result_key = plan_result_keys.get(name)
@@ -370,8 +367,6 @@ class Workflow:
                         kind="processing_tool",
                     )
                 )
-            if node_dir.exists():
-                shutil.rmtree(node_dir)
         return invalidated
 
     def _dataframe_tool_signature_params(self, node: Node) -> dict[str, Any]:
@@ -419,7 +414,7 @@ class Workflow:
         return visited
 
     def plan(self, *, dev_mode: bool = False) -> "dict[str, NodePlan]":
-        """Return a per-node v1 cache-status plan.
+        """Return a per-node cache-status plan.
 
         Instantiates a non-Wetlands :class:`DefaultEngine` and calls its
         :meth:`plan`. No tool code runs.

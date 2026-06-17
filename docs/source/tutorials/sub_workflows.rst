@@ -109,7 +109,7 @@ execution time. Every internal node is given a scoped name of the form
 
 The scoped form is what shows up in ``plan()`` results, ``compute_steps()``
 iteration, ``ProgressEvent.node_name`` during execution, and the node component
-used to derive v1 result keys.
+used to derive result keys.
 
 Per-internal-node caching
 -------------------------

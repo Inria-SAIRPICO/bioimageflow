@@ -178,7 +178,6 @@ Each worker sees ``CUDA_VISIBLE_DEVICES`` set to its zero-based index
 Parsl engine
 ------------
 
-``engine="parsl"`` is reserved for a future Parsl-backed engine that
-will translate ``ResourceSpec`` into Parsl resource requests. The implemented
-engines today are ``direct`` and ``wetlands``; distributed execution is
-deferred.
+The implemented engines are ``direct`` and ``wetlands``.
+``engine="parsl"`` is reserved for a distributed backend that will translate
+``ResourceSpec`` into Parsl resource requests when that backend is implemented.

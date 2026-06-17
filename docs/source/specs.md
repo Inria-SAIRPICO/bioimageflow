@@ -12,9 +12,8 @@ BioImageFlow addresses three challenges in bioimage analysis:
 
 ### 1.0 Baseline Contract
 
-BioImageFlow v1 targets Python `>=3.10` for the orchestrator and first-party tool packages.
-`bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including legacy external-binary environments whose dependencies require Python 3.9.
-The clean v1 API does not carry a backward-compatibility requirement for legacy public surfaces; compatibility shims may exist during migration, but the public specification describes the v1 contract.
+BioImageFlow targets Python `>=3.10` for the orchestrator and first-party tool packages.
+`bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
 All first-party packages are released in lockstep, so a BioImageFlow workspace should use matching package versions for `bioimageflow`, `bioimageflow-core`, and the first-party tool packages.
 The repository root project is workspace-only: it exists to coordinate local package development and documentation, not as a runtime package imported by users.
 Package-local documentation is source-only and is not part of the installed runtime API.
@@ -40,7 +39,7 @@ BioImageFlow is split into two packages:
 
 **`bioimageflow-core`** — The shared foundation. Installed in the main process **and** in every tool worker environment. Contains the type system, tool base classes (`BaseTool` and `ProcessingTool`), argument passing, and I/O dispatch helpers. It declares NumPy because shared-memory helpers expose NumPy array views, and it avoids orchestrator-only dependencies such as pandas, pydantic, and image IO stacks.
 
-**`bioimageflow`** — The orchestrator. Installed only in the main process. Contains the graph engine, execution engines, column resolution, cache management, workflow coordination, and `DataFrameTool` base class. Depends on `bioimageflow-core`, `pandas`, `pydantic`, and the runtime engine dependencies used by the local executor. Distributed execution and Parsl integration are deferred and are not current v1 behavior.
+**`bioimageflow`** — The orchestrator. Installed only in the main process. Contains the graph engine, execution engines, column resolution, cache management, workflow coordination, and `DataFrameTool` base class. Depends on `bioimageflow-core`, `pandas`, `pydantic`, and the runtime engine dependencies used by the local executor. The implemented execution backends are `direct` and `wetlands`.
 
 Common source, merge, conversion, and glue tools live in the first-party `bioimageflow-common-tools` companion package, not in the orchestrator package.
 
@@ -1325,7 +1324,7 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 
 *Module: `bioimageflow.tool_loader`*
 
-Tools are distributed as standard Python packages. The package version participates in v1 result-key material for caching (see [Section 6.1](#61-result-key)). When a tool's package version changes, cached results for that tool are automatically invalidated.
+Tools are distributed as standard Python packages. The package version participates in result-key material for caching (see [Section 6.1](#61-result-key)). When a tool's package version changes, cached results for that tool are automatically invalidated.
 First-party BioImageFlow packages are released and documented in lockstep, so first-party package references should use matching versions unless a compatibility note explicitly says otherwise.
 
 #### Package Structure Requirements
@@ -1389,9 +1388,9 @@ assert issubclass(v2.GaussianSmooth, ProcessingTool)
 
 # Both can coexist in the same workflow
 with Workflow() as wf:
-    old_result = v1.GaussianSmooth()(input_image=raw["path"], sigma=1.0)
+    smooth_v1_result = v1.GaussianSmooth()(input_image=raw["path"], sigma=1.0)
     new_result = v2.GaussianSmooth()(input_image=raw["path"], sigma=1.0)
-    results = wf.compute(old_result, new_result)
+    results = wf.compute(smooth_v1_result, new_result)
 ```
 
 The loading mechanism:
@@ -1755,13 +1754,12 @@ Node registration is automatic: calling a tool (e.g., `segment(...)`) appends th
 | Parameter       | Type          | Default         | Description                                      |
 |----------------|---------------|-----------------|--------------------------------------------------|
 | `storage_path`  | `str \| Path` | `"./bif_data"`  | Root directory for output files and cache. Relative values are interpreted against the orchestrator process working directory and stored internally as absolute runtime paths. |
-| `engine`        | `str`         | `"direct"`      | Execution backend. `"direct"` runs in the orchestrator process. `"wetlands"` runs `ProcessingTool` work in Wetlands worker environments. Distributed and Parsl engines are future/deferred. |
+| `engine`        | `str`         | `"direct"`      | Execution backend. `"direct"` runs in the orchestrator process. `"wetlands"` runs `ProcessingTool` work in Wetlands worker environments. |
 | `execution`     | `str`         | `"parallel"`    | Local scheduling policy: `"parallel"` may execute ready independent nodes concurrently; `"sequential"` executes one node at a time for debugging and deterministic reproduction. |
 | `max_workers`   | `int`         | `1`             | Default number of Wetlands workers per environment when `engine="wetlands"`. Ignored by `engine="direct"` except where a future direct executor explicitly documents row-level parallelism. |
 | `on_progress`   | `Callable \| None` | `None`     | Progress callback (see [Section 4.4](#44-progress-monitoring)) |
 
-`max_age` and `max_executions` are not Workflow constructor parameters in the clean v1 API.
-V1 cache records are not deleted by automatic retention policy; pruning published records is a future explicit operation.
+Cache records are not deleted by automatic retention policy; pruning published records is an explicit storage maintenance operation.
 
 **`compute()` return type and terminal detection:**
 
@@ -1878,10 +1876,10 @@ affected: set[InvalidatedSelection] = workflow.invalidate(["segmenter_1"])      
 affected = workflow.invalidate(["segmenter_1"], cascade=False)                  # only this node
 ```
 
-`invalidate` removes or tombstones the v1 `current.json` cache selections for each affected node/result key; with `cascade=True` (default) it also invalidates every transitively downstream node selection so a subsequent `compute()` recomputes or reselects everything that depended on the changed node.
-It returns `InvalidatedSelection` entries for actual v1 selections whose `current.json` pointers were removed.
+`invalidate` removes or tombstones the `current.json` cache selections for each affected node/result key; with `cascade=True` (default) it also invalidates every transitively downstream node selection so a subsequent `compute()` recomputes or reselects everything that depended on the changed node.
+It returns `InvalidatedSelection` entries for actual selections whose `current.json` pointers were removed.
 Each entry contains `node_name`, `result_key`, `selected_record_id`, and `status` (`"removed"` or `"corrupt_removed"`).
-It never reports legacy directory cleanup as a cache selection and never deletes immutable `records/<record-id>/` directories.
+It never deletes immutable `records/<record-id>/` directories.
 It raises `KeyError` for unknown node names.
 It is not safe to call concurrently with `compute()` on the same workflow storage path unless both operations use the same guarded metadata protocol or callers coordinate externally.
 
@@ -1926,7 +1924,7 @@ for name, entry in plan.items():
 ```
 
 `plan()` returns every node's cache status without executing anything.
-When all consumed upstream selected records are known, it also returns the final v1 result key that `compute()` would derive if it consumes the same upstream record references.
+When all consumed upstream selected records are known, it also returns the final result key that `compute()` would derive if it consumes the same upstream record references.
 When an upstream node must execute before its selected record is known, the downstream plan entry reports `PENDING_UPSTREAM` instead of a fake final cache key.
 `plan()` never launches a Wetlands environment and is safe to call before compute.
 It raises `CycleInWorkflowError` if the graph is cyclic.
@@ -1956,7 +1954,7 @@ results.compute()
 | `node_name`   | `str`           | Name of the node being executed                        |
 | `status`      | `str`           | One of: `"started"`, `"row_progress"`, `"row_complete"`, `"completed"`, `"cached"`, `"failed"`, `"cancelled"` |
 | `result_key`  | `str \| None`   | V1 result key when the event is tied to a cacheable node result |
-| `record_id`   | `str \| None`   | Selected v1 record ID for `"completed"` and `"cached"` events |
+| `record_id`   | `str \| None`   | Selected record ID for `"completed"` and `"cached"` events |
 | `row`         | `int`           | Current row index (for `row_complete` and `row_progress`) |
 | `total_rows`  | `int`           | Total number of rows for this node                     |
 | `message`     | `str \| None`   | Sub-row progress message from `RemoteTaskHandle.update()` |
@@ -1964,8 +1962,8 @@ results.compute()
 | `maximum`     | `int \| None`   | Sub-row progress maximum value                         |
 | `timestamp`   | `float`         | Unix timestamp                                         |
 
-`result_key` and `record_id` are v1 cache identities only.
-They never expose legacy timestamp/hash directory names or diagnostic signatures.
+`result_key` and `record_id` are cache identities only.
+Diagnostic signatures are separate debug values and are not cache identities.
 For a cache miss, `"started"` may include `result_key` while `record_id` remains `None` until the result is published and selected.
 
 When using branch-level parallelism, progress events from concurrent nodes may interleave. The engine serializes all `on_progress` callback invocations via an internal lock, so the callback does not need to be thread-safe.
@@ -2056,7 +2054,7 @@ Passing an unknown name raises `KeyError`.
 1. **Disabled nodes are not executed** — no cache lookup, no computation, no side effects.
 2. **Implicit skip propagation** — any node whose upstream dependency chain includes a disabled node is also skipped (it cannot run without its inputs). This propagation is computed in O(V) after topological sort.
 3. **Graph structure is preserved** — disabling a node does not alter edges, bindings, or registration. Re-enabling restores the original wiring.
-4. **Caching is unaffected** — the `enabled` flag is not part of v1 result-key material. Re-enabling a node with the same parameters and selected upstream records can hit the existing cache.
+4. **Caching is unaffected** — the `enabled` flag is not part of result-key material. Re-enabling a node with the same parameters and selected upstream records can hit the existing cache.
 5. **Return value** — `compute()` returns results only for target nodes that were actually executed:
    - If all targets are disabled or have disabled upstreams, `DisabledNodeError` is raised.
    - If some targets are disabled in a multi-target call, only executed targets appear in the returned dict.
@@ -2064,7 +2062,7 @@ Passing an unknown name raises `KeyError`.
 #### Step-by-Step Execution (`compute_steps`)
 
 When using `compute_steps()`, skipped nodes are still yielded so the GUI can display them (e.g., grayed out). Each `NodeStep` exposes a `skipped` property:
-`compute_steps()` remains a supported execution API and uses the same v1 cache semantics as `compute()`: cache lookup uses result keys and selected `current.json` records, cache misses publish immutable records, and run views point at the selected records.
+`compute_steps()` remains a supported execution API and uses the same cache semantics as `compute()`: cache lookup uses result keys and selected `current.json` records, cache misses publish immutable records, and run views point at the selected records.
 
 ```python
 for step in wf.compute_steps(results):
@@ -2093,7 +2091,7 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 }
 ```
 
-`tool_module` stores the **canonical** module path (not the scoped `__1_0_0` variant). When `tool_package` and `tool_package_version` are present, `Workflow.load()` uses `load_versioned_package()` to load the package and `resolve_tool_class()` to find the class in the scoped namespace. Clean v1 workflows should include package identity for package tools. Any fallback import for legacy or ad hoc workflows is migration behavior, not part of the stable v1 package contract.
+`tool_module` stores the **canonical** module path (not the scoped `__1_0_0` variant). When `tool_package` and `tool_package_version` are present, `Workflow.load()` uses `load_versioned_package()` to load the package and `resolve_tool_class()` to find the class in the scoped namespace. Workflows should include package identity for package tools.
 
 `Workflow.load()` restores the flag: disabled nodes remain disabled in the loaded workflow.
 
@@ -2179,24 +2177,24 @@ When `node.compute()` is called:
 
    1. **Collect Upstream DataFrames:** Gather the output DataFrames from all positional upstream nodes.
    2. **Resolve Arguments:** Resolve `Inputs` parameters into a single `Arguments` object (all constants, validated via Pydantic). Path-typed values are converted to absolute runtime paths before `merge_dataframes()` or `transform()` is called.
-   3. **Cache Check:** Derive the v1 result key from node identity, resolved arguments, tool/environment identity, and selected upstream record references. If `current.json` selects a valid reusable record, load the cached results and skip to step 6.
+   3. **Cache Check:** Derive the result key from node identity, resolved arguments, tool/environment identity, and selected upstream record references. If `current.json` selects a valid reusable record, load the cached results and skip to step 6.
    4. **Merge:** Call `tool.merge_dataframes(dfs, arguments)`. Default: inner join on index.
    5. **Transform:** Call `tool.transform(df, arguments)`. Returns a (potentially different) DataFrame. Default: identity (passthrough).
-   6. **Caching:** Publish the result as an immutable v1 cache record under `storage_path/cache/v1/`, then update the run view from the selected record.
+   6. **Caching:** Publish the result as an immutable cache record under `storage_path/cache/v1/`, then update the run view from the selected record.
 
 #### ProcessingTool Execution Path
 
    1. **Index Alignment:** Collect all upstream nodes referenced via column bindings. Compute the aligned index — the finest-grained index that is compatible with all upstream indices (see [Section 5.3](#53-dataframe-semantics)). If upstream indices are incompatible (no common lineage), raise `IndexAlignmentError`.
    2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations. Path-typed values are converted to absolute runtime paths in the orchestrator.
    3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The main process must resolve output paths *before* dispatch since the worker has no knowledge of workflow graph state. Generated output paths are absolute and point under the run's `assets/` directory.
-   4. **Cache Check:** Derive the v1 result key from node identity, resolved arguments, tool/environment identity, and selected upstream record references. If `current.json` selects a valid reusable record, load cached results and skip to step 10.
+   4. **Cache Check:** Derive the result key from node identity, resolved arguments, tool/environment identity, and selected upstream record references. If `current.json` selects a valid reusable record, load cached results and skip to step 10.
    5. **Execution Context:** Create a unique attempt staging directory under `storage_path/cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/` with `assets/`, shared `work/`, `work/rows/`, per-row `work/rows/<safe_row_id>/`, and `work/batch/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Every context shares the same `work_dir` (`run_dir/work/`) and `rows_dir` (`run_dir/work/rows/`); row contexts receive a private `row_dir`, and the batch context receives a private `batch_dir`. Context paths are runtime details and are not included in result-key material.
    6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
    7. **Backend Preparation:** If `engine="direct"`, instantiate or reuse the tool in the orchestrator process and do not launch Wetlands. If `engine="wetlands"`, create/reuse the Wetlands environment. If an existing Wetlands environment with the same name has a different dependency hash, raise `EnvironmentMismatchError`.
    8. **Dispatch:** If `process_batch` was overridden, call one batch operation. Otherwise, call all `process_row` operations. The direct backend calls tool methods in the orchestrator process. The Wetlands backend uses `env.submit()` for batch work and `env.map_tasks()` for row work. When `engine="wetlands"` and the effective `max_workers > 1`, rows may execute in parallel across worker processes. Results are always collected in submission order to preserve deterministic DataFrame construction.
    8b. **Output Validation:** After `process_row`/`process_batch` returns, the runtime performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., image path fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised with clear context pointing to the tool code.
-   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the v1 record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
-   10. **Caching:** Publish the result as an immutable v1 cache record under `storage_path/cache/v1/`, then update the run view from the selected record.
+   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
+   10. **Caching:** Publish the result as an immutable cache record under `storage_path/cache/v1/`, then update the run view from the selected record.
 
 #### ProcessingTool Backend Interaction (ProcessingTool Steps 6-10)
 
@@ -2333,7 +2331,7 @@ def run_process_row(tool_class_name, arguments_dict, context_dict=None):
 
 ### 6.1 Result Key
 
-Before reusable cache lookup, each node derives a v1 result key when every consumed upstream selected record is known.
+Before reusable cache lookup, each node derives a result key when every consumed upstream selected record is known.
 The result key answers: "what computation is this, over which exact selected upstream records?"
 
 Result-key material includes every value that can affect logical output and cache validity:
@@ -2358,8 +2356,7 @@ Result keys are stored under the canonical cache root:
 storage_path/cache/v1/results/<result-shard>/<result-key>/
 ```
 
-The legacy `sig_hash` name is not part of the clean v1 public planning API.
-Implementations may keep diagnostic signatures internally, and `NodePlan.logical_signature` exposes the diagnostic value when callers need it.
+`NodePlan.logical_signature` exposes a diagnostic value when callers need it.
 Public cache APIs use result keys and selected record IDs.
 Callers should treat `NodePlan.final_result_key` as the public opaque cache token and should not parse or persist the diagnostic logical signature.
 
@@ -2516,7 +2513,7 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
 
 ### 7.2 Directory Structure
 
-The v1 runtime storage layout is rooted at `Workflow.storage_path`.
+The runtime storage layout is rooted at `Workflow.storage_path`.
 When the platform runs a saved workflow, it sets that root from the active workspace: `workspace/outputs/<workflow_id>/`.
 The workspace itself also contains the saved workflow tree, workspace-local custom tools, user data, and outputs:
 
@@ -2540,7 +2537,7 @@ workspace/
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json              # optional/future in current runtime
+                attempt.json              # optional runtime metadata
                 staging/
                   dataframe.parquet
                   dataframe.csv           # optional debug artifact
@@ -2645,9 +2642,9 @@ def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
 - **Allocation:** Tools create shared memory segments using `create_shared_output()`, which uses the `bif_` namespace prefix.
 - **Ownership:** When a tool returns a `SharedArray` in its outputs, the engine assumes full ownership. Since `create_shared_output` closes the tool's handle automatically, ownership transfer is enforced by the API.
 - **Consumption:** Downstream tools read shared memory via `load_image()` (Path/SharedArray dispatch) or `open_shared_array()` directly.
-- **Garbage Collection:** The current helper closes local shared-memory handles but does not unlink segments automatically. Topology-aware unlinking is deferred.
-- **Crash Safety:** No `bioimageflow clean-shm` CLI is currently provided. Manual orphan cleanup and process-exit cleanup tooling are deferred.
-- **Persistence:** Shared memory is volatile. If caching is requested for a source or column-bound `ProcessingTool` node that produced shared memory outputs, the engine publishes each non-null `SharedArray` output cell as a durable v1 record-owned `.npy` asset under the reserved `assets/shm/` namespace. When the node is subsequently loaded from cache, the engine reads each durable asset back into a fresh `SharedArray` before dispatching to downstream tools, thereby strictly respecting the `ImageShared` interface contract.
+- **Garbage Collection:** The current helper closes local shared-memory handles but does not unlink segments automatically.
+- **Crash Safety:** No `bioimageflow clean-shm` CLI is currently provided.
+- **Persistence:** Shared memory is volatile. If caching is requested for a source or column-bound `ProcessingTool` node that produced shared memory outputs, the engine publishes each non-null `SharedArray` output cell as a durable record-owned `.npy` asset under the reserved `assets/shm/` namespace. When the node is subsequently loaded from cache, the engine reads each durable asset back into a fresh `SharedArray` before dispatching to downstream tools, thereby strictly respecting the `ImageShared` interface contract.
 
 When a tool stores a `SharedArray` in an output DataFrame column, it carries the shared memory name, array shape, and dtype — sufficient for downstream tools to attach and read the data. Since `SharedArray` is a frozen dataclass defined in `bioimageflow-core`, it is picklable and can cross the serialization boundary.
 
@@ -2684,8 +2681,8 @@ class MyGPUTool(ProcessingTool):
     ...
 ```
 
-- `ResourceSpec.max_concurrent` is reserved for future distributed engines and is not used by the direct or Wetlands v1 local backends.
-- Distributed and Parsl execution are deferred v1 work. Future engines may map resource specs to executor pools, for example by routing `gpu=1` work to a GPU executor or by using `max_concurrent=4` to limit task submissions.
+- `ResourceSpec.max_concurrent` is reserved for distributed engines and is not used by the direct or Wetlands local backends.
+- Distributed engines may map resource specs to executor pools, for example by routing `gpu=1` work to a GPU executor or by using `max_concurrent=4` to limit task submissions.
 - Tools without `resources` have no constraints (unlimited concurrency, CPU-only).
 
 `ResourceSpec` lives in `bioimageflow_core.environment` alongside `EnvironmentSpec`.
@@ -2741,7 +2738,7 @@ node_logger = logging.getLogger(f"bioimageflow.node.{node_name}")
 - **Wetlands backend (`engine="wetlands"`):** Dispatches `ProcessingTool` work to Wetlands worker environments. Within each node, `process_row` calls are dispatched via Wetlands task APIs. When the effective `max_workers > 1`, rows may run in parallel across worker processes. When `max_workers == 1` (default), rows run sequentially within that environment.
 - **Parallel scheduling (`execution="parallel"`):** Independent ready nodes may execute concurrently. `DataFrameTool` nodes still run on the main thread with coordination because they operate on DataFrames in the orchestrator process and may not be thread-safe.
 - **Sequential scheduling (`execution="sequential"`):** Forces single-node-at-a-time execution for debugging and deterministic reproduction.
-- **Distributed engine (future/deferred):** Parsl or another distributed backend may be added later for cluster execution. This is not current v1 behavior. Future engines should use `ResourceSpec` declarations (see [Section 10](#10-resource-constraints)) to route tasks to appropriate executors.
+- **Distributed engine:** Parsl or another distributed backend can use `ResourceSpec` declarations (see [Section 10](#10-resource-constraints)) to route tasks to appropriate executors. The implemented engines are `direct` and `wetlands`.
 
 The choice of backend and local scheduling policy is transparent to tool authors — the same tool code works with direct and Wetlands execution.
 
@@ -2950,14 +2947,14 @@ At execution time, the engine **flattens** the sub-workflow into its constituent
 4. After all internal nodes execute, the engine assembles the sub-workflow's output DataFrame by collecting columns from the output mapping.
 
 **Consequences of flattening:**
-- **Caching:** Each internal node caches independently using the same v1 result-key/current-record semantics as a top-level node.
+- **Caching:** Each internal node caches independently using the same result-key/current-record semantics as a top-level node.
 - **Environment reuse:** Internal `ProcessingTool`s with the same `EnvironmentSpec` as parent-level tools share the same Wetlands environment.
 - **Name scoping:** Internal node names are prefixed with the sub-workflow node name: `"SegmentAndMeasure_1/CellposeSegmenter_1"`. Node keys and result-key material preserve the same scoping.
 
 ### 14.6 Debugging with `compute_steps`
 
 Internal nodes are visible during step-by-step execution via `compute_steps()`. Each internal node is yielded as its own `NodeStep` with a scoped name:
-`compute_steps()` uses the same v1 cache lookup, publication, and run-view update semantics as `compute()`.
+`compute_steps()` uses the same cache lookup, publication, and run-view update semantics as `compute()`.
 
 ```python
 for step in wf.compute_steps(results):
@@ -2975,7 +2972,7 @@ Next: SegmentAndMeasure_1/MeasureStats_1 (env: imageio)
 
 ### 14.7 Cache Scope
 
-Internal nodes use scoped node keys in v1 result-key material and in human-facing run views:
+Internal nodes use scoped node keys in result-key material and in human-facing run views:
 
 ```text
 SegmentAndMeasure_1/CellposeSegmenter_1
@@ -2984,7 +2981,7 @@ FileLoader_1
 ```
 
 The canonical cache remains under `storage_path/cache/v1/`.
-Sub-workflow scoping affects node keys and result-key material; it does not create a legacy `storage_path/data/` cache tree.
+Sub-workflow scoping affects node keys and result-key material; sub-workflow results use the same `cache/v1` storage layout as top-level nodes.
 
 ### 14.8 Serialization
 
@@ -3169,27 +3166,6 @@ A config-driven sub-workflow is functionally equivalent to a class-based sub-wor
 
 ---
 
-## 15. Future Work
-
-The following items are acknowledged design concerns that will be addressed in future iterations:
-
-### 15.1 Row-Level Error Policy
-
-Currently, when a single row fails in `process_row`, the entire node execution fails and no partial results are saved. For large datasets (e.g., 10,000 images where one is corrupted), this discards all successful results.
-
-**Planned:** An `on_error` policy per node:
-- `on_error="fail"` (default): Current behavior — any row failure aborts the node.
-- `on_error="skip"`: Failed rows are excluded from the output DataFrame. A row-level error log is saved alongside the results.
-- Partial results saved to cache with a metadata flag marking the node as incomplete, enabling incremental re-execution.
-
-### 15.2 Content-Based External Reference Fingerprinting
-
-V1 result-key material includes external reference *paths*, not file *contents*. If an input file is modified without changing its path, the cache may report a false hit.
-
-**Planned:** An opt-in external-reference fingerprinting mode for source nodes that hashes file metadata (size + mtime) or file contents. This is expensive for large files but critical for reproducibility in scientific workflows. When enabled, the source node's result-key material additionally includes the content fingerprint of each file it references.
-
----
-
 ## Appendix A: Wetlands API
 
 Wetlands is a lightweight Python library for managing Conda environments. It creates environments on demand, installs dependencies, and runs Python code inside them as isolated subprocess workers. Each environment is fully isolated, enabling tools with conflicting dependencies to coexist in the same workflow.
@@ -3298,19 +3274,3 @@ Functions without a `task` parameter work exactly as before.
 ```python
 env.exit()  # Shuts down all workers and releases resources
 ```
-
----
-
-## Changelog
-
-- GUI Validation and Planning API: `Workflow.from_dict` / `to_dict`, `Workflow.validate`, `Workflow.plan`, `Workflow.capture_errors`, `Workflow.topological_order`, `Workflow.downstream_of`, `ValidationError` dataclass, `NodePlan` dataclass, and helpers `validate_parameters` / `check_type_compat` / `serialize_image_spec`. Additive; `Workflow.load` / `export` / `compute` are unchanged. Note: `Workflow.validate()` runs Pydantic validation on supplied constants (`parameter_invalid`) that was previously deferred to execution — callers relying on engine coercion may need explicit defaults or broader `Inputs` types.
-- Wire-format schema serializers: `bioimageflow.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` return JSON-safe per-field schemas (including `choices` from `Literal` / `Enum`, three-state `connectable`, `image_spec`) for tool classes without requiring instantiation. `Passthrough` outputs serialize to `{"_passthrough": True}`. `SchemaSerializationError` is the accompanying exception. Recommended for any GUI or external consumer that needs tool metadata over the wire; `get_inputs_schema(tool)` is still available for Python-object introspection. Additive; no existing API changed.
-- Platform-boundary refactor (GUI integration surface):
-  - `Workflow.from_dict` gains orthogonal `validate_only` and `partial` flags. The legacy `collect_errors=` kwarg is **removed** (passing it raises `TypeError`); `validate_only=True, partial=True` is the equivalent.
-  - The `Workflow.collect_errors()` context manager is **renamed** to `Workflow.capture_errors()`; the underlying `_error_capture` ContextVar is consistent. No alias.
-  - `Workflow` exposes `errors`, `failed_nodes`, `is_partial` build-time properties and `invalidate(node_ids, *, cascade=True)` for cache cleanup. `invalidate` is **not** safe vs concurrent `compute()`.
-  - `Workflow.plan()` exposes v1 `NodePlanStatus` (`CACHED` / `PRIOR_SELECTION_MISS` / `UNEXECUTED` / `SKIPPED` / `PENDING_UPSTREAM`) plus `final_result_key`, `selected_record_id`, `pending_upstreams`, and diagnostic `logical_signature` on the `NodePlan` dataclass; `cached` / `skipped` are read-only convenience accessors derived from `status`. `plan()` raises `CycleInWorkflowError` (a `ValueError` subclass) on cyclic graphs instead of degrading to all-skipped.
-  - `ValidationError` adds an `edge_id: str | None` field, copied from the optional `id` key on wire-format edges. `validate()`'s deduplication includes `edge_id`, so two errors that differ only by `edge_id` are reported as distinct.
-  - `serialize_constant` / `deserialize_constant` are public exports of `bioimageflow.validation`. `deserialize_constant` requires the typed envelope; bare-string input is no longer accepted.
-  - New `bioimageflow.ToolRegistry` and `bioimageflow.ToolMetadata` for GUIs to enumerate tools without rebuilding loader plumbing. `install_package` (network) and `register_package` (in-process) are split so hot validation paths never touch the network.
-  - New `bioimageflow.WorkflowSession` — a dict-backed incremental editing model with cached `to_workflow()`, in-place updates for `set_constant` / `set_enabled` (no tool re-resolution), and structural-edit invalidation. Aimed at GUI clients that mutate graphs at keystroke rate.

@@ -28,8 +28,8 @@ Construction
    sess = WorkflowSession(data)              # load existing wire format
    sess = WorkflowSession(data, registry=reg, storage_path="./bif_data")
 
-The ``registry`` argument is held for tool resolution by future versions
-of the session. The ``storage_path`` argument injects (or overrides)
+The ``registry`` argument is stored with the session for host-side tool resolution.
+The ``storage_path`` argument injects (or overrides)
 ``data["config"]["storage_path"]`` without mutating the input dict.
 
 Mutating operations
@@ -99,7 +99,7 @@ The materialized workflow is reused across non-structural edits, validation is c
   (``wf.errors``) and ``wf.validate()`` results, deduplicated.
 
 :meth:`~bioimageflow.WorkflowSession.plan` returns ``dict[str, NodePlan]`` with the same shape as ``Workflow.plan()``.
-It reuses the materialized workflow object when possible, but refreshes the v1 storage/current snapshot on every call so external ``compute()`` or ``invalidate()`` operations are reflected immediately.
+It reuses the materialized workflow object when possible, but refreshes the storage/current snapshot on every call so external ``compute()`` or ``invalidate()`` operations are reflected immediately.
 
 A fourth method, :meth:`~bioimageflow.WorkflowSession.to_dict`, returns
 a deep copy of the wire format — a snapshot suitable for export or for

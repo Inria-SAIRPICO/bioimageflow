@@ -79,12 +79,11 @@ Other parameters
 ``Workflow.load(path)`` is a thin wrapper around the strict mode
 (``partial=False, validate_only=False``).
 
-Worked example: GUI loading a stale graph
------------------------------------------
+Worked example: GUI loading a graph with an unavailable package
+---------------------------------------------------------------
 
-A user opens a workflow file written months ago. The package
-``my_tools`` was renamed to ``my_lab_tools``; one node references the
-old name. The host wants to surface the failure inline rather than
+A user opens a workflow file that references a package not installed in the
+current tool store. The host wants to surface the failure inline rather than
 crash:
 
 .. code-block:: python

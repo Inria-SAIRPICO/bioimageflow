@@ -108,7 +108,7 @@ def cache_load(cache_path: Path) -> pd.DataFrame:
     if cache_path.suffix == ".parquet":
         df = pd.read_parquet(cache_path)
     else:
-        # Legacy CSV fallback
+        # CSV support for lightweight fixtures and manually inspected caches.
         df = pd.read_csv(cache_path, index_col=0, keep_default_na=False)
         # Restore numeric columns where possible
         for col in df.columns:
@@ -270,7 +270,7 @@ def iter_dataframe_result_metadata(
     storage_path: str | Path,
     known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return DataFrameTool v1 result metadata, inferring old records when possible."""
+    """Return DataFrameTool result metadata, inferring metadata-less records when possible."""
     return _iter_result_metadata(
         storage_path,
         kind="dataframe_tool",
@@ -283,7 +283,7 @@ def iter_processing_result_metadata(
     storage_path: str | Path,
     known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ProcessingTool v1 result metadata, inferring old records when possible."""
+    """Return ProcessingTool result metadata, inferring metadata-less records when possible."""
     return _iter_result_metadata(
         storage_path,
         kind="processing_tool",
@@ -301,7 +301,7 @@ def dataframe_lookup(
     node_name: str,
     sig_hash: str,
 ) -> pd.DataFrame | None:
-    """Load a DataFrameTool v1 cache hit, or return ``None`` on miss."""
+    """Load a DataFrameTool cache hit, or return ``None`` on miss."""
     storage = Storage(storage_path)
     result_key = dataframe_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
@@ -310,7 +310,7 @@ def dataframe_lookup(
     try:
         return cache_load(_dataframe_record_path(storage, result_key, pointer.record_id))
     except Exception as exc:
-        raise CacheCorruptionError("Cached v1 dataframe is unreadable.") from exc
+        raise CacheCorruptionError("Cached dataframe is unreadable.") from exc
 
 
 def dataframe_publish(
@@ -319,7 +319,7 @@ def dataframe_publish(
     sig_hash: str,
     df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Publish a DataFrameTool result through the v1 immutable record model."""
+    """Publish a DataFrameTool result through the immutable record model."""
     storage = Storage(storage_path)
     result_key = dataframe_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
@@ -392,7 +392,7 @@ def dataframe_publish(
     try:
         return cache_load(_dataframe_record_path(storage, result_key, pointer.record_id))
     except Exception as exc:
-        raise CacheCorruptionError("Published v1 dataframe is unreadable.") from exc
+        raise CacheCorruptionError("Published dataframe is unreadable.") from exc
 
 
 def processing_prepare_attempt(
@@ -400,7 +400,7 @@ def processing_prepare_attempt(
     node_name: str,
     sig_hash: str,
 ) -> tuple[str, str, Path, Path]:
-    """Create a v1 attempt staging tree for a ProcessingTool node."""
+    """Create an attempt staging tree for a ProcessingTool node."""
     storage = Storage(storage_path)
     result_key = processing_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
@@ -577,7 +577,7 @@ def processing_lookup(
     shared_array_columns: set[str] | None = None,
     hydrate_assets: bool = True,
 ) -> pd.DataFrame | None:
-    """Load a ProcessingTool v1 cache hit, or return ``None`` on miss."""
+    """Load a ProcessingTool cache hit, or return ``None`` on miss."""
     storage = Storage(storage_path)
     result_key = processing_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
@@ -588,7 +588,7 @@ def processing_lookup(
     try:
         df = cache_load(record_dir / "dataframe.parquet")
     except Exception as exc:
-        raise CacheCorruptionError("Cached v1 ProcessingTool dataframe is unreadable.") from exc
+        raise CacheCorruptionError("Cached ProcessingTool dataframe is unreadable.") from exc
     if not hydrate_assets:
         return df
     return _rehydrate_processing_assets(
@@ -872,7 +872,7 @@ def processing_publish(
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]] | None = None,
     declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
 ) -> pd.DataFrame:
-    """Publish a source ProcessingTool attempt as a v1 immutable record."""
+    """Publish a source ProcessingTool attempt as an immutable record."""
     storage = Storage(storage_path)
     stored_df, outputs, owned_assets = _processing_manifest_entries_and_dataframe(
         df,
@@ -960,7 +960,7 @@ def processing_publish(
     try:
         selected_df = cache_load(selected_record_dir / "dataframe.parquet")
     except Exception as exc:
-        raise CacheCorruptionError("Published v1 ProcessingTool dataframe is unreadable.") from exc
+        raise CacheCorruptionError("Published ProcessingTool dataframe is unreadable.") from exc
     return _rehydrate_processing_assets(
         selected_df,
         selected_record_dir,

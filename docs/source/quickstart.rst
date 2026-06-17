@@ -134,7 +134,7 @@ What happens:
 3. ``wf.compute(inverted)`` executes the DAG in topological order.
 
 The result is a pandas DataFrame with one column per output field.
-Owned output assets are stored in immutable v1 records under
+Owned output assets are stored in immutable records under
 ``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/`` and the
 run view under ``./bif_data/runs/`` points back to the selected record.
 :doc:`concepts/caching` covers the cache lifecycle, ``plan()`` and

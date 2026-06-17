@@ -19,5 +19,5 @@ Integrators trees.
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.
-The target v1 replacement for output and cache storage is specified in
-:doc:`output_cache_storage` until it is folded into the exhaustive specification.
+The canonical output and cache storage layout is specified in
+:doc:`output_cache_storage`.

@@ -8,7 +8,7 @@ Covers:
 - Cache miss: changing tool version invalidates cache
 - Cache miss: changing environment dependencies invalidates cache
 - Dev mode: source code changes invalidate cache
-- Cache retention policy (max_executions, max_age)
+- Published records are retained until explicit storage maintenance
 - Dependency normalization (sort order, whitespace)
 """
 

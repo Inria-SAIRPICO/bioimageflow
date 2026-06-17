@@ -14,7 +14,7 @@ Execution pipeline
    after its dependencies. Uses Kahn's algorithm; cycles are detected and
    rejected.
 
-3. **Cache lookup**: for each node, derive its v1 result key from the node,
+3. **Cache lookup**: for each node, derive its result key from the node,
    resolved inputs, tool identity, environment identity, and selected upstream
    records. If ``current.json`` selects a reusable record, load it and skip
    execution.
@@ -33,10 +33,9 @@ Execution pipeline
    each ``Outputs`` instance becomes a row.
 
 7. **Cache publication**: publish the output DataFrame and owned assets as an
-   immutable v1 record, then select it through ``current.json``.
+   immutable record, then select it through ``current.json``.
 
-Automatic cache retention through ``max_executions`` or ``max_age`` is not part of the clean ``Workflow`` API.
-Future pruning must be an explicit storage maintenance operation.
+Published cache records are retained until an explicit storage maintenance operation prunes them.
 
 Index alignment
 ---------------
@@ -97,10 +96,10 @@ not used to decide cache hits.
 Result keys
 -----------
 
-The v1 result key is the public cache identity exposed by planning, progress,
+The result key is the public cache identity exposed by planning, progress,
 invalidation, and run-view APIs. It includes the node's logical inputs and
 selected upstream record references when upstream records are available.
-The full v1 material is documented in :doc:`../reference/output_cache_storage`.
+The full material is documented in :doc:`../reference/output_cache_storage`.
 
 Progress events
 ---------------
@@ -113,11 +112,11 @@ The engine emits :class:`~bioimageflow.ProgressEvent` objects via the
 - ``completed``: node execution finished
 - ``cached``: node result loaded from cache (no execution)
 
-Cache-related events expose v1 ``result_key`` / ``record_id`` values, never
-legacy cache directory names or diagnostic signature hashes.
+Cache-related events expose ``result_key`` / ``record_id`` values.
+Diagnostic signatures are separate debug values and are not cache keys.
 
 See also
 --------
 
-- :doc:`caching` --- the v1 result-key/current-record model, ``plan()``,
+- :doc:`caching` --- the result-key/current-record model, ``plan()``,
   ``invalidate()``, and ``NodePlanStatus`` values.

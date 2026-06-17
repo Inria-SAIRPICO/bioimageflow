@@ -2,7 +2,7 @@
 
 Main-process orchestrator for BioImageFlow workflows.
 
-This package builds workflow DAGs, resolves column bindings, executes tools, and publishes v1 cache records and run views.
+This package builds workflow DAGs, resolves column bindings, executes tools, and publishes cache records and run views.
 Worker-safe tool authoring primitives live in `bioimageflow-core`; optional domain tools live in separate `bioimageflow-*-tools` packages.
 
 Install:

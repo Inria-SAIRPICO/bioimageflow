@@ -1,4 +1,4 @@
-"""Runtime integration tests for the v1 output/cache storage contract."""
+"""Runtime integration tests for output/cache storage."""
 
 import json
 import hashlib
@@ -226,16 +226,16 @@ class UnsafeTemplateSource(ProcessingTool):
         return self.Outputs(mask=arguments.mask)
 
 
-class ColumnBoundLegacyWriter(ProcessingTool):
-    display_name = "Column Bound Legacy Writer"
-    environment = EnvironmentSpec(name="column_bound_legacy_writer", dependencies={})
+class ColumnBoundAssetWriter(ProcessingTool):
+    display_name = "Column Bound Asset Writer"
+    environment = EnvironmentSpec(name="column_bound_asset_writer", dependencies={})
     executions = 0
 
     class Inputs(IOModel):
         label: str
 
     class Outputs(IOModel):
-        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("legacy_{row_index}.txt")
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("label_{row_index}.txt")
 
     def process_row(self, arguments: Arguments, *, context: object | None = None):
         type(self).executions += 1
@@ -479,7 +479,7 @@ def _force_current_record(storage: Storage, result_key: str, record_id: str) -> 
     current_path.write_text(json.dumps(pointer.to_dict(), indent=2, sort_keys=True))
 
 
-def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path: Path) -> None:
+def test_dataframe_tool_compute_publishes_record_and_uses_cache_hit(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
 
@@ -497,7 +497,6 @@ def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path:
     assert pointer is not None
     assert pointer.record_id == record_id
     assert (storage.result_dir(result_key) / "records" / record_id / "dataframe.parquet").exists()
-    assert not (storage_path / "data" / "CountingTable_1").exists()
 
     events: list[tuple[str, str]] = []
     with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
@@ -510,7 +509,7 @@ def test_dataframe_tool_compute_publishes_v1_record_and_uses_cache_hit(tmp_path:
     assert _current_pointer_files(storage_path) == current_files
 
 
-def test_dataframe_tool_progress_events_expose_v1_selection_identity(tmp_path: Path) -> None:
+def test_dataframe_tool_progress_events_expose_selection_identity(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
     events: list[ProgressEvent] = []
@@ -626,7 +625,7 @@ def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:
     assert cached[-1].record_id == result["record_id"]
 
 
-def test_compute_steps_processing_tool_cached_step_emits_v1_progress_identity(tmp_path: Path) -> None:
+def test_compute_steps_processing_tool_cached_step_emits_progress_identity(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     SourceAssetWriter.executions = 0
 
@@ -729,7 +728,7 @@ def test_compute_writes_run_view_for_subworkflow_internal_nodes(tmp_path: Path) 
     assert result["cache_hit"] is False
 
 
-def test_dataframe_tool_parameter_change_creates_distinct_v1_result_without_legacy_data(tmp_path: Path) -> None:
+def test_dataframe_tool_parameter_change_creates_distinct_result_record(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -740,10 +739,9 @@ def test_dataframe_tool_parameter_change_creates_distinct_v1_result_without_lega
     current_files = _current_pointer_files(storage_path)
     assert len(current_files) == 2
     assert {json.loads(path.read_text())["result_key"] for path in current_files}
-    assert not (storage_path / "data").exists()
 
 
-def test_chained_dataframe_tools_use_v1_cache_for_each_node(tmp_path: Path) -> None:
+def test_chained_dataframe_tools_use_current_cache_for_each_node(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
     DoubleValue.executions = 0
@@ -803,7 +801,7 @@ def test_downstream_result_key_tracks_selected_upstream_record(tmp_path: Path) -
     assert DoubleValue.executions == 2
 
 
-def test_dataframe_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
+def test_dataframe_tool_plan_reports_cached_from_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -816,7 +814,7 @@ def test_dataframe_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> N
     assert plan[table.name].status is NodePlanStatus.CACHED
 
 
-def test_dataframe_tool_corrupt_v1_current_raises(tmp_path: Path) -> None:
+def test_dataframe_tool_corrupt_current_raises(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -854,7 +852,7 @@ def test_dataframe_tool_path_outputs_are_normalized_after_publish_hit_and_steps(
     assert type(first.loc["row", "path"]) is type(second.loc["row", "path"]) is type(stepped.loc["row", "path"])
 
 
-def test_dataframe_tool_invalidate_removes_v1_current_but_keeps_record(tmp_path: Path) -> None:
+def test_dataframe_tool_invalidate_removes_current_but_keeps_record(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0
 
@@ -888,7 +886,7 @@ def test_dataframe_tool_invalidate_removes_v1_current_but_keeps_record(tmp_path:
     assert CountingTable.executions == 2
 
 
-def test_dataframe_tool_invalidate_removes_corrupt_v1_current(tmp_path: Path) -> None:
+def test_dataframe_tool_invalidate_removes_corrupt_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -912,17 +910,17 @@ def test_dataframe_tool_invalidate_removes_corrupt_v1_current(tmp_path: Path) ->
     assert not current_path.exists()
 
 
-def test_dataframe_tool_invalidate_removes_prior_signature_current(tmp_path: Path) -> None:
+def test_dataframe_tool_invalidate_removes_prior_current_selection(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
         node = CountingTable()(value=1)
         wf.compute(node)
-        old_result_key = _planned_result_key(wf, node.name)
+        prior_result_key = _planned_result_key(wf, node.name)
 
     storage = Storage(storage_path)
-    old_pointer = storage.load_current(old_result_key)
-    assert old_pointer is not None
+    prior_pointer = storage.load_current(prior_result_key)
+    assert prior_pointer is not None
 
     with Workflow(storage_path=storage_path) as wf:
         node = CountingTable()(value=2)
@@ -930,12 +928,12 @@ def test_dataframe_tool_invalidate_removes_prior_signature_current(tmp_path: Pat
 
     assert _invalidated_node_names(cleared) == {"CountingTable_1"}
     selection = _selection_for(cleared, "CountingTable_1")
-    assert selection.result_key == old_result_key
-    assert selection.selected_record_id == old_pointer.record_id
-    assert storage.load_current(old_result_key) is None
+    assert selection.result_key == prior_result_key
+    assert selection.selected_record_id == prior_pointer.record_id
+    assert storage.load_current(prior_result_key) is None
 
 
-def test_dataframe_tool_corrupt_v1_dataframe_file_raises_cache_corruption(tmp_path: Path) -> None:
+def test_dataframe_tool_corrupt_dataframe_file_raises_cache_corruption(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1026,7 +1024,6 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     ]
     assert (record_dir / "assets" / "mask_0.txt").read_text() == "abc"
     assert first.loc["0", "mask"] == str(record_dir / "assets" / "mask_0.txt")
-    assert not (storage_path / "data" / "SourceAssetWriter_1").exists()
 
     with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
         second = wf.compute(SourceAssetWriter()(text="abc"))
@@ -1104,7 +1101,7 @@ def test_zero_row_processing_tool_publishes_written_default_template_asset(
     assert DefaultTemplateZeroRowWriter.executions == 1
 
 
-def test_processing_tool_progress_events_expose_v1_selection_identity(tmp_path: Path) -> None:
+def test_processing_tool_progress_events_expose_selection_identity(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     SourceAssetWriter.executions = 0
     events: list[ProgressEvent] = []
@@ -1157,7 +1154,6 @@ def test_source_processing_tool_external_paths_stay_external_references(tmp_path
     ]
     assert set(first["path"]) == {str(source_dir / "a.txt"), str(source_dir / "b.txt")}
     assert not (record_dir / "assets").exists()
-    assert not (storage_path / "data" / "SourceExternalPaths_1").exists()
 
     with Workflow(storage_path=storage_path) as wf:
         second = wf.compute(SourceExternalPaths()(directory=source_dir))
@@ -1166,7 +1162,7 @@ def test_source_processing_tool_external_paths_stay_external_references(tmp_path
     assert SourceExternalPaths.executions == 1
 
 
-def test_source_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
+def test_source_processing_tool_plan_reports_cached_from_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
@@ -1185,13 +1181,13 @@ def test_source_processing_tool_default_input_value_affects_signature(tmp_path: 
     with Workflow(storage_path=storage_path) as wf:
         explicit = SourceAssetWriter()(text="mask", name="source")
         wf.compute(explicit)
-        explicit_sig_hash = wf.plan()[explicit.name].logical_signature
+        explicit_logical_signature = wf.plan()[explicit.name].logical_signature
 
     with Workflow(storage_path=storage_path) as wf:
         defaulted = SourceAssetWriter()(name="source")
         plan = wf.plan()
 
-    assert plan[defaulted.name].logical_signature == explicit_sig_hash
+    assert plan[defaulted.name].logical_signature == explicit_logical_signature
     assert plan[defaulted.name].status is NodePlanStatus.CACHED
 
 
@@ -1299,7 +1295,6 @@ def test_failed_source_processing_tool_does_not_publish_current(tmp_path: Path) 
             wf.compute(node)
 
     assert _current_pointer_files(storage_path) == []
-    assert not (storage_path / "data" / "FailingSourceAssetWriter_1").exists()
 
 
 def test_source_processing_tool_rejects_templated_output_outside_staging(tmp_path: Path) -> None:
@@ -1480,12 +1475,12 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
 
 def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
-    ColumnBoundLegacyWriter.executions = 0
+    ColumnBoundAssetWriter.executions = 0
     events: list[tuple[str, str]] = []
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=4)
-        node = ColumnBoundLegacyWriter()(label=table["label"])
+        node = ColumnBoundAssetWriter()(label=table["label"])
         first = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
@@ -1498,21 +1493,20 @@ def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cach
         {
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
-            "path": "assets/legacy_row.txt",
+            "path": "assets/label_row.txt",
             "size": 2,
         }
     ]
-    assert Path(first.loc["row", "output"]) == record_dir / "assets" / "legacy_row.txt"
+    assert Path(first.loc["row", "output"]) == record_dir / "assets" / "label_row.txt"
     assert Path(first.loc["row", "output"]).read_text() == "v4"
-    assert not (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
 
     with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
         table = CountingTable()(value=4)
-        second = wf.compute(ColumnBoundLegacyWriter()(label=table["label"]))
+        second = wf.compute(ColumnBoundAssetWriter()(label=table["label"]))
 
     pd.testing.assert_frame_equal(first, second)
-    assert ColumnBoundLegacyWriter.executions == 1
-    assert ("ColumnBoundLegacyWriter_1", "cached") in events
+    assert ColumnBoundAssetWriter.executions == 1
+    assert ("ColumnBoundAssetWriter_1", "cached") in events
 
 
 def test_column_bound_zero_row_processing_tool_publishes_written_template_assets(
@@ -1600,16 +1594,16 @@ def test_column_bound_zero_row_processing_tool_publishes_declared_scalar_outputs
     assert ColumnBoundZeroRowScalarWriter.executions == 2
 
 
-def test_column_bound_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
+def test_column_bound_processing_tool_plan_reports_cached_from_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=5)
-        wf.compute(ColumnBoundLegacyWriter()(label=table["label"]))
+        wf.compute(ColumnBoundAssetWriter()(label=table["label"]))
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=5)
-        node = ColumnBoundLegacyWriter()(label=table["label"])
+        node = ColumnBoundAssetWriter()(label=table["label"])
         plan = wf.plan()
 
     assert plan[node.name].status is NodePlanStatus.CACHED
@@ -1620,7 +1614,7 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=6)
-        node = ColumnBoundLegacyWriter()(label=table["label"])
+        node = ColumnBoundAssetWriter()(label=table["label"])
         wf.compute(node)
         node_name = node.name
         result_key = _planned_result_key(wf, node_name)
@@ -1632,7 +1626,7 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=6)
-        node = ColumnBoundLegacyWriter()(label=table["label"])
+        node = ColumnBoundAssetWriter()(label=table["label"])
         cleared = wf.invalidate([node.name])
 
     assert _invalidated_node_names(cleared) == {node_name}
@@ -1640,32 +1634,32 @@ def test_column_bound_processing_tool_invalidate_removes_current_but_keeps_recor
     assert record_dir.exists()
 
 
-def test_column_bound_processing_tool_invalidate_removes_prior_signature_current(tmp_path: Path) -> None:
+def test_column_bound_processing_tool_invalidate_removes_prior_current_selection(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=9)
-        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "old_{row_index}.txt"})
+        node = ColumnBoundAssetWriter()(label=table["label"], output_templates={"output": "first_{row_index}.txt"})
         wf.compute(node)
-        old_result_key = _planned_result_key(wf, node.name)
+        prior_result_key = _planned_result_key(wf, node.name)
 
     storage = Storage(storage_path)
-    assert storage.load_current(old_result_key) is not None
+    assert storage.load_current(prior_result_key) is not None
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=9)
-        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "new_{row_index}.txt"})
+        node = ColumnBoundAssetWriter()(label=table["label"], output_templates={"output": "second_{row_index}.txt"})
         cleared = wf.invalidate([node.name])
 
-    assert _invalidated_node_names(cleared) == {"ColumnBoundLegacyWriter_1"}
-    selection = _selection_for(cleared, "ColumnBoundLegacyWriter_1")
-    assert selection.result_key == old_result_key
+    assert _invalidated_node_names(cleared) == {"ColumnBoundAssetWriter_1"}
+    selection = _selection_for(cleared, "ColumnBoundAssetWriter_1")
+    assert selection.result_key == prior_result_key
     assert selection.status == "removed"
-    assert storage.load_current(old_result_key) is None
+    assert storage.load_current(prior_result_key) is None
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=9)
-        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": "old_{row_index}.txt"})
+        node = ColumnBoundAssetWriter()(label=table["label"], output_templates={"output": "first_{row_index}.txt"})
         plan = wf.plan()
 
     assert plan[node.name].status is NodePlanStatus.UNEXECUTED
@@ -1676,8 +1670,8 @@ def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_c
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=10)
-        node_a = ColumnBoundLegacyWriter()(label=table["label"], name="writer_a")
-        node_b = ColumnBoundLegacyWriter()(label=table["label"], name="writer_b")
+        node_a = ColumnBoundAssetWriter()(label=table["label"], name="writer_a")
+        node_b = ColumnBoundAssetWriter()(label=table["label"], name="writer_b")
         wf.compute(node_a, node_b)
         plan = wf.plan()
 
@@ -1691,8 +1685,8 @@ def test_column_bound_processing_tool_invalidate_keeps_unrelated_metadata_less_c
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=10)
-        node_a = ColumnBoundLegacyWriter()(label=table["label"], name="writer_a")
-        ColumnBoundLegacyWriter()(label=table["label"], name="writer_b")
+        node_a = ColumnBoundAssetWriter()(label=table["label"], name="writer_a")
+        ColumnBoundAssetWriter()(label=table["label"], name="writer_b")
         cleared = wf.invalidate([node_a.name], cascade=False)
 
     assert _invalidated_node_names(cleared) == {"writer_a"}
@@ -1705,7 +1699,7 @@ def test_column_bound_processing_tool_preserves_nested_owned_asset_paths(tmp_pat
 
     with Workflow(storage_path=storage_path) as wf:
         table = MultiRowTable()()
-        node = ColumnBoundLegacyWriter()(
+        node = ColumnBoundAssetWriter()(
             label=table["label"],
             output_templates={"output": "nested/{column:label}/{row_index}.txt"},
         )
@@ -1725,7 +1719,6 @@ def test_column_bound_processing_tool_preserves_nested_owned_asset_paths(tmp_pat
         str(record_dir / "assets" / "nested" / "alpha" / "a.txt"),
         str(record_dir / "assets" / "nested" / "beta" / "b.txt"),
     }
-    assert not (storage_path / "data" / "ColumnBoundLegacyWriter_1").exists()
 
 
 @pytest.mark.parametrize("template", ["../outside.txt", "/absolute.txt", r"nested\\backslash.txt"])
@@ -1734,16 +1727,16 @@ def test_column_bound_processing_tool_rejects_unsafe_output_template_before_exec
     template: str,
 ) -> None:
     storage_path = tmp_path / "results"
-    ColumnBoundLegacyWriter.executions = 0
+    ColumnBoundAssetWriter.executions = 0
 
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=7)
-        node = ColumnBoundLegacyWriter()(label=table["label"], output_templates={"output": template})
+        node = ColumnBoundAssetWriter()(label=table["label"], output_templates={"output": template})
         with pytest.raises(CacheCorruptionError):
             wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    assert ColumnBoundLegacyWriter.executions == 0
+    assert ColumnBoundAssetWriter.executions == 0
     assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
@@ -1760,7 +1753,7 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(t
     assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
-def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(
+def test_column_bound_shared_array_processing_tool_publishes_durable_asset_and_rehydrates_hits(
     tmp_path: Path,
 ) -> None:
     from bioimageflow_core.shm import open_shared_array
@@ -1807,7 +1800,6 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_v1_asset_an
     assert output["path"].startswith("assets/shm/result_")
     assert output["path"].endswith(".npy")
     assert (record_dir / output["path"]).exists()
-    assert not (storage_path / "data" / "ColumnBoundSharedMemoryWriter_1").exists()
 
     events: list[tuple[str, str]] = []
     with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:
@@ -1855,9 +1847,9 @@ def test_column_bound_shared_array_processing_tool_upstream_change_reports_pendi
         table = CountingTable()(value=4)
         wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
         node_name = "ColumnBoundSharedMemoryWriter_1"
-        old_result_key = _planned_result_key(wf, node_name)
+        prior_result_key = _planned_result_key(wf, node_name)
 
-    assert Storage(storage_path).load_current(old_result_key) is not None
+    assert Storage(storage_path).load_current(prior_result_key) is not None
     with Workflow(storage_path=storage_path) as wf:
         table = CountingTable()(value=5)
         node = ColumnBoundSharedMemoryWriter()(label=table["label"])
@@ -1991,7 +1983,7 @@ def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_co
             wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
 
 
-def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehydrates_hits(tmp_path: Path) -> None:
+def test_source_shared_array_processing_tool_publishes_durable_asset_and_rehydrates_hits(tmp_path: Path) -> None:
     from bioimageflow_core.shm import open_shared_array
 
     storage_path = tmp_path / "results"
@@ -2035,7 +2027,6 @@ def test_source_shared_array_processing_tool_publishes_durable_v1_asset_and_rehy
     assert output["path"].startswith("assets/shm/result_")
     assert output["path"].endswith(".npy")
     assert (record_dir / output["path"]).exists()
-    assert not (storage_path / "data" / "SourceSharedMemoryWriter_1").exists()
 
     events: list[tuple[str, str]] = []
     with Workflow(storage_path=storage_path, on_progress=lambda event: events.append((event.node_name, event.status))) as wf:

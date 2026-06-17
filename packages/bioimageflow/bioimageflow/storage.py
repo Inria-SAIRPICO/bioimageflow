@@ -229,7 +229,7 @@ def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -
 
 
 def canonical_scalar_payload(value: Any) -> dict[str, Any]:
-    """Return the canonical v1 payload for scalar manifest metadata."""
+    """Return the canonical payload for scalar manifest metadata."""
     payload = _cell_payload(value)
     if payload["kind"] in {"record_asset", "external_path"}:
         raise TypeError("Scalar output metadata must not encode path or asset references.")
@@ -260,7 +260,7 @@ def canonical_dataframe_digest(
     declared_columns: Sequence[str] | None = None,
     column_kinds: Mapping[str, str] | None = None,
 ) -> str:
-    """Return a stable digest for the supported v1 dataframe surface."""
+    """Return a stable digest for the supported dataframe surface."""
     columns = _ordered_dataframe_columns(df, declared_columns)
     kinds = {str(key): value for key, value in (column_kinds or {}).items()}
     column_schema = [
@@ -361,7 +361,7 @@ def make_record_id(manifest_material: dict[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class RecordManifest:
-    """Structured manifest helper for a reusable v1 record."""
+    """Structured manifest helper for a reusable record."""
 
     result_key: str
     record_id: str
@@ -634,7 +634,7 @@ class CurrentPointer:
 
 
 class Storage:
-    """Filesystem paths and guarded metadata updates for v1 storage."""
+    """Filesystem paths and guarded metadata updates for versioned storage."""
 
     def __init__(self, storage_path: str | Path) -> None:
         self.storage_path = Path(storage_path)

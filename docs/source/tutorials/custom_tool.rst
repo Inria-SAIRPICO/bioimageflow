@@ -137,7 +137,7 @@ when the worker-only dependency is not installed in the main process.
 
 Anatomy:
 
-- **display_name**: human-readable label for UIs and documentation. Runtime progress events use scoped node names; cache identity uses v1 result keys.
+- **display_name**: human-readable label for UIs and documentation. Runtime progress events use scoped node names; cache identity uses result keys.
 - **environment**: declares the conda/pip dependencies this tool needs.
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.
@@ -441,7 +441,7 @@ Documentation and images
 
 Every reusable tool or workflow must have author-facing documentation and
 tests in the same change. Keep examples runnable with the current package
-layout and current public APIs; do not document legacy import paths.
+layout and current public APIs; do not document private import paths.
 
 Use images sparingly and commit them under ``docs/images/`` when they are
 needed to explain a workflow, UI state, or expected output. Prefer small

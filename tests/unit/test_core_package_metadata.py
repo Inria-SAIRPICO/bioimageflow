@@ -388,7 +388,7 @@ def test_sphinx_quickstart_declares_imported_processing_dependencies() -> None:
     assert re.search(r"import imageio\.v3 as iio", quickstart) is not None
 
 
-def test_docs_python_requirement_matches_v1_contract() -> None:
+def test_docs_python_requirement_matches_supported_contract() -> None:
     docs = [
         ROOT / "README.md",
         ROOT / "docs" / "source" / "installation.rst",

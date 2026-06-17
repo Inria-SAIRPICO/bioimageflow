@@ -114,7 +114,7 @@ class BatchContextTool(ProcessingTool):
     ]
 
 
-def test_execution_context_rejects_old_per_row_work_dir(tmp_path):
+def test_execution_context_rejects_per_row_work_dir(tmp_path):
     run_dir = tmp_path / "run"
     rows_dir = run_dir / "work" / "rows"
 
@@ -130,7 +130,7 @@ def test_execution_context_rejects_old_per_row_work_dir(tmp_path):
         )
 
 
-def test_execution_context_rejects_old_batch_work_dir(tmp_path):
+def test_execution_context_rejects_batch_work_dir(tmp_path):
     run_dir = tmp_path / "run"
     work_dir = run_dir / "work"
 

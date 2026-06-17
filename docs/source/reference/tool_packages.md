@@ -22,7 +22,7 @@ pytest configuration.
 ## Release and CI Contract
 
 The orchestrator, core package, and companion tool packages are released with lockstep versions so workflow examples and package docs describe one coherent BioImageFlow distribution.
-The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
+The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with Python 3.9 binary dependencies can install the shared worker API.
 The deterministic CI matrix validates the main development/runtime surface on Python 3.10, 3.11, and 3.12, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
 
 Package metadata separates distribution dependencies from isolated runtime dependencies.
@@ -136,11 +136,10 @@ The sections below include the package-owned Markdown files from
 ```{include} ../../../packages/bioimageflow-common-tools/docs/tools/mosaic.md
 ```
 
-## Common Legacy Module Pages
+## Specialized Wrapper Pages
 
-These pages document legacy module-level wrappers that are still useful for
-existing examples, but they are not current public exports of
-`bioimageflow_common_tools`.
+These pages document specialized module-level wrappers that are available from
+their package modules but are not common-tool root exports.
 
 ```{include} ../../../packages/bioimageflow-common-tools/docs/tools/atlas.md
 ```

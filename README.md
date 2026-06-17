@@ -9,7 +9,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 - **DAG workflow engine** — build pipelines by connecting tools, not writing glue code
 - **Two-package architecture** — a minimal worker-safe core (`bioimageflow-core`) and an orchestrator (`bioimageflow`) for the main process
 - **Typed image I/O** — annotate inputs/outputs with semantic type, layout, and dtype constraints; reusable groups such as `SCALAR_IMAGE_SEMANTICS` cover common scalar image consumers
-- **Automatic caching** — v1 result-key/current-record caching skips redundant computation
+- **Automatic caching** — result-key/current-record caching skips redundant computation
 - **Shared memory** — zero-copy array transfer between tools via `SharedArray`
 - **Companion merge strategies** — inner join, cross join, concat, and collect tools from `bioimageflow-common-tools`
 - **Output templating** — declarative output path patterns with `{input.stem}`, `{row_index}`, etc.
@@ -19,7 +19,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 
 - Python >= 3.10
 
-`bioimageflow-core` supports Python >= 3.9 for isolated Wetlands worker environments that must run legacy binary dependencies, but the user-facing orchestrator and first-party tool packages target Python >= 3.10.
+`bioimageflow-core` supports Python >= 3.9 for isolated Wetlands worker environments that require Python 3.9 binary dependencies, while the user-facing orchestrator and first-party tool packages target Python >= 3.10.
 
 ## Installation
 

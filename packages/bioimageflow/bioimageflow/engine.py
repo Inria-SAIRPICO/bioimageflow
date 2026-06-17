@@ -35,7 +35,6 @@ from bioimageflow.cache import (
     processing_result_key,
 )
 from bioimageflow.node import IndexAlignmentError, Node
-from bioimageflow.legacy_storage import get_node_dir
 from bioimageflow.storage import CacheCorruptionError, Storage, validate_relative_posix_path
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
@@ -72,6 +71,10 @@ def _work_dir(run_dir: Path) -> Path:
 
 def _rows_work_dir(run_dir: Path) -> Path:
     return _work_dir(run_dir) / "rows"
+
+
+def _pending_assets_dir(storage_path: str | Path, node_name: str) -> Path:
+    return Path(storage_path) / "cache" / "v1" / "pending" / node_name / "assets"
 
 
 def _batch_work_dir(run_dir: Path) -> Path:
@@ -344,20 +347,20 @@ class NodePlanStatus(str, Enum):
     Values
     ------
     CACHED
-        The node's v1 result key has a valid selected current record;
+        The node result key has a valid selected current record;
         ``compute()`` would short-circuit.
     PRIOR_SELECTION_MISS
-        The planned v1 result key has no selected current record, but the
+        The planned result key has no selected current record, but the
         same node has another selected current record from prior result-key
         material. ``compute()`` would re-execute and publish or select a record.
     UNEXECUTED
-        No known v1 cache record exists for this node.
+        No known cache record exists for this node.
     SKIPPED
         The node is disabled, or has a disabled upstream that prevents
         execution. ``final_result_key`` and ``selected_record_id`` are ``None``.
     PENDING_UPSTREAM
         At least one upstream selected record is not known yet, so the
-        node's final result key cannot be determined from a stable v1
+        node's final result key cannot be determined from a stable
         record graph snapshot.
     """
     CACHED = "cached"
@@ -380,7 +383,7 @@ class NodePlan:
         V1 result key for this node when it can be computed from known
         selected upstream records; ``None`` for skipped and pending nodes.
     selected_record_id
-        Currently selected v1 record ID for ``final_result_key`` when the
+        Currently selected record ID for ``final_result_key`` when the
         node is cached; otherwise ``None``.
     status
         Per-node :class:`NodePlanStatus` — the canonical signal for
@@ -392,7 +395,7 @@ class NodePlan:
         Upstream node names whose selected records are not known yet.
     logical_signature
         Diagnostic logical signature computed by the same helpers as
-        execution. It is not the public v1 cache identity field.
+        execution. It is not the public cache identity field.
 
     ``cached`` and ``skipped`` are read-only convenience accessors
     derived from ``status`` (``cached == status is CACHED``,
@@ -1573,8 +1576,9 @@ class DefaultEngine:
                 node.name, str(idx), row_args, path_input_fields,
                 upstream_nodes, results, idx, timestamp,
             )
-            template_assets_dir = assets_dir or _assets_dir(
-                get_node_dir(workflow.storage_path, node.name) / "pending"
+            template_assets_dir = assets_dir or _pending_assets_dir(
+                workflow.storage_path,
+                node.name,
             )
             for out_field, template in templates.items():
                 if assets_dir is None:
@@ -2468,10 +2472,10 @@ class DefaultEngine:
     # ── Pre-execution planning ─────────────────────────────────────────
 
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
-        """Return the v1 cache status and diagnostic plan state of every node.
+        """Return the cache status and diagnostic plan state of every node.
 
         Walks the graph in topological order, computes diagnostic logical
-        signatures with the same helpers as :meth:`execute`, and reports v1
+        signatures with the same helpers as :meth:`execute`, and reports
         result-key/current-record state when enough upstream cache selections
         are known. No tool code runs, and no Wetlands environment is launched.
 
@@ -2574,9 +2578,7 @@ class DefaultEngine:
                     sig_hash,
                 )
             else:
-                from bioimageflow.legacy_storage import has_other_hash_dirs
-                node_dir = get_node_dir(workflow.storage_path, node.name)
-                has_prior_current = has_other_hash_dirs(node_dir, sig_hash)
+                has_prior_current = False
             if has_prior_current:
                 status = NodePlanStatus.PRIOR_SELECTION_MISS
             else:

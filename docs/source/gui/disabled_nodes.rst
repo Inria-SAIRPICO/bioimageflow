@@ -37,7 +37,7 @@ skipped during execution. ``Workflow.plan()`` reflects this with
 Skipping does not cascade to *parents*. A disabled leaf node leaves its
 ancestors untouched.
 
-The ``enabled`` flag is **not** part of v1 result identity
+The ``enabled`` flag is **not** part of result identity
 ----------------------------------------------------------
 
 Re-enabling a previously disabled node hits the existing cache — no
