@@ -15,8 +15,7 @@ back to the original image.
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and SciPy/scikit-image Gaussian filtering through the package
-baseline helpers.
+imageio, NumPy, and the package-local Gaussian smoothing helper.
 
 ## Assumptions
 

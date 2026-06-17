@@ -5,7 +5,7 @@ extract object centroids from label movies, link objects frame-to-frame, and
 compute track summaries. It is intended for demonstrative workflows and fast
 tests before heavier btrack or LapTrack integrations are justified.
 
-Core libraries are imageio, NumPy, and BioImageFlow core APIs.
+Core libraries are imageio, NumPy, pandas for dataframe tools, and BioImageFlow core APIs.
 The current linker is greedy nearest-neighbor, so it is transparent and deterministic but not suitable for crowded, crossing, or division-heavy movies.
 
 ## Tools

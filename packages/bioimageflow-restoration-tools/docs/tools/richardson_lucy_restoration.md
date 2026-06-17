@@ -16,7 +16,7 @@ deconvolution baseline to a 2D intensity image.
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and scikit-image Richardson-Lucy restoration.
+imageio, NumPy, and the package-local Richardson-Lucy baseline.
 
 ## Assumptions
 

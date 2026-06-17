@@ -5,7 +5,7 @@ assign spot coordinates to label images, and summarize spot counts/intensities
 per object. It is intended for FISH-like, smFISH-like, synapse, vesicle, or
 small puncta examples where a lightweight and deterministic baseline is enough.
 
-Core libraries are imageio, NumPy, and BioImageFlow core APIs.
+Core libraries are imageio, NumPy, pandas for dataframe tools, and BioImageFlow core APIs.
 SciPy is used opportunistically for LoG scoring when available; a NumPy fallback keeps default tests runnable.
 Big-FISH remains a future optional evaluation backend, not a current default dependency.
 
