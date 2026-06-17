@@ -131,7 +131,7 @@ Full documentation is available at `docs/`:
 ```bash
 cd docs
 make html
-open _build/html/index.html
+open build/html/index.html
 ```
 
 ## Development
@@ -139,14 +139,28 @@ open _build/html/index.html
 The full test workflow is documented in `docs/source/reference/testing.md`.
 
 ```bash
+# Run quality checks
+uv run ruff check .
+uv run pyright
+
 # Run regular tests
 uv run pytest
+
+# Run the CI default deterministic test tier
+uv run pytest -m "not slow"
 
 # Run only unit tests
 uv run pytest tests/unit/
 
 # Run only integration tests
 uv run pytest tests/integration/
+
+# Verify package build artifacts
+uv run pytest tests/unit/test_package_artifacts.py
+uv build --all-packages --out-dir dist/packages
+
+# Build documentation with warnings treated as failures
+uv run sphinx-build -W --keep-going docs/source docs/_build/html
 
 # Run opt-in complete tests
 uv run pytest -m complete --run-complete -rsx

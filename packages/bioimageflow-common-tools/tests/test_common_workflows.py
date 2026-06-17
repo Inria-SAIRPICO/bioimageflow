@@ -48,7 +48,8 @@ def image_dir(tmp_path: Path) -> Path:
     data_dir.mkdir()
     for name in ["sample_01.tif", "sample_02.tif"]:
         # 3-channel image (CYX): 3 x 64 x 64
-        img = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
+        img = np.arange(3 * 64 * 64, dtype=np.uint16).reshape(3, 64, 64)
+        img = (img % 255).astype(np.uint8)
         iio.imwrite(str(data_dir / name), img, photometric="minisblack")
     return data_dir
 
