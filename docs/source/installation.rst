@@ -14,7 +14,7 @@ Install from PyPI
    pip install bioimageflow
 
 This installs both ``bioimageflow`` (the orchestrator) and ``bioimageflow-core``
-(the zero-dependency core).
+(the worker-safe core).
 
 Companion tool packages
 -----------------------
@@ -74,8 +74,9 @@ Package structure
 BioImageFlow is split into two packages:
 
 ``bioimageflow-core``
-   Zero external dependencies. Contains types, tool base classes, and
-   shared-memory utilities. Installed in both the main process and all worker
+   Minimal worker-safe dependencies. Contains types, tool base classes, and
+   shared-memory utilities. It declares NumPy because shared-memory helpers
+   expose NumPy array views. Installed in both the main process and all worker
    environments.
 
 ``bioimageflow``

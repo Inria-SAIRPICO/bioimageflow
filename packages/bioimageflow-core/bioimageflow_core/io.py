@@ -1,4 +1,4 @@
-"""I/O dispatch — zero declared dependencies. Uses numpy at runtime."""
+"""I/O dispatch helpers with pluggable file readers and NumPy shared-memory views."""
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager

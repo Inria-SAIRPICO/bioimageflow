@@ -7,7 +7,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 ## Key Features
 
 - **DAG workflow engine** — build pipelines by connecting tools, not writing glue code
-- **Two-package architecture** — a zero-dependency core (`bioimageflow-core`) safe for worker processes, and an orchestrator (`bioimageflow`) for the main process
+- **Two-package architecture** — a minimal worker-safe core (`bioimageflow-core`) and an orchestrator (`bioimageflow`) for the main process
 - **Typed image I/O** — annotate inputs/outputs with semantic type, layout, and dtype constraints; reusable groups such as `SCALAR_IMAGE_SEMANTICS` cover common scalar image consumers
 - **Automatic caching** — v1 result-key/current-record caching skips redundant computation
 - **Shared memory** — zero-copy array transfer between tools via `SharedArray`
@@ -99,7 +99,7 @@ print(result)  # DataFrame with a 'mask' column of output paths
 
 ```
 bioimageflow-core          bioimageflow
-(zero deps, worker-safe)   (pandas + pydantic, main process)
+(worker-safe + numpy)      (pandas + pydantic, main process)
 ┌─────────────────────┐   ┌──────────────────────────┐
 │  Semantic, Layout    │   │  Workflow                 │
 │  ImageSpec, groups   │   │  Node, ColumnRef          │
@@ -110,7 +110,7 @@ bioimageflow-core          bioimageflow
 └─────────────────────┘   └──────────────────────────┘
 ```
 
-**`bioimageflow-core`** is installed everywhere — main process and worker environments. It contains the type system, tool base classes, and shared-memory utilities with zero external dependencies.
+**`bioimageflow-core`** is installed everywhere — main process and worker environments. It contains the type system, tool base classes, and shared-memory utilities, and declares NumPy because shared-memory array views use it at runtime.
 
 **`bioimageflow`** is the orchestrator. It builds the DAG, resolves bindings, executes tools in topological order, and manages caching. It depends on pandas and pydantic.
 

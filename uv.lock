@@ -155,6 +155,13 @@ requires-dist = [
 name = "bioimageflow-core"
 version = "0.1.6"
 source = { editable = "packages/bioimageflow-core" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy" }]
 
 [[package]]
 name = "bioimageflow-io-tools"

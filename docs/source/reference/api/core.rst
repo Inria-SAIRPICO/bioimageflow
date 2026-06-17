@@ -1,8 +1,9 @@
 bioimageflow_core
 =================
 
-The zero-dependency core package. Installed in all environments (main process
-and workers).
+The worker-safe core package. Installed in all environments (main process and
+workers). It declares NumPy for shared-memory array helpers and avoids
+orchestrator-only dependencies such as pandas and pydantic.
 
 Types
 -----

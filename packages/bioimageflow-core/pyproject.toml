@@ -1,9 +1,11 @@
 [project]
 name = "bioimageflow-core"
 version = "0.1.6"
-description = "Core types and tool base classes for BioImageFlow — zero dependencies"
+description = "Worker-safe core types and tool base classes for BioImageFlow"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "numpy",
+]
 
 [build-system]
 requires = ["hatchling"]

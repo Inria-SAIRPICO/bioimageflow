@@ -7,7 +7,7 @@ concerns.
 .. code-block:: text
 
    bioimageflow-core           bioimageflow
-   (zero deps, worker-safe)    (pandas + pydantic, main process)
+   (worker-safe + numpy)       (pandas + pydantic, main process)
    ┌──────────────────────┐   ┌───────────────────────────┐
    │  Semantic, Layout     │   │  Workflow                  │
    │  ImageSpec, image I/O  │   │  Node, ColumnRef           │
@@ -20,7 +20,8 @@ concerns.
 bioimageflow-core
 -----------------
 
-**Zero external dependencies.** Uses only the Python standard library.
+**Minimal worker-safe dependencies.** Uses the Python standard library plus
+NumPy for shared-memory array views.
 
 This package is installed in *every* environment --- the main process and all
 worker environments. It contains:
@@ -40,9 +41,9 @@ worker environments. It contains:
 - **I/O dispatch**: :func:`~bioimageflow_core.io.load_image`,
   :func:`~bioimageflow_core.io.save_image`
 
-The zero-dependency constraint means workers only need ``bioimageflow-core``
-plus their own domain libraries (e.g., cellpose, scikit-image). They never
-import pandas or pydantic.
+The worker-safe dependency boundary means workers need ``bioimageflow-core``,
+NumPy, and their own domain libraries (e.g., cellpose, scikit-image). They
+never import pandas or pydantic.
 
 bioimageflow
 ------------
