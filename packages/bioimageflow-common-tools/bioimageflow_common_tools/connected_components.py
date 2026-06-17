@@ -19,7 +19,7 @@ from bioimageflow_core import (
 
 simpleitk_env = EnvironmentSpec(
     name="simpleitk",
-    dependencies={"python": "3.12", "pip": ["SimpleITK", "numpy"]},
+    dependencies={"python": "3.12", "pip": ["SimpleITK", "numpy", "tifffile"]},
 )
 
 
@@ -28,7 +28,8 @@ class ConnectedComponents(ProcessingTool):
 
     Converts a binary detection map into a labeled image where each
     connected region receives a unique integer identifier.
-    Uses SimpleITK for both I/O and processing.
+    Uses SimpleITK for input I/O and processing, and tifffile for UInt32 TIFF
+    output because SimpleITK's TIFF writer does not support UInt32.
     """
     display_name = "Connected Components"
     documentation = (
@@ -72,7 +73,9 @@ class ConnectedComponents(ProcessingTool):
         )]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import numpy as np
         import SimpleITK as sitk    # type: ignore
+        import tifffile
 
         sitk_image = sitk.ReadImage(str(arguments.input_image))
         # Binarize: threshold > 0
@@ -86,6 +89,6 @@ class ConnectedComponents(ProcessingTool):
 
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        sitk.WriteImage(sitk.Cast(labeled, sitk.sitkUInt32), str(output_path))
+        tifffile.imwrite(str(output_path), labeled_array.astype(np.uint32, copy=False))
 
         return self.Outputs(output_image=output_path, num_labels=num_labels)

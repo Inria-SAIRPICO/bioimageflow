@@ -274,8 +274,8 @@ def test_exported_sairpico_binary_tool_executes_real_cli(
     tmp_path: Path,
     complete_wetlands_config: dict,
 ) -> None:
-    output_path = tmp_path / f"{case.id}.tif"
-    arguments = case.make_arguments(tmp_path, output_path)
+    output_name = f"{case.id}.tif"
+    arguments = case.make_arguments(tmp_path, tmp_path / output_name)
     kwargs = vars(arguments).copy()
     kwargs.pop("output_image")
 
@@ -285,10 +285,11 @@ def test_exported_sairpico_binary_tool_executes_real_cli(
     ) as wf:
         output_node = case.tool_cls()(
             name=case.id.replace("-", "_"),
-            output_templates={"output_image": str(output_path)},
+            output_templates={"output_image": output_name},
             **kwargs,
         )
         result = wf.compute(output_node)
 
-    assert Path(result.iloc[0]["output_image"]) == output_path
+    output_path = Path(result.iloc[0]["output_image"])
+    assert output_path.name == output_name
     case.assert_output(output_path)

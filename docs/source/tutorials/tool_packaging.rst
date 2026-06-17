@@ -239,8 +239,9 @@ versions of the same package simultaneously:
 
 .. code-block:: python
 
-   from bioimageflow import Workflow, Concat, load_versioned_package
+   from bioimageflow import Workflow, load_versioned_package
    from bioimageflow.tool_loader import resolve_tool_class
+   from bioimageflow_common_tools import Concat
 
    v1 = load_versioned_package("my_tools", "1.0.0")
    v2 = load_versioned_package("my_tools", "2.0.0")

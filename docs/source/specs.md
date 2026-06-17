@@ -12,7 +12,8 @@ BioImageFlow addresses three challenges in bioimage analysis:
 
 ### 1.0 Baseline Contract
 
-BioImageFlow v1 targets Python `>=3.10`.
+BioImageFlow v1 targets Python `>=3.10` for the orchestrator and first-party tool packages.
+`bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including legacy external-binary environments whose dependencies require Python 3.9.
 The clean v1 API does not carry a backward-compatibility requirement for legacy public surfaces; compatibility shims may exist during migration, but the public specification describes the v1 contract.
 All first-party packages are released in lockstep, so a BioImageFlow workspace should use matching package versions for `bioimageflow`, `bioimageflow-core`, and the first-party tool packages.
 The repository root project is workspace-only: it exists to coordinate local package development and documentation, not as a runtime package imported by users.

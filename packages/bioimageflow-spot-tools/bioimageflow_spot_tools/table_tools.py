@@ -1,9 +1,8 @@
 """Spot table filtering, rendering, colocalization, and quality metrics."""
 
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
-from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -17,6 +16,25 @@ from bioimageflow_core import (
     Semantic,
     Template,
 )
+
+if TYPE_CHECKING:
+    from bioimageflow import DataFrameTool as DataFrameTool
+    from bioimageflow import Passthrough as Passthrough
+else:
+    try:
+        from bioimageflow import DataFrameTool as DataFrameTool
+        from bioimageflow import Passthrough as Passthrough
+    except ModuleNotFoundError:
+        class DataFrameTool:  # type: ignore[no-redef]
+            """Unavailable outside the orchestrator environment."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError(
+                    "DataFrameTool classes require the bioimageflow orchestrator package."
+                )
+
+        class Passthrough(IOModel):  # type: ignore[no-redef]
+            """Fallback schema base for worker-only imports."""
 
 
 def _float(row: dict[str, Any], column: str, default: float | None = None) -> float:

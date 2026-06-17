@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import os
 import subprocess
+import sys
 import tarfile
 import zipfile
 
@@ -20,6 +23,18 @@ TOOL_PACKAGE_NAMES = {
     "bioimageflow-segmentation-tools",
     "bioimageflow-spot-tools",
     "bioimageflow-tracking-tools",
+}
+PUBLIC_IMPORT_MODULES = {
+    "bioimageflow": "bioimageflow",
+    "bioimageflow-common-tools": "bioimageflow_common_tools",
+    "bioimageflow-core": "bioimageflow_core",
+    "bioimageflow-io-tools": "bioimageflow_io_tools",
+    "bioimageflow-measurement-tools": "bioimageflow_measurement_tools",
+    "bioimageflow-restoration-tools": "bioimageflow_restoration_tools",
+    "bioimageflow-sairpico-tools": "bioimageflow_sairpico_tools",
+    "bioimageflow-segmentation-tools": "bioimageflow_segmentation_tools",
+    "bioimageflow-spot-tools": "bioimageflow_spot_tools",
+    "bioimageflow-tracking-tools": "bioimageflow_tracking_tools",
 }
 FORBIDDEN_ARTIFACT_PARTS = {
     ".DS_Store",
@@ -130,3 +145,54 @@ def test_common_tools_data_file_is_in_wheel_and_sdist(built_artifacts: Path) -> 
 
     assert data_path in _wheel_members(_wheel_path(built_artifacts, distribution_name))
     assert data_path in _sdist_members(_sdist_path(built_artifacts, distribution_name))
+
+
+def test_built_wheels_import_public_modules(
+    built_artifacts: Path,
+    tmp_path: Path,
+) -> None:
+    wheel_paths = {
+        distribution_name: _wheel_path(built_artifacts, distribution_name)
+        for distribution_name in _distribution_names()
+    }
+    code = """
+from pathlib import Path
+import importlib
+import json
+import sys
+
+modules = json.loads(sys.argv[1])
+wheel_paths = json.loads(sys.argv[2])
+failures = {}
+
+for distribution_name, module_name in modules.items():
+    module = importlib.import_module(module_name)
+    module_file = str(Path(module.__file__).resolve())
+    wheel_path = wheel_paths[distribution_name]
+    if wheel_path not in module_file:
+        failures[module_name] = module_file
+
+if failures:
+    raise SystemExit(json.dumps(failures, sort_keys=True))
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(str(path) for path in wheel_paths.values())
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            json.dumps(PUBLIC_IMPORT_MODULES, sort_keys=True),
+            json.dumps(
+                {name: str(path) for name, path in wheel_paths.items()},
+                sort_keys=True,
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr

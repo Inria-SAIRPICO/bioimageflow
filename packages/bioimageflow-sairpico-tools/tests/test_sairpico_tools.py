@@ -118,18 +118,17 @@ def test_output_image_override_uses_output_template_not_input_binding(
     tmp_path: Path,
 ) -> None:
     input_path = tmp_path / "input.tif"
-    output_path = tmp_path / "median.tif"
     iio.imwrite(input_path, np.zeros((8, 8), dtype=np.uint16))
 
     with Workflow(storage_path=tmp_path / "results"):
         node = MedianDenoising()(
             input_image=input_path,
             denoising_type="2D",
-            output_templates={"output_image": str(output_path)},
+            output_templates={"output_image": "median.tif"},
             name="median",
         )
 
-    assert node.output_templates == {"output_image": str(output_path)}
+    assert node.output_templates == {"output_image": "median.tif"}
 
 
 def test_importing_package_does_not_import_subprocess() -> None:
@@ -209,6 +208,11 @@ def test_tools_are_isolated_by_runtime_module() -> None:
     assert Path(inspect.getfile(CImgDenoising)).name == "cimgdenoising.py"
     assert Path(inspect.getfile(HotspotDetection)).name == "hotspot.py"
     assert Path(inspect.getfile(HotspotToSpots)).name == "hotspot.py"
+
+
+def test_sairpico_binary_environments_are_pinned_to_python39() -> None:
+    for tool_cls in ALL_TOOLS:
+        assert tool_cls.environment.dependencies["python"] == "3.9"
 
 
 def _annotation_nodes(tree: ast.AST) -> list[ast.expr]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -70,6 +71,30 @@ def test_common_package_all_exports_only_public_tools() -> None:
     assert all(issubclass(getattr(common, name), BaseTool) for name in common.__all__)
 
 
+def test_processing_submodule_import_does_not_require_orchestrator_package() -> None:
+    code = """
+import sys
+
+class BlockBioImageFlow:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "bioimageflow" or fullname.startswith("bioimageflow."):
+            raise ModuleNotFoundError(fullname)
+        return None
+
+sys.meta_path.insert(0, BlockBioImageFlow())
+import bioimageflow_common_tools.atlas
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[1],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_common_docs_separate_public_tools_from_legacy_module_docs() -> None:
     index = (
         Path(__file__).parents[1]
@@ -122,6 +147,12 @@ def test_connected_components_schema_declares_uint32_labels() -> None:
     schema = serialize_output_schema(ConnectedComponents)
 
     assert schema["output_image"]["image_spec"]["dtypes"] == ["uint32"]
+
+
+def test_connected_components_environment_declares_uint32_tiff_writer() -> None:
+    from bioimageflow_common_tools.connected_components import simpleitk_env
+
+    assert "tifffile" in simpleitk_env.dependencies["pip"]
 
 
 def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:

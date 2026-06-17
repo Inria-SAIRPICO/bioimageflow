@@ -70,6 +70,7 @@ def test_installation_docs_name_supported_python_matrix() -> None:
     installation = _text("docs/source/installation.rst")
 
     assert "Python >= 3.10" in installation
+    assert "bioimageflow-core`` package supports Python >= 3.9" in installation
     assert "Python 3.10, 3.11, and 3.12" in installation
 
 
@@ -178,3 +179,35 @@ def test_output_cache_reference_does_not_point_legacy_shape_at_current_specs() -
 
     assert "legacy storage shape documented in the exhaustive specification" not in storage_reference
     assert "older releases and historical documentation" in storage_reference
+
+
+def test_tool_packaging_imports_common_tools_merge_exports() -> None:
+    text = _text("docs/source/tutorials/tool_packaging.rst")
+
+    assert "from bioimageflow import Workflow, Concat" not in text
+    assert "from bioimageflow_common_tools import Concat" in text
+
+
+def test_environment_reference_matches_local_v1_resource_semantics() -> None:
+    text = _text("docs/source/reference/environments.rst")
+
+    assert "raised at construction time" not in text
+    assert "workflow containing those reachable tools is planned or computed" in text
+    assert "max_concurrent`` clamps" not in text
+    assert "Direct and Wetlands v1 do not enforce" in text
+
+
+def test_caching_docs_surface_path_based_external_file_caveat() -> None:
+    caching = _text("docs/source/concepts/caching.rst")
+    quickstart = _text("docs/source/quickstart.rst")
+
+    assert "External file references are path-based" in caching
+    assert "modified in place without changing its path" in caching
+    assert "input references, parameters, and tool versions" in quickstart
+
+
+def test_tool_package_reference_documents_manual_publish_boundary() -> None:
+    text = _text("docs/source/reference/tool_packages.md")
+
+    assert "Publishing is currently manual and outside CI deployment" in text
+    assert "does not upload them to an index" in text

@@ -1,9 +1,8 @@
 """Lightweight label and table measurement tools."""
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from bioimageflow import DataFrameTool
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -16,6 +15,20 @@ from bioimageflow_core import (
     ProcessingTool,
     Semantic,
 )
+
+if TYPE_CHECKING:
+    from bioimageflow import DataFrameTool as DataFrameTool
+else:
+    try:
+        from bioimageflow import DataFrameTool as DataFrameTool
+    except ModuleNotFoundError:
+        class DataFrameTool:  # type: ignore[no-redef]
+            """Unavailable outside the orchestrator environment."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError(
+                    "DataFrameTool classes require the bioimageflow orchestrator package."
+                )
 
 
 class RegionProperties(ProcessingTool):
