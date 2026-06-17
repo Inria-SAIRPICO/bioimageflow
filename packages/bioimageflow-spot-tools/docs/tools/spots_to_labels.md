@@ -25,6 +25,8 @@ SpotsToLabels().process_batch([
 
 The output label image contains one label per spot row or one label per connected mask component.
 The label image is written as `uint32`; background is `0`, and non-zero labels are preserved exactly for spot-row inputs or assigned sequentially for mask inputs.
+When the upstream spot table is empty, coordinate mode still writes a blank `uint32` label image from `image_shape` and reports `label_count=0`.
+Blank mask inputs likewise produce a blank label image with `label_count=0`.
 
 ## Failure Modes
 

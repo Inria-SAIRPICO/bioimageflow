@@ -25,6 +25,7 @@ RenderSpots().process_batch([
 The output image marks each spot coordinate.
 With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
 With `label_mode=False`, the output is a `uint8` binary mask with values `{0, 1}`.
+When the upstream spot table is empty, `RenderSpots` still writes a blank image from `image_shape` or `reference_image` and reports `spot_count=0`.
 
 ## Failure Modes
 

@@ -467,6 +467,8 @@ class ProcessingTool(BaseTool):
     All custom methods (process_row, process_batch) run in the worker.
     """
     environment: EnvironmentSpec    # Required — defines the Wetlands environment
+    run_empty_batch: bool = False   # Opt-in reducer/artifact behavior for zero rows
+    empty_batch_anchor_inputs: tuple[str, ...] = ()
 
     class Outputs(IOModel): ...     # Declared by each concrete tool
 
@@ -528,6 +530,8 @@ class ProcessingTool(BaseTool):
 ```
 
 Concrete `ProcessingTool` subclasses must override at least one of `process_row` or `process_batch`. The framework validates this via `__init_subclass__` and raises `TypeError` at class definition time if neither is overridden.
+
+Batch tools are not called when their row-aligned upstream inputs are empty by default; the engine publishes an empty output dataframe with the declared output columns. Reducer or artifact-rendering batch tools that can produce a meaningful aggregate output for zero rows may set `run_empty_batch = True`. In that case the engine calls `process_batch` with synthetic argument rows built from constants, defaults, output templates, and any `empty_batch_anchor_inputs` bound to non-empty upstream columns. Without anchors, the engine supplies one synthetic argument row. With anchors, it supplies one synthetic argument row per anchor row. Anchor inputs are for non-row context such as a source label image used to render an all-background output; they must not be used to create fake object or spot rows.
 
 **Progress reporting:** `process_row` may declare an optional keyword parameter `task` to receive a `RemoteTaskHandle` for sub-row progress reporting. When present, Wetlands injects the handle automatically. Tools that don't declare `task` are unaffected.
 

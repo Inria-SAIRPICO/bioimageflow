@@ -1426,21 +1426,33 @@ class DefaultEngine:
         )
 
         path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
-        arguments_dicts = self._resolve_all_row_arguments(
-            node, aligned_index, results, upstream_nodes,
-            input_annotations, templates, path_input_fields, workflow,
-            assets_dir=real_assets_dir,
-        )
+        execution_index = aligned_index
+        has_batch = type(node.tool).process_batch is not ProcessingTool.process_batch
+        if not aligned_index and has_batch and getattr(node.tool, "run_empty_batch", False):
+            execution_index, arguments_dicts = self._resolve_empty_batch_arguments(
+                node,
+                results,
+                input_annotations,
+                templates,
+                path_input_fields,
+                real_assets_dir,
+            )
+        else:
+            arguments_dicts = self._resolve_all_row_arguments(
+                node, aligned_index, results, upstream_nodes,
+                input_annotations, templates, path_input_fields, workflow,
+                assets_dir=real_assets_dir,
+            )
 
         # --- Dispatch & build output ---
         row_contexts, batch_context = self._build_execution_contexts(
-            staging_dir, real_assets_dir, aligned_index,
+            staging_dir, real_assets_dir, execution_index,
         )
         raw_results = self._dispatch_tool(
             node.tool, arguments_dicts, workflow, node.name,
             row_contexts, batch_context,
         )
-        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        df = self._build_output_dataframe(raw_results, execution_index, node.tool)
         df = processing_v1_publish(
             workflow.storage_path,
             node.name,
@@ -1622,6 +1634,55 @@ class DefaultEngine:
 
             arguments_dicts.append(row_args)
         return arguments_dicts
+
+    def _resolve_empty_batch_arguments(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        input_annotations: dict[str, Any],
+        templates: dict[str, str],
+        path_input_fields: list[str],
+        assets_dir: Path,
+    ) -> tuple[list[Any], list[dict[str, Any]]]:
+        """Resolve constants/defaults and output templates for an empty batch."""
+        anchor_inputs = tuple(getattr(node.tool, "empty_batch_anchor_inputs", ()))
+        anchor_bindings = [
+            (field, node._column_bindings[field])
+            for field in anchor_inputs
+            if field in node._column_bindings
+            and node._column_bindings[field].node in results
+            and not results[node._column_bindings[field].node].empty
+        ]
+        if anchor_bindings:
+            anchor_df = results[anchor_bindings[0][1].node]
+            execution_index = sorted(anchor_df.index, key=str)
+        else:
+            execution_index = ["0"]
+
+        arguments_dicts: list[dict[str, Any]] = []
+        for idx in execution_index:
+            row_args = self._resolve_defaults(node, input_annotations)
+            for field, col_ref in anchor_bindings:
+                up_df = results[col_ref.node]
+                idx_set = set(str(i) for i in up_df.index)
+                resolved_idx = idx if str(idx) in idx_set else self._find_parent_index(idx, idx_set)
+                if resolved_idx is None:
+                    continue
+                row_args[field] = _to_python(up_df.at[resolved_idx, col_ref.column])
+            self._normalize_path_arguments(row_args, input_annotations)
+            context = self._build_template_context(
+                node.name,
+                str(idx),
+                row_args,
+                path_input_fields,
+                {},
+                results,
+                idx,
+            )
+            for out_field, template in templates.items():
+                row_args[out_field] = _resolve_staged_output_path(assets_dir, template, context)
+            arguments_dicts.append(row_args)
+        return execution_index, arguments_dicts
 
     def _resolve_single_row(
         self,
@@ -1883,6 +1944,8 @@ class DefaultEngine:
     ) -> list[list[Any]]:
         """Direct dispatch — tool runs in the main process."""
         if has_batch:
+            if not arguments_dicts and not getattr(tool, "run_empty_batch", False):
+                return []
             args_list = [Arguments(**d) for d in arguments_dicts]
             kwargs = {}
             if _accepts_context(tool.process_batch):
@@ -1969,6 +2032,8 @@ class DefaultEngine:
         from wetlands.task import TaskStatus, TaskEventType
 
         assert self._env_manager is not None
+        if has_batch and not arguments_dicts and not getattr(tool, "run_empty_batch", False):
+            return []
         env_spec = tool.environment
         tool_file_path = _find_tool_file(type(tool))
         tool_class_name = type(tool).__name__
@@ -2348,6 +2413,8 @@ class DefaultEngine:
             return max((str(i).count('::') for i in idx_set), default=0)
 
         all_indices = [set(results[n].index) for n in upstream_nodes.values()]
+        if any(not indices for indices in all_indices):
+            return [], {n.name: results[n] for n in upstream_nodes.values()}
         finest_index = max(all_indices, key=lambda s: (_max_depth(s), len(s)))
         aligned = sorted(finest_index, key=str)
         return aligned, {n.name: results[n] for n in upstream_nodes.values()}

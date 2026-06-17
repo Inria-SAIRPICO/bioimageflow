@@ -25,6 +25,7 @@ LabelsToObjects().process_row(Arguments(label_image="labels_tyx.tif"))
 ## Expected Results
 
 The workflow dataframe contains one row per non-zero label per frame with centroid and area columns.
+All-background inputs produce an empty object table with the declared columns; no sentinel object row is created.
 
 ## Failure Modes
 

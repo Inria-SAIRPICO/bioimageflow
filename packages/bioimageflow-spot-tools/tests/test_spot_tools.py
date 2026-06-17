@@ -8,6 +8,7 @@ import pytest
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_output_schema
 from bioimageflow_core import Arguments
+from bioimageflow_common_tools import Files
 import bioimageflow_spot_tools.detection as spot_detection
 from bioimageflow_spot_tools import (
     AssignSpotsToLabels,
@@ -179,6 +180,42 @@ def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
     assert result.iloc[0]["total_intensity"] > 0
 
 
+def test_zero_spot_workflow_keeps_downstream_spot_table_empty(tmp_path: Path) -> None:
+    image = tmp_path / "blank.tif"
+    labels = tmp_path / "labels.tif"
+    iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
+    iio.imwrite(labels, np.ones((16, 16), dtype=np.uint32))
+
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        detected = DetectSpots()(
+            input_image=image,
+            method="local_maxima",
+            threshold=1.0,
+            name="detect",
+        )
+        assigned = AssignSpotsToLabels()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            intensity=detected["intensity"],
+            score=detected["score"],
+            label_image=labels,
+            name="assign",
+        )
+        result = wf.compute(assigned)
+
+    assert result.empty
+    assert list(result.columns) == [
+        "spot_id",
+        "y",
+        "x",
+        "intensity",
+        "score",
+        "label",
+        "assigned_count",
+    ]
+
+
 def test_spot_colocalization_builds_workflow_graph(tmp_path: Path) -> None:
     image = _spot_image(tmp_path / "puncta.tif")
 
@@ -271,6 +308,158 @@ def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) 
     assert mask.dtype == np.uint8
     assert set(np.unique(mask)) == {0, 1}
     assert result.spot_count == 1
+
+
+def test_render_spots_zero_rows_preserves_artifact_and_count(tmp_path: Path) -> None:
+    result = RenderSpots().process_batch(
+        [
+            Arguments(
+                image_shape="16,16",
+                radius=1,
+                label_mode=True,
+                output_image=tmp_path / "rendered.tif",
+            )
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.output_image)
+    assert labels.dtype == np.uint32
+    assert int(labels.max()) == 0
+    assert result.spot_count == 0
+
+
+def test_render_spots_zero_rows_writes_one_artifact_per_anchor(tmp_path: Path) -> None:
+    results = RenderSpots().process_batch(
+        [
+            Arguments(
+                image_shape="16,16",
+                radius=1,
+                label_mode=True,
+                output_image=tmp_path / f"rendered_{index}.tif",
+            )
+            for index in range(2)
+        ]
+    )
+
+    assert len(results) == 2
+    for row in results:
+        result = row[0]
+        labels = iio.imread(result.output_image)
+        assert labels.dtype == np.uint32
+        assert labels.shape == (16, 16)
+        assert int(labels.max()) == 0
+        assert result.spot_count == 0
+
+
+def test_spots_to_labels_zero_rows_preserves_artifact_and_count(tmp_path: Path) -> None:
+    result = SpotsToLabels().process_batch(
+        [
+            Arguments(
+                image_shape="16,16",
+                radius=1,
+                label_image=tmp_path / "labels.tif",
+            )
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.label_image)
+    assert labels.dtype == np.uint32
+    assert int(labels.max()) == 0
+    assert result.label_count == 0
+
+
+def test_spots_to_labels_mask_mode_writes_one_artifact_per_mask(tmp_path: Path) -> None:
+    mask_paths = []
+    for index in range(2):
+        mask = np.zeros((16, 16), dtype=np.uint8)
+        if index == 1:
+            mask[4:6, 4:6] = 1
+        mask_path = tmp_path / f"mask_{index}.tif"
+        iio.imwrite(mask_path, mask)
+        mask_paths.append(mask_path)
+
+    results = SpotsToLabels().process_batch(
+        [
+            Arguments(
+                mask_image=mask_path,
+                label_image=tmp_path / f"labels_{index}.tif",
+            )
+            for index, mask_path in enumerate(mask_paths)
+        ]
+    )
+
+    assert len(results) == 2
+    assert [row[0].label_count for row in results] == [0, 1]
+    assert int(iio.imread(results[0][0].label_image).max()) == 0
+    assert int(iio.imread(results[1][0].label_image).max()) == 1
+
+
+def test_spots_to_labels_zero_spot_workflow_writes_blank_artifact(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "blank.tif"
+    iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
+
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        detected = DetectSpots()(
+            input_image=image,
+            method="local_maxima",
+            threshold=1.0,
+            name="detect",
+        )
+        labels_node = SpotsToLabels()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            image_shape="16,16",
+            name="labels",
+        )
+        first = wf.compute(labels_node)
+        second = wf.compute(labels_node)
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert int(second.iloc[0]["label_count"]) == 0
+    labels = iio.imread(second.iloc[0]["label_image"])
+    assert labels.dtype == np.uint32
+    assert labels.shape == (16, 16)
+    assert int(labels.max()) == 0
+    assert Path(second.iloc[0]["label_image"]).exists()
+
+
+def test_spots_to_labels_empty_coordinates_do_not_treat_masks_as_fake_rows(
+    tmp_path: Path,
+) -> None:
+    mask_dir = tmp_path / "masks"
+    mask_dir.mkdir()
+    for index in range(2):
+        mask = np.zeros((16, 16), dtype=np.uint8)
+        mask[4:6, 4:6] = 1
+        iio.imwrite(mask_dir / f"mask_{index}.tif", mask)
+
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        masks = Files()(path=mask_dir, pattern="*.tif", name="masks")
+        detected = DetectSpots()(
+            input_image=masks["path"],
+            method="local_maxima",
+            threshold=2.0,
+            name="detect",
+        )
+        labels_node = SpotsToLabels()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            mask_image=masks["path"],
+            image_shape="16,16",
+            name="labels",
+        )
+        result = wf.compute(labels_node)
+
+    assert len(result) == 1
+    assert int(result.iloc[0]["label_count"]) == 0
+    labels = iio.imread(result.iloc[0]["label_image"])
+    assert labels.shape == (16, 16)
+    assert int(labels.max()) == 0
 
 
 def test_spot_label_renderers_preserve_ids_above_uint16(tmp_path: Path) -> None:

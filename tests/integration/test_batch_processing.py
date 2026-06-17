@@ -8,10 +8,106 @@ Covers:
 """
 
 
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from bioimageflow import DataFrameTool
 from bioimageflow import Workflow
-from bioimageflow_core import ProcessingTool
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, Template
 
 from .conftest import FileLoader, StubBatchExploder, StubBatchProcessor
+
+
+class EmptySource(DataFrameTool):
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(IOModel):
+        value: int
+
+    def transform(self, df: Any, arguments: Arguments) -> pd.DataFrame:
+        return pd.DataFrame(columns=pd.Index(["value"]))
+
+
+class EmptyChild(DataFrameTool):
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(IOModel):
+        value: int
+
+    def transform(self, df: Any, arguments: Arguments) -> pd.DataFrame:
+        return pd.DataFrame(columns=pd.Index(["value"]))
+
+
+class SinglePathSource(DataFrameTool):
+    class Inputs(IOModel):
+        path: Path
+
+    class Outputs(IOModel):
+        path: Path
+
+    def transform(self, df: Any, arguments: Arguments) -> pd.DataFrame:
+        return pd.DataFrame([{"path": str(arguments.path)}], index=pd.Index(["0"]))
+
+
+class EmptyBatchProbe(ProcessingTool):
+    environment = StubBatchProcessor.environment
+    called = False
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        output: Path = Template("probe.txt")
+
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
+        type(self).called = True
+        return []
+
+
+class EmptyBatchReducer(ProcessingTool):
+    environment = StubBatchProcessor.environment
+    run_empty_batch = True
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        output: Path = Template("empty_reducer.txt")
+        count: int
+
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
+        assert len(arguments_list) == 1
+        output = Path(arguments_list[0].output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("empty")
+        return [[self.Outputs(output=output, count=0)]]
+
+
+class AnchoredEmptyBatchReducer(ProcessingTool):
+    environment = StubBatchProcessor.environment
+    run_empty_batch = True
+    empty_batch_anchor_inputs = ("path",)
+
+    class Inputs(IOModel):
+        value: int
+        path: Path
+
+    class Outputs(IOModel):
+        output: Path = Template("{path.stem}_empty.txt")
+        source_name: str
+
+    def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
+        rows = []
+        for arguments in arguments_list:
+            output = Path(arguments.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(Path(arguments.path).name)
+            rows.append([self.Outputs(output=output, source_name=Path(arguments.path).name)])
+        return rows
 
 
 class TestBatchOneToOne:
@@ -68,3 +164,46 @@ class TestBatchOverrideDetection:
     def test_row_tool_is_not_batch(self):
         from .conftest import StubSegmenter
         assert type(StubSegmenter()).process_batch is ProcessingTool.process_batch
+
+
+class TestEmptyBatchExecution:
+
+    def test_default_batch_tool_does_not_run_for_empty_upstream(self, tmp_workspace):
+        EmptyBatchProbe.called = False
+
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            empty = EmptySource()(name="empty")
+            probed = EmptyBatchProbe()(value=empty["value"], name="probe")
+            df = wf.compute(probed)
+
+        assert not EmptyBatchProbe.called
+        assert df.empty
+        assert list(df.columns) == ["output"]
+
+    def test_run_empty_batch_tool_runs_once_for_empty_upstream(self, tmp_workspace):
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            empty = EmptySource()(name="empty")
+            reduced = EmptyBatchReducer()(value=empty["value"], name="reduce_empty")
+            df = wf.compute(reduced)
+
+        assert len(df) == 1
+        assert int(df.iloc[0]["count"]) == 0
+        assert Path(df.iloc[0]["output"]).read_text() == "empty"
+
+    def test_run_empty_batch_anchor_uses_non_empty_bound_input(self, tmp_workspace):
+        source_path = tmp_workspace / "source.tif"
+        source_path.write_text("source")
+
+        with Workflow(storage_path=tmp_workspace / "results") as wf:
+            source = SinglePathSource()(path=source_path, name="source")
+            empty = EmptyChild()(source, name="empty")
+            reduced = AnchoredEmptyBatchReducer()(
+                value=empty["value"],
+                path=source["path"],
+                name="anchored",
+            )
+            df = wf.compute(reduced)
+
+        assert len(df) == 1
+        assert df.iloc[0]["source_name"] == "source.tif"
+        assert Path(df.iloc[0]["output"]).read_text() == "source.tif"
