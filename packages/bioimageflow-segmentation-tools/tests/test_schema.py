@@ -7,6 +7,7 @@ import json
 import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
+from bioimageflow_core import BaseTool
 from bioimageflow_segmentation_tools import (
     Cellpose3,
     DistanceWatershedSegment,
@@ -38,6 +39,25 @@ SEGMENTATION_TOOLS = [
 ]
 
 pytestmark = pytest.mark.package_tools
+
+
+def test_segmentation_package_all_exports_only_public_tools() -> None:
+    import bioimageflow_segmentation_tools as segmentation
+
+    assert sorted(segmentation.__all__) == [
+        "Cellpose3",
+        "DistanceWatershedSegment",
+        "FilterLabels",
+        "LocalThresholdSegment",
+        "OtsuThresholdSegment",
+        "PostprocessLabels",
+        "SplitTouchingObjects",
+        "StarDistSegmenter",
+        "ThresholdSegment",
+        "WatershedSegment",
+    ]
+    assert "classical" not in segmentation.__all__
+    assert all(issubclass(getattr(segmentation, name), BaseTool) for name in segmentation.__all__)
 
 
 @pytest.mark.parametrize("tool_cls", SEGMENTATION_TOOLS, ids=lambda c: c.__name__)
