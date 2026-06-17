@@ -17,7 +17,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 
 ## Requirements
 
-- Python >= 3.13
+- Python >= 3.10
 
 ## Installation
 

@@ -2,9 +2,11 @@
 name = "bioimageflow"
 version = "0.1.6"
 description = "Python library for orchestrating bioimage analysis workflows"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bioimageflow-core>=0.1.6",
+    "numpy",
     "pandas",
     "pyarrow",
     "pydantic",
