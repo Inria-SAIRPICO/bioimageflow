@@ -4,6 +4,20 @@ version = "0.1.6"
 description = "Object extraction and lightweight tracking tools for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name = "BioImageFlow Contributors" }]
+license = "BSD-4-Clause"
+license-files = ["LICENSE"]
+keywords = ["bioimage-analysis", "bioimageflow", "microscopy", "workflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 dependencies = [
     "bioimageflow-core>=0.1.6",
     "bioimageflow>=0.1.6",
@@ -12,9 +26,40 @@ dependencies = [
     "pandas",
 ]
 
+[project.urls]
+Homepage = "https://gitlab.inria.fr/sairpico/bioimageflow"
+Repository = "https://gitlab.inria.fr/sairpico/bioimageflow"
+Issues = "https://gitlab.inria.fr/sairpico/bioimageflow/-/issues"
+
 [tool.uv.sources]
 bioimageflow-core = { workspace = true }
 bioimageflow = { workspace = true }
+
+[tool.hatch.build]
+exclude = [
+    "/.DS_Store",
+    "/.gitignore",
+    "/.mypy_cache/",
+    "/.pytest_cache/",
+    "/.ruff_cache/",
+    "/.vscode/",
+    "/__pycache__/",
+    "/build/",
+    "/dist/",
+]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".DS_Store",
+    ".gitignore",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".vscode/",
+    "__pycache__/",
+    "build/",
+    "dist/",
+]
 
 [build-system]
 requires = ["hatchling"]

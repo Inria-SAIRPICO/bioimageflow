@@ -1,4 +1,4 @@
-# BioImageFlow Restoration Tools
+# bioimageflow-restoration-tools
 
 Tools for image restoration baselines and synthetic benchmarking.
 

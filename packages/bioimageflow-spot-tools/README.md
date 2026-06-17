@@ -1,4 +1,4 @@
-# BioImageFlow Spot Tools
+# bioimageflow-spot-tools
 
 Tools for puncta and spot quantification.
 

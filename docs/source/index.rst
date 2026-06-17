@@ -25,7 +25,7 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
 
    class Threshold(ProcessingTool):
        display_name = "Threshold"
-       environment = EnvironmentSpec(name="base", dependencies={})
+       environment = EnvironmentSpec(name="base", dependencies={"numpy": "*", "imageio": "*"})
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -37,12 +37,12 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
            )
 
        def process_row(self, arguments: Arguments) -> "Threshold.Outputs":
+           import imageio.v3 as iio
            import numpy as np
-           from skimage.io import imread, imsave
 
-           img = imread(arguments.image)
+           img = iio.imread(arguments.image)
            mask = (img > arguments.cutoff).astype(np.uint8) * 255
-           imsave(str(arguments.mask), mask)
+           iio.imwrite(arguments.mask, mask)
            return self.Outputs(mask=arguments.mask)
 
    threshold = Threshold()

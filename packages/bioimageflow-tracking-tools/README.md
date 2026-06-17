@@ -1,4 +1,4 @@
-# BioImageFlow Tracking Tools
+# bioimageflow-tracking-tools
 
 Tools for label-stack object extraction and lightweight tracking.
 

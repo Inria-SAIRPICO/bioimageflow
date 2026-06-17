@@ -76,7 +76,7 @@ Declare its inputs, outputs, and the environment it needs:
 
    class InvertImage(ProcessingTool):
        display_name = "Invert"
-       environment = EnvironmentSpec(name="skimage", dependencies={})
+       environment = EnvironmentSpec(name="imageio", dependencies={"imageio": "*"})
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -85,10 +85,10 @@ Declare its inputs, outputs, and the environment it needs:
            inverted: Annotated[Path, ImageSpec()] = Template("{image.stem}_inv.tif")
 
        def process_row(self, arguments: Arguments) -> "InvertImage.Outputs":
-           from skimage.io import imread, imsave
-           img = imread(arguments.image)
+           import imageio.v3 as iio
+           img = iio.imread(arguments.image)
            out = 255 - img
-           imsave(str(arguments.inverted), out)
+           iio.imwrite(arguments.inverted, out)
            return self.Outputs(inverted=arguments.inverted)
 
 Key points:

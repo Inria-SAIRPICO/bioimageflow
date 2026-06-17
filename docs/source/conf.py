@@ -46,7 +46,7 @@ html_static_path = ["_static"]
 html_title = "BioImageFlow"
 
 html_theme_options = {
-    "source_repository": "https://github.com/your-org/bioimageflow",
+    "source_repository": "https://gitlab.inria.fr/sairpico/bioimageflow",
     "source_branch": "main",
     "source_directory": "docs/source/",
 }

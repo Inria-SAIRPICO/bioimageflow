@@ -17,6 +17,11 @@ COMPLETE_TEST_MARKERS = [
     "sairpico_binary: tests that require real SAIRPICO command-line tools",
     "model_runtime: tests that require optional model runtimes or model downloads",
 ]
+REGISTERED_TEST_MARKERS = [
+    *COMPLETE_TEST_MARKERS,
+    "slow: optional public-data or heavy dependency tests",
+    "package_tools: tests owned by optional tool packages",
+]
 
 EXTERNAL_TEST_MARKER_NAMES = frozenset(
     marker.split(":", 1)[0] for marker in COMPLETE_TEST_MARKERS
@@ -33,7 +38,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    for marker in COMPLETE_TEST_MARKERS:
+    for marker in REGISTERED_TEST_MARKERS:
         config.addinivalue_line("markers", marker)
 
 

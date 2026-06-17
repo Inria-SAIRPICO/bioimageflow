@@ -5,6 +5,7 @@ TODO.md
 bif_data/
 data/
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
+packages/bioimageflow-common-tools/bioimageflow_common_tools/data/*
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/blobs.txt
 .pytest_cache/
 .claude/
@@ -15,4 +16,3 @@ docs/_build/
 wetlands/
 wetlands-lib/
 packages/bioimageflow-common-tools/bioimageflow_common_tools/.vscode/
-packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
