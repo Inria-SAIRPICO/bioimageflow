@@ -1,4 +1,4 @@
-"""BioImageFlow type system — zero external dependencies."""
+"""BioImageFlow worker-safe type system."""
 
 import warnings
 from collections.abc import Set as AbstractSet

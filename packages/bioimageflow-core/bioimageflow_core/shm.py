@@ -1,4 +1,4 @@
-"""Shared memory helpers — zero declared dependencies. Uses numpy at runtime."""
+"""Shared memory helpers that expose NumPy array views."""
 
 import uuid
 from collections.abc import Generator

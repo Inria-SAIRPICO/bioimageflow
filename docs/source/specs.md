@@ -37,7 +37,7 @@ For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-ap
 
 BioImageFlow is split into two packages:
 
-**`bioimageflow-core`** — The shared foundation. Installed in the main process **and** in every tool worker environment. Contains the type system, tool base classes (`BaseTool` and `ProcessingTool`), argument passing, and I/O dispatch helpers. **Zero external dependencies** — uses only the Python standard library, ensuring it can never conflict with tool dependencies regardless of their numpy, pydantic, or imageio versions. Modules that touch numpy (`io.py`, `shm.py`) do so via runtime `import` — they borrow numpy from the tool's own environment rather than declaring it as a package dependency.
+**`bioimageflow-core`** — The shared foundation. Installed in the main process **and** in every tool worker environment. Contains the type system, tool base classes (`BaseTool` and `ProcessingTool`), argument passing, and I/O dispatch helpers. It declares NumPy because shared-memory helpers expose NumPy array views, and it avoids orchestrator-only dependencies such as pandas, pydantic, and image IO stacks.
 
 **`bioimageflow`** — The orchestrator. Installed only in the main process. Contains the graph engine, execution engines, column resolution, cache management, workflow coordination, `DataFrameTool` base class, and merge strategies. Depends on `bioimageflow-core`, `pandas`, `pydantic`, and the runtime engine dependencies used by the local executor. Distributed execution and Parsl integration are deferred and are not current v1 behavior.
 
@@ -57,10 +57,9 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
                                            ├── tool_loader.py  # Versioned package loading
                                            └── workflow.py     # Workflow container
 
-(*) io.py and shm.py use numpy at runtime via import — not as a declared
-    dependency. They work because tools that process images always have
-    numpy installed. Tools that never touch images or shared memory
-    need not have numpy at all.
+(*) io.py and shm.py use NumPy at runtime and NumPy is a declared
+    `bioimageflow-core` dependency so shared-memory APIs work in every
+    worker environment.
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
@@ -983,7 +982,7 @@ export = save(
 class IOModel:
     """
     Lightweight declarative base for tool Inputs/Outputs.
-    Zero external dependencies — uses only standard-library features.
+    No pandas or pydantic dependency; uses only standard-library features.
     """
     @classmethod
     def _get_all_annotations(cls):
@@ -1243,7 +1242,7 @@ if TYPE_CHECKING:
     import cellpose.models  # Visible to IDEs and type checkers, not imported at runtime
 ```
 
-Imports from `bioimageflow-core` (e.g., `ImageSpec`, `Arguments`, `IOModel`) can be at module level since the package is always available and has zero external dependencies.
+Imports from `bioimageflow-core` (e.g., `ImageSpec`, `Arguments`, `IOModel`) can be at module level since the package is always available and only carries worker-safe dependencies.
 
 DataFrameTool definitions import from `bioimageflow` and run exclusively in the main process, so they have full access to Pandas and any main-process library at module level:
 ```python
@@ -1256,7 +1255,7 @@ import pandas as pd  # Available — DataFrameTool runs in main process only
 
 *Module: `bioimageflow_core.io`*
 
-Since `bioimageflow-core` has no external dependencies, image I/O uses a **pluggable dispatch** pattern. The tool provides its own file reader/writer; `bioimageflow-core` handles the dispatch between file paths and shared memory references.
+Image I/O uses a **pluggable dispatch** pattern. The tool provides its own file reader/writer; `bioimageflow-core` handles the dispatch between file paths and shared memory references without depending on image IO libraries.
 
 ```python
 from contextlib import contextmanager
@@ -2150,7 +2149,7 @@ The system has two distinct execution contexts with a strict serialization bound
 | Aspect          | Orchestrator (Main Process)                            | Worker (Wetlands Environment)                          |
 |----------------|--------------------------------------------------------|--------------------------------------------------------|
 | **Role**        | Planning, scheduling, data management, DataFrameTool execution | Executing ProcessingTool logic                         |
-| **Packages**    | `bioimageflow` + `bioimageflow-core` + Pandas + Pydantic + graph lib | `bioimageflow-core` (zero deps) + tool dependencies    |
+| **Packages**    | `bioimageflow` + `bioimageflow-core` + Pandas + Pydantic + graph lib | `bioimageflow-core` + NumPy + tool dependencies        |
 | **State**       | Holds the DataFrame, graph, cache                      | Runtime state allowed (e.g., cached model instances)   |
 | **Data in/out** | `list[dict]` sent and received via Wetlands            | `list[dict]` received and sent via Wetlands            |
 
@@ -2613,7 +2612,7 @@ def open_shared_array(ref: SharedArray) -> "Iterator[np.ndarray]":
     ...
 ```
 
-Both helpers use `numpy` and `multiprocessing.shared_memory` at runtime (not declared as dependencies). This is safe because only tools that process image arrays call these functions, and those tools always have numpy in their environment.
+Both helpers use `numpy` and `multiprocessing.shared_memory` at runtime. NumPy is declared by `bioimageflow-core`, so shared-memory APIs work in worker environments even when an individual tool did not list NumPy explicitly.
 
 **Important: `close()` vs `unlink()`** — Both context managers **close** the local shared memory handle on exit but do **not unlink** (delete) the segment. The data persists after the `with` block ends so that downstream consumers and the engine can access it. This means `return` inside a `with create_shared_output(...)` block is correct and expected. Tool authors should never unlink shared memory themselves — only the engine does that.
 

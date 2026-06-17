@@ -1,4 +1,4 @@
-"""Tool base classes — zero external dependencies."""
+"""Worker-safe tool base classes."""
 
 from dataclasses import dataclass
 from enum import Enum
