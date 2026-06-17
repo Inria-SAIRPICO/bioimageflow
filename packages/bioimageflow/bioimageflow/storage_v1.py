@@ -42,6 +42,8 @@ _RESERVED_NAMES = {
 _RESULT_KEY_RE = re.compile(r"^rk_[a-z2-7]{52}$")
 _RECORD_ID_RE = re.compile(r"^rec_[a-z2-7]{52}$")
 _SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_INTEGER_RE = re.compile(r"^-?[0-9]+$")
+_UNSIGNED_INTEGER_RE = re.compile(r"^[0-9]+$")
 _RECORD_MANIFEST_FIELDS = frozenset({"schema", "result_key", "record_id", "dataframe", "outputs"})
 
 
@@ -224,6 +226,14 @@ def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -
     if isinstance(value, Path):
         return {"kind": "external_path", "value": Path(value).as_posix()}
     raise TypeError(f"Unsupported dataframe value: {type(value).__name__}")
+
+
+def canonical_scalar_payload(value: Any) -> dict[str, Any]:
+    """Return the canonical v1 payload for scalar manifest metadata."""
+    payload = _cell_payload(value)
+    if payload["kind"] in {"record_asset", "external_path"}:
+        raise TypeError("Scalar output metadata must not encode path or asset references.")
+    return payload
 
 
 def _ordered_dataframe_columns(
@@ -468,7 +478,55 @@ class RecordManifest:
             if output.get("identity") not in {"path"}:
                 raise CacheCorruptionError("Record manifest external path identity is invalid.")
             return
+        if kind == "scalar_output":
+            self._validate_scalar_output(output)
+            return
         raise CacheCorruptionError(f"Unsupported record output kind: {kind!r}")
+
+    def _validate_scalar_output(self, output: dict[str, Any]) -> None:
+        if not isinstance(output.get("output_column"), str) or output["output_column"] == "":
+            raise CacheCorruptionError("Record manifest scalar output column is invalid.")
+        if not isinstance(output.get("row_index"), str) or output["row_index"] == "":
+            raise CacheCorruptionError("Record manifest scalar output row index is invalid.")
+        value = output.get("value")
+        if not isinstance(value, dict):
+            raise CacheCorruptionError("Record manifest scalar output value is invalid.")
+        kind = value.get("kind")
+        scalar_value = value.get("value")
+        if kind == "null":
+            if scalar_value is not None:
+                raise CacheCorruptionError("Record manifest null scalar output is invalid.")
+            return
+        if kind == "bool":
+            if not isinstance(scalar_value, bool):
+                raise CacheCorruptionError("Record manifest bool scalar output is invalid.")
+            return
+        if kind == "signed_integer":
+            if not isinstance(scalar_value, str) or _INTEGER_RE.fullmatch(scalar_value) is None:
+                raise CacheCorruptionError("Record manifest integer scalar output is invalid.")
+            return
+        if kind == "unsigned_integer":
+            if not isinstance(scalar_value, str) or _UNSIGNED_INTEGER_RE.fullmatch(scalar_value) is None:
+                raise CacheCorruptionError("Record manifest unsigned integer scalar output is invalid.")
+            return
+        if kind == "float":
+            if not isinstance(scalar_value, str) or scalar_value == "":
+                raise CacheCorruptionError("Record manifest float scalar output is invalid.")
+            if scalar_value not in {"NaN", "Infinity", "-Infinity"}:
+                try:
+                    float(scalar_value)
+                except ValueError as exc:
+                    raise CacheCorruptionError("Record manifest float scalar output is invalid.") from exc
+            return
+        if kind == "string":
+            if not isinstance(scalar_value, str):
+                raise CacheCorruptionError("Record manifest string scalar output is invalid.")
+            return
+        if kind == "datetime":
+            if not isinstance(scalar_value, str) or scalar_value == "":
+                raise CacheCorruptionError("Record manifest datetime scalar output is invalid.")
+            return
+        raise CacheCorruptionError(f"Unsupported record scalar output value kind: {kind!r}")
 
     def _validate_shared_array_asset(
         self,
@@ -862,6 +920,8 @@ class StorageV1:
             raise CacheCorruptionError("Run node result no longer references the selected current record.")
         manifest = self._load_record_manifest(result_key, record_id)
         record_dir = self.result_dir(result_key) / "records" / record_id
+        if payload.get("outputs") != manifest.outputs:
+            raise CacheCorruptionError("Run node result outputs do not match the selected record manifest.")
         expected_canonical = self._relative_target(result_path, record_dir)
         if payload.get("canonical") != expected_canonical:
             raise CacheCorruptionError("Run node result canonical path mismatch.")

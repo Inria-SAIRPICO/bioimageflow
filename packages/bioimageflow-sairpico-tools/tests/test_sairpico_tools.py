@@ -16,6 +16,7 @@ import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.env_manager import _find_tool_file
+from bioimageflow.storage_v1 import StorageV1
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments, ProcessingTool
 from bioimageflow_core.worker import _load_module_from_file
@@ -641,3 +642,57 @@ def test_hotspot_to_spots_converts_components_to_coordinate_table(tmp_path: Path
         (2.5, 2.5),
         (8.0, 9.0),
     ]
+
+
+def test_hotspot_to_spots_returns_no_rows_for_blank_image(tmp_path: Path) -> None:
+    hotspot_path = tmp_path / "blank_hotspot.tif"
+    iio.imwrite(hotspot_path, np.zeros((8, 8), dtype=np.float32))
+
+    result = HotspotToSpots().process_row(Arguments(
+        hotspot_image=hotspot_path,
+        threshold=1.0,
+    ))
+
+    assert result == []
+    assert HotspotToSpots.zero_row_scalar_outputs == {"spot_count": 0}
+
+
+def test_hotspot_to_spots_publishes_zero_spot_count_metadata(tmp_path: Path) -> None:
+    hotspot_path = tmp_path / "blank_hotspot.tif"
+    iio.imwrite(hotspot_path, np.zeros((8, 8), dtype=np.float32))
+    storage_path = tmp_path / "results"
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = HotspotToSpots()(hotspot_image=hotspot_path, threshold=1.0)
+        result = wf.compute(node)
+        node_name = node.name
+
+    assert result.empty
+    assert list(result.columns) == [
+        "spot_id",
+        "y",
+        "x",
+        "intensity",
+        "score",
+        "area",
+        "label",
+        "spot_count",
+    ]
+    [run_dir] = [path for path in (storage_path / "runs").iterdir() if path.is_dir()]
+    run_result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
+    result_key = run_result["result_key"]
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "kind": "scalar_output",
+            "output_column": "spot_count",
+            "row_index": "0",
+            "value": {"kind": "signed_integer", "value": "0"},
+        }
+    ]
+
+    assert run_result["outputs"] == manifest["outputs"]

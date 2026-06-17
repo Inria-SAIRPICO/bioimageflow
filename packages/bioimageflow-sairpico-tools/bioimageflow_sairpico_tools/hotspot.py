@@ -67,6 +67,7 @@ class HotspotToSpots(ProcessingTool):
     category = Category.SPOT_DETECTION
     tags = ["sairpico", "hotspot", "spots"]
     environment = hotspot_env
+    zero_row_scalar_outputs = {"spot_count": 0}
 
     class Inputs(IOModel):
         hotspot_image: Annotated[

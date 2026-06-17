@@ -338,6 +338,7 @@ Before computing the record ID and writing the published dataframe, the engine c
 
 - A declared `ProcessingTool.Outputs` path field whose value is under the attempt `staging/assets/` tree is an owned asset and is rewritten to a record-relative artifact reference such as `assets/mask.tif`.
 - If a declared templated path output is resolved and the tool writes the file but returns zero dataframe rows, the written file is still published as an owned asset in `manifest.outputs`. The dataframe remains empty; publication must not add sentinel rows solely to expose artifacts.
+- If a table-only `ProcessingTool` declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes the declared scalar values as `scalar_output` entries in `manifest.outputs`. These entries are provenance metadata only; they are not rehydrated into dataframe rows.
 - A path under the attempt `staging/work/` tree is rejected unless the tool explicitly declared that file as an output artifact.
 - Two outputs resolving to the same canonical `assets/...` path are an error unless the tool returns the same file and the manifest records it once.
 - Absolute paths, `..`, symlink escapes, and platform-specific aliases must not appear in record-owned path columns.
@@ -354,6 +355,24 @@ Manifest entries distinguish owned assets from external references:
   ]
 }
 ```
+
+Scalar output metadata uses the same deterministic scalar payload encoding as canonical dataframe cells:
+
+```json
+{
+  "outputs": [
+    {
+      "kind": "scalar_output",
+      "output_column": "spot_count",
+      "row_index": "0",
+      "value": {"kind": "signed_integer", "value": "0"}
+    }
+  ]
+}
+```
+
+`scalar_output` entries must reference declared scalar output columns and a string row index from the input execution row that produced no output rows.
+They are included in record identity and run node `result.json`, but they do not create files below run-view `outputs/`.
 
 When the engine loads a cache hit for runtime execution, it resolves record-relative asset paths to absolute paths under the selected record directory before passing values to downstream tools.
 It must reject paths that resolve outside the record directory.
@@ -521,6 +540,7 @@ runs/<run-id>/
 
 `record.bioimageflow-link.json` is a pointer file to the selected canonical record.
 `outputs/` may contain pointer files to individual user-facing artifacts for convenient browsing.
+Only `owned_asset` manifest entries create output pointer files; `external_path` and `scalar_output` entries remain metadata in `result.json`.
 
 Example:
 

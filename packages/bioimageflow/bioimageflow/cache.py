@@ -18,6 +18,7 @@ from bioimageflow.storage_v1 import (
     RecordManifest,
     StorageV1,
     asset_digest_and_size,
+    canonical_scalar_payload,
     make_record_id,
     make_result_key,
     validate_relative_posix_path,
@@ -766,6 +767,29 @@ def _add_processing_owned_asset(
     return record_relative
 
 
+def _add_processing_scalar_output(
+    *,
+    output_column: str,
+    row_index: Any,
+    value: Any,
+    outputs: list[dict[str, Any]],
+    seen_outputs: set[tuple[str, str, str]],
+) -> None:
+    column = str(output_column)
+    index = str(row_index)
+    entry_key = ("scalar_output", column, index)
+    payload = canonical_scalar_payload(value)
+    if entry_key in seen_outputs:
+        raise CacheCorruptionError(f"Duplicate scalar output metadata: {column} at row {index}")
+    outputs.append({
+        "kind": "scalar_output",
+        "output_column": column,
+        "row_index": index,
+        "value": payload,
+    })
+    seen_outputs.add(entry_key)
+
+
 def _processing_manifest_entries_and_dataframe(
     df: pd.DataFrame,
     path_columns: set[str],
@@ -773,11 +797,13 @@ def _processing_manifest_entries_and_dataframe(
     staging_assets_dir: Path,
     shared_array_columns: set[str] | None = None,
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]] | None = None,
+    declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path]]:
     stored = df.copy()
     outputs: list[dict[str, Any]] = []
     owned_assets: dict[str, Path] = {}
     seen_outputs: set[tuple[str, str]] = set()
+    seen_scalar_outputs: set[tuple[str, str, str]] = set()
     staging_root = staging_assets_dir.resolve()
     shared_array_columns = shared_array_columns or set()
     from bioimageflow_core.types import SharedArray
@@ -869,6 +895,14 @@ def _processing_manifest_entries_and_dataframe(
             row_index=row_index,
             require_exists=False,
         )
+    for column, row_index, value in declared_scalar_outputs or ():
+        _add_processing_scalar_output(
+            output_column=str(column),
+            row_index=row_index,
+            value=value,
+            outputs=outputs,
+            seen_outputs=seen_scalar_outputs,
+        )
     return stored, outputs, owned_assets
 
 
@@ -886,6 +920,7 @@ def processing_v1_publish(
     owned_path_columns: set[str],
     shared_array_columns: set[str] | None = None,
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]] | None = None,
+    declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
 ) -> pd.DataFrame:
     """Publish a source ProcessingTool attempt as a v1 immutable record."""
     storage = StorageV1(storage_path)
@@ -896,6 +931,7 @@ def processing_v1_publish(
         staging_assets_dir,
         shared_array_columns,
         declared_owned_artifact_paths,
+        declared_scalar_outputs,
     )
     staging_parquet = staging_dir / "dataframe.parquet"
     _prepare_dataframe_for_parquet(stored_df).to_parquet(staging_parquet, index=True)

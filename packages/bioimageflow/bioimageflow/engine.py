@@ -219,6 +219,38 @@ def _declared_owned_artifact_paths(
     return artifacts
 
 
+def _declared_zero_row_scalar_outputs(
+    tool: ProcessingTool,
+    raw_results: list[list[Any]],
+    execution_index: list[Any],
+) -> list[tuple[str, Any, Any]]:
+    declared_values = getattr(tool, "zero_row_scalar_outputs", {})
+    if not declared_values:
+        return []
+    if not isinstance(declared_values, dict):
+        raise TypeError(f"{type(tool).__name__}.zero_row_scalar_outputs must be a dict.")
+    outputs = getattr(tool, "Outputs", None)
+    if outputs is None or not hasattr(outputs, "_get_all_annotations"):
+        return []
+    output_annotations = outputs._get_all_annotations()
+    entries: list[tuple[str, Any, Any]] = []
+    for column, value in sorted(declared_values.items()):
+        column_name = str(column)
+        if column_name not in output_annotations:
+            raise ValueError(
+                f"{type(tool).__name__}.zero_row_scalar_outputs declares unknown output column {column_name!r}."
+            )
+        annotation = output_annotations[column_name]
+        if is_path_type(annotation) or _is_shared_array_type(annotation):
+            raise ValueError(
+                f"{type(tool).__name__}.zero_row_scalar_outputs column {column_name!r} must be scalar."
+            )
+        for row_index, row_outputs in zip(execution_index, raw_results):
+            if len(row_outputs) == 0:
+                entries.append((column_name, row_index, value))
+    return entries
+
+
 def _is_shared_array_type(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin is Annotated:
@@ -1315,6 +1347,11 @@ class DefaultEngine:
                 df,
                 declared_path_columns,
             ),
+            declared_scalar_outputs=_declared_zero_row_scalar_outputs(
+                node.tool,
+                raw_results,
+                aligned_index,
+            ),
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -1500,6 +1537,11 @@ class DefaultEngine:
                 execution_index,
                 df,
                 declared_path_columns,
+            ),
+            declared_scalar_outputs=_declared_zero_row_scalar_outputs(
+                node.tool,
+                raw_results,
+                execution_index,
             ),
         )
         df = self._coerce_numeric_columns(df)
