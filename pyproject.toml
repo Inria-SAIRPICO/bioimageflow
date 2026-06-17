@@ -28,6 +28,7 @@ dev = [
     "sphinx-copybutton>=0.5.2",
     "myst-parser>=4.0.0",
     "ruff>=0.15.7",
+    "pyright>=1.1.410",
     "scikit-image",
     "ipython>=8.38.0",
 ]
@@ -50,6 +51,7 @@ bioimageflow-tracking-tools = { workspace = true }
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]
 python_files = ["test_*.py"]
+addopts = ["--strict-config", "--strict-markers"]
 filterwarnings = []
 markers = [
     "wetlands: tests that execute real Wetlands worker processes",
@@ -61,3 +63,19 @@ markers = [
     "model_runtime: tests that require optional model runtimes or model downloads",
     "package_tools: tests owned by optional tool packages",
 ]
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = [
+    ".worktrees",
+    "build",
+    "dist",
+    "docs/build",
+    "docs/_build",
+    "wetlands",
+    "bif",
+    "results",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

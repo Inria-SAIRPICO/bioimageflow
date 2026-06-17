@@ -21,6 +21,12 @@ Run the regular suite with:
 uv run pytest
 ```
 
+CI runs the deterministic default tier with slow tests excluded:
+
+```bash
+uv run pytest -m "not slow"
+```
+
 Package-local regular tests can be run with:
 
 ```bash
@@ -87,9 +93,15 @@ Before broad finalization, run:
 
 ```bash
 uv run ruff check .
-uv run pytest
-uv run sphinx-build docs/source docs/_build/html
+uv run pyright
+uv run pytest -m "not slow"
+uv run pytest tests/unit/test_package_artifacts.py
+uv build --all-packages --out-dir dist/packages
+uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
+
+Pyright is an implementation gate in this phase.
+The checked configuration includes package implementation code and excludes test modules because root tests still contain dynamic negative-test and pandas-stub idioms that are not part of the product type contract.
 
 Complete tests are appropriate at the end of a long package or workflow iteration, or when a maintainer explicitly asks for them.
 Agents should ask before triggering downloads, real binaries, or model runtimes unless the user has already approved those resources for the current task.

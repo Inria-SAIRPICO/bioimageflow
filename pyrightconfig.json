@@ -2,17 +2,14 @@
   "venvPath": ".",
   "venv": ".venv",
   "include": [
-    "conftest.py",
-    "docs/source",
-    "example-workflows",
-    "packages",
-    "tests"
+    "packages"
   ],
   "exclude": [
     "**/__pycache__",
     "**/.pytest_cache",
     "**/.ruff_cache",
     "**/.venv",
+    "**/tests",
     "**/wetlands",
     "**/bif",
     "**/results",
@@ -20,6 +17,9 @@
     ".worktrees",
     "docs/_build"
   ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
   "extraPaths": [
     "packages/bioimageflow-core",
     "packages/bioimageflow-common-tools",

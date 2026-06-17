@@ -49,6 +49,8 @@ html_theme_options = {
     "source_repository": "https://gitlab.inria.fr/sairpico/bioimageflow",
     "source_branch": "main",
     "source_directory": "docs/source/",
+    "source_view_link": "https://gitlab.inria.fr/sairpico/bioimageflow/-/blob/main/docs/source/{filename}",
+    "source_edit_link": "https://gitlab.inria.fr/sairpico/bioimageflow/-/edit/main/docs/source/{filename}",
 }
 
 # -- Autodoc options ---------------------------------------------------------
