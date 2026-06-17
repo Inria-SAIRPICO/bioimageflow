@@ -36,6 +36,7 @@ DetectSpots().process_row(
 
 The label image marks one pixel per detected spot, and the workflow output dataframe contains one row per accepted local maximum.
 The label image is written as `uint32`; background is `0`, and detected spots use positive sequential IDs.
+When no spots pass the threshold, the dataframe is empty and the blank `uint32` label image is still published as the node's `output_labels` artifact.
 
 ## Failure Modes
 

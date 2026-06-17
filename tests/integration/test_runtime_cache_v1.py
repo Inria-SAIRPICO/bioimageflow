@@ -17,7 +17,7 @@ from bioimageflow.cache import (
     processing_v1_publish,
 )
 from bioimageflow.storage_v1 import CacheCorruptionError, StorageV1, make_record_id
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, Template
+from bioimageflow_core import Arguments, EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool, Template
 from bioimageflow_core.types import ImageSpec, Semantic, SharedArray
 
 
@@ -93,7 +93,7 @@ class SourceAssetWriter(ProcessingTool):
         mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("mask_{row_index}.txt")
         count: int
 
-    def process_row(self, arguments: Arguments, *, context: object | None = None):
+    def process_row(self, arguments: Arguments, *, context: ExecutionContext | None = None):
         type(self).executions += 1
         assert context is not None
         assert "cache/v1/results" in str(context.run_dir)
@@ -102,6 +102,48 @@ class SourceAssetWriter(ProcessingTool):
         assert mask.parent == context.assets_dir
         mask.write_text(arguments.text)
         return self.Outputs(mask=mask, count=len(arguments.text))
+
+
+class ZeroRowAssetWriter(ProcessingTool):
+    display_name = "Zero Row Asset Writer"
+    environment = EnvironmentSpec(name="zero_row_asset_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        text: str = "blank"
+
+    class Outputs(IOModel):
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("mask_{row_index}.txt")
+        count: int
+
+    def process_row(self, arguments: Arguments, *, context: ExecutionContext | None = None):
+        type(self).executions += 1
+        assert context is not None
+        mask = Path(arguments.mask)
+        assert mask.parent == context.assets_dir
+        mask.write_text(arguments.text)
+        return []
+
+
+class DefaultTemplateZeroRowWriter(ProcessingTool):
+    display_name = "Default Template Zero Row Writer"
+    environment = EnvironmentSpec(name="default_template_zero_row_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        text: str = "default"
+
+    class Outputs(IOModel):
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+        count: int
+
+    def process_row(self, arguments: Arguments, *, context: ExecutionContext | None = None):
+        type(self).executions += 1
+        assert context is not None
+        output = Path(arguments.output)
+        assert output.parent == context.assets_dir
+        output.write_text(arguments.text)
+        return []
 
 
 class SourceExternalPaths(ProcessingTool):
@@ -205,6 +247,27 @@ class ColumnBoundLegacyWriter(ProcessingTool):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(arguments.label)
         return self.Outputs(output=output)
+
+
+class ColumnBoundZeroRowWriter(ProcessingTool):
+    display_name = "Column Bound Zero Row Writer"
+    environment = EnvironmentSpec(name="column_bound_zero_row_writer", dependencies={})
+    executions = 0
+
+    class Inputs(IOModel):
+        label: str
+
+    class Outputs(IOModel):
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("zero_{row_index}.txt")
+        count: int
+
+    def process_row(self, arguments: Arguments, *, context: object | None = None):
+        type(self).executions += 1
+        assert context is not None
+        output = Path(arguments.output)
+        assert output.parent == context.assets_dir
+        output.write_text(arguments.label)
+        return []
 
 
 class EscapingColumnBoundWriter(ProcessingTool):
@@ -881,6 +944,74 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     assert ("SourceAssetWriter_1", "cached") in events
 
 
+def test_zero_row_processing_tool_publishes_written_template_asset_without_sentinel_row(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    ZeroRowAssetWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = ZeroRowAssetWriter()(text="blank")
+        first = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+
+    assert first.empty
+    assert list(first.columns) == ["mask", "count"]
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "output_column": "mask",
+            "path": "assets/mask_0.txt",
+            "row_index": "0",
+            "size": 5,
+        }
+    ]
+    assert (record_dir / "assets" / "mask_0.txt").read_text() == "blank"
+
+    with Workflow(storage_path=storage_path) as wf:
+        second = wf.compute(ZeroRowAssetWriter()(text="blank"))
+
+    pd.testing.assert_frame_equal(first, second)
+    assert ZeroRowAssetWriter.executions == 1
+
+
+def test_zero_row_processing_tool_publishes_written_default_template_asset(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    DefaultTemplateZeroRowWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        node = DefaultTemplateZeroRowWriter()(text="default")
+        result = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+
+    assert result.empty
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "output_column": "output",
+            "path": "assets/DefaultTemplateZeroRowWriter_1_0",
+            "row_index": "0",
+            "size": 7,
+        }
+    ]
+    assert (record_dir / "assets" / "DefaultTemplateZeroRowWriter_1_0").read_text() == "default"
+    assert DefaultTemplateZeroRowWriter.executions == 1
+
+
 def test_processing_tool_progress_events_expose_v1_selection_identity(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     SourceAssetWriter.executions = 0
@@ -1176,6 +1307,51 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
     assert list(outside.iterdir()) == []
 
 
+def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    node_name = "ZeroRowAssetWriter_1"
+    sig_hash = "sig"
+    result_key, attempt_id, staging_dir, assets_dir = processing_v1_prepare_attempt(
+        storage_path,
+        node_name,
+        sig_hash,
+    )
+    source = assets_dir / "mask_0.txt"
+    source.write_text("blank")
+    df = pd.DataFrame(columns=pd.Index(["mask", "count"]))
+
+    result = processing_v1_publish(
+        storage_path,
+        node_name,
+        sig_hash,
+        df,
+        result_key=result_key,
+        attempt_id=attempt_id,
+        staging_dir=staging_dir,
+        staging_assets_dir=assets_dir,
+        path_columns={"mask"},
+        owned_path_columns={"mask"},
+        declared_owned_artifact_paths=[("mask", "0", source)],
+    )
+
+    assert result.empty
+    pointer = StorageV1(storage_path).load_current(result_key)
+    assert pointer is not None
+    record_dir = StorageV1(storage_path).result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "output_column": "mask",
+            "path": "assets/mask_0.txt",
+            "row_index": "0",
+            "size": 5,
+        }
+    ]
+    assert (record_dir / "assets" / "mask_0.txt").read_text() == "blank"
+
+
 def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     node_name = "DirectoryTool_1"
@@ -1245,6 +1421,42 @@ def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cach
     pd.testing.assert_frame_equal(first, second)
     assert ColumnBoundLegacyWriter.executions == 1
     assert ("ColumnBoundLegacyWriter_1", "cached") in events
+
+
+def test_column_bound_zero_row_processing_tool_publishes_written_template_assets(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    ColumnBoundZeroRowWriter.executions = 0
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        node = ColumnBoundZeroRowWriter()(label=table["label"])
+        first = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+
+    assert first.empty
+    assert list(first.columns) == ["output", "count"]
+    storage = StorageV1(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert [output["path"] for output in manifest["outputs"]] == [
+        "assets/zero_a.txt",
+        "assets/zero_b.txt",
+    ]
+    assert [output["output_column"] for output in manifest["outputs"]] == ["output", "output"]
+    assert [output["row_index"] for output in manifest["outputs"]] == ["a", "b"]
+    assert (record_dir / "assets" / "zero_a.txt").read_text() == "alpha"
+    assert (record_dir / "assets" / "zero_b.txt").read_text() == "beta"
+
+    with Workflow(storage_path=storage_path) as wf:
+        table = MultiRowTable()()
+        second = wf.compute(ColumnBoundZeroRowWriter()(label=table["label"]))
+
+    pd.testing.assert_frame_equal(first, second)
+    assert ColumnBoundZeroRowWriter.executions == 2
 
 
 def test_column_bound_processing_tool_plan_reports_cached_from_v1_current(tmp_path: Path) -> None:
