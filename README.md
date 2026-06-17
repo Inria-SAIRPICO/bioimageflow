@@ -138,6 +138,15 @@ Runs in the main process. Transforms entire DataFrames. Useful for loading data,
 Full documentation is available at `docs/`:
 
 ```bash
+uv run python docs/generate_tool_package_docs.py
+uv run sphinx-autobuild docs/source docs/_build/html
+```
+
+Open the live preview at <http://127.0.0.1:8000/>.
+
+For a one-shot Sphinx build through the docs Makefile:
+
+```bash
 cd docs
 make html
 open build/html/index.html
@@ -175,6 +184,7 @@ uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
 
 # Build documentation with warnings treated as failures
+uv run python docs/generate_tool_package_docs.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 
 # Run opt-in complete tests

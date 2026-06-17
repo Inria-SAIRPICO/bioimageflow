@@ -28,6 +28,9 @@ Package layout
 
 A tool package is a standard Python package with a ``pyproject.toml``:
 
+For a practical package scaffold that includes package-owned docs and tests,
+see :doc:`custom_tool_package`.
+
 .. code-block:: text
 
    my_tools/

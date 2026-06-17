@@ -88,7 +88,21 @@ Features
    gui/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+   :caption: Tool Packages
+
+   tool_packages/index
+   tool_packages/bioimageflow-common-tools/index
+   tool_packages/bioimageflow-io-tools/index
+   tool_packages/bioimageflow-segmentation-tools/index
+   tool_packages/bioimageflow-measurement-tools/index
+   tool_packages/bioimageflow-spot-tools/index
+   tool_packages/bioimageflow-tracking-tools/index
+   tool_packages/bioimageflow-restoration-tools/index
+   tool_packages/bioimageflow-sairpico-tools/index
+
+.. toctree::
+   :maxdepth: 1
    :caption: Reference
 
    reference/index

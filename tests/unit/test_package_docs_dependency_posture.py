@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 
 ROOT = Path(__file__).parents[2]
@@ -102,3 +104,59 @@ def test_tool_package_reference_documents_release_and_ci_contract() -> None:
         "complete-test jobs are manual or scheduled",
     ]:
         assert required in text
+
+
+def test_generated_tool_package_docs_are_current() -> None:
+    result = subprocess.run(
+        [sys.executable, "docs/generate_tool_package_docs.py", "--check"],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_each_package_doc_page_has_generated_wrapper() -> None:
+    for package_dir in sorted((ROOT / "packages").glob("*/docs")):
+        distribution_dir = package_dir.parent
+        generated_dir = ROOT / "docs" / "source" / "tool_packages" / distribution_dir.name
+
+        assert (generated_dir / "index.md").exists()
+        assert _markdown_names(package_dir / "tools") == _markdown_names(
+            generated_dir / "tools"
+        )
+        assert _markdown_names(package_dir / "workflows") == _markdown_names(
+            generated_dir / "workflows"
+        )
+
+
+def _markdown_names(directory: Path) -> set[str]:
+    if not directory.exists():
+        return set()
+    return {
+        path.name
+        for path in directory.glob("*.md")
+        if path.name.lower() != "readme.md"
+    }
+
+
+def test_tool_package_docs_are_top_level_not_reference_concatenated() -> None:
+    root_index = _text("docs/source/index.rst")
+    reference_index = _text("docs/source/reference/index.rst")
+    package_reference = _text("docs/source/reference/tool_packages.md")
+
+    assert ":caption: Tool Packages" in root_index
+    assert "tool_packages/index" in root_index
+    assert "segmentation_tools" not in reference_index
+    assert "```{include} ../../../packages/" not in package_reference
+
+
+def test_custom_tool_package_tutorial_is_listed() -> None:
+    tutorial_index = _text("docs/source/tutorials/index.rst")
+    tutorial = _text("docs/source/tutorials/custom_tool_package.rst")
+
+    assert "custom_tool_package" in tutorial_index
+    assert "[tool.bioimageflow.docs]" in tutorial
+    assert "BIOIMAGEFLOW_DOC_PACKAGE_PATHS" in tutorial

@@ -14,4 +14,5 @@ Step-by-step guides covering common BioImageFlow patterns.
    parallelism
    cancellation
    shared_memory
+   custom_tool_package
    tool_packaging
