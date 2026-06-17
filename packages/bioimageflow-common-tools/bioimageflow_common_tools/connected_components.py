@@ -59,6 +59,7 @@ class ConnectedComponents(ProcessingTool):
             ImageSpec(
                 semantics={Semantic.LABEL},
                 layouts={Layout.PLANAR, Layout.VOLUMETRIC},
+                dtypes={"uint32"},
             ),
             GUIMeta(
                 display_name="Label image",
@@ -85,6 +86,6 @@ class ConnectedComponents(ProcessingTool):
 
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        sitk.WriteImage(sitk.Cast(labeled, sitk.sitkUInt16), str(output_path))
+        sitk.WriteImage(sitk.Cast(labeled, sitk.sitkUInt32), str(output_path))
 
         return self.Outputs(output_image=output_path, num_labels=num_labels)

@@ -24,7 +24,9 @@ SpotsToLabels().process_batch([
 ## Expected Results
 
 The output label image contains one label per spot row or one label per connected mask component.
+The label image is written as `uint32`; background is `0`, and non-zero labels are preserved exactly for spot-row inputs or assigned sequentially for mask inputs.
 
 ## Failure Modes
 
 Missing coordinates, malformed shapes, unreadable masks, or unwritable output paths raise errors.
+Spot-row `spot_id` values must be positive integers no larger than the `uint32` maximum, and mask inputs that would produce more labels than `uint32` can store raise `ValueError`.

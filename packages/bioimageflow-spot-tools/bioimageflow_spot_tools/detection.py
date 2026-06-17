@@ -139,7 +139,7 @@ class DetectSpots(ProcessingTool):
     class Outputs(IOModel):
         output_labels: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
+            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}),
             GUIMeta(display_name="Spot labels"),
         ] = Template("{input_image.stem}_spots.tif")
         spot_id: Annotated[int, GUIMeta(display_name="Spot ID")]
@@ -165,8 +165,10 @@ class DetectSpots(ProcessingTool):
             threshold=float(arguments.threshold),
             min_distance=int(arguments.min_distance),
         )
+        if len(maxima) > np.iinfo(np.uint32).max:
+            raise ValueError("DetectSpots produced more labels than uint32 can store.")
 
-        labels = np.zeros(image.shape, dtype=np.uint16)
+        labels = np.zeros(image.shape, dtype=np.uint32)
         rows = []
         for spot_id, (y, x) in enumerate(maxima, start=1):
             labels[y, x] = spot_id

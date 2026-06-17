@@ -4,7 +4,7 @@
 Every connected non-zero region receives a unique integer label.
 
 The input is `input_image`, a planar or volumetric binary image. Outputs are
-`output_image`, a UInt16 label image, and `num_labels`, the number of connected
+`output_image`, a UInt32 label image, and `num_labels`, the number of connected
 components. The core library is SimpleITK, which handles both IO and connected
 component labeling.
 
@@ -33,6 +33,7 @@ ConnectedComponents().process_row(Arguments(input_image="binary.tif"))
 ## Expected Results
 
 The output label image has one integer label per connected foreground component.
+It is written as `uint32`; background is `0`, and labels are positive component IDs.
 
 ## Failure Modes
 

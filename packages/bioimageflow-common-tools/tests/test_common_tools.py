@@ -4,6 +4,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import imageio.v3 as iio
+import numpy as np
 import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
@@ -85,3 +87,34 @@ def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
         Arguments(column_name="threshold", values=[0.1, 0.2, 0.5]),
     )
     assert table.to_dict("list") == {"threshold": [0.1, 0.2, 0.5]}
+
+
+def test_connected_components_schema_declares_uint32_labels() -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    schema = serialize_output_schema(ConnectedComponents)
+
+    assert schema["output_image"]["image_spec"]["dtypes"] == ["uint32"]
+
+
+def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:
+    pytest.importorskip("SimpleITK")
+    from bioimageflow_common_tools import ConnectedComponents
+
+    mask = np.zeros((16, 16), dtype=np.uint8)
+    mask[1:4, 1:4] = 1
+    mask[8:12, 9:13] = 1
+    input_image = tmp_path / "binary.tif"
+    iio.imwrite(input_image, mask)
+
+    result = ConnectedComponents().process_row(
+        Arguments(
+            input_image=input_image,
+            output_image=tmp_path / "labels.tif",
+        )
+    )
+
+    labels = iio.imread(result.output_image)
+    assert labels.dtype == np.uint32
+    assert result.num_labels == 2
+    assert int(labels.max()) == 2

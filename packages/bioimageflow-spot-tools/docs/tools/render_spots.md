@@ -23,7 +23,10 @@ RenderSpots().process_batch([
 ## Expected Results
 
 The output image marks each spot coordinate.
+With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
+With `label_mode=False`, the output is a `uint8` binary mask with values `{0, 1}`.
 
 ## Failure Modes
 
 Missing coordinates, malformed shapes, out-of-bounds coordinates, or unwritable output paths raise errors.
+In label mode, `spot_id` must be a positive integer no larger than the `uint32` maximum.

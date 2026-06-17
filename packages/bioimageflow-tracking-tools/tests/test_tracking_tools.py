@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
+from bioimageflow.validation import serialize_output_schema
 from bioimageflow_core import Arguments
 from bioimageflow_tracking_tools import (
     FilterObjects,
@@ -133,6 +134,82 @@ def test_tracks_to_labels_renders_track_ids_into_label_stack(tmp_path: Path) -> 
     assert labels[0, 6, 6] == 5
     assert labels[0, 21, 23] == 7
     assert result.track_count == 2
+
+
+def test_tracks_to_labels_output_schema_declares_uint32_labels() -> None:
+    schema = serialize_output_schema(TracksToLabels)
+
+    assert schema["output_label_image"]["image_spec"]["dtypes"] == ["uint32"]
+
+
+def test_tracks_to_labels_preserves_track_ids_above_uint16(tmp_path: Path) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+    large_track_id = int(np.iinfo(np.uint16).max) + 23
+
+    result = TracksToLabels().process_batch(
+        [
+            Arguments(
+                track_id=large_track_id,
+                frame=0,
+                label=1,
+                label_image=label_path,
+                output_label_image=tmp_path / "track_labels.tif",
+            ),
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.output_label_image)
+    assert labels.dtype == np.uint32
+    assert int(labels[0, 6, 6]) == large_track_id
+    assert result.track_count == 1
+
+
+def test_tracks_to_labels_accepts_integer_like_track_ids(tmp_path: Path) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+
+    result = TracksToLabels().process_batch(
+        [
+            Arguments(
+                track_id="1.0",
+                frame=0,
+                label=1.0,
+                label_image=label_path,
+                output_label_image=tmp_path / "track_labels.tif",
+            ),
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.output_label_image)
+    assert labels.dtype == np.uint32
+    assert int(labels[0, 6, 6]) == 1
+    assert result.track_count == 1
+
+
+@pytest.mark.parametrize(
+    "track_id",
+    [0, -1, 1.5, int(np.iinfo(np.uint32).max) + 1],
+)
+def test_tracks_to_labels_rejects_reserved_or_out_of_range_track_ids(
+    tmp_path: Path,
+    track_id: int | float,
+) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+    output_path = tmp_path / "track_labels.tif"
+
+    with pytest.raises(ValueError, match="positive integer|<="):
+        TracksToLabels().process_batch(
+            [
+                Arguments(
+                    track_id=track_id,
+                    frame=0,
+                    label=1,
+                    label_image=label_path,
+                    output_label_image=output_path,
+                ),
+            ]
+        )
+
+    assert not output_path.exists()
 
 
 def test_tracks_to_labels_rejects_missing_required_numeric_fields(
