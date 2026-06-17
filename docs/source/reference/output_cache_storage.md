@@ -337,6 +337,7 @@ The engine must not infer asset columns heuristically from arbitrary strings.
 Before computing the record ID and writing the published dataframe, the engine canonicalizes declared path/asset columns:
 
 - A declared `ProcessingTool.Outputs` path field whose value is under the attempt `staging/assets/` tree is an owned asset and is rewritten to a record-relative artifact reference such as `assets/mask.tif`.
+- If a declared templated path output is resolved and the tool writes the file but returns zero dataframe rows, the written file is still published as an owned asset in `manifest.outputs`. The dataframe remains empty; publication must not add sentinel rows solely to expose artifacts.
 - A path under the attempt `staging/work/` tree is rejected unless the tool explicitly declared that file as an output artifact.
 - Two outputs resolving to the same canonical `assets/...` path are an error unless the tool returns the same file and the manifest records it once.
 - Absolute paths, `..`, symlink escapes, and platform-specific aliases must not appear in record-owned path columns.

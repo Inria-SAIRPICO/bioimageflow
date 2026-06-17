@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -705,12 +706,73 @@ def _write_shared_array_asset(
     return relative, entry, path
 
 
+def _add_processing_owned_asset(
+    *,
+    path: Path,
+    staging_root: Path,
+    outputs: list[dict[str, Any]],
+    owned_assets: dict[str, Path],
+    seen_outputs: set[tuple[str, str]],
+    output_column: str | None = None,
+    row_index: Any | None = None,
+    require_exists: bool = True,
+) -> str | None:
+    try:
+        relative = path.resolve().relative_to(staging_root)
+    except ValueError as exc:
+        raise CacheCorruptionError(f"Declared owned output asset is outside staging assets: {path}") from exc
+    try:
+        record_relative = validate_relative_posix_path(f"assets/{relative.as_posix()}")
+    except ValueError as exc:
+        raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
+    if record_relative.startswith("assets/shm/"):
+        raise CacheCorruptionError("assets/shm/ is reserved for shared-array assets.")
+    if not path.exists():
+        if require_exists:
+            raise CacheCorruptionError(f"Declared output asset is missing: {path}")
+        return None
+    try:
+        path.resolve().relative_to(staging_root)
+    except ValueError as exc:
+        raise CacheCorruptionError(f"Declared output asset escapes staging assets: {path}") from exc
+    size, digest = asset_digest_and_size(path)
+    previous = owned_assets.get(record_relative)
+    if previous is not None and previous.resolve() != path.resolve():
+        raise CacheCorruptionError(f"Duplicate owned asset path: {record_relative}")
+    for existing_relative, existing_path in owned_assets.items():
+        if existing_relative == record_relative:
+            continue
+        if record_relative.startswith(f"{existing_relative}/") or existing_relative.startswith(f"{record_relative}/"):
+            raise CacheCorruptionError(
+                f"Overlapping owned asset paths are not supported: {existing_relative}, {record_relative}"
+            )
+    owned_assets[record_relative] = path
+    entry_key = ("owned_asset", record_relative)
+    if entry_key not in seen_outputs:
+        entry = {
+            "path": record_relative,
+            "kind": "owned_asset",
+            "size": size,
+            "digest": digest,
+        }
+        if output_column is not None:
+            entry["output_column"] = str(output_column)
+        if row_index is not None:
+            entry["row_index"] = str(row_index)
+        if path.is_dir():
+            entry["asset_type"] = "directory"
+        outputs.append(entry)
+        seen_outputs.add(entry_key)
+    return record_relative
+
+
 def _processing_manifest_entries_and_dataframe(
     df: pd.DataFrame,
     path_columns: set[str],
     owned_path_columns: set[str],
     staging_assets_dir: Path,
     shared_array_columns: set[str] | None = None,
+    declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path]]:
     stored = df.copy()
     outputs: list[dict[str, Any]] = []
@@ -763,7 +825,7 @@ def _processing_manifest_entries_and_dataframe(
             if not path.is_absolute():
                 path = Path.cwd() / path
             try:
-                relative = path.resolve().relative_to(staging_root)
+                path.resolve().relative_to(staging_root)
             except ValueError:
                 if column in owned_path_columns:
                     raise CacheCorruptionError(
@@ -776,43 +838,37 @@ def _processing_manifest_entries_and_dataframe(
                     seen_outputs.add(entry_key)
                 stored.at[index, column] = external
                 continue
-            try:
-                record_relative = validate_relative_posix_path(f"assets/{relative.as_posix()}")
-            except ValueError as exc:
-                raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
-            if record_relative.startswith("assets/shm/"):
-                raise CacheCorruptionError("assets/shm/ is reserved for shared-array assets.")
-            if not path.exists():
-                raise CacheCorruptionError(f"Declared output asset is missing: {path}")
-            try:
-                path.resolve().relative_to(staging_root)
-            except ValueError as exc:
-                raise CacheCorruptionError(f"Declared output asset escapes staging assets: {path}") from exc
-            size, digest = asset_digest_and_size(path)
-            previous = owned_assets.get(record_relative)
-            if previous is not None and previous.resolve() != path.resolve():
-                raise CacheCorruptionError(f"Duplicate owned asset path: {record_relative}")
-            for existing_relative, existing_path in owned_assets.items():
-                if existing_relative == record_relative:
-                    continue
-                if record_relative.startswith(f"{existing_relative}/") or existing_relative.startswith(f"{record_relative}/"):
-                    raise CacheCorruptionError(
-                        f"Overlapping owned asset paths are not supported: {existing_relative}, {record_relative}"
-                    )
-            owned_assets[record_relative] = path
-            entry_key = ("owned_asset", record_relative)
-            if entry_key not in seen_outputs:
-                entry = {
-                    "path": record_relative,
-                    "kind": "owned_asset",
-                    "size": size,
-                    "digest": digest,
-                }
-                if path.is_dir():
-                    entry["asset_type"] = "directory"
-                outputs.append(entry)
-                seen_outputs.add(entry_key)
+            record_relative = _add_processing_owned_asset(
+                path=path,
+                staging_root=staging_root,
+                outputs=outputs,
+                owned_assets=owned_assets,
+                seen_outputs=seen_outputs,
+            )
+            assert record_relative is not None
             stored.at[index, column] = record_relative
+    for column, row_index, value in declared_owned_artifact_paths or ():
+        if column not in path_columns:
+            continue
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            continue
+        if not isinstance(value, (str, os.PathLike)):
+            raise CacheCorruptionError(
+                f"Declared owned output path {column!r} contains unsupported value: {type(value).__name__}"
+            )
+        path = Path(value)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        _add_processing_owned_asset(
+            path=path,
+            staging_root=staging_root,
+            outputs=outputs,
+            owned_assets=owned_assets,
+            seen_outputs=seen_outputs,
+            output_column=str(column),
+            row_index=row_index,
+            require_exists=False,
+        )
     return stored, outputs, owned_assets
 
 
@@ -829,6 +885,7 @@ def processing_v1_publish(
     path_columns: set[str],
     owned_path_columns: set[str],
     shared_array_columns: set[str] | None = None,
+    declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]] | None = None,
 ) -> pd.DataFrame:
     """Publish a source ProcessingTool attempt as a v1 immutable record."""
     storage = StorageV1(storage_path)
@@ -838,6 +895,7 @@ def processing_v1_publish(
         owned_path_columns,
         staging_assets_dir,
         shared_array_columns,
+        declared_owned_artifact_paths,
     )
     staging_parquet = staging_dir / "dataframe.parquet"
     _prepare_dataframe_for_parquet(stored_df).to_parquet(staging_parquet, index=True)

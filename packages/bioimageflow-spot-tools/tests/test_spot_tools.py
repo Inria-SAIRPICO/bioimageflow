@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -214,6 +215,50 @@ def test_zero_spot_workflow_keeps_downstream_spot_table_empty(tmp_path: Path) ->
         "label",
         "assigned_count",
     ]
+
+
+def test_detect_spots_zero_rows_publish_blank_label_artifact(tmp_path: Path) -> None:
+    image = tmp_path / "blank.tif"
+    storage_path = tmp_path / "bif"
+    iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
+
+    with Workflow(storage_path=str(storage_path)) as wf:
+        detected = DetectSpots()(
+            input_image=image,
+            method="local_maxima",
+            threshold=1.0,
+            name="detect",
+        )
+        result = wf.compute(detected)
+
+    assert result.empty
+    assert list(result.columns) == [
+        "output_labels",
+        "spot_id",
+        "y",
+        "x",
+        "intensity",
+        "score",
+        "spot_count",
+    ]
+    [current_path] = list(storage_path.glob("cache/v1/results/**/current.json"))
+    current = json.loads(current_path.read_text())
+    record_dir = current_path.parent / "records" / current["record_id"]
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["outputs"] == [
+        {
+            "digest": manifest["outputs"][0]["digest"],
+            "kind": "owned_asset",
+            "output_column": "output_labels",
+            "path": "assets/blank_spots.tif",
+            "row_index": "0",
+            "size": manifest["outputs"][0]["size"],
+        }
+    ]
+    labels = iio.imread(record_dir / "assets" / "blank_spots.tif")
+    assert labels.dtype == np.uint32
+    assert labels.shape == (16, 16)
+    assert int(labels.max()) == 0
 
 
 def test_spot_colocalization_builds_workflow_graph(tmp_path: Path) -> None:

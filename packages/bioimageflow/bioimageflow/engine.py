@@ -199,6 +199,26 @@ def _explicit_template_output_columns(node: Node) -> set[str]:
     return columns
 
 
+def _declared_owned_artifact_paths(
+    arguments_dicts: list[dict[str, Any]],
+    execution_index: list[Any],
+    df: pd.DataFrame,
+    output_columns: set[str],
+) -> list[tuple[str, Any, Any]]:
+    artifacts: list[tuple[str, Any, Any]] = []
+    output_indices = {str(index) for index in df.index}
+    for row_index, row_args in zip(execution_index, arguments_dicts):
+        row_index_str = str(row_index)
+        if row_index_str in output_indices or any(
+            index.startswith(f"{row_index_str}::") for index in output_indices
+        ):
+            continue
+        for column in sorted(output_columns):
+            if column in row_args:
+                artifacts.append((column, row_index, row_args[column]))
+    return artifacts
+
+
 def _is_shared_array_type(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin is Annotated:
@@ -1275,6 +1295,8 @@ class DefaultEngine:
             row_contexts, batch_context,
         )
         df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
+        owned_path_columns = _explicit_template_output_columns(node)
+        declared_path_columns = set(templates)
         df = processing_v1_publish(
             workflow.storage_path,
             node.name,
@@ -1285,8 +1307,14 @@ class DefaultEngine:
             staging_dir=staging_dir,
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
-            owned_path_columns=_explicit_template_output_columns(node),
+            owned_path_columns=owned_path_columns,
             shared_array_columns=shared_array_output_columns,
+            declared_owned_artifact_paths=_declared_owned_artifact_paths(
+                arguments_dicts,
+                aligned_index,
+                df,
+                declared_path_columns,
+            ),
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -1453,6 +1481,8 @@ class DefaultEngine:
             row_contexts, batch_context,
         )
         df = self._build_output_dataframe(raw_results, execution_index, node.tool)
+        owned_path_columns = _explicit_template_output_columns(node)
+        declared_path_columns = set(templates)
         df = processing_v1_publish(
             workflow.storage_path,
             node.name,
@@ -1463,8 +1493,14 @@ class DefaultEngine:
             staging_dir=staging_dir,
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
-            owned_path_columns=_explicit_template_output_columns(node),
+            owned_path_columns=owned_path_columns,
             shared_array_columns=shared_array_output_columns,
+            declared_owned_artifact_paths=_declared_owned_artifact_paths(
+                arguments_dicts,
+                execution_index,
+                df,
+                declared_path_columns,
+            ),
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
