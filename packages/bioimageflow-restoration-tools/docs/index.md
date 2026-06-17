@@ -5,9 +5,9 @@ synthetic benchmark. It is designed for demonstrative workflows that show how
 image quality changes can be measured, not as a full production restoration
 suite.
 
-Core libraries are imageio, NumPy, scikit-image restoration when available,
-and a NumPy fallback for deterministic tests. SAIRPICO command-line
-restoration tools live in `bioimageflow-sairpico-tools`.
+Install-time libraries are imageio and NumPy.
+`RestoreImage` and `BenchmarkRestoration` use optional scikit-image restoration helpers when available and fall back to package-local NumPy baselines for deterministic tests.
+SAIRPICO command-line restoration tools live in `bioimageflow-sairpico-tools`.
 
 ## Tools
 

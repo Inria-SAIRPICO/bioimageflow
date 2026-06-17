@@ -7,10 +7,9 @@ or visual mosaics. It should stay lightweight and process
 orchestration-oriented; domain-heavy segmentation, restoration, spot, tracking,
 and large-format IO tools belong in their specialized packages.
 
-Core libraries for the public tools are BioImageFlow, pandas, imageio, NumPy,
-Pillow, and SimpleITK for the connected-components wrapper. The package is
-intended for users who need to assemble or inspect workflows without installing
-deep-learning dependencies.
+Install-time libraries for the public tools are BioImageFlow, pandas, imageio, NumPy, and Pillow.
+`ConnectedComponents` uses SimpleITK from its isolated `EnvironmentSpec` runtime rather than requiring SimpleITK in the main process.
+The package is intended for users who need to assemble or inspect workflows without installing deep-learning dependencies.
 
 ## Public Tools
 

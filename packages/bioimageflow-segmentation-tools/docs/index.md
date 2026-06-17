@@ -5,10 +5,8 @@ threshold/watershed workflows and optional deep-learning models. It is the
 package to install when a workflow needs label images from intensity,
 probability, or binary inputs.
 
-Core libraries are imageio, NumPy, scikit-image, tifffile, Cellpose 3, and
-StarDist/TensorFlow. Heavy model dependencies are isolated in EnvironmentSpec
-objects and imported inside `process_row`, so graph construction and schema
-tests remain lightweight.
+Install-time libraries are imageio, NumPy, scikit-image, and tifffile.
+Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in isolated `EnvironmentSpec` environments and are imported inside `process_row`, so graph construction and schema tests remain lightweight.
 
 ## Tools
 
@@ -45,7 +43,5 @@ Run package tests with:
 uv run pytest packages/bioimageflow-segmentation-tools/tests
 ```
 
-Fast tests execute only the classical tools on generated images and verify that
-heavy tools build workflow graphs without importing model dependencies.
-Optional public-data validation should be marked `public_data` and should
-define expected object-count or benchmark ranges.
+Fast tests execute only the classical tools on generated images and verify that heavy tools build workflow graphs without importing model dependencies.
+Optional model-runtime validation should be marked `complete`, `wetlands`, and `model_runtime`; public datasets additionally use `public_data` and define expected object-count or benchmark ranges.
