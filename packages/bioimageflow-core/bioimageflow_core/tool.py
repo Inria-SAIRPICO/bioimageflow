@@ -101,6 +101,8 @@ class ProcessingTool(BaseTool):
     environment: ClassVar[Any]
     Outputs: ClassVar[Optional[type[IOModel]]]
     resources: ClassVar[Any] = None
+    run_empty_batch: ClassVar[bool] = False
+    empty_batch_anchor_inputs: ClassVar[tuple[str, ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

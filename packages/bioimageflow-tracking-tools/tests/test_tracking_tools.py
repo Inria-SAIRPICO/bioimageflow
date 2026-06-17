@@ -8,6 +8,7 @@ import pytest
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_output_schema
 from bioimageflow_core import Arguments
+from bioimageflow_common_tools import Files
 from bioimageflow_tracking_tools import (
     FilterObjects,
     LabelsToObjects,
@@ -45,6 +46,17 @@ def test_labels_to_objects_extracts_centroids(tmp_path: Path) -> None:
     assert {row.frame for row in result} == {0, 1, 2}
 
 
+def test_labels_to_objects_all_background_returns_empty_object_table(
+    tmp_path: Path,
+) -> None:
+    label_path = tmp_path / "background.tif"
+    iio.imwrite(label_path, np.zeros((3, 16, 16), dtype=np.uint32), photometric="minisblack")
+
+    result = LabelsToObjects().process_row(Arguments(label_image=str(label_path)))
+
+    assert result == []
+
+
 def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
     label_path = _moving_labels(tmp_path / "labels.tif")
     objects = LabelsToObjects().process_row(Arguments(label_image=str(label_path)))
@@ -62,6 +74,48 @@ def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
     assert tracks["track_count"].iloc[0] == 2
     assert metrics["track_length"].tolist() == [3, 3]
     assert metrics["mean_track_length"].iloc[0] == 3.0
+
+
+def test_empty_tracking_tables_keep_declared_contracts() -> None:
+    objects = pd.DataFrame(
+        columns=pd.Index(["frame", "label", "y", "x", "area", "object_count"])
+    )
+
+    tracks = LinkObjects().transform(objects, Arguments(max_distance=5.0))
+    summary = TrackSummary().transform(tracks, Arguments())
+    quality = TrackQualityMetrics().transform(tracks, Arguments(min_track_length=2))
+    validation = TrackTableValidate().transform(tracks, Arguments())
+
+    assert tracks.empty
+    assert {"track_id", "track_count"} <= set(tracks.columns)
+    assert summary.empty
+    assert list(summary.columns) == [
+        "track_id",
+        "track_length",
+        "duration",
+        "start_frame",
+        "end_frame",
+        "displacement",
+        "mean_speed",
+        "track_count",
+    ]
+    assert quality.to_dict("records") == [
+        {
+            "track_count": 0,
+            "gap_count": 0,
+            "split_count": 0,
+            "merge_count": 0,
+            "short_track_fraction": 0.0,
+        }
+    ]
+    assert validation.to_dict("records") == [
+        {
+            "severity": "info",
+            "message": "valid",
+            "valid": True,
+            "error_count": 0,
+        }
+    ]
 
 
 def test_tracking_workflow_graph_runs(tmp_path: Path) -> None:
@@ -134,6 +188,86 @@ def test_tracks_to_labels_renders_track_ids_into_label_stack(tmp_path: Path) -> 
     assert labels[0, 6, 6] == 5
     assert labels[0, 21, 23] == 7
     assert result.track_count == 2
+
+
+def test_tracks_to_labels_zero_tracks_preserves_artifact_and_count(tmp_path: Path) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+
+    result = TracksToLabels().process_batch(
+        [
+            Arguments(
+                label_image=label_path,
+                output_label_image=tmp_path / "track_labels.tif",
+            ),
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.output_label_image)
+    assert labels.dtype == np.uint32
+    assert labels.shape == (3, 32, 32)
+    assert int(labels.max()) == 0
+    assert result.track_count == 0
+
+
+def test_tracking_workflow_all_background_writes_zero_track_artifact(
+    tmp_path: Path,
+) -> None:
+    label_path = tmp_path / "background.tif"
+    source = np.zeros((3, 16, 16), dtype=np.uint32)
+    iio.imwrite(label_path, source, photometric="minisblack")
+
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        objects = LabelsToObjects()(label_image=label_path, name="objects")
+        tracks = LinkObjects()(objects, name="links")
+        rendered = TracksToLabels()(
+            track_id=tracks["track_id"],
+            frame=tracks["frame"],
+            label=tracks["label"],
+            label_image=label_path,
+            name="render_tracks",
+        )
+        result = wf.compute(rendered)
+
+    assert len(result) == 1
+    assert int(result.iloc[0]["track_count"]) == 0
+    labels = iio.imread(result.iloc[0]["output_label_image"])
+    assert labels.dtype == np.uint32
+    assert labels.shape == source.shape
+    assert int(labels.max()) == 0
+
+
+def test_tracking_workflow_all_background_writes_one_artifact_per_source(
+    tmp_path: Path,
+) -> None:
+    image_dir = tmp_path / "labels"
+    image_dir.mkdir()
+    for index in range(2):
+        iio.imwrite(
+            image_dir / f"background_{index}.tif",
+            np.zeros((3, 16, 16), dtype=np.uint32),
+            photometric="minisblack",
+        )
+
+    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        files = Files()(path=image_dir, pattern="*.tif", name="files")
+        objects = LabelsToObjects()(label_image=files["path"], name="objects")
+        tracks = LinkObjects()(objects, name="links")
+        rendered = TracksToLabels()(
+            track_id=tracks["track_id"],
+            frame=tracks["frame"],
+            label=tracks["label"],
+            label_image=files["path"],
+            name="render_tracks",
+        )
+        result = wf.compute(rendered)
+
+    assert len(result) == 2
+    assert set(result["track_count"]) == {0}
+    for path in result["output_label_image"]:
+        labels = iio.imread(path)
+        assert labels.dtype == np.uint32
+        assert labels.shape == (3, 16, 16)
+        assert int(labels.max()) == 0
 
 
 def test_tracks_to_labels_output_schema_declares_uint32_labels() -> None:

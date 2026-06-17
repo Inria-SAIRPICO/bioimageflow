@@ -24,6 +24,7 @@ TracksToLabels().process_batch([
 
 The output label stack contains track IDs at the pixels occupied by the source labels.
 The output is written as `uint32`; background is `0`, and positive track IDs are preserved exactly.
+When the upstream track table is empty but `label_image` is provided, `TracksToLabels` still writes an all-background `uint32` label stack matching the source shape and reports `track_count=0`.
 
 ## Failure Modes
 

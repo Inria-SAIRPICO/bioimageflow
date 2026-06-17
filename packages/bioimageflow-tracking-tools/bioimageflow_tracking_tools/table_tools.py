@@ -125,6 +125,8 @@ class TracksToLabels(ProcessingTool):
     category = Category.TRACKING
     tags = ["tracking", "labels", "render"]
     environment = GENERAL_ENV
+    run_empty_batch = True
+    empty_batch_anchor_inputs = ("label_image",)
 
     class Inputs(IOModel):
         track_id: Annotated[int, GUIMeta("Track ID", connectable=Connectable.BY_DEFAULT)]
@@ -163,7 +165,22 @@ class TracksToLabels(ProcessingTool):
                 "label": _argument(row_arguments, "label", None),
             }
             for row_arguments in arguments_list
+            if any(hasattr(row_arguments, field) for field in ("track_id", "frame", "label"))
         ]
+        if not tracks:
+            outputs = []
+            for row_arguments in arguments_list:
+                source = iio.imread(row_arguments.label_image)
+                if source.ndim == 2:
+                    source = source[np.newaxis, ...]
+                output_image = np.zeros(source.shape, dtype=np.uint32)
+                output = Path(row_arguments.output_label_image)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                iio.imwrite(output, output_image, photometric="minisblack")
+                outputs.append([
+                    self.Outputs(output_label_image=output, track_count=0)
+                ])
+            return outputs
         source = iio.imread(arguments.label_image)
         if source.ndim == 2:
             source = source[np.newaxis, ...]
