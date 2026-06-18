@@ -355,22 +355,54 @@ def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) 
     assert result.spot_count == 1
 
 
-def test_render_spots_zero_rows_preserves_artifact_and_count(tmp_path: Path) -> None:
-    result = RenderSpots().process_batch(
+@pytest.mark.parametrize(
+    (
+        "tool",
+        "output_name",
+        "count_name",
+        "extra_arguments",
+    ),
+    [
+        pytest.param(
+            RenderSpots(),
+            "output_image",
+            "spot_count",
+            {"label_mode": True},
+            id="render-spots",
+        ),
+        pytest.param(
+            SpotsToLabels(),
+            "label_image",
+            "label_count",
+            {},
+            id="spots-to-labels",
+        ),
+    ],
+)
+def test_spot_label_renderers_zero_rows_preserve_artifact_and_count(
+    tmp_path: Path,
+    tool: RenderSpots | SpotsToLabels,
+    output_name: str,
+    count_name: str,
+    extra_arguments: dict[str, object],
+) -> None:
+    output_path = tmp_path / f"{output_name}.tif"
+    result = tool.process_batch(
         [
             Arguments(
                 image_shape="16,16",
                 radius=1,
-                label_mode=True,
-                output_image=tmp_path / "rendered.tif",
+                **extra_arguments,
+                **{output_name: output_path},
             )
         ]
     )[0][0]
 
-    labels = iio.imread(result.output_image)
+    labels = iio.imread(getattr(result, output_name))
     assert labels.dtype == np.uint32
+    assert labels.shape == (16, 16)
     assert int(labels.max()) == 0
-    assert result.spot_count == 0
+    assert getattr(result, count_name) == 0
 
 
 def test_render_spots_zero_rows_writes_one_artifact_per_anchor(tmp_path: Path) -> None:
@@ -394,23 +426,6 @@ def test_render_spots_zero_rows_writes_one_artifact_per_anchor(tmp_path: Path) -
         assert labels.shape == (16, 16)
         assert int(labels.max()) == 0
         assert result.spot_count == 0
-
-
-def test_spots_to_labels_zero_rows_preserves_artifact_and_count(tmp_path: Path) -> None:
-    result = SpotsToLabels().process_batch(
-        [
-            Arguments(
-                image_shape="16,16",
-                radius=1,
-                label_image=tmp_path / "labels.tif",
-            )
-        ]
-    )[0][0]
-
-    labels = iio.imread(result.label_image)
-    assert labels.dtype == np.uint32
-    assert int(labels.max()) == 0
-    assert result.label_count == 0
 
 
 def test_spots_to_labels_mask_mode_writes_one_artifact_per_mask(tmp_path: Path) -> None:
