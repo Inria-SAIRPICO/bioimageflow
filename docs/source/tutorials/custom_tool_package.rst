@@ -119,7 +119,7 @@ First-party BioImageFlow packages also participate in repository-wide package-to
 
 .. code-block:: bash
 
-   uv run pytest -m package_tools
+   uv run pytest -m "package_tools and not complete"
 
 Including Package Docs in BioImageFlow
 --------------------------------------

@@ -21,8 +21,11 @@ FAST_TEST_SELECTOR = (
     "and not wetlands and not public_data and not external_binary and not sairpico_binary "
     "and not model_runtime"
 )
+FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
 ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
+ACCEPTANCE_TEST_COMMAND = f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"'
 PACKAGE_TOOLS_TEST_SELECTOR = "package_tools and not complete"
+PACKAGE_TOOLS_TEST_COMMAND = f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"'
 
 
 def _pyproject() -> dict:
@@ -74,10 +77,10 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
         "uv sync --locked --all-packages --group dev",
         "uv run ruff check .",
         "uv run pyright",
-        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
+        FAST_TEST_COMMAND,
         "uv run pytest tests/unit/test_package_artifacts.py",
-        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
-        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
+        ACCEPTANCE_TEST_COMMAND,
+        PACKAGE_TOOLS_TEST_COMMAND,
         "uv build --all-packages --out-dir dist/packages",
         "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
     ]
@@ -94,7 +97,23 @@ def test_gitlab_ci_has_supported_python_test_matrix() -> None:
         job = ci_config[f"tests:python{version}"]
         assert job["stage"] == "test"
         assert job["image"] == f"ghcr.io/astral-sh/uv:python{version}-bookworm"
-        assert job["script"] == [f'uv run pytest -m "{FAST_TEST_SELECTOR}"']
+        assert job["script"] == [FAST_TEST_COMMAND]
+
+
+def test_gitlab_ci_fast_matrix_is_path_scoped_without_changing_other_test_tiers() -> None:
+    ci_config = _gitlab_ci()
+
+    fast_matrix_scripts = [
+        ci_config[f"tests:python{version}"]["script"][0]
+        for version in ["3.10", "3.11", "3.12"]
+    ]
+
+    assert fast_matrix_scripts == [FAST_TEST_COMMAND] * 3
+    assert ci_config["tests:acceptance"]["script"] == [ACCEPTANCE_TEST_COMMAND]
+    assert ci_config["tests:package-tools"]["script"] == [PACKAGE_TOOLS_TEST_COMMAND]
+    assert ci_config["package-artifacts"]["script"] == [
+        "uv run pytest tests/unit/test_package_artifacts.py"
+    ]
 
 
 def test_gitlab_ci_has_deterministic_acceptance_job() -> None:
@@ -102,7 +121,7 @@ def test_gitlab_ci_has_deterministic_acceptance_job() -> None:
     job = ci_config["tests:acceptance"]
 
     assert job["stage"] == "test"
-    assert job["script"] == [f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"']
+    assert job["script"] == [ACCEPTANCE_TEST_COMMAND]
 
 
 def test_gitlab_ci_has_deterministic_package_tools_job() -> None:
@@ -110,7 +129,7 @@ def test_gitlab_ci_has_deterministic_package_tools_job() -> None:
     job = ci_config["tests:package-tools"]
 
     assert job["stage"] == "test"
-    assert job["script"] == [f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"']
+    assert job["script"] == [PACKAGE_TOOLS_TEST_COMMAND]
 
 
 def test_gitlab_ci_complete_jobs_are_optional_and_separate() -> None:
@@ -138,33 +157,47 @@ def test_gitlab_ci_complete_jobs_are_optional_and_separate() -> None:
 
 
 def test_contributor_docs_match_ci_quality_commands() -> None:
-    docs_text = (ROOT / "docs/source/reference/testing.md").read_text()
-    readme_text = (ROOT / "README.md").read_text()
+    tier_docs = [
+        ROOT / "README.md",
+        ROOT / "docs/source/reference/testing.md",
+        ROOT / "docs/source/reference/tool_packages.md",
+        ROOT / "docs/source/tutorials/custom_tool_package.rst",
+    ]
 
     required_docs_commands = [
         "uv run ruff check .",
         "uv run pyright",
-        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
+        FAST_TEST_COMMAND,
         "uv run pytest tests/unit/test_package_artifacts.py",
-        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
-        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
+        ACCEPTANCE_TEST_COMMAND,
+        PACKAGE_TOOLS_TEST_COMMAND,
         "uv build --all-packages --out-dir dist/packages",
         "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
     ]
+
+    docs_text = (ROOT / "docs/source/reference/testing.md").read_text()
+    for command in [
+        FAST_TEST_COMMAND,
+        ACCEPTANCE_TEST_COMMAND,
+        PACKAGE_TOOLS_TEST_COMMAND,
+        "uv run pytest tests/unit/test_package_artifacts.py",
+    ]:
+        assert command in (ROOT / "README.md").read_text()
+
     for command in required_docs_commands:
         assert command in docs_text
 
-    for command in [
-        f'uv run pytest -m "{FAST_TEST_SELECTOR}"',
-        f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"',
-        f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"',
-        "uv run pytest tests/unit/test_package_artifacts.py",
-    ]:
-        assert command in readme_text
+    for doc_path in tier_docs:
+        doc_text = doc_path.read_text()
+        if "not slow and not acceptance" in doc_text:
+            assert FAST_TEST_COMMAND in doc_text
+            assert f'uv run pytest -m "{FAST_TEST_SELECTOR}"' not in doc_text
+        if "package_tools" in doc_text and "uv run pytest -m package_tools" in doc_text:
+            raise AssertionError(f"{doc_path.relative_to(ROOT)} uses stale package_tools selector")
 
     assert "Python 3.10, 3.11, and 3.12" in docs_text
     assert 'uv run pytest -m "complete and wetlands" --run-complete -rsx' in docs_text
-    assert "open build/html/index.html" in readme_text
+    assert "open build/html/index.html" in (ROOT / "README.md").read_text()
 
 
 def test_package_test_modules_are_marked_package_tools() -> None:
