@@ -72,6 +72,13 @@ Run package artifact checks with:
 uv run pytest tests/unit/test_package_artifacts.py
 ```
 
+To validate an existing package artifact directory instead of building inside the test fixture, point the test at the prebuilt output:
+
+```bash
+uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
+```
+
 Run deterministic package-tool coverage with:
 
 ```bash
@@ -169,6 +176,7 @@ uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
 

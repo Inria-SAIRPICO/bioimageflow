@@ -11,6 +11,7 @@ import yaml
 
 from tests.support.ci_selectors import (
     ACCEPTANCE_TEST_COMMAND,
+    CI_PACKAGE_ARTIFACTS_COMMAND,
     DOCS_BUILD_COMMAND,
     FAST_TEST_COMMAND,
     FAST_TEST_SELECTOR,
@@ -81,6 +82,7 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
         RUFF_COMMAND,
         PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
+        CI_PACKAGE_ARTIFACTS_COMMAND,
         PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
@@ -114,8 +116,15 @@ def test_gitlab_ci_fast_matrix_is_path_scoped_without_changing_other_test_tiers(
     assert fast_matrix_scripts == [FAST_TEST_COMMAND] * 3
     assert ci_config["tests:acceptance"]["script"] == [ACCEPTANCE_TEST_COMMAND]
     assert ci_config["tests:package-tools"]["script"] == [PACKAGE_TOOLS_TEST_COMMAND]
+    assert ci_config["build"]["stage"] == "build"
+    assert ci_config["build"]["script"] == [PACKAGE_BUILD_COMMAND]
+    assert ci_config["build"]["artifacts"]["paths"] == ["dist/packages/"]
+    assert ci_config["package-artifacts"]["stage"] == "package"
+    assert ci_config["package-artifacts"]["needs"] == [
+        {"job": "build", "artifacts": True}
+    ]
     assert ci_config["package-artifacts"]["script"] == [
-        "uv run pytest tests/unit/test_package_artifacts.py"
+        CI_PACKAGE_ARTIFACTS_COMMAND
     ]
 
 
@@ -172,6 +181,7 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
         PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
         PACKAGE_ARTIFACTS_COMMAND,
+        CI_PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
         PACKAGE_BUILD_COMMAND,

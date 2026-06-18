@@ -182,6 +182,7 @@ uv run pytest tests/integration/
 # Verify package build artifacts
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 
 # Build documentation with warnings treated as failures
 uv run python docs/generate_tool_package_docs.py
