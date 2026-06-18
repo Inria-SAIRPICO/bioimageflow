@@ -19,6 +19,7 @@ from tests.support.ci_selectors import (
     PACKAGE_ARTIFACTS_COMMAND,
     PACKAGE_BUILD_COMMAND,
     PACKAGE_TOOLS_TEST_COMMAND,
+    PYTHON_COMPAT_TEST_COMMAND,
     PYRIGHT_COMMAND,
     RUFF_COMMAND,
 )
@@ -61,7 +62,7 @@ def test_pytest_registers_non_fast_deterministic_markers() -> None:
         for marker in _pyproject()["tool"]["pytest"]["ini_options"]["markers"]
     }
 
-    assert {"acceptance", "packaging", "shared_memory", "slow"} <= marker_names
+    assert {"acceptance", "compat", "packaging", "shared_memory", "slow"} <= marker_names
 
 
 def test_pyright_is_an_implementation_gate_for_this_phase() -> None:
@@ -82,6 +83,7 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
         RUFF_COMMAND,
         PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
+        PYTHON_COMPAT_TEST_COMMAND,
         CI_PACKAGE_ARTIFACTS_COMMAND,
         PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
@@ -98,11 +100,16 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
 def test_gitlab_ci_has_supported_python_test_matrix() -> None:
     ci_config = _gitlab_ci()
 
-    for version in ["3.10", "3.11", "3.12"]:
+    for version in ["3.10", "3.12"]:
         job = ci_config[f"tests:python{version}"]
         assert job["stage"] == "test"
         assert job["image"] == f"ghcr.io/astral-sh/uv:python{version}-bookworm"
         assert job["script"] == [FAST_TEST_COMMAND]
+
+    py311 = ci_config["tests:python3.11"]
+    assert py311["stage"] == "test"
+    assert py311["image"] == "ghcr.io/astral-sh/uv:python3.11-bookworm"
+    assert py311["script"] == [PYTHON_COMPAT_TEST_COMMAND]
 
 
 def test_gitlab_ci_fast_matrix_is_path_scoped_without_changing_other_test_tiers() -> None:
@@ -110,10 +117,11 @@ def test_gitlab_ci_fast_matrix_is_path_scoped_without_changing_other_test_tiers(
 
     fast_matrix_scripts = [
         ci_config[f"tests:python{version}"]["script"][0]
-        for version in ["3.10", "3.11", "3.12"]
+        for version in ["3.10", "3.12"]
     ]
 
-    assert fast_matrix_scripts == [FAST_TEST_COMMAND] * 3
+    assert fast_matrix_scripts == [FAST_TEST_COMMAND] * 2
+    assert ci_config["tests:python3.11"]["script"] == [PYTHON_COMPAT_TEST_COMMAND]
     assert ci_config["tests:acceptance"]["script"] == [ACCEPTANCE_TEST_COMMAND]
     assert ci_config["tests:package-tools"]["script"] == [PACKAGE_TOOLS_TEST_COMMAND]
     assert ci_config["build"]["stage"] == "build"
@@ -168,6 +176,27 @@ def test_gitlab_ci_complete_jobs_are_optional_and_separate() -> None:
     assert public_data_job["variables"] == {"BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS": "1"}
 
 
+def test_gitlab_ci_has_scheduled_manual_python311_full_deterministic_validation() -> None:
+    ci_config = _gitlab_ci()
+    template = ci_config[".release-validation-job"]
+    job = ci_config["release-python3.11-deterministic"]
+
+    assert template["stage"] == "complete"
+    assert template["image"] == "ghcr.io/astral-sh/uv:python3.11-bookworm"
+    assert template["rules"] == [
+        {"if": '$CI_PIPELINE_SOURCE == "schedule"', "when": "on_success"},
+        {"when": "manual"},
+    ]
+    assert "allow_failure" not in template
+    assert job["extends"] == ".release-validation-job"
+    assert job["script"] == [
+        FAST_TEST_COMMAND,
+        ACCEPTANCE_TEST_COMMAND,
+        PACKAGE_TOOLS_TEST_COMMAND,
+        PACKAGE_ARTIFACTS_COMMAND,
+    ]
+
+
 def test_contributor_docs_match_ci_quality_commands() -> None:
     tier_docs = [
         ROOT / "README.md",
@@ -180,6 +209,7 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
         RUFF_COMMAND,
         PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
+        PYTHON_COMPAT_TEST_COMMAND,
         PACKAGE_ARTIFACTS_COMMAND,
         CI_PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
@@ -208,7 +238,9 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
         if "package_tools" in doc_text and "uv run pytest -m package_tools" in doc_text:
             raise AssertionError(f"{doc_path.relative_to(ROOT)} uses stale package_tools selector")
 
-    assert "Python 3.10, 3.11, and 3.12" in docs_text
+    assert "Python 3.10 and 3.12" in docs_text
+    assert "Python 3.11 runs the `compat` smoke selector" in docs_text
+    assert "release-required" in docs_text
     assert FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND in docs_text
     assert "restricted sandboxes" in docs_text
     assert "uv run python scripts/affected_tests.py --stdin" in docs_text
@@ -273,15 +305,83 @@ def _test_function_effective_pytestmark_names(module: ast.Module) -> dict[str, s
     }
 
 
+def _qualified_test_effective_pytestmark_names(module: ast.Module) -> dict[str, set[str]]:
+    module_markers = _module_pytestmark_names(module)
+    markers_by_name: dict[str, set[str]] = {}
+    for statement in module.body:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            markers_by_name[statement.name] = (
+                module_markers | _function_pytestmark_names(statement)
+            )
+        if isinstance(statement, ast.ClassDef):
+            class_markers = module_markers | _function_pytestmark_names(statement)
+            for child in statement.body:
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    markers_by_name[f"{statement.name}.{child.name}"] = (
+                        class_markers | _function_pytestmark_names(child)
+                    )
+    return markers_by_name
+
+
+def test_python_compat_smoke_marker_covers_required_surfaces() -> None:
+    expected_compat_tests = {
+        "tests/integration/test_basic_workflow.py": {
+            "TestBasicLinearWorkflow.test_linear_pipeline_returns_dataframe",
+        },
+        "tests/integration/test_caching.py": {
+            "TestCacheHit.test_second_run_uses_cache",
+            "TestCacheMiss.test_different_parameter_invalidates_cache",
+        },
+        "tests/integration/test_workflow_serialization.py": {
+            "TestWorkflowImport.test_load_and_reexecute",
+        },
+        "tests/integration/test_gui_validation_api.py": {
+            "TestFromDictToDict.test_round_trip_strict",
+            "TestIntrospectionHelpers.test_get_inputs_schema_has_serialized_key",
+        },
+        "tests/integration/test_type_compatibility.py": {
+            "TestCompatibility.test_both_empty_compatible",
+        },
+        "tests/integration/test_runtime_cache.py": {
+            "test_dataframe_tool_compute_publishes_record_and_uses_cache_hit",
+        },
+        "tests/unit/test_tool_loader.py": {
+            "TestTransitiveDeps.test_worker_loads_versioned_package_tool_with_relative_imports",
+        },
+    }
+
+    missing: dict[str, list[str]] = {}
+    for relative_path, test_names in expected_compat_tests.items():
+        module_path = ROOT / relative_path
+        module = ast.parse(module_path.read_text(), filename=str(module_path))
+        markers_by_name = _qualified_test_effective_pytestmark_names(module)
+        missing_in_file = [
+            test_name
+            for test_name in sorted(test_names)
+            if "compat" not in markers_by_name[test_name]
+        ]
+        if missing_in_file:
+            missing[relative_path] = missing_in_file
+
+    assert missing == {}
+
+
 def test_deterministic_non_fast_markers_are_not_external_resource_markers() -> None:
     namespace: dict[str, object] = {}
     exec((ROOT / "conftest.py").read_text(), namespace)
 
     external_marker_names = namespace["EXTERNAL_TEST_MARKER_NAMES"]
 
-    assert not {"acceptance", "package_tools", "packaging", "shared_memory", "slow"}.intersection(
-        external_marker_names
-    )
+    deterministic_markers = {
+        "acceptance",
+        "compat",
+        "package_tools",
+        "packaging",
+        "shared_memory",
+        "slow",
+    }
+
+    assert not deterministic_markers.intersection(external_marker_names)
 
 
 def test_shared_memory_marker_is_required_in_fast_ci_selector() -> None:

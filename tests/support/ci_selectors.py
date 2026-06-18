@@ -9,6 +9,8 @@ FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
 FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND = (
     f'uv run pytest tests -m "{FAST_TEST_SELECTOR} and not shared_memory"'
 )
+PYTHON_COMPAT_TEST_SELECTOR = f"compat and {FAST_TEST_SELECTOR}"
+PYTHON_COMPAT_TEST_COMMAND = f'uv run pytest tests -m "{PYTHON_COMPAT_TEST_SELECTOR}"'
 
 ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
 ACCEPTANCE_TEST_COMMAND = f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"'

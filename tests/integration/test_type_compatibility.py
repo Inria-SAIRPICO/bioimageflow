@@ -103,6 +103,7 @@ class TestLayoutEnum:
 
 class TestCompatibility:
 
+    @pytest.mark.compat
     def test_both_empty_compatible(self):
         """Two wildcard specs are always compatible."""
         producer = ImageSpec()

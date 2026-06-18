@@ -15,6 +15,7 @@ import sys
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from bioimageflow import ToolRegistry, Workflow
 
@@ -222,6 +223,7 @@ class TestWorkflowExport:
 
 class TestWorkflowImport:
 
+    @pytest.mark.compat
     def test_load_and_reexecute(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()
