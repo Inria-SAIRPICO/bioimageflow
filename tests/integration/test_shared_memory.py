@@ -12,11 +12,14 @@ Covers:
 
 from typing import Any
 
+import pytest
+
 from bioimageflow import Workflow
 
 from .conftest import FileLoader, StubSharedMemoryConsumer, StubSharedMemoryTool
 
 
+@pytest.mark.shared_memory
 class TestSharedMemoryWorkflow:
 
     def test_shm_producer_then_consumer(self, tmp_workspace):
@@ -37,6 +40,7 @@ class TestSharedMemoryWorkflow:
             assert all(df["num_labels"] == 1)
 
 
+@pytest.mark.shared_memory
 class TestSharedMemoryHelpers:
 
     def test_create_shared_output_and_open(self):
@@ -96,6 +100,7 @@ class TestLoadImageDispatch:
         with load_image(img_path, file_reader=reader) as data:
             assert data == "FAKE_IMAGE_cell_01.tif"
 
+    @pytest.mark.shared_memory
     def test_load_image_with_shared_array(self):
         """load_image with a SharedArray attaches to shared memory."""
         import numpy as np
@@ -131,6 +136,7 @@ class TestSaveImage:
         assert out_path.read_text() == "PIXEL_DATA"
 
 
+@pytest.mark.shared_memory
 class TestSharedMemoryCachePersistence:
 
     def test_cached_shm_output_restored_from_disk(self, tmp_workspace):

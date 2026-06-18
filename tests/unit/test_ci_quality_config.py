@@ -57,7 +57,7 @@ def test_pytest_registers_non_fast_deterministic_markers() -> None:
         for marker in _pyproject()["tool"]["pytest"]["ini_options"]["markers"]
     }
 
-    assert {"acceptance", "packaging", "slow"} <= marker_names
+    assert {"acceptance", "packaging", "shared_memory", "slow"} <= marker_names
 
 
 def test_pyright_is_an_implementation_gate_for_this_phase() -> None:
@@ -196,6 +196,11 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
             raise AssertionError(f"{doc_path.relative_to(ROOT)} uses stale package_tools selector")
 
     assert "Python 3.10, 3.11, and 3.12" in docs_text
+    assert (
+        f'uv run pytest tests -m "{FAST_TEST_SELECTOR} and not shared_memory"'
+        in docs_text
+    )
+    assert "restricted sandboxes" in docs_text
     assert 'uv run pytest -m "complete and wetlands" --run-complete -rsx' in docs_text
     assert "open build/html/index.html" in (ROOT / "README.md").read_text()
 
@@ -244,9 +249,17 @@ def test_deterministic_non_fast_markers_are_not_external_resource_markers() -> N
 
     external_marker_names = namespace["EXTERNAL_TEST_MARKER_NAMES"]
 
-    assert not {"acceptance", "package_tools", "packaging", "slow"}.intersection(
+    assert not {"acceptance", "package_tools", "packaging", "shared_memory", "slow"}.intersection(
         external_marker_names
     )
+
+
+def test_shared_memory_marker_is_required_in_fast_ci_selector() -> None:
+    ci_config = _gitlab_ci()
+
+    for version in ["3.10", "3.11", "3.12"]:
+        command = ci_config[f"tests:python{version}"]["script"][0]
+        assert "not shared_memory" not in command
 
 
 def test_package_artifact_tests_are_packaging_marked() -> None:

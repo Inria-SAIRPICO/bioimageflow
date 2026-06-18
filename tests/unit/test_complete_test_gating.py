@@ -20,6 +20,7 @@ DETERMINISTIC_NON_FAST_MARKERS = (
     "acceptance",
     "package_tools",
     "packaging",
+    "shared_memory",
     "slow",
 )
 
