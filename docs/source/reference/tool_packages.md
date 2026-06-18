@@ -21,7 +21,9 @@ The regular CI gate for package and documentation changes includes:
 ```bash
 uv run ruff check .
 uv run pyright
-uv run pytest -m "not slow"
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest -m "acceptance and not complete"
+uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
 uv run sphinx-build -W --keep-going docs/source docs/_build/html

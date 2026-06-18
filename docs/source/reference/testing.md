@@ -28,7 +28,7 @@ Fast tests should:
 CI runs the required fast matrix with deterministic non-fast and complete/resource tiers excluded:
 
 ```bash
-uv run pytest -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 ```
 
 The GitLab CI regular-test matrix runs that command on Python 3.10, 3.11, and 3.12.
@@ -145,7 +145,7 @@ Before broad finalization, run:
 ```bash
 uv run ruff check .
 uv run pyright
-uv run pytest -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
