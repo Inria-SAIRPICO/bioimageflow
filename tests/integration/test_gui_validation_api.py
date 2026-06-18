@@ -138,6 +138,7 @@ class TestCaptureErrors:
 
 
 class TestFromDictToDict:
+    @pytest.mark.compat
     def test_round_trip_strict(self, tmp_path: Path) -> None:
         wf = Workflow(engine="direct", storage_path=tmp_path)
         with wf:
@@ -517,6 +518,7 @@ class TestIntrospectionHelpers:
     def test_serialize_image_spec_none(self) -> None:
         assert serialize_image_spec(None) is None
 
+    @pytest.mark.compat
     def test_get_inputs_schema_has_serialized_key(self) -> None:
         schema = get_inputs_schema(StubSegmenter())
         entry = schema["input_image"]

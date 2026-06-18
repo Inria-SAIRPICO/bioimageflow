@@ -625,6 +625,7 @@ class TestTransitiveDeps:
         unload_versioned_package("dummy_tools", "1.0.0")
         assert expected not in sys.path
 
+    @pytest.mark.compat
     def test_worker_loads_versioned_package_tool_with_relative_imports(self, tool_store):
         from bioimageflow.env_manager import _find_tool_file
         from bioimageflow.tool_loader import load_versioned_package

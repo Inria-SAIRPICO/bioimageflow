@@ -22,6 +22,7 @@ from .conftest import FileLoader, StubSegmenter, StubStats
 class TestBasicLinearWorkflow:
     """Source → Segmenter → Stats: the simplest useful pipeline."""
 
+    @pytest.mark.compat
     def test_linear_pipeline_returns_dataframe(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()

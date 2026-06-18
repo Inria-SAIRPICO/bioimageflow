@@ -24,6 +24,7 @@ REGISTERED_TEST_MARKERS = [
     "packaging: build artifact, wheel, sdist, or package metadata artifact checks",
     "package_tools: tests owned by optional tool packages",
     "shared_memory: deterministic tests requiring POSIX/shared-memory platform support",
+    "compat: deterministic Python-version compatibility smoke coverage",
 ]
 
 EXTERNAL_TEST_MARKER_NAMES = frozenset(
