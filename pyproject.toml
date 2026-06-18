@@ -65,6 +65,7 @@ markers = [
     "sairpico_binary: tests that require real SAIRPICO command-line tools",
     "model_runtime: tests that require optional model runtimes or model downloads",
     "package_tools: tests owned by optional tool packages",
+    "shared_memory: deterministic tests requiring POSIX/shared-memory platform support",
 ]
 
 [tool.ruff]

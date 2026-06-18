@@ -33,6 +33,15 @@ uv run pytest tests -m "not slow and not acceptance and not packaging and not pa
 
 The GitLab CI regular-test matrix runs that command on Python 3.10, 3.11, and 3.12.
 
+For restricted sandboxes that cannot create POSIX shared-memory segments, agents may run a partial local fast loop with shared-memory tests excluded:
+
+```bash
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not shared_memory"
+```
+
+That command is only for local sandbox triage.
+It does not replace the required CI fast matrix, where `shared_memory` remains included.
+
 Package-local regular tests are a separate deterministic required tier and can be run with:
 
 ```bash
@@ -48,6 +57,7 @@ Use these markers when coverage is valuable but too broad or artifact-oriented f
 - `acceptance`: high-level workflow or example coverage that executes deterministic scenarios;
 - `packaging`: build artifact, wheel, sdist, or package metadata artifact checks;
 - `package_tools`: package-local deterministic coverage that is required in a separate CI job;
+- `shared_memory`: deterministic tests requiring POSIX/shared-memory platform support;
 - `slow`: deterministic or external tests excluded from the fast development loop.
 
 Run deterministic acceptance coverage with:

@@ -1753,6 +1753,7 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(t
     assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_processing_tool_publishes_durable_asset_and_rehydrates_hits(
     tmp_path: Path,
 ) -> None:
@@ -1840,6 +1841,7 @@ def test_column_bound_shared_array_processing_tool_publishes_durable_asset_and_r
     assert record_dir.exists()
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_processing_tool_upstream_change_reports_pending_upstream(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -1860,6 +1862,7 @@ def test_column_bound_shared_array_processing_tool_upstream_change_reports_pendi
     assert plan[node.name].final_result_key is None
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_plan_and_invalidate_do_not_rehydrate_shared_memory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1890,6 +1893,7 @@ def test_column_bound_shared_array_plan_and_invalidate_do_not_rehydrate_shared_m
     assert _invalidated_node_names(cleared) == {"ColumnBoundSharedMemoryWriter_1"}
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_per_row(tmp_path: Path) -> None:
     from bioimageflow_core.shm import open_shared_array
 
@@ -1935,6 +1939,7 @@ def test_column_bound_shared_array_processing_tool_publishes_one_shared_asset_pe
         assert int(array.sum()) == 16
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_current(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -1961,6 +1966,7 @@ def test_column_bound_shared_array_processing_tool_invalidate_removes_corrupt_cu
     assert record_dir.exists()
 
 
+@pytest.mark.shared_memory
 def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_corruption(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -1983,6 +1989,7 @@ def test_column_bound_shared_array_processing_tool_missing_asset_raises_cache_co
             wf.compute(ColumnBoundSharedMemoryWriter()(label=table["label"]))
 
 
+@pytest.mark.shared_memory
 def test_source_shared_array_processing_tool_publishes_durable_asset_and_rehydrates_hits(tmp_path: Path) -> None:
     from bioimageflow_core.shm import open_shared_array
 
@@ -2066,6 +2073,7 @@ def test_source_shared_array_processing_tool_publishes_durable_asset_and_rehydra
     assert record_dir.exists()
 
 
+@pytest.mark.shared_memory
 def test_source_shared_array_processing_tool_missing_asset_raises_cache_corruption(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -2086,6 +2094,7 @@ def test_source_shared_array_processing_tool_missing_asset_raises_cache_corrupti
             wf.compute(SourceSharedMemoryWriter()())
 
 
+@pytest.mark.shared_memory
 def test_source_shared_array_processing_tool_parameter_change_reports_prior_selection_miss(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
 
@@ -2138,6 +2147,7 @@ def test_source_path_or_shared_array_output_rejects_path_assets_under_shared_nam
             wf.compute(node)
 
 
+@pytest.mark.shared_memory
 def test_source_path_or_shared_array_output_handles_shared_array_values(tmp_path: Path) -> None:
     from bioimageflow_core.shm import open_shared_array
 
