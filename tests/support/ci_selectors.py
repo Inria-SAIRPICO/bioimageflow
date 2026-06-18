@@ -17,6 +17,10 @@ PACKAGE_TOOLS_TEST_SELECTOR = "package_tools and not complete"
 PACKAGE_TOOLS_TEST_COMMAND = f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"'
 
 PACKAGE_ARTIFACTS_COMMAND = "uv run pytest tests/unit/test_package_artifacts.py"
+CI_PACKAGE_ARTIFACTS_COMMAND = (
+    "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages "
+    "uv run pytest tests/unit/test_package_artifacts.py"
+)
 PACKAGE_METADATA_CONTRACTS_COMMAND = (
     "uv run pytest tests/unit/test_package_artifacts.py "
     "tests/unit/test_package_docs_dependency_posture.py "
