@@ -150,6 +150,15 @@ Use the smallest data that proves the behavior.
 ## Agent Workflow
 
 Agents should run relevant regular tests while developing.
+For a quick advisory mapping from changed paths to likely local tests, run:
+
+```bash
+git diff --name-only main...HEAD | uv run python scripts/affected_tests.py --stdin
+```
+
+The affected-test helper fails open to broader tests for unknown paths and does not replace CI gates.
+Use it to choose an initial local check, then run the required gates for the change before merge.
+
 Before broad finalization, run:
 
 ```bash

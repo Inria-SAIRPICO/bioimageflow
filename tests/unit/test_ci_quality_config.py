@@ -9,6 +9,19 @@ import sys
 
 import yaml
 
+from tests.support.ci_selectors import (
+    ACCEPTANCE_TEST_COMMAND,
+    DOCS_BUILD_COMMAND,
+    FAST_TEST_COMMAND,
+    FAST_TEST_SELECTOR,
+    FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND,
+    PACKAGE_ARTIFACTS_COMMAND,
+    PACKAGE_BUILD_COMMAND,
+    PACKAGE_TOOLS_TEST_COMMAND,
+    PYRIGHT_COMMAND,
+    RUFF_COMMAND,
+)
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - Python < 3.11
@@ -16,16 +29,6 @@ else:  # pragma: no cover - Python < 3.11
 
 
 ROOT = Path(__file__).parents[2]
-FAST_TEST_SELECTOR = (
-    "not slow and not acceptance and not packaging and not package_tools and not complete "
-    "and not wetlands and not public_data and not external_binary and not sairpico_binary "
-    "and not model_runtime"
-)
-FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
-ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
-ACCEPTANCE_TEST_COMMAND = f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"'
-PACKAGE_TOOLS_TEST_SELECTOR = "package_tools and not complete"
-PACKAGE_TOOLS_TEST_COMMAND = f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"'
 
 
 def _pyproject() -> dict:
@@ -75,14 +78,14 @@ def test_gitlab_ci_runs_documented_deterministic_quality_gates() -> None:
 
     expected_commands = [
         "uv sync --locked --all-packages --group dev",
-        "uv run ruff check .",
-        "uv run pyright",
+        RUFF_COMMAND,
+        PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
-        "uv run pytest tests/unit/test_package_artifacts.py",
+        PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
-        "uv build --all-packages --out-dir dist/packages",
-        "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
+        PACKAGE_BUILD_COMMAND,
+        DOCS_BUILD_COMMAND,
     ]
 
     for command in expected_commands:
@@ -165,14 +168,14 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
     ]
 
     required_docs_commands = [
-        "uv run ruff check .",
-        "uv run pyright",
+        RUFF_COMMAND,
+        PYRIGHT_COMMAND,
         FAST_TEST_COMMAND,
-        "uv run pytest tests/unit/test_package_artifacts.py",
+        PACKAGE_ARTIFACTS_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
-        "uv build --all-packages --out-dir dist/packages",
-        "uv run sphinx-build -W --keep-going docs/source docs/_build/html",
+        PACKAGE_BUILD_COMMAND,
+        DOCS_BUILD_COMMAND,
     ]
 
     docs_text = (ROOT / "docs/source/reference/testing.md").read_text()
@@ -180,7 +183,7 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
         FAST_TEST_COMMAND,
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
-        "uv run pytest tests/unit/test_package_artifacts.py",
+        PACKAGE_ARTIFACTS_COMMAND,
     ]:
         assert command in (ROOT / "README.md").read_text()
 
@@ -196,11 +199,10 @@ def test_contributor_docs_match_ci_quality_commands() -> None:
             raise AssertionError(f"{doc_path.relative_to(ROOT)} uses stale package_tools selector")
 
     assert "Python 3.10, 3.11, and 3.12" in docs_text
-    assert (
-        f'uv run pytest tests -m "{FAST_TEST_SELECTOR} and not shared_memory"'
-        in docs_text
-    )
+    assert FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND in docs_text
     assert "restricted sandboxes" in docs_text
+    assert "uv run python scripts/affected_tests.py --stdin" in docs_text
+    assert "does not replace CI gates" in docs_text
     assert 'uv run pytest -m "complete and wetlands" --run-complete -rsx' in docs_text
     assert "open build/html/index.html" in (ROOT / "README.md").read_text()
 

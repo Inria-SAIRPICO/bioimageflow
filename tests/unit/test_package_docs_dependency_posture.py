@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 
+from tests.support.ci_selectors import FAST_TEST_COMMAND
+
 
 ROOT = Path(__file__).parents[2]
 
@@ -99,7 +101,7 @@ def test_tool_package_reference_documents_release_and_ci_contract() -> None:
         "`bioimageflow-core` declares Python `>=3.9`",
         "uv run ruff check .",
         "uv run pyright",
-        'uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"',
+        FAST_TEST_COMMAND,
         "uv build --all-packages --out-dir dist/packages",
         "complete-test jobs are manual or scheduled",
     ]:
