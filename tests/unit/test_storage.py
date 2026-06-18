@@ -283,48 +283,54 @@ def test_record_manifest_validation_rejects_invalid_scalar_outputs(
         manifest.validate(record_dir)
 
 
-def test_record_manifest_validation_rejects_symlink_asset_escape(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("escape_case", "expected_match"),
+    [
+        pytest.param("asset", "escapes", id="owned-asset"),
+        pytest.param("dataframe", "dataframe", id="dataframe"),
+    ],
+)
+def test_record_manifest_validation_rejects_symlink_escape(
+    tmp_path: Path,
+    escape_case: str,
+    expected_match: str,
+) -> None:
     result_key = make_result_key({"node": "segment"})
     dataframe_digest = _file_digest(b"parquet")
-    output = {"path": "assets/mask.tif", "kind": "owned_asset", "size": 4, "digest": _file_digest(b"mask")}
-    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    outputs: list[dict[str, object]] = []
+    if escape_case == "asset":
+        outputs = [
+            {
+                "path": "assets/mask.tif",
+                "kind": "owned_asset",
+                "size": 4,
+                "digest": _file_digest(b"mask"),
+            }
+        ]
+
+    record_id = _record_id_for(result_key, dataframe_digest, outputs)
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
-    outside = tmp_path / "outside.tif"
-    outside.write_bytes(b"mask")
-    asset = record_dir / "assets" / "mask.tif"
-    asset.parent.mkdir()
-    asset.symlink_to(outside)
+    if escape_case == "asset":
+        (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+        outside = tmp_path / "outside.tif"
+        outside.write_bytes(b"mask")
+        asset = record_dir / "assets" / "mask.tif"
+        asset.parent.mkdir()
+        asset.symlink_to(outside)
+    else:
+        outside = tmp_path / "outside.parquet"
+        outside.write_bytes(b"parquet")
+        (record_dir / "dataframe.parquet").symlink_to(outside)
 
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
         dataframe_digest=dataframe_digest,
-        outputs=[output],
+        outputs=outputs,
     )
 
-    with pytest.raises(CacheCorruptionError, match="escapes"):
-        manifest.validate(record_dir)
-
-
-def test_record_manifest_validation_rejects_dataframe_symlink_escape(tmp_path: Path) -> None:
-    result_key = make_result_key({"node": "segment"})
-    dataframe_digest = _file_digest(b"parquet")
-    record_id = _record_id_for(result_key, dataframe_digest, [])
-    record_dir = tmp_path / "records" / record_id
-    record_dir.mkdir(parents=True)
-    outside = tmp_path / "outside.parquet"
-    outside.write_bytes(b"parquet")
-    (record_dir / "dataframe.parquet").symlink_to(outside)
-    manifest = RecordManifest(
-        result_key=result_key,
-        record_id=record_id,
-        dataframe_digest=dataframe_digest,
-        outputs=[],
-    )
-
-    with pytest.raises(CacheCorruptionError, match="dataframe"):
+    with pytest.raises(CacheCorruptionError, match=expected_match):
         manifest.validate(record_dir)
 
 
@@ -471,23 +477,19 @@ def test_select_current_record_rejects_symlinked_record_directory(tmp_path: Path
         )
 
 
-def test_load_current_raises_on_corrupt_pointer(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "pointer_payload",
+    [
+        pytest.param("{not json", id="corrupt-json"),
+        pytest.param("[]", id="non-mapping"),
+    ],
+)
+def test_load_current_raises_on_invalid_pointer_payload(tmp_path: Path, pointer_payload: str) -> None:
     storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     result_dir = storage.result_dir(result_key)
     result_dir.mkdir(parents=True)
-    (result_dir / "current.json").write_text("{not json")
-
-    with pytest.raises(CacheCorruptionError):
-        storage.load_current(result_key)
-
-
-def test_load_current_raises_on_non_mapping_pointer(tmp_path: Path) -> None:
-    storage = Storage(tmp_path)
-    result_key = make_result_key({"node": "segment"})
-    result_dir = storage.result_dir(result_key)
-    result_dir.mkdir(parents=True)
-    (result_dir / "current.json").write_text("[]")
+    (result_dir / "current.json").write_text(pointer_payload)
 
     with pytest.raises(CacheCorruptionError):
         storage.load_current(result_key)
