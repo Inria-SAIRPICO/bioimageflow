@@ -142,9 +142,11 @@ def test_sdists_exclude_generated_artifacts_and_keep_tool_docs_tests(
     assert offenders == {}
 
 
-def test_common_tools_data_file_is_in_wheel_and_sdist(built_artifacts: Path) -> None:
-    distribution_name = "bioimageflow-common-tools"
-    data_path = "bioimageflow_common_tools/data/blobs.txt"
+def test_spot_tools_atlas_data_file_is_in_wheel_and_sdist(
+    built_artifacts: Path,
+) -> None:
+    distribution_name = "bioimageflow-spot-tools"
+    data_path = "bioimageflow_spot_tools/data/blobs.txt"
 
     assert data_path in _wheel_members(_wheel_path(built_artifacts, distribution_name))
     assert data_path in _sdist_members(_sdist_path(built_artifacts, distribution_name))

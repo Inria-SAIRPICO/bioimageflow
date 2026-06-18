@@ -106,7 +106,7 @@ class TestTemplateResolution:
         load = FileLoader()
         tool = StubCustomTemplate()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             output = tool(input_image=raw["path"])
             df = wf.compute(output)
@@ -121,7 +121,7 @@ class TestTemplateResolution:
         load = FileLoader()
         tool = StubCustomTemplate()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             output = tool(input_image=raw["path"])
             df = wf.compute(output)
@@ -134,7 +134,7 @@ class TestTemplateResolution:
         load = FileLoader()
         tool = StubDefaultTemplate()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             output = tool(input_image=raw["path"], name="my_step")
             df = wf.compute(output)
@@ -147,7 +147,7 @@ class TestTemplateResolution:
         load = FileLoader()
         tool = StubMultiInput()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             # Cross-compare first and second image (simplified: same source)
             output = tool(image_a=raw["path"], image_b=raw["path"])
@@ -161,7 +161,7 @@ class TestTemplateResolution:
         load = FileLoader()
         tool = StubOptionalPathTemplate()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             output = tool(input_image=raw["path"], psf_image=None)
             df = wf.compute(output)
@@ -178,7 +178,7 @@ class TestTilerOutputNaming:
         load = FileLoader()
         tile = StubTiler()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=3)
             df = wf.compute(tiles)
@@ -219,7 +219,7 @@ class TestColumnTemplate:
         regex = ColumnRegex()
         tool = StubColumnTemplate()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             raw = load(path=str(ws / "data"))
             enriched = regex(
                 raw,
@@ -260,7 +260,7 @@ class TestTimestampTemplate:
         load = FileLoader()
         tool = StubTimestampTemplate()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             output = tool(input_image=raw["path"])
             df = wf.compute(output)
@@ -298,6 +298,6 @@ class TestTemplateErrors:
         tool = BadTemplate()
 
         with pytest.raises(Exception, match="nonexistent_field|template|undefined"):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 tool(input_image=raw["path"])

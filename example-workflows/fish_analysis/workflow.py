@@ -64,7 +64,7 @@ def build_fish_workflow(
     storage_path: str = "./fish_results",
     data_dir: str = "./data",
     debug: bool = False,
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple:
     """Build and return the FISH analysis workflow and its terminal node.
@@ -164,7 +164,7 @@ def build_fish_workflow(
 
 def build_synthetic_fish_workflow(
     storage_path: str = "./fish_synthetic_results",
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build a lightweight FISH-like workflow for tests and examples.

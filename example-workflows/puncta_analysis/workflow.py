@@ -28,7 +28,7 @@ def _write_inputs(data_dir: Path) -> tuple[Path, Path]:
 
 def build_workflow(
     storage_path: str = "./puncta_analysis_results",
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build the puncta analysis workflow."""

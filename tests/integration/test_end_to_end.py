@@ -42,7 +42,7 @@ class TestBioImageAnalysisPipeline:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             raw = load(path=str(ws / "data"))
             with_meta = regex(
                 raw,
@@ -76,7 +76,7 @@ class TestMultiModalPipeline:
 
         register = StubRegistration()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri")
             ct = load(path=str(ws / "ct"), name="ct")
             patients = csv_load(path=str(ws / "patients.csv"), name="patients")
@@ -133,7 +133,7 @@ class TestTilingPipeline:
         segment = StubSegmenter()
         collect = Collect()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=2)
             masks = segment(input_image=tiles["tile"])
@@ -163,7 +163,7 @@ class TestComparativeAnalysis:
         stardist = StardistSegmenter()
         _join = JoinOnColumn()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             cp_masks = cellpose(input_image=raw["path"], name="cellpose")
             sd_masks = stardist(input_image=raw["path"], name="stardist")
@@ -196,7 +196,7 @@ class TestCachedRerunPipeline:
 
         # First full run
         dfs: list[Any] = []
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -205,6 +205,7 @@ class TestCachedRerunPipeline:
         # Second run: same segment parameters, should cache-hit on segment
         events: list[Any] = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -230,7 +231,7 @@ class TestVerticalScaling:
         concat = Concat()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri")
             ct = load(path=str(ws / "ct"), name="ct")
             all_images = concat(mri, ct)

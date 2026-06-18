@@ -169,7 +169,7 @@ class Workflow:
     def __init__(
         self,
         storage_path: str | Path = "./bif_data",
-        engine: str = "direct",
+        engine: str = "wetlands",
         execution: str = "parallel",
         on_progress: Callable[[ProgressEvent], None] | None = None,
         wetlands_config: dict[str, Any] | None = None,
@@ -1190,7 +1190,7 @@ class Workflow:
 
         wf_kwargs: dict[str, Any] = dict(
             storage_path=storage_path,
-            engine=engine if engine is not None else config.get("engine", "direct"),
+            engine=engine if engine is not None else config.get("engine", "wetlands"),
             execution=execution if execution is not None else config.get("execution", "parallel"),
         )
         if on_progress is not None:

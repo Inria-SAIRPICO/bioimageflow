@@ -67,6 +67,7 @@ class TestSequentialEngineIgnoresResources:
         batch = StubBatchProcessor()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", execution="sequential"
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))

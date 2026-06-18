@@ -34,7 +34,7 @@ class TestInnerJoin:
         segment = StubSegmenter()
         join = InnerJoin()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             # Join raw (path, filename) with masks (mask, cell_count) on index
@@ -55,7 +55,7 @@ class TestCrossJoin:
         load = FileLoader()
         cross = CrossJoin()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri_loader")
             ct = load(path=str(ws / "ct"), name="ct_loader")
             paired = cross(mri, ct, suffixes=("_mri", "_ct"))
@@ -72,7 +72,7 @@ class TestCrossJoin:
         cross = CrossJoin()
         register = StubRegistration()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri_loader")
             ct = load(path=str(ws / "ct"), name="ct_loader")
             paired = cross(mri, ct, suffixes=("_mri", "_ct"))
@@ -94,7 +94,7 @@ class TestJoinOnColumn:
         regex = ColumnRegex()
         join = JoinOnColumn()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri_loader")
             mri_meta = regex(
                 mri,
@@ -121,7 +121,7 @@ class TestJoinOnColumn:
         join = JoinOnColumn()
         register = StubRegistration()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri_loader")
             ct = load(path=str(ws / "ct"), name="ct_loader")
 
@@ -158,7 +158,7 @@ class TestConcat:
         load = FileLoader()
         concat = Concat()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             mri = load(path=str(ws / "mri"), name="mri_loader")
             ct = load(path=str(ws / "ct"), name="ct_loader")
             combined = concat(mri, ct)
@@ -178,7 +178,7 @@ class TestCollect:
         measure = StubStats()
         collect = Collect()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             stats = measure(image=raw["path"], mask=masks["mask"])
@@ -198,7 +198,7 @@ class TestMergeSchemaPropagation:
     def test_inner_join_schema(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow():
+        with Workflow(engine="direct"):
             files = Files()(path=str(tmp_workspace / "data"))
             seg = StubSegmenter()(input_image=files["path"])
             joined = InnerJoin()(files, seg)
@@ -212,7 +212,7 @@ class TestMergeSchemaPropagation:
         """The exact pattern from example-workflows/parameter_space_exploration."""
         from bioimageflow_common_tools import Files, Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             files = Files()(path="/tmp")
             sens = Generate()(column_name="sensitivity", values=[1, 2])
             size = Generate()(column_name="size", values=[10, 20])
@@ -224,7 +224,7 @@ class TestMergeSchemaPropagation:
     def test_join_on_column_schema(self):
         from bioimageflow_common_tools import Files
 
-        with Workflow():
+        with Workflow(engine="direct"):
             mri = Files()(path="/tmp/mri", name="mri")
             ct = Files()(path="/tmp/ct", name="ct")
             joined = JoinOnColumn()(
@@ -237,7 +237,7 @@ class TestMergeSchemaPropagation:
     def test_concat_schema(self):
         from bioimageflow_common_tools import Files
 
-        with Workflow():
+        with Workflow(engine="direct"):
             mri = Files()(path="/tmp/mri", name="mri")
             ct = Files()(path="/tmp/ct", name="ct")
             stacked = Concat()(mri, ct)
@@ -265,7 +265,7 @@ class TestMergeSchemaPropagation:
     def test_collect_schema_renames_duplicates(self):
         from bioimageflow_common_tools import Files
 
-        with Workflow():
+        with Workflow(engine="direct"):
             a = Files()(path="/tmp/a", name="a")
             b = Files()(path="/tmp/b", name="b")
             collected = Collect()(a, b)
@@ -291,7 +291,7 @@ class TestMergeSchemaPropagation:
             def resolve_outputs(cls, inputs=None):
                 return None  # always unresolvable
 
-        with Workflow():
+        with Workflow(engine="direct"):
             files = Files()(path="/tmp")
             unk = Unknown()()
             joined = InnerJoin()(files, unk)
@@ -301,7 +301,7 @@ class TestMergeSchemaPropagation:
         """node['col'] validates against the merged schema."""
         from bioimageflow_common_tools import Files, Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             files = Files()(path="/tmp")
             sens = Generate()(column_name="sensitivity", values=[1, 2])
             grid = CrossJoin()(files, sens)

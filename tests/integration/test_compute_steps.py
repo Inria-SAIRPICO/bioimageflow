@@ -31,7 +31,7 @@ class TestNodeStepObject:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -48,7 +48,7 @@ class TestNodeStepObject:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -65,7 +65,7 @@ class TestNodeStepObject:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -83,7 +83,7 @@ class TestNodeStepObject:
         """Calling execute() twice returns the same DataFrame."""
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
 
             for step in wf.compute_steps(raw):
@@ -100,7 +100,7 @@ class TestAutoExecute:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -123,7 +123,7 @@ class TestPrepare:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -136,7 +136,7 @@ class TestPrepare:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -149,7 +149,7 @@ class TestPrepare:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -173,7 +173,7 @@ class TestComputeStepsOrder:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -192,7 +192,7 @@ class TestComputeStepsOrder:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -214,7 +214,7 @@ class TestComputeStepsPartialIteration:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -224,7 +224,7 @@ class TestComputeStepsPartialIteration:
                 break  # Only consume the first step
 
         # Verify we can still run a full compute afterwards.
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             df = wf.compute(masks)
@@ -235,7 +235,7 @@ class TestComputeStepsPartialIteration:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -251,13 +251,13 @@ class TestComputeStepsCaching:
         segment = StubSegmenter()
 
         # First run — populate cache
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             wf.compute(masks)
 
         # Second run — should still yield both nodes
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 
@@ -279,7 +279,7 @@ class TestComputeStepsTerminals:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             _masks = segment(input_image=raw["path"])
 
@@ -297,7 +297,7 @@ class TestComputeStepsTerminals:
         seg1 = StubSegmenter()
         seg2 = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = seg1(input_image=raw["path"], diameter=30.0, name="seg_a")
             masks_b = seg2(input_image=raw["path"], diameter=50.0, name="seg_b")
@@ -323,6 +323,7 @@ class TestComputeStepsProgress:
         segment = StubSegmenter()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -343,7 +344,7 @@ class TestComputeStepsDevMode:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 

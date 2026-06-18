@@ -21,7 +21,7 @@ class TestFanOut:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_30 = segment(input_image=raw["path"], diameter=30.0, name="seg_30")
             masks_50 = segment(input_image=raw["path"], diameter=50.0, name="seg_50")
@@ -36,7 +36,7 @@ class TestFanOut:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_small = segment(input_image=raw["path"], diameter=10.0, name="small")
             masks_large = segment(input_image=raw["path"], diameter=100.0, name="large")
@@ -60,7 +60,7 @@ class TestDeadBranchPruning:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = segment(input_image=raw["path"], diameter=30.0, name="branch_a")
             _masks_b = segment(input_image=raw["path"], diameter=50.0, name="branch_b")

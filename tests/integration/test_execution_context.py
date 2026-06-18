@@ -109,7 +109,7 @@ def test_process_row_receives_shared_work_dir_and_per_row_dir(tmp_workspace):
     load = FileLoader()
     tool = RowContextTool()
 
-    with Workflow(storage_path=tmp_workspace / "results") as wf:
+    with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
         raw = load(path=str(tmp_workspace / "data"))
         output = tool(input_path=raw["path"], name="row_context")
         df = wf.compute(output)
@@ -144,7 +144,7 @@ def test_process_batch_receives_shared_work_dir_and_batch_dir(tmp_workspace):
     load = FileLoader()
     tool = BatchContextTool()
 
-    with Workflow(storage_path=tmp_workspace / "results") as wf:
+    with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
         raw = load(path=str(tmp_workspace / "data"))
         output = tool(input_path=raw["path"], name="batch_context")
         df = wf.compute(output)

@@ -39,13 +39,13 @@ class TestCacheHit:
         segment = StubSegmenter()
 
         results: list[Any] = []
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             results.append(wf.compute(masks))
 
         # Re-run with identical configuration
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             results.append(wf.compute(masks))
@@ -63,13 +63,14 @@ class TestCacheHit:
         segment = StubSegmenter()
 
         # First run
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             wf.compute(masks)
 
         # Second run with progress tracking
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
@@ -86,7 +87,7 @@ class TestCacheMiss:
         segment = StubSegmenter()
 
         # First run
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             df1 = wf.compute(masks)
@@ -95,6 +96,7 @@ class TestCacheMiss:
         # Second run with different parameter — should NOT use cache
         events: list[Any] = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -117,7 +119,7 @@ class TestCacheMiss:
         # Add a file to the data directory
         (tmp_workspace / "data" / "cell_04.tif").write_text("NEW_IMAGE")
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             df = wf.compute(masks)
@@ -132,7 +134,7 @@ class TestDevMode:
         segment = StubSegmenter()
 
         # First run with dev_mode
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             df1 = wf.compute(masks, dev_mode=True)
@@ -146,6 +148,7 @@ class TestDevMode:
         # First run
         events1: list[Any] = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events1.append(e),
         ) as wf:
@@ -156,6 +159,7 @@ class TestDevMode:
         # Second identical run — should cache hit
         events2: list[Any] = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events2.append(e),
         ) as wf:
@@ -196,6 +200,7 @@ class TestDevMode:
         events3: list[Any] = []
         modified_seg = ModifiedSegmenter()
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events3.append(e),
         ) as wf:
@@ -235,7 +240,7 @@ class TestEnvironmentDependencyChange:
         load = FileLoader()
 
         # First run with numpy==1.24
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             out = ToolV1()(input_image=raw["path"])
             wf.compute(out)
@@ -261,6 +266,7 @@ class TestEnvironmentDependencyChange:
 
         events: list[Any] = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -332,9 +338,9 @@ class TestCacheRetention:
     def test_max_executions_is_removed_from_workflow_api(self):
         """Published-record pruning is no longer a Workflow constructor policy."""
         with pytest.raises(TypeError, match="max_executions"):
-            Workflow(max_executions=3)
+            Workflow(engine="direct", max_executions=3)
 
     def test_max_age_is_removed_from_workflow_api(self):
         """Age-based cache cleanup belongs to an explicit maintenance API."""
         with pytest.raises(TypeError, match="max_age"):
-            Workflow(max_age="7d")
+            Workflow(engine="direct", max_age="7d")

@@ -116,7 +116,7 @@ class TestBatchOneToOne:
         load = FileLoader()
         batch = StubBatchProcessor()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             embeddings = batch(input_image=raw["path"])
             df = wf.compute(embeddings)
@@ -127,7 +127,7 @@ class TestBatchOneToOne:
         load = FileLoader()
         batch = StubBatchProcessor()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             embeddings = batch(input_image=raw["path"])
             df = wf.compute(embeddings)
@@ -143,7 +143,7 @@ class TestBatchOneToN:
         load = FileLoader()
         exploder = StubBatchExploder()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             crops = exploder(input_image=raw["path"])
             df = wf.compute(crops)
@@ -171,7 +171,7 @@ class TestEmptyBatchExecution:
     def test_default_batch_tool_does_not_run_for_empty_upstream(self, tmp_workspace):
         EmptyBatchProbe.called = False
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             empty = EmptySource()(name="empty")
             probed = EmptyBatchProbe()(value=empty["value"], name="probe")
             df = wf.compute(probed)
@@ -181,7 +181,7 @@ class TestEmptyBatchExecution:
         assert list(df.columns) == ["output"]
 
     def test_run_empty_batch_tool_runs_once_for_empty_upstream(self, tmp_workspace):
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             empty = EmptySource()(name="empty")
             reduced = EmptyBatchReducer()(value=empty["value"], name="reduce_empty")
             df = wf.compute(reduced)
@@ -194,7 +194,7 @@ class TestEmptyBatchExecution:
         source_path = tmp_workspace / "source.tif"
         source_path.write_text("source")
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             source = SinglePathSource()(path=source_path, name="source")
             empty = EmptyChild()(source, name="empty")
             reduced = AnchoredEmptyBatchReducer()(

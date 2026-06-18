@@ -254,7 +254,7 @@ def test_postprocess_labels_removes_small_objects_and_relabels(tmp_path: Path) -
 def test_heavy_segmentation_tools_build_graph_without_model_dependencies(
     tmp_path: Path,
 ) -> None:
-    with Workflow(storage_path=tmp_path / "results") as wf:
+    with Workflow(engine="direct", storage_path=tmp_path / "results") as wf:
         Cellpose3()(input_image=tmp_path / "image.tif", name="cellpose")
         StarDistSegmenter()(input_image=tmp_path / "image.tif", name="stardist")
 

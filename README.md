@@ -96,7 +96,7 @@ loader = FileLoader()
 
 configure_wetlands(wetlands_instance_path="./wetlands")
 
-with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
+with Workflow(storage_path="./bif_data") as wf:
     raw = loader(folder="/data/images")
     masks = threshold(image=raw["path"], cutoff=100.0, name="threshold")
     result = wf.compute(masks)

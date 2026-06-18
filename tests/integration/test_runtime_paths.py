@@ -82,6 +82,7 @@ def test_runtime_paths_are_absolute_when_subprocess_uses_work_dir(
     wrapper = CwdSensitiveWrapper()
 
     with Workflow(
+        engine="direct",
         storage_path=Path("relative_results"),
     ) as workflow:
         raw = source(directory=data_dir)

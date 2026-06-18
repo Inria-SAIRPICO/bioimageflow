@@ -120,7 +120,7 @@ def test_output_image_override_uses_output_template_not_input_binding(
     input_path = tmp_path / "input.tif"
     iio.imwrite(input_path, np.zeros((8, 8), dtype=np.uint16))
 
-    with Workflow(storage_path=tmp_path / "results"):
+    with Workflow(engine="direct", storage_path=tmp_path / "results"):
         node = MedianDenoising()(
             input_image=input_path,
             denoising_type="2D",
@@ -666,7 +666,7 @@ def test_hotspot_to_spots_publishes_zero_spot_count_metadata(tmp_path: Path) -> 
     iio.imwrite(hotspot_path, np.zeros((8, 8), dtype=np.float32))
     storage_path = tmp_path / "results"
 
-    with Workflow(storage_path=storage_path) as wf:
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
         node = HotspotToSpots()(hotspot_image=hotspot_path, threshold=1.0)
         result = wf.compute(node)
         node_name = node.name

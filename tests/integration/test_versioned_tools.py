@@ -152,13 +152,13 @@ class TestVersionedNodeCreation:
 
     def test_processing_tool_creates_node(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             node = v1.AlphaTool()(value=5)
             assert node.tool.display_name == "Alpha"
 
     def test_dataframe_tool_creates_node(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             node = v1.LoaderTool()(path=str(data_dir))
             assert node.tool.display_name == "Dummy Loader"
 
@@ -166,13 +166,13 @@ class TestVersionedNodeCreation:
         from bioimageflow.node import BindingError
         v1 = _load_v1(tool_store)
         with pytest.raises(BindingError, match="nonexistent_field"):
-            with Workflow(storage_path=data_dir.parent / "results"):
+            with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
                 v1.AlphaTool()(nonexistent_field=5)
 
     def test_output_column_ref(self, tool_store, data_dir):
         from bioimageflow.node import ColumnRef, ColumnNotFoundError
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             node = v1.AlphaTool()(value=0)
             ref = node["result"]
             assert isinstance(ref, ColumnRef)
@@ -182,7 +182,7 @@ class TestVersionedNodeCreation:
     def test_two_versions_in_same_workflow(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             n1 = v1.AlphaTool()(value=0)
             n2 = v2.AlphaTool()(value=0)
             assert n1.name == "AlphaTool_1"
@@ -197,7 +197,7 @@ class TestVersionedExecution:
 
     def test_processing_tool_executes(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
             df = wf.compute(node)
         assert "result" in df.columns
@@ -205,7 +205,7 @@ class TestVersionedExecution:
 
     def test_dataframe_tool_executes(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.LoaderTool()(path=str(data_dir))
             df = wf.compute(node)
         assert "filepath" in df.columns
@@ -214,7 +214,7 @@ class TestVersionedExecution:
     def test_two_versions_produce_different_results(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             n1 = v1.AlphaTool()(value=0)
             n2 = v2.AlphaTool()(value=0)
             results = wf.compute(n1, n2)
@@ -224,7 +224,7 @@ class TestVersionedExecution:
 
     def test_dataframe_tool_v2_adds_column(self, tool_store, data_dir):
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v2.LoaderTool()(path=str(data_dir))
             df = wf.compute(node)
         assert "version" in df.columns
@@ -233,7 +233,7 @@ class TestVersionedExecution:
     def test_versioned_tool_with_column_bindings(self, tool_store, data_dir):
         """LoaderTool -> AlphaTool pipeline using column bindings."""
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             _raw = v1.LoaderTool()(path=str(data_dir))
             processed = v1.AlphaTool()(value=0)
             df = wf.compute(processed)
@@ -249,7 +249,7 @@ class TestVersionedSubWorkflow:
     def test_sub_workflow_creates_node(self, tool_store, data_dir):
         from bioimageflow.sub_workflow import SubWorkflowNode
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             _raw = v1.LoaderTool()(path=str(data_dir))
             node = v1.AlphaPipeline()(path=str(data_dir))
             assert isinstance(node, SubWorkflowNode)
@@ -257,7 +257,7 @@ class TestVersionedSubWorkflow:
     def test_sub_workflow_uses_correct_version_tools(self, tool_store, data_dir):
         """Internal nodes of v1 sub-workflow should carry v1 metadata."""
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results"):
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
             node = v1.AlphaPipeline()(path=str(data_dir))
             for internal in node.internal_nodes:
                 version = getattr(type(internal.tool), "_bif_package_version", None)
@@ -266,7 +266,7 @@ class TestVersionedSubWorkflow:
 
     def test_sub_workflow_executes(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaPipeline()(path=str(data_dir))
             df = wf.compute(node)
         assert "result" in df.columns
@@ -275,7 +275,7 @@ class TestVersionedSubWorkflow:
     def test_two_sub_workflow_versions_differ(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             n1 = v1.AlphaPipeline()(path=str(data_dir))
             n2 = v2.AlphaPipeline()(path=str(data_dir))
             results = wf.compute(n1, n2)
@@ -292,7 +292,7 @@ class TestVersionedSerialization:
 
     def test_export_includes_version_info(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
             wf.compute(node)
             wf.export(data_dir.parent / "workflow.json")
@@ -305,7 +305,7 @@ class TestVersionedSerialization:
 
     def test_export_sub_workflow_includes_version_info(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaPipeline()(path=str(data_dir))
             wf.compute(node)
             wf.export(data_dir.parent / "workflow.json")
@@ -318,7 +318,7 @@ class TestVersionedSerialization:
     def test_export_mixed_versions(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             n1 = v1.AlphaTool()(value=0)
             n2 = v2.AlphaTool()(value=0)
             wf.compute(n1, n2)
@@ -334,7 +334,7 @@ class TestVersionedSerialization:
         monkeypatch.setenv("BIOIMAGEFLOW_TOOL_STORE", str(tool_store))
         v1 = _load_v1(tool_store)
 
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
             _df1 = wf.compute(node)
             wf.export(data_dir.parent / "workflow.json")
@@ -354,7 +354,7 @@ class TestVersionedSerialization:
         monkeypatch.setenv("BIOIMAGEFLOW_TOOL_STORE", str(tool_store))
         v1 = _load_v1(tool_store)
 
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             _raw = v1.LoaderTool()(path=str(data_dir))
             node = v1.AlphaTool()(value=0)
             df1 = wf.compute(node)
@@ -379,12 +379,13 @@ class TestVersionedCaching:
         """Second run with same version hits cache."""
         v1 = _load_v1(tool_store)
 
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
             wf.compute(node)
 
         events = []
         with Workflow(
+            engine="direct",
             storage_path=data_dir.parent / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -399,12 +400,13 @@ class TestVersionedCaching:
         v1 = _load_v1(tool_store)
         v2 = _load_v2(tool_store)
 
-        with Workflow(storage_path=data_dir.parent / "results") as wf:
+        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
             node = v1.AlphaTool()(value=0)
             wf.compute(node)
 
         events = []
         with Workflow(
+            engine="direct",
             storage_path=data_dir.parent / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:

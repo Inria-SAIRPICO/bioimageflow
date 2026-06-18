@@ -55,7 +55,7 @@ class TestFamilyWorkflow:
         load = FileLoader()
         segment = CellposeSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=25.0)
             df = wf.compute(masks)
@@ -69,7 +69,7 @@ class TestFamilyWorkflow:
         segment = CellposeSegmenter()
         train = CellposeTrain()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             trained = train(
@@ -88,7 +88,7 @@ class TestFamilyWorkflow:
         cellpose = CellposeSegmenter()
         stardist = StardistSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             cp_masks = cellpose(input_image=raw["path"], name="cellpose_seg")
             sd_masks = stardist(input_image=raw["path"], name="stardist_seg")

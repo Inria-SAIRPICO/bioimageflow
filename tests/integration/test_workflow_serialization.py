@@ -72,7 +72,7 @@ class TestWorkflowExport:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             wf.compute(masks)
@@ -84,7 +84,7 @@ class TestWorkflowExport:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             wf.compute(masks)
@@ -103,7 +103,7 @@ class TestWorkflowExport:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             wf.compute(masks)
@@ -119,7 +119,7 @@ class TestWorkflowExport:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             segment(input_image=raw["path"], diameter=30.0)
             wf.export(tmp_workspace / "workflow.json")
@@ -145,7 +145,7 @@ class TestWorkflowExport:
             LocalAnnotate = getattr(tools_module, "LocalAnnotate")
             LocalSource = getattr(tools_module, "LocalSource")
 
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
                 LocalAnnotate()(source)
                 wf.export(tmp_workspace / "workflow.json")
@@ -171,7 +171,7 @@ class TestWorkflowExport:
             LocalAnnotate = getattr(tools_module, "LocalAnnotate")
             LocalSource = getattr(tools_module, "LocalSource")
 
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
                 LocalAnnotate()(source)
                 wf.export(tmp_workspace / "workflow.bioimageflow.zip")
@@ -199,7 +199,7 @@ class TestWorkflowExport:
             LocalAnnotate = getattr(tools_module, "LocalAnnotate")
             LocalSource = getattr(tools_module, "LocalSource")
 
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
                 LocalAnnotate()(source)
                 wf.export(tmp_workspace / "workflow.bioimageflow.zip")
@@ -227,7 +227,7 @@ class TestWorkflowImport:
         segment = StubSegmenter()
         results: list[Any] = []
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             results.append(wf.compute(masks))
@@ -245,7 +245,7 @@ class TestWorkflowImport:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             segment(input_image=raw["path"], diameter=30.0)
             wf.export(tmp_workspace / "workflow.json")
@@ -267,7 +267,7 @@ class TestWorkflowImport:
             LocalAnnotate = getattr(tools_module, "LocalAnnotate")
             LocalSource = getattr(tools_module, "LocalSource")
 
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 source = LocalSource()()
                 annotated = LocalAnnotate()(source)
                 wf.export(tmp_workspace / "workflow.json")
@@ -293,7 +293,7 @@ class TestWorkflowCustomToolRegistry:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             segment(input_image=raw["path"], diameter=30.0)
 
@@ -308,7 +308,7 @@ class TestWorkflowCustomToolRegistry:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             segment(input_image=raw["path"], diameter=30.0)
             wf.export(tmp_workspace / "workflow.json")

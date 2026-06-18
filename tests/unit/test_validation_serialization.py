@@ -749,7 +749,7 @@ class TestSerializeResolvedOutputs:
             def resolve_outputs(cls, inputs=None):
                 return None
 
-        with Workflow():
+        with Workflow(engine="direct"):
             n = Unconfigured()()
             out = serialize_resolved_outputs(n)
             assert out == {"resolved": False, "columns": {}}
@@ -758,7 +758,7 @@ class TestSerializeResolvedOutputs:
         from bioimageflow import Workflow
         from bioimageflow_common_tools import Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             g = Generate()(column_name="sensitivity", values=[1, 2])
             out = serialize_resolved_outputs(g)
             assert out["resolved"] is True
@@ -768,7 +768,7 @@ class TestSerializeResolvedOutputs:
         from bioimageflow import Workflow
         from bioimageflow_common_tools import Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             g = Generate()(column_name="x", values=[1])
             json.dumps(serialize_resolved_outputs(g))
 

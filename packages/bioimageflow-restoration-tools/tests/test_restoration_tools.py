@@ -70,7 +70,7 @@ def test_restoration_workflow_graph_runs(tmp_path: Path) -> None:
     image_path = tmp_path / "image.tif"
     iio.imwrite(image_path, image)
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         restored = RestoreImage()(input_image=image_path, name="restore")
         result = wf.compute(restored)
 

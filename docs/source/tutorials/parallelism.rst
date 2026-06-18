@@ -2,9 +2,7 @@ Parallelism
 ===========
 
 BioImageFlow has two local execution backends.
-The default ``engine="direct"`` runs tool code in the orchestrator process and
-uses ``execution="parallel"`` to schedule ready independent nodes concurrently.
-The ``engine="wetlands"`` backend runs :class:`~bioimageflow_core.ProcessingTool`
+The default ``engine="wetlands"`` runs :class:`~bioimageflow_core.ProcessingTool`
 methods in isolated worker processes and is the backend that supports row-level
 worker-process parallelism. This page covers the knobs that size those modes.
 
@@ -33,7 +31,7 @@ count for tools that don't override it:
 
    from bioimageflow import Workflow
 
-   with Workflow(max_workers=4, engine="wetlands") as wf:
+   with Workflow(max_workers=4) as wf:
        ...
 
 The default is ``max_workers=1`` — a single worker per Wetlands environment.
@@ -56,7 +54,7 @@ that environment:
    cellpose = Cellpose3()                    # has its own EnvironmentSpec
    filter_tool = FilterByArea()              # uses GENERAL_ENV
 
-   with Workflow(max_workers=4, engine="wetlands") as wf:
+   with Workflow(max_workers=4) as wf:
        wf.get_environment(cellpose).max_workers = 1   # GPU tool — keep serial
        wf.get_environment(GENERAL_ENV).max_workers = 8
 
@@ -74,7 +72,7 @@ worker-specific configuration:
 .. code-block:: python
 
    gpu_tool = MyGPUTool()
-   with Workflow(engine="wetlands") as wf:
+   with Workflow() as wf:
        env = wf.get_environment(gpu_tool)
        env.max_workers = 4
        env.worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
@@ -144,7 +142,7 @@ Worked example: a GPU tool with row-level parallelism
 -----------------------------------------------------
 
 A tool declares ``ResourceSpec(gpu=1)`` and lives in its own environment.
-With ``engine="wetlands"``, the workflow runs four rows of it in parallel,
+With the default engine, the workflow runs four rows of it in parallel,
 each pinned to a distinct GPU:
 
 .. code-block:: python
@@ -166,7 +164,7 @@ each pinned to a distinct GPU:
            ...
 
    segment = Segment()
-   with Workflow(engine="wetlands") as wf:
+   with Workflow() as wf:
        wf.get_environment(segment).max_workers = 4    # 4 worker processes
        images = files(path="/data", pattern="*.tif")
        masks = segment(image=images["path"])

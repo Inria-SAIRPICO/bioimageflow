@@ -135,7 +135,7 @@ Wire the tools together in a :class:`~bioimageflow.Workflow`:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
+   with Workflow(storage_path="./bif_data") as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        stats = measure(mask=masks["mask"])
@@ -168,7 +168,7 @@ targets to get a dictionary:
 
 .. code-block:: python
 
-   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
+   with Workflow(storage_path="./bif_data") as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        stats = measure(mask=masks["mask"])
@@ -193,7 +193,7 @@ Track execution progress with a callback:
        elif event.status == "completed":
            print(f"Done: {event.node_name}")
 
-   with Workflow(storage_path="./bif_data", engine="wetlands", on_progress=on_progress) as wf:
+   with Workflow(storage_path="./bif_data", on_progress=on_progress) as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        result = wf.compute(masks)

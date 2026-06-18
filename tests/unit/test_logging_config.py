@@ -137,7 +137,7 @@ def test_configure_logging_delegates_wetlands_console_logging(
 
 def test_default_engine_and_workflow_construction_do_not_add_console_handlers() -> None:
     DefaultEngine(use_wetlands=False)
-    Workflow()
+    Workflow(engine="direct")
 
     assert logging.getLogger("bioimageflow").handlers == []
     assert logging.getLogger("wetlands").handlers == []

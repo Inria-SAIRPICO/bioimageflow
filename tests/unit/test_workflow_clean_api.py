@@ -11,11 +11,16 @@ from bioimageflow.engine import DefaultEngine, SequentialEngine
 from bioimageflow.node import get_active_workflow
 
 
-def test_workflow_defaults_to_direct_parallel_engine() -> None:
+def test_workflow_defaults_to_wetlands_parallel_engine() -> None:
     wf = Workflow()
+    engine = wf._make_engine()
 
-    assert wf.engine_type == "direct"
+    assert wf.engine_type == "wetlands"
     assert wf.execution == "parallel"
+    assert isinstance(engine, DefaultEngine)
+    assert not isinstance(engine, SequentialEngine)
+    assert engine._use_wetlands is True
+    assert engine._force_sequential is False
     assert not hasattr(wf, "use_wetlands")
     assert not hasattr(wf, "max_age")
     assert not hasattr(wf, "max_executions")
@@ -47,7 +52,7 @@ def test_workflow_builds_direct_parallel_engine() -> None:
 
 
 def test_workflow_builds_wetlands_sequential_engine() -> None:
-    engine = Workflow(engine="wetlands", execution="sequential")._make_engine()
+    engine = Workflow(execution="sequential")._make_engine()
 
     assert isinstance(engine, SequentialEngine)
     assert engine._use_wetlands is True
@@ -72,6 +77,13 @@ def test_workflow_to_dict_uses_clean_config(tmp_path) -> None:
     assert "use_wetlands" not in config
     assert "max_age" not in config
     assert "max_executions" not in config
+
+
+def test_workflow_from_dict_defaults_to_wetlands_engine() -> None:
+    wf = Workflow.from_dict({"nodes": [], "edges": [], "config": {}})
+
+    assert wf.engine_type == "wetlands"
+    assert wf.execution == "parallel"
 
 
 def test_active_workflow_is_context_local_across_threads() -> None:

@@ -56,14 +56,8 @@ align rows correctly.
 Engines and scheduling
 ----------------------
 
-The default engine is ``engine="direct"`` with ``execution="parallel"``.
-It runs :class:`~bioimageflow.DataFrameTool` objects and
-:class:`~bioimageflow_core.ProcessingTool` methods in the orchestrator process.
-The parallel scheduling policy may execute ready independent nodes concurrently,
-but row-level worker-process parallelism is only used by
-``engine="wetlands"``.
-
-Use ``engine="wetlands"`` when processing tools should run in isolated Wetlands
+The default engine is ``engine="wetlands"`` with ``execution="parallel"``.
+It runs :class:`~bioimageflow_core.ProcessingTool` methods in isolated Wetlands
 worker environments. In that backend, ``max_workers`` and
 per-environment overrides control worker-process pools and row dispatch.
 See :doc:`../tutorials/parallelism` for ``max_workers``,

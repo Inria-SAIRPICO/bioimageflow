@@ -27,7 +27,7 @@ def _write_synthetic_input(data_dir: Path) -> Path:
 
 def build_workflow(
     storage_path: str = "./sairpico_restoration_smoke_results",
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build a SAIRPICO denoise plus deconvolution smoke graph."""

@@ -72,7 +72,7 @@ class TestIsPartial:
         # A workflow built via the context manager never went through
         # from_dict, so the "expected node names" set is None and
         # is_partial is False.
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         assert wf.is_partial is False
 
 
@@ -98,6 +98,6 @@ class TestErrorsProperty:
 
 class TestNodesViewIsCopy:
     def test_nodes_returns_a_copy(self) -> None:
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         wf.nodes["spurious"] = None  # type: ignore[assignment]
         assert "spurious" not in wf._nodes  # internal state untouched

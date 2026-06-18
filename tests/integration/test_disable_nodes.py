@@ -30,20 +30,20 @@ class TestNodeEnabledAttribute:
 
     def test_node_enabled_by_default(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             assert raw.enabled is True
 
     def test_disable_sets_enabled_false(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.disable()
             assert raw.enabled is False
 
     def test_enable_sets_enabled_true(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.disable()
             raw.enable()
@@ -51,7 +51,7 @@ class TestNodeEnabledAttribute:
 
     def test_enabled_can_be_set_directly(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             raw.enabled = False
             assert raw.enabled is False
@@ -62,7 +62,7 @@ class TestWorkflowEnableDisable:
     def test_workflow_disable_by_node_ref(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             wf.disable(masks)
@@ -72,7 +72,7 @@ class TestWorkflowEnableDisable:
     def test_workflow_disable_by_name(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             wf.disable("StubSegmenter_1")
@@ -81,7 +81,7 @@ class TestWorkflowEnableDisable:
     def test_workflow_enable_by_name(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             masks.disable()
@@ -92,7 +92,7 @@ class TestWorkflowEnableDisable:
         load = FileLoader()
         segment = StubSegmenter()
         measure = StubStats()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -103,7 +103,7 @@ class TestWorkflowEnableDisable:
 
     def test_workflow_disable_unknown_name_raises(self, tmp_workspace):
         load = FileLoader()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             _raw = load(path=str(tmp_workspace / "data"))
             with pytest.raises(KeyError):
                 wf.disable("nonexistent_node")
@@ -115,7 +115,7 @@ class TestDisabledLeafNode:
         """Disable one of two terminals — the other still computes."""
         load = FileLoader()
         segment = StubSegmenter()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = segment(input_image=raw["path"], diameter=30.0, name="seg_a")
             masks_b = segment(input_image=raw["path"], diameter=50.0, name="seg_b")
@@ -128,7 +128,7 @@ class TestDisabledLeafNode:
         """Computing a single disabled target raises DisabledNodeError."""
         load = FileLoader()
         segment = StubSegmenter()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             masks.disable()
@@ -143,7 +143,7 @@ class TestDisabledSourceNode:
         load = FileLoader()
         segment = StubSegmenter()
         measure = StubStats()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -159,7 +159,7 @@ class TestDisabledMiddleNode:
         load = FileLoader()
         segment = StubSegmenter()
         measure = StubStats()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], name="seg")
             results = measure(image=raw["path"], mask=masks["mask"], name="stats")
@@ -178,13 +178,13 @@ class TestReEnable:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             # First: run full workflow to populate cache
             df1 = wf.compute(masks)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             # Disable, then re-enable
@@ -205,7 +205,7 @@ class TestDisabledDiamond:
         seg2 = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = seg1(input_image=raw["path"], diameter=30.0, name="seg_a")
             masks_b = seg2(input_image=raw["path"], diameter=50.0, name="seg_b")
@@ -224,7 +224,7 @@ class TestComputeStepsWithDisabled:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], name="seg")
             results = measure(image=raw["path"], mask=masks["mask"], name="stats")
@@ -246,7 +246,7 @@ class TestComputeStepsWithDisabled:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             masks.disable()
@@ -263,7 +263,7 @@ class TestSerializationRoundTrip:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], name="seg")
             masks.disable()
@@ -281,7 +281,7 @@ class TestSerializationRoundTrip:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], name="seg")
             masks.disable()
@@ -299,7 +299,7 @@ class TestAllTargetsDisabled:
         seg1 = StubSegmenter()
         seg2 = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = seg1(input_image=raw["path"], name="seg_a")
             masks_b = seg2(input_image=raw["path"], name="seg_b")

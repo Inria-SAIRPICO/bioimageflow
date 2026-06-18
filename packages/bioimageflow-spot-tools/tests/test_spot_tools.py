@@ -162,7 +162,7 @@ def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
     labels_path = tmp_path / "labels.tif"
     iio.imwrite(labels_path, labels)
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
         assigned = AssignSpotsToLabels()(
             spot_id=detected["spot_id"],
@@ -187,7 +187,7 @@ def test_zero_spot_workflow_keeps_downstream_spot_table_empty(tmp_path: Path) ->
     iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
     iio.imwrite(labels, np.ones((16, 16), dtype=np.uint32))
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(
             input_image=image,
             method="local_maxima",
@@ -222,7 +222,7 @@ def test_detect_spots_zero_rows_publish_blank_label_artifact(tmp_path: Path) -> 
     storage_path = tmp_path / "bif"
     iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
 
-    with Workflow(storage_path=str(storage_path)) as wf:
+    with Workflow(engine="direct", storage_path=str(storage_path)) as wf:
         detected = DetectSpots()(
             input_image=image,
             method="local_maxima",
@@ -264,7 +264,7 @@ def test_detect_spots_zero_rows_publish_blank_label_artifact(tmp_path: Path) -> 
 def test_spot_colocalization_builds_workflow_graph(tmp_path: Path) -> None:
     image = _spot_image(tmp_path / "puncta.tif")
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
         matches = SpotColocalization()(
             detected,
@@ -445,7 +445,7 @@ def test_spots_to_labels_zero_spot_workflow_writes_blank_artifact(
     image = tmp_path / "blank.tif"
     iio.imwrite(image, np.zeros((16, 16), dtype=np.float32))
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         detected = DetectSpots()(
             input_image=image,
             method="local_maxima",
@@ -482,7 +482,7 @@ def test_spots_to_labels_empty_coordinates_do_not_treat_masks_as_fake_rows(
         mask[4:6, 4:6] = 1
         iio.imwrite(mask_dir / f"mask_{index}.tif", mask)
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         masks = Files()(path=mask_dir, pattern="*.tif", name="masks")
         detected = DetectSpots()(
             input_image=masks["path"],

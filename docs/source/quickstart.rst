@@ -116,7 +116,7 @@ Wire tools together inside a :class:`~bioimageflow.Workflow` context manager:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
+   with Workflow(storage_path="./bif_data") as wf:
        images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)
@@ -149,7 +149,7 @@ that input references, parameters, and tool versions haven't changed:
 
 .. code-block:: python
 
-   with Workflow(storage_path="./bif_data", engine="wetlands") as wf:
+   with Workflow(storage_path="./bif_data") as wf:
        images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)  # cache hit, no recomputation

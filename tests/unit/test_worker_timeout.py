@@ -75,7 +75,7 @@ class TestWorkflowEnvironmentField:
 
     def test_via_get_environment(self):
         spec = EnvironmentSpec(name="test_env", dependencies={})
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         cfg = wf.get_environment(spec)
         assert cfg.worker_timeout is None
         cfg.worker_timeout = 30.0
@@ -123,14 +123,14 @@ class TestResolveWorkerConfig:
     def test_default_engine_returns_none_when_not_configured(self):
         engine = DefaultEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert wt is None
 
     def test_default_engine_returns_configured_timeout(self):
         engine = DefaultEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         wf.get_environment(tool).worker_timeout = 45.0
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert wt == 45.0
@@ -138,7 +138,7 @@ class TestResolveWorkerConfig:
     def test_sequential_engine_respects_timeout(self):
         engine = SequentialEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         wf.get_environment(tool).worker_timeout = 15.0
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert mw == 1
@@ -249,7 +249,7 @@ class TestWorkerTimeoutErrorRaised:
     def test_row_path_raises_worker_timeout_error(self):
         engine, stub = self._make_engine_with_stub()
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         wf.get_environment(tool).worker_timeout = 10.0
         # Engine will call _resolve_worker_config → (1, None, 10.0)
         # Then map_process_rows → hanging tasks → TimeoutError → WorkerTimeoutError
@@ -279,7 +279,7 @@ class TestWorkerTimeoutErrorRaised:
                 return []
 
         tool = _BatchTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         wf.get_environment(tool).worker_timeout = 5.0
 
         with pytest.raises(WorkerTimeoutError, match="Batch"):
@@ -347,7 +347,7 @@ class TestWorkerTimeoutErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
 
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
         # No worker_timeout configured → None flows through
 
         row_contexts, batch_context = _execution_contexts(1)
@@ -380,7 +380,7 @@ class TestWorkerTaskErrorRaised:
         original = RuntimeError("native command crashed")
         engine, _stub = self._make_engine_with_failure(original)
         tool = _StubTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)
@@ -416,7 +416,7 @@ class TestWorkerTaskErrorRaised:
                 return []
 
         tool = _BatchTool()
-        wf = Workflow()
+        wf = Workflow(engine="direct")
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)

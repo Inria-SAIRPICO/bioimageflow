@@ -85,7 +85,7 @@ def label_images(tmp_path: Path) -> tuple[Path, Path]:
 
 class TestFiles:
     def test_lists_files(self, image_dir: Path) -> None:
-        with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
             node = Files()(path=str(image_dir))
             result = wf.compute(node)
             assert len(result) == 2
@@ -99,7 +99,7 @@ class TestFiles:
         # Create a non-matching file
         (image_dir / "notes.txt").write_text("hello")
 
-        with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
             node = Files()(path=str(image_dir), pattern="*.tif")
             result = wf.compute(node)
             assert len(result) == 2
@@ -111,7 +111,7 @@ class TestFiles:
 
 class TestExtractChannel:
     def test_extracts_channel(self, image_dir: Path) -> None:
-        with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
             files = Files()(path=str(image_dir), pattern="*.tif")
             ch0 = ExtractChannel()(input_image=files["path"], channel=0)
             result = wf.compute(ch0)
@@ -125,7 +125,7 @@ class TestExtractChannel:
             assert img.shape == (64, 64)
 
     def test_extracts_different_channels(self, image_dir: Path) -> None:
-        with Workflow(storage_path=str(image_dir.parent / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
             files = Files()(path=str(image_dir), pattern="*.tif")
             ch0 = ExtractChannel()(
                 input_image=files["path"], channel=0, name="ch0"
@@ -203,7 +203,7 @@ class TestMosaic:
             def process_row(self, arguments: Any, *, context: object | None = None) -> Any:
                 raise AssertionError("graph construction test only")
 
-        with Workflow(storage_path=str(tmp_path / "bif")):
+        with Workflow(engine="direct", storage_path=str(tmp_path / "bif")):
             binary = BinaryProducer()(name="binary")
             Mosaic()(input_image=binary["output_image"], name="mosaic")
 
@@ -217,7 +217,7 @@ class TestMiniPipeline:
         self, tmp_path: Path, image_dir: Path
     ) -> None:
         """Test Files → ExtractChannel pipeline (branching topology)."""
-        with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
             files = Files()(path=str(image_dir), pattern="*.tif")
             ch0 = ExtractChannel()(
                 input_image=files["path"], channel=0, name="ch0"
@@ -286,7 +286,7 @@ class TestMiniPipeline:
         data_dir.mkdir()
         iio.imwrite(str(data_dir / "sample.tif"), combined)
 
-        with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+        with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
             files = Files()(path=str(data_dir))
             ch_spots = ExtractChannel()(
                 input_image=files["path"], channel=0, name="ch_spots"

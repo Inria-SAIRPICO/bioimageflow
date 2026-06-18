@@ -23,7 +23,7 @@ def _write_labels(data_dir: Path) -> Path:
 
 def build_workflow(
     storage_path: str = "./tracking_analysis_results",
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build the tracking workflow."""

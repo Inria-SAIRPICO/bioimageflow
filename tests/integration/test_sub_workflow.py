@@ -175,7 +175,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg_measure = SegmentAndMeasure()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg_measure(image=raw["path"], diameter=25.0)
             df = wf.compute(results)
@@ -192,7 +192,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg_measure = SegmentAndMeasure()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg_measure(image=raw["path"])
             df = wf.compute(results)
@@ -205,7 +205,7 @@ class TestSubWorkflowBasic:
         seg_measure = SegmentAndMeasure()
         measure2 = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg_measure(image=raw["path"])
             # Use sub-workflow output as input to another tool
@@ -223,7 +223,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
             df = wf.compute(results)
@@ -236,7 +236,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"], name="my_segmentation")
             assert results.name == "my_segmentation"
@@ -245,7 +245,7 @@ class TestSubWorkflowBasic:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             r1 = seg(image=raw["path"])
             r2 = seg(image=raw["path"])
@@ -264,7 +264,7 @@ class TestSubWorkflowEncapsulation:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             _results = seg(image=raw["path"])
 
@@ -279,7 +279,7 @@ class TestSubWorkflowEncapsulation:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
 
@@ -302,7 +302,7 @@ class TestSubWorkflowComputeSteps:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
 
@@ -320,7 +320,7 @@ class TestSubWorkflowComputeSteps:
         load = FileLoader()
         seg = SegmentOnly()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
 
@@ -342,7 +342,7 @@ class TestSubWorkflowComputeSteps:
         load = FileLoader()
         seg_measure = SegmentAndMeasure()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg_measure(image=raw["path"])
 
@@ -372,7 +372,7 @@ class TestSubWorkflowCaching:
 
         # First run
         df1 = pd.DataFrame()
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = seg(image=raw["path"])
             df1 = wf.compute(results)
@@ -380,6 +380,7 @@ class TestSubWorkflowCaching:
         # Second run — should hit cache
         events = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -430,7 +431,7 @@ class TestSubWorkflowMixedTools:
         load = FileLoader()
         pipeline = FilterAndSegment()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = pipeline(image=raw["path"], filename=raw["filename"])
             df = wf.compute(results)
@@ -473,7 +474,7 @@ class TestNestedSubWorkflows:
         load = FileLoader()
         outer = OuterWorkflow()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = outer(image=raw["path"])
             df = wf.compute(results)
@@ -506,7 +507,7 @@ class TestNestedSubWorkflows:
         load = FileLoader()
         outer = OuterWorkflow()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = outer(image=raw["path"])
 
@@ -532,6 +533,7 @@ class TestSubWorkflowProgress:
         seg = SegmentOnly()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -563,7 +565,7 @@ class TestSubWorkflowSerialization:
             load = LocalFileLoader()
             seg = LocalSegmentOnly()
 
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 raw = load(path=str(tmp_workspace / "data"))
                 results = seg(image=raw["path"])
                 df1 = wf.compute(results)
@@ -616,7 +618,7 @@ class TestSubWorkflowErrors:
         load = FileLoader()
 
         with pytest.raises(ValueError, match="cell_count"):
-            with Workflow():
+            with Workflow(engine="direct"):
                 raw = load(path="./data")
                 bad(image=raw["path"])
 
@@ -627,7 +629,7 @@ class TestSubWorkflowErrors:
         seg = SegmentAndMeasure()
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 # 'image' is required but not provided
                 seg()
 
@@ -639,7 +641,7 @@ class TestSubWorkflowErrors:
         seg = SegmentOnly()
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 seg(image=raw["path"], nonexistent_field=42)
 
@@ -656,7 +658,7 @@ class TestMultipleSubWorkflowInstances:
         seg1 = SegmentAndMeasure()
         seg2 = SegmentAndMeasure()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             r1 = seg1(image=raw["path"], diameter=20.0)
             r2 = seg2(image=raw["path"], diameter=50.0)
@@ -675,7 +677,7 @@ class TestMultipleSubWorkflowInstances:
         stats1 = StubStats()
         stats2 = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = seg(image=raw["path"])
             r1 = stats1(image=raw["path"], mask=masks["mask"], name="stats_a")

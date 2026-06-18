@@ -1728,7 +1728,7 @@ from bioimageflow import Workflow
 
 # Option 1: Context manager (recommended). Nodes created inside are
 # automatically registered with the workflow.
-with Workflow(storage_path="./results", engine="direct", execution="sequential") as wf:
+with Workflow(storage_path="./results", execution="sequential") as wf:
     raw = load_images(path="./data")
     masks = segment(input_image=raw["path"])
     results = analyze(image=raw["path"], mask=masks["mask"])
@@ -1754,9 +1754,9 @@ Node registration is automatic: calling a tool (e.g., `segment(...)`) appends th
 | Parameter       | Type          | Default         | Description                                      |
 |----------------|---------------|-----------------|--------------------------------------------------|
 | `storage_path`  | `str \| Path` | `"./bif_data"`  | Root directory for output files and cache. Relative values are interpreted against the orchestrator process working directory and stored internally as absolute runtime paths. |
-| `engine`        | `str`         | `"direct"`      | Execution backend. `"direct"` runs in the orchestrator process. `"wetlands"` runs `ProcessingTool` work in Wetlands worker environments. |
+| `engine`        | `str`         | `"wetlands"`    | Execution backend. `"direct"` runs in the orchestrator process. `"wetlands"` runs `ProcessingTool` work in Wetlands worker environments. |
 | `execution`     | `str`         | `"parallel"`    | Local scheduling policy: `"parallel"` may execute ready independent nodes concurrently; `"sequential"` executes one node at a time for debugging and deterministic reproduction. |
-| `max_workers`   | `int`         | `1`             | Default number of Wetlands workers per environment when `engine="wetlands"`. Ignored by `engine="direct"` except where a future direct executor explicitly documents row-level parallelism. |
+| `max_workers`   | `int`         | `1`             | Default number of Wetlands workers per environment when `engine="wetlands"`. Ignored by `engine="direct"`. |
 | `on_progress`   | `Callable \| None` | `None`     | Progress callback (see [Section 4.4](#44-progress-monitoring)) |
 
 Cache records are not deleted by automatic retention policy; pruning published records is an explicit storage maintenance operation.
@@ -2734,7 +2734,7 @@ node_logger = logging.getLogger(f"bioimageflow.node.{node_name}")
 
 ## 12. Parallelism
 
-- **Direct backend (`engine="direct"`):** Runs `ProcessingTool` methods in the orchestrator process. This backend is useful for deterministic tests, local debugging, and tools whose environment already matches the main process.
+- **Direct backend (`engine="direct"`):** Runs `ProcessingTool` methods in the orchestrator process. This backend is for deterministic tests.
 - **Wetlands backend (`engine="wetlands"`):** Dispatches `ProcessingTool` work to Wetlands worker environments. Within each node, `process_row` calls are dispatched via Wetlands task APIs. When the effective `max_workers > 1`, rows may run in parallel across worker processes. When `max_workers == 1` (default), rows run sequentially within that environment.
 - **Parallel scheduling (`execution="parallel"`):** Independent ready nodes may execute concurrently. `DataFrameTool` nodes still run on the main thread with coordination because they operate on DataFrames in the orchestrator process and may not be thread-safe.
 - **Sequential scheduling (`execution="sequential"`):** Forces single-node-at-a-time execution for debugging and deterministic reproduction.

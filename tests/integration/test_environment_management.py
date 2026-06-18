@@ -85,7 +85,7 @@ class TestEnvironmentMismatch:
         load = FileLoader()
 
         with pytest.raises(Exception, match="[Mm]ismatch|conflict|environment"):
-            with Workflow(storage_path=tmp_workspace / "results") as wf:
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
                 raw = load(path=str(tmp_workspace / "data"))
                 r1 = ToolV1()(input_image=raw["path"], name="v1")
                 r2 = ToolV2()(input_image=raw["path"], name="v2")

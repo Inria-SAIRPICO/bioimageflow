@@ -22,7 +22,7 @@ class TestBasicExplosion:
         load = FileLoader()
         tile = StubTiler()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=4)
             df = wf.compute(tiles)
@@ -36,7 +36,7 @@ class TestBasicExplosion:
         load = FileLoader()
         tile = StubTiler()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=2)
             df = wf.compute(tiles)
@@ -50,7 +50,7 @@ class TestBasicExplosion:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             df = wf.compute(masks)
@@ -70,7 +70,7 @@ class TestExplosionAlignment:
         load = FileLoader()
         tile = StubTiler()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=2)
             # The key test: Collect(raw, tiles) aligns raw's coarser index
@@ -92,7 +92,7 @@ class TestNestedExplosion:
         load = FileLoader()
         tile = StubTiler()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             first_tiles = tile(input_image=raw["path"], tile_count=2, name="tile1")
             second_tiles = tile(input_image=first_tiles["tile"], tile_count=2, name="tile2")
@@ -114,7 +114,7 @@ class TestDownstreamOfExplosion:
         tile = StubTiler()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=3)
             masks = segment(input_image=tiles["tile"])

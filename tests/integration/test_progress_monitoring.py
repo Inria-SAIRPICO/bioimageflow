@@ -26,6 +26,7 @@ class TestProgressCallback:
         segment = StubSegmenter()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
@@ -48,6 +49,7 @@ class TestProgressCallback:
         segment = StubSegmenter()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
@@ -76,6 +78,7 @@ class TestProgressCallback:
         segment = StubSegmenter()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
@@ -99,6 +102,7 @@ class TestProgressCallback:
         segment = StubSegmenter()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
@@ -115,7 +119,7 @@ class TestProgressCallback:
         segment = StubSegmenter()
 
         # First run (populates cache)
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             wf.compute(masks)
@@ -123,6 +127,7 @@ class TestProgressCallback:
         # Second run with progress tracking
         events = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -147,6 +152,7 @@ class TestMultiNodeProgress:
         measure = StubStats()
 
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results", on_progress=on_progress
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))

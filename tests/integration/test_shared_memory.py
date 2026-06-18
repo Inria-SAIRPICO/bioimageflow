@@ -25,7 +25,7 @@ class TestSharedMemoryWorkflow:
         producer = StubSharedMemoryTool()
         consumer = StubSharedMemoryConsumer()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             shm_out = producer(input_image=raw["path"])
             result = consumer(label_map=shm_out["result"])
@@ -145,14 +145,14 @@ class TestSharedMemoryCachePersistence:
         results: list[Any] = []
 
         # First run: produces SharedArray
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             shm_out = producer(input_image=raw["path"])
             result = consumer(label_map=shm_out["result"])
             results.append(wf.compute(result))
 
         # Second run: should load from cache (SharedArray → file → SharedArray)
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             shm_out = producer(input_image=raw["path"])
             result = consumer(label_map=shm_out["result"])

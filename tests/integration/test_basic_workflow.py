@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
+from bioimageflow.engine import SequentialEngine
 
 from .conftest import FileLoader, StubSegmenter, StubStats
 
@@ -26,7 +27,7 @@ class TestBasicLinearWorkflow:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"], diameter=30.0)
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -41,7 +42,7 @@ class TestBasicLinearWorkflow:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             df = wf.compute(masks)
@@ -57,7 +58,7 @@ class TestBasicLinearWorkflow:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -72,7 +73,7 @@ class TestNodeNaming:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"))
             masks1 = segment(input_image=raw["path"], diameter=30.0)
             masks2 = segment(input_image=raw["path"], diameter=50.0)
@@ -85,7 +86,7 @@ class TestNodeNaming:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             raw = load(path=str(tmp_workspace / "data"), name="my_source")
             masks = segment(input_image=raw["path"], name="small_cells")
             assert raw.name == "my_source"
@@ -96,7 +97,7 @@ class TestNodeNaming:
         segment = StubSegmenter()
 
         with pytest.raises(ValueError, match="unique"):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"), name="my_node")
                 _masks = segment(input_image=raw["path"], name="my_node")
 
@@ -110,13 +111,13 @@ class TestImplicitWorkflow:
 
         raw = load(path=str(tmp_workspace / "data"))
         masks = segment(input_image=raw["path"])
-        df = masks.compute()
+        df = masks.compute(engine=SequentialEngine(use_wetlands=False))
 
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 3
 
     def test_explicit_workflow_without_context_manager(self, tmp_workspace):
-        wf = Workflow(storage_path=tmp_workspace / "results")
+        wf = Workflow(engine="direct", storage_path=tmp_workspace / "results")
         load = FileLoader()
         segment = StubSegmenter()
 
@@ -135,7 +136,7 @@ class TestMultipleTerminals:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -150,7 +151,7 @@ class TestMultipleTerminals:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             _results = measure(image=raw["path"], mask=masks["mask"])
@@ -166,7 +167,7 @@ class TestMultipleTerminals:
         seg1 = StubSegmenter()
         seg2 = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks_a = seg1(input_image=raw["path"], diameter=30.0, name="seg_a")
             masks_b = seg2(input_image=raw["path"], diameter=50.0, name="seg_b")
@@ -189,7 +190,7 @@ class TestColumnBindingWinsOverStaleConstant:
         load = FileLoader()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
 

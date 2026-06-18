@@ -21,7 +21,7 @@ class TestDataFrameToolSource:
     def test_file_loader_source(self, tmp_workspace):
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             df = wf.compute(raw)
 
@@ -33,7 +33,7 @@ class TestDataFrameToolSource:
         ws = tmp_workspace_two_sources
         load = CsvLoader()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             patients = load(path=str(ws / "patients.csv"))
             df = wf.compute(patients)
 
@@ -48,7 +48,7 @@ class TestProcessingToolSource:
         source = StubSourceProcessingTool()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             discovered = source(directory=str(tmp_workspace / "data"))
             masks = segment(input_image=discovered["path"])
             df = wf.compute(masks)
@@ -60,7 +60,7 @@ class TestProcessingToolSource:
     def test_processing_tool_source_output_schema(self, tmp_workspace):
         source = StubSourceProcessingTool()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             discovered = source(directory=str(tmp_workspace / "data"))
             df = wf.compute(discovered)
 
@@ -75,7 +75,7 @@ class TestAcceptsUpstreamEnforcement:
     def test_files_with_upstream_raises(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             other = Files()(path=str(tmp_workspace / "data"))
             with pytest.raises(SourceToolUpstreamError) as exc_info:
                 Files()(other, path=str(tmp_workspace / "data"))
@@ -85,7 +85,7 @@ class TestAcceptsUpstreamEnforcement:
     def test_generate_with_upstream_raises(self, tmp_workspace):
         from bioimageflow_common_tools import Files, Generate
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             other = Files()(path=str(tmp_workspace / "data"))
             with pytest.raises(SourceToolUpstreamError):
                 Generate()(other, column_name="x", values=[1])
@@ -93,7 +93,7 @@ class TestAcceptsUpstreamEnforcement:
     def test_files_kwargs_only_succeeds(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = Files()(path=str(tmp_workspace / "data"))
             df = wf.compute(raw)
             assert len(df) == 3
@@ -110,7 +110,7 @@ class TestAcceptsUpstreamEnforcement:
         """Files declares Outputs(IOModel) → static schema via resolve_outputs."""
         from bioimageflow_common_tools import Files
 
-        with Workflow(storage_path=tmp_workspace / "results"):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
             f = Files()(path=str(tmp_workspace / "data"))
             schema = f.get_output_schema()
             assert schema is not None

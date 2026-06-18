@@ -20,7 +20,7 @@ def _build_chain(tmp_path: Path) -> Workflow:
     src = tmp_path / "files"
     src.mkdir(exist_ok=True)
     (src / "a.txt").write_text("a")
-    wf = Workflow(storage_path=tmp_path / "cache")
+    wf = Workflow(engine="direct", storage_path=tmp_path / "cache")
     with wf:
         load = FileLoader()(path=str(src))
         seg = StubSegmenter()(input_image=load["path"])

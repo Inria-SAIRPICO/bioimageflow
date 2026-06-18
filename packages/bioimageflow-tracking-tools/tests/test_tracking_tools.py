@@ -121,7 +121,7 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
 def test_tracking_workflow_graph_runs(tmp_path: Path) -> None:
     label_path = _moving_labels(tmp_path / "labels.tif")
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         objects = LabelsToObjects()(label_image=label_path, name="objects")
         tracks = LinkObjects()(
             objects,
@@ -216,7 +216,7 @@ def test_tracking_workflow_all_background_writes_zero_track_artifact(
     source = np.zeros((3, 16, 16), dtype=np.uint32)
     iio.imwrite(label_path, source, photometric="minisblack")
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         objects = LabelsToObjects()(label_image=label_path, name="objects")
         tracks = LinkObjects()(objects, name="links")
         rendered = TracksToLabels()(
@@ -248,7 +248,7 @@ def test_tracking_workflow_all_background_writes_one_artifact_per_source(
             photometric="minisblack",
         )
 
-    with Workflow(storage_path=str(tmp_path / "bif")) as wf:
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         files = Files()(path=image_dir, pattern="*.tif", name="files")
         objects = LabelsToObjects()(label_image=files["path"], name="objects")
         tracks = LinkObjects()(objects, name="links")

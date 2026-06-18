@@ -26,7 +26,7 @@ def build_segmentation_workflow(
     pattern: str = "*.tif",
     nuclei_channel: int = 2,
     cellpose_diameter: float = 18.0,
-    engine: str = "direct",
+    engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node, Node]:
     """Build a simple two-branch segmentation workflow."""

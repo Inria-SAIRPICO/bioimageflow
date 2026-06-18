@@ -334,7 +334,7 @@ class TestConfigSubWorkflowExecution:
         sw = SubWorkflow.from_config(_single_seg_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             df = wf.compute(results)
@@ -349,7 +349,7 @@ class TestConfigSubWorkflowExecution:
         sw = SubWorkflow.from_config(_two_node_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"], diameter=25.0)
             df = wf.compute(results)
@@ -362,7 +362,7 @@ class TestConfigSubWorkflowExecution:
         sw = SubWorkflow.from_config(_two_node_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             # diameter not provided — should use default 30.0
             results = sw(image=raw["path"])
@@ -378,7 +378,7 @@ class TestConfigSubWorkflowExecution:
         sw = SubWorkflow.from_config(config)
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             df = wf.compute(results)
@@ -397,7 +397,7 @@ class TestConfigSubWorkflowEncapsulation:
         sw = SubWorkflow.from_config(_single_seg_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             _results = sw(image=raw["path"])
 
@@ -418,7 +418,7 @@ class TestConfigSubWorkflowComputeSteps:
         sw = SubWorkflow.from_config(_single_seg_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             names = []
@@ -440,13 +440,14 @@ class TestConfigSubWorkflowCaching:
         sw = SubWorkflow.from_config(_single_seg_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             wf.compute(results)
 
         events = []
         with Workflow(
+            engine="direct",
             storage_path=tmp_workspace / "results",
             on_progress=lambda e: events.append(e),
         ) as wf:
@@ -494,7 +495,7 @@ class TestConfigSubWorkflowNested:
         sw = SubWorkflow.from_config(outer_config)
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             df = wf.compute(results)
@@ -533,7 +534,7 @@ class TestConfigSubWorkflowNested:
         sw = SubWorkflow.from_config(outer_config)
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             df = wf.compute(results)
@@ -553,7 +554,7 @@ class TestConfigSubWorkflowSerialization:
         sw = SubWorkflow.from_config(_two_node_config())
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             results = sw(image=raw["path"])
             df1 = wf.compute(results)
@@ -580,7 +581,7 @@ class TestConfigSubWorkflowMultiple:
         sw = SubWorkflow.from_config(config)
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             r1 = sw(image=raw["path"], diameter=20.0)
             r2 = sw(image=raw["path"], diameter=50.0)
@@ -605,12 +606,12 @@ class TestConfigSubWorkflowEquivalence:
         sw_class = SegmentAndMeasure()
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             r1 = sw_config(image=raw["path"])
             df1 = wf.compute(r1)
 
-        with Workflow(storage_path=tmp_workspace / "results2") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results2") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             r2 = sw_class(image=raw["path"])
             df2 = wf.compute(r2)
@@ -635,7 +636,7 @@ class TestConfigSubWorkflowErrors:
         sw = SubWorkflow.from_config(_single_seg_config())
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 sw()  # 'image' is required, not provided
 
     def test_unknown_input_raises(self, tmp_workspace):
@@ -644,7 +645,7 @@ class TestConfigSubWorkflowErrors:
         load = FileLoader()
 
         with pytest.raises(BindingError):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 sw(image=raw["path"], nonexistent=42)
 
@@ -726,6 +727,6 @@ class TestConfigSubWorkflowErrors:
         load = FileLoader()
 
         with pytest.raises(KeyError):
-            with Workflow(storage_path=tmp_workspace / "results"):
+            with Workflow(engine="direct", storage_path=tmp_workspace / "results"):
                 raw = load(path=str(tmp_workspace / "data"))
                 sw(image=raw["path"])

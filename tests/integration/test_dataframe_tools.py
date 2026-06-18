@@ -33,7 +33,7 @@ class TestColumnRegex:
         load = FileLoader()
         regex = ColumnRegex()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             raw = load(path=str(ws / "data"))
             enriched = regex(
                 raw,
@@ -61,7 +61,7 @@ class TestFilterRows:
         filt = FilterRows()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             # StubSegmenter returns cell_count=42 for all rows
             masks = segment(input_image=raw["path"])
@@ -76,7 +76,7 @@ class TestFilterRows:
         filt = FilterRows()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             filtered = filt(masks, column_name="cell_count", min=40.0)
@@ -90,7 +90,7 @@ class TestFilterRows:
         load = FileLoader()
         filt = FilterRows()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             filtered = filt(raw, column_name="filename", min=None, max=None)
             df = wf.compute(filtered)
@@ -109,7 +109,7 @@ class TestChainedDataFrameTools:
         filt = FilterRows()
         segment = StubSegmenter()
 
-        with Workflow(storage_path=ws / "results") as wf:
+        with Workflow(engine="direct", storage_path=ws / "results") as wf:
             raw = load(path=str(ws / "data"))
             enriched = regex(
                 raw,
@@ -134,7 +134,7 @@ class TestCompoundPattern:
         prepare = PrepareRegistration()
         register = StubRegistration()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             paired = prepare(raw, reference_index=0)
             registered = register(
@@ -154,7 +154,7 @@ class TestDataFrameIndexAsString:
         """Engine must convert source DataFrameTool integer indices to strings."""
         load = FileLoader()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             df = wf.compute(raw)
             for idx in df.index:
@@ -186,7 +186,7 @@ class TestGenerateResolveOutputs:
         """Generate(column_name="x")["x"] succeeds with no deferral."""
         from bioimageflow_common_tools import Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             g = Generate()(column_name="sensitivity", values=[1, 2])
             ref = g["sensitivity"]
             assert ref.column == "sensitivity"
@@ -195,7 +195,7 @@ class TestGenerateResolveOutputs:
         """Generate(column_name="x")["y"] raises ColumnNotFoundError."""
         from bioimageflow_common_tools import Generate
 
-        with Workflow():
+        with Workflow(engine="direct"):
             g = Generate()(column_name="x", values=[1])
             with pytest.raises(ColumnNotFoundError):
                 _ = g["nope"]
@@ -224,7 +224,7 @@ class TestGenerateResolveOutputs:
             def resolve_outputs(cls, inputs=None):
                 return None
 
-        with Workflow():
+        with Workflow(engine="direct"):
             n = DynamicNoSchema()()
             # No schema → no construction-time validation → succeeds.
             ref = n["any_column"]
@@ -237,14 +237,14 @@ class TestNodeGetOutputSchema:
     def test_files_node_schema(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow():
+        with Workflow(engine="direct"):
             f = Files()(path=str(tmp_workspace / "data"))
             schema = f.get_output_schema()
             assert schema is not None
             assert set(schema.keys()) == {"path"}
 
     def test_processing_tool_static_schema(self):
-        with Workflow():
+        with Workflow(engine="direct"):
             from .conftest import StubSegmenter, FileLoader
 
             load = FileLoader()(path="/tmp/x")

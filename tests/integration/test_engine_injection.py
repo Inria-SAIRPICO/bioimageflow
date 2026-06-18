@@ -28,7 +28,7 @@ class TestEngineInjection:
         custom_engine = SequentialEngine(use_wetlands=False)
         custom_engine._test_marker = "injected"  # type: ignore[attr-defined]
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -62,7 +62,7 @@ class TestEngineInjection:
 
         tracking_engine = TrackingEngine(use_wetlands=False)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -81,7 +81,7 @@ class TestEngineInjection:
         custom_engine = SequentialEngine(use_wetlands=False)
         custom_engine._test_marker = "steps_injected"  # type: ignore[attr-defined]
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -112,7 +112,7 @@ class TestEngineInjection:
 
         tracking_engine = TrackingEngine(use_wetlands=False)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -128,7 +128,7 @@ class TestEngineInjection:
         segment = StubSegmenter()
         measure = StubStats()
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -147,7 +147,7 @@ class TestEngineInjection:
 
         custom_engine = SequentialEngine(use_wetlands=False)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -168,7 +168,7 @@ class TestEngineInjection:
 
         custom_engine = SequentialEngine(use_wetlands=False)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
@@ -188,7 +188,7 @@ class TestEngineInjection:
 
         custom_engine = SequentialEngine(use_wetlands=False)
 
-        with Workflow(storage_path=tmp_workspace / "results") as wf:
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             results = measure(image=raw["path"], mask=masks["mask"])
