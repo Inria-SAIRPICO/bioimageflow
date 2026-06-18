@@ -245,6 +245,24 @@ def _module_pytestmark_names(module: ast.Module) -> set[str]:
     return names
 
 
+def _function_pytestmark_names(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    names = set()
+    for decorator in function.decorator_list:
+        names.update(_pytest_mark_names(decorator))
+    return names
+
+
+def _test_function_effective_pytestmark_names(module: ast.Module) -> dict[str, set[str]]:
+    module_markers = _module_pytestmark_names(module)
+    return {
+        statement.name: module_markers | _function_pytestmark_names(statement)
+        for statement in module.body
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
 def test_deterministic_non_fast_markers_are_not_external_resource_markers() -> None:
     namespace: dict[str, object] = {}
     exec((ROOT / "conftest.py").read_text(), namespace)
@@ -293,26 +311,51 @@ def test_priority_workflow_execution_tests_are_acceptance_marked() -> None:
         "test_synthetic_fish_workflow_executes",
         "test_bbbc038_segmentation_benchmark_constructs_and_executes",
         "test_ome_normalization_executes_tiny_fixture",
-        "test_cellpose_stardist_workflow_executes_with_fake_model_runtimes",
-        "test_parameter_space_workflow_executes_with_fake_atlas_binary",
-        "test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary",
     }
-    markers_by_test = {
-        statement.name: _pytest_mark_names(statement)
-        for statement in module.body
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
-    }
+    effective_markers_by_test = _test_function_effective_pytestmark_names(module)
 
     missing = [
         test_name
         for test_name in sorted(acceptance_test_names)
-        if "acceptance" not in markers_by_test[test_name]
+        if "acceptance" not in effective_markers_by_test[test_name]
     ]
     assert missing == []
 
-    assert "acceptance" not in markers_by_test[
+    assert "acceptance" not in effective_markers_by_test[
         "test_fish_heavy_workflow_constructs_with_package_imports"
     ]
-    assert "acceptance" not in markers_by_test[
+    assert "acceptance" not in effective_markers_by_test[
         "test_cellpose_stardist_workflow_constructs_with_package_imports"
     ]
+
+
+def test_fake_dependency_priority_workflow_tests_stay_in_fast_tier() -> None:
+    module_path = ROOT / "tests/priority_workflows/test_workflows.py"
+    module = ast.parse(module_path.read_text(), filename=str(module_path))
+
+    fake_dependency_test_names = {
+        "test_cellpose_stardist_workflow_executes_with_fake_model_runtimes",
+        "test_parameter_space_workflow_executes_with_fake_atlas_binary",
+        "test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary",
+    }
+    forbidden_markers = {
+        "acceptance",
+        "wetlands",
+        "complete",
+        "public_data",
+        "external_binary",
+        "sairpico_binary",
+        "model_runtime",
+    }
+    fast_selector_excluded_markers = {
+        part.removeprefix("not ")
+        for part in FAST_TEST_SELECTOR.split(" and ")
+        if part.startswith("not ")
+    }
+    effective_markers_by_test = _test_function_effective_pytestmark_names(module)
+
+    assert forbidden_markers <= fast_selector_excluded_markers
+    assert {
+        test_name: forbidden_markers & effective_markers_by_test[test_name]
+        for test_name in sorted(fake_dependency_test_names)
+    } == {test_name: set() for test_name in sorted(fake_dependency_test_names)}

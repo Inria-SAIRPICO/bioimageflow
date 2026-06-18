@@ -179,7 +179,6 @@ def test_cellpose_stardist_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
-@pytest.mark.acceptance
 def test_cellpose_stardist_workflow_executes_with_fake_model_runtimes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -192,7 +191,9 @@ def test_cellpose_stardist_workflow_executes_with_fake_model_runtimes(
     wf, cellpose, stardist = module.build_segmentation_workflow(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "model_runtime" / "bif"),
+        engine="direct",
     )
+    assert wf.engine_type == "direct"
     result = wf.compute(cellpose, stardist)
     cellpose_result = result["cellpose3_nuclei"]
     stardist_result = result["stardist_nuclei"]
@@ -222,7 +223,6 @@ def test_parameter_space_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
-@pytest.mark.acceptance
 def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -251,7 +251,9 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     wf, terminal = module.build_parameter_space_workflow(
         data_dir=str(data_dir),
         storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"),
+        engine="direct",
     )
+    assert wf.engine_type == "direct"
     result = wf.compute(terminal)
     assert len(result) == 6
     assert int(result.iloc[0]["image_count"]) == 6
@@ -279,7 +281,6 @@ def test_fish_sub_workflow_constructs_with_package_imports(
     } <= set(wf.nodes)
 
 
-@pytest.mark.acceptance
 def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -315,7 +316,11 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
         fake_run,
     )
 
-    wf, terminal = module.build_workflow(storage_path=str(tmp_path / "sairpico"))
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / "sairpico"),
+        engine="direct",
+    )
+    assert wf.engine_type == "direct"
     assert {
         "median_denoise_2d",
         "richardson_lucy_2d",
