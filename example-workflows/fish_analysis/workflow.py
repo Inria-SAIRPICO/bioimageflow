@@ -21,8 +21,8 @@ Output: average number of FOLS2 and CSF1R spots per nucleus per image.
 
 Pipeline topology:
 
-  DownloadImages → ReadImage ─┬─ ExtractChannel(ch0) → Atlas → ConnectedComponents ─┐
-                                  ├─ ExtractChannel(ch1) → Atlas → ConnectedComponents ─┤
+  DownloadImages → ReadImage ─┬─ ExtractChannel(ch0) → AtlasSpotDetection → ConnectedComponents ─┐
+                                  ├─ ExtractChannel(ch1) → AtlasSpotDetection → ConnectedComponents ─┤
                                   └─ ExtractChannel(ch2) → Cellpose3 ──────────────────┤
                                                                                         │
                              LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────┤
@@ -39,11 +39,15 @@ from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
 from bioimageflow_common_tools import Collect, ExtractChannel, ConnectedComponents, LabelOverlaps
-from bioimageflow_common_tools.atlas import Atlas
 from bioimageflow_io_tools import ReadImage
 from bioimageflow_segmentation_tools import Cellpose3
 from bioimageflow_segmentation_tools import ThresholdSegment
-from bioimageflow_spot_tools import AssignSpotsToLabels, DetectSpots, SpotSummary
+from bioimageflow_spot_tools import (
+    AssignSpotsToLabels,
+    AtlasSpotDetection,
+    DetectSpots,
+    SpotSummary,
+)
 
 # Workflow-specific tools
 _this_dir = str(Path(__file__).resolve().parent)
@@ -116,11 +120,11 @@ def build_fish_workflow(
         )
 
         # -- 4. Spot detection (channels 0 & 1) --
-        spots_fols2 = Atlas()(
+        spots_fols2 = AtlasSpotDetection()(
             input_image=ch_fols2["output_image"],
             name="atlas_fols2",
         )
-        spots_csfr1 = Atlas()(
+        spots_csfr1 = AtlasSpotDetection()(
             input_image=ch_csfr1["output_image"],
             name="atlas_csfr1",
         )
@@ -170,7 +174,7 @@ def build_synthetic_fish_workflow(
     """Build a lightweight FISH-like workflow for tests and examples.
 
     This graph keeps the same high-level shape as the CIL workflow but replaces
-    Atlas and Cellpose with small package tools that can run on a synthetic
+    AtlasSpotDetection and Cellpose with small package tools that can run on a synthetic
     fixture in normal CI.
     """
     import imageio.v3 as iio

@@ -5,8 +5,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import bioimageflow_common_tools.atlas as atlas_module
-from bioimageflow_common_tools.atlas import Atlas
+import bioimageflow_spot_tools.atlas as atlas_module
+from bioimageflow_spot_tools import AtlasSpotDetection
 from bioimageflow_core import Arguments, ExecutionContext
 
 import pytest
@@ -41,14 +41,14 @@ def test_atlas_runs_external_command_in_execution_row_dir(tmp_path, monkeypatch)
         Path(kwargs["output_path"]).write_text("detections")
 
     monkeypatch.setattr(
-        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        "bioimageflow_spot_tools.atlas.run_external_command_with_staged_output",
         fake_run_staged,
     )
 
     output_path = tmp_path / "assets" / "detections.tif"
     context = _execution_context(tmp_path)
 
-    result = Atlas().process_row(
+    result = AtlasSpotDetection().process_row(
         Arguments(
             input_image=tmp_path / "input.tif",
             output_image=output_path,
@@ -85,9 +85,9 @@ def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypat
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
+    monkeypatch.setattr("bioimageflow_spot_tools.atlas.run_external_command", fake_run)
     monkeypatch.setattr(
-        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        "bioimageflow_spot_tools.atlas.run_external_command_with_staged_output",
         fake_run_staged,
     )
     monkeypatch.chdir(tmp_path)
@@ -95,7 +95,7 @@ def test_atlas_blobsref_fallback_uses_shared_work_atlas_path(tmp_path, monkeypat
     relative_root = Path("relative_run")
     context = _execution_context(relative_root)
 
-    Atlas().process_row(
+    AtlasSpotDetection().process_row(
         Arguments(
             input_image=tmp_path / "input.tif",
             output_image=tmp_path / "assets" / "detections.tif",
@@ -143,14 +143,14 @@ def test_atlas_blobsref_fallback_is_generated_once_for_parallel_rows(
     fake_package_file.parent.mkdir()
     fake_package_file.write_text("")
     monkeypatch.setattr(atlas_module, "__file__", str(fake_package_file))
-    monkeypatch.setattr("bioimageflow_common_tools.atlas.run_external_command", fake_run)
+    monkeypatch.setattr("bioimageflow_spot_tools.atlas.run_external_command", fake_run)
     monkeypatch.setattr(
-        "bioimageflow_common_tools.atlas.run_external_command_with_staged_output",
+        "bioimageflow_spot_tools.atlas.run_external_command_with_staged_output",
         fake_run_staged,
     )
 
     def run_row(i: int) -> None:
-        Atlas().process_row(
+        AtlasSpotDetection().process_row(
             Arguments(
                 input_image=tmp_path / f"input_{i}.tif",
                 output_image=tmp_path / "assets" / f"detections_{i}.tif",

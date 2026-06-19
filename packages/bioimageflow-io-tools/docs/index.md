@@ -5,12 +5,13 @@ workflow-local image normalization, axis slicing, and simple OME-compatible
 output. It is intentionally focused on deterministic file operations rather
 than biological analysis.
 
-Core libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr writer in
-the package code. A future Bio-Formats or bioio-backed tool can live here, but
-the current public tools are lightweight and suitable for fast CI tests.
+Core lightweight libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr writer in the package code.
+`BioIOConvertImage` uses an explicit bioio/plugin-backed environment for broad microscopy formats such as CZI and OME-Zarr.
 
 ## Tools
 
+- <a href="tools/bioio_convert_image.md">BioIOConvertImage</a>: broad bioio/plugin-backed
+  format conversion for CZI, OME-Zarr, OME-TIFF, TIFF, PNG, and similar formats.
 - <a href="tools/read_image.md">ReadImage</a>: read an image and write a workflow-local
   copy.
 - <a href="tools/read_image_metadata.md">ReadImageMetadata</a>: report shape, dtype,

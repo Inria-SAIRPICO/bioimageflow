@@ -10,6 +10,7 @@
 ```{toctree}
 :maxdepth: 1
 
+tools/bioio_convert_image
 tools/convert_image_format
 tools/convert_to_ome_tiff
 tools/convert_to_ome_zarr

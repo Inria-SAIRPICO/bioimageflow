@@ -11,6 +11,7 @@
 :maxdepth: 1
 
 tools/assign_spots_to_labels
+tools/atlas_spot_detection
 tools/detect_spots
 tools/filter_spots
 tools/render_spots

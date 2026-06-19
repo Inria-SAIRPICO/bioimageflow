@@ -1,7 +1,7 @@
 # BioImageFlow SAIRPICO Tools
 
-`bioimageflow-sairpico-tools` owns BioImageFlow wrappers for the legacy
-SAIRPICO command-line programs. The package exposes point-spread-function
+`bioimageflow-sairpico-tools` owns BioImageFlow wrappers for the SAIRPICO
+command-line programs. The package exposes point-spread-function
 generation, deconvolution, denoising, and hotspot detection tools while keeping
 the original binaries in conda-backed `EnvironmentSpec` definitions.
 
@@ -33,8 +33,8 @@ The package declares three environments:
 - `hotspot`: `bioimageit::hotspot==1.0.0` from `conda-forge` and `bioimageit`;
   used by `HotspotDetection`.
 
-Inputs are legacy image files, with public image wrappers declaring `png`,
-`tif`, and `tiff` formats. The underlying SAIRPICO binaries are external
+Inputs are image files, with public image wrappers declaring `png`, `tif`, and
+`tiff` formats. The underlying SAIRPICO binaries are external
 processes, so failures are usually surfaced as missing binaries, missing PSF
 files for 3D deconvolution, unsupported file layouts, or non-zero subprocess
 exit codes.

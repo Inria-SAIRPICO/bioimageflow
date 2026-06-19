@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -14,6 +16,7 @@ pytestmark = pytest.mark.package_tools
 
 def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     from bioimageflow_io_tools import (
+        BioIOConvertImage,
         ConvertImageFormat,
         ConvertToOmeTiff,
         ConvertToOmeZarr,
@@ -32,6 +35,7 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     iio.imwrite(source, data, photometric="minisblack")
 
     for tool in [
+        BioIOConvertImage,
         ReadImage,
         ReadImageMetadata,
         ValidateImageLayout,
@@ -55,6 +59,10 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     convert_outputs = serialize_output_schema(ConvertImageFormat)
     assert "output_image" not in convert_inputs
     assert "output_image" in convert_outputs
+    bioio_inputs = serialize_input_schema(BioIOConvertImage)
+    bioio_outputs = serialize_output_schema(BioIOConvertImage)
+    assert bioio_inputs["dim_order"]["default"] == "TCZYX"
+    assert "output_image" in bioio_outputs
 
     read_output = tmp_path / "read.tif"
     read = ReadImage().process_row(
@@ -232,6 +240,91 @@ def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path)
     assert (ome_zarr_output / "0" / ".zarray").exists()
 
 
+def test_bioio_convert_image_uses_bioio_plugins_and_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bioimageflow_io_tools import BioIOConvertImage
+
+    source = tmp_path / "source.czi"
+    source.write_text("fake czi")
+    output = tmp_path / "converted.ome.tiff"
+    data = np.arange(2 * 3 * 4 * 5 * 6, dtype=np.uint16).reshape(2, 3, 4, 5, 6)
+    saves: list[tuple[np.ndarray, str, str]] = []
+
+    class FakeBioImage:
+        dims = "TCZYX"
+        shape = data.shape
+        dtype = data.dtype
+
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.scene = None
+
+        def set_scene(self, scene: int) -> None:
+            self.scene = scene
+
+        def get_image_data(self, dim_order: str, **dim_kwargs: int) -> np.ndarray:
+            assert dim_order == "TCZYX"
+            assert dim_kwargs == {"C": 1, "Z": 2, "T": 0}
+            return data[0:1, 1:2, 2:3]
+
+    class FakeOmeTiffWriter:
+        @staticmethod
+        def save(array: np.ndarray, path: str, *, dim_order: str) -> None:
+            saves.append((array.copy(), path, dim_order))
+            Path(path).write_text("ome tiff")
+
+    class FakeOMEZarrWriter:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+        def write_full_volume(self, array: np.ndarray) -> None:
+            Path(str(self.kwargs["store"])).mkdir(parents=True, exist_ok=True)
+
+    class FakeTwoDWriter:
+        @staticmethod
+        def save(array: np.ndarray, path: str, dim_order: str | None = None) -> None:
+            Path(path).write_text(f"{array.shape}:{dim_order}")
+
+    bioio_module = types.ModuleType("bioio")
+    bioio_module.BioImage = FakeBioImage
+    ome_tiff_writers = types.ModuleType("bioio_ome_tiff.writers")
+    ome_tiff_writers.OmeTiffWriter = FakeOmeTiffWriter
+    ome_zarr_writers = types.ModuleType("bioio_ome_zarr.writers")
+    ome_zarr_writers.OMEZarrWriter = FakeOMEZarrWriter
+    imageio_writers = types.ModuleType("bioio_imageio.writers")
+    imageio_writers.TwoDWriter = FakeTwoDWriter
+
+    monkeypatch.setitem(sys.modules, "bioio", bioio_module)
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff", types.ModuleType("bioio_ome_tiff"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff.writers", ome_tiff_writers)
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr", types.ModuleType("bioio_ome_zarr"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr.writers", ome_zarr_writers)
+    monkeypatch.setitem(sys.modules, "bioio_imageio", types.ModuleType("bioio_imageio"))
+    monkeypatch.setitem(sys.modules, "bioio_imageio.writers", imageio_writers)
+
+    result = BioIOConvertImage().process_row(
+        Arguments(
+            input_image=source,
+            output_image=output,
+            dim_order="TCZYX",
+            scene=2,
+            channel=1,
+            z=2,
+            timepoint=0,
+        )
+    )
+
+    assert result.output_image == output
+    assert output.read_text() == "ome tiff"
+    assert saves
+    saved_array, saved_path, saved_dim_order = saves[0]
+    assert saved_path == str(output)
+    assert saved_dim_order == "YX"
+    np.testing.assert_array_equal(saved_array, data[0, 1, 2])
+
+
 def test_select_scene_supports_ordinary_images_and_tiff_series(tmp_path: Path) -> None:
     import tifffile
 
@@ -371,6 +464,7 @@ def test_io_package_all_exports_only_public_tools() -> None:
     import bioimageflow_io_tools
 
     assert sorted(bioimageflow_io_tools.__all__) == [
+        "BioIOConvertImage",
         "ConvertImageFormat",
         "ConvertToOmeTiff",
         "ConvertToOmeZarr",

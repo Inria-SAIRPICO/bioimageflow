@@ -1,4 +1,4 @@
-"""ConvertImage — convert image file formats using bioio."""
+"""BioIOConvertImage — convert image file formats using bioio."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -33,16 +33,16 @@ bioio_env = EnvironmentSpec(
 )
 
 
-class ConvertImage(ProcessingTool):
+class BioIOConvertImage(ProcessingTool):
     """Convert image file formats using bioio.
 
     Supports reading CZI, DV, PNG, GIF, LIF, ND2, OME-TIFF, OME-ZARR,
     SLDY, TIFF, and Bio-Formats files. The extension of the output file
     specifies the target format.
     """
-    display_name = "Convert Image"
+    display_name = "BioIO Convert Image"
     documentation = (
-        "Convert image file formats using bioio. The output format is "
+        "Convert broad microscopy image file formats using bioio. The output format is "
         "determined by the output file extension."
     )
     category = Category.CONVERSION

@@ -9,6 +9,9 @@ This is the workflow-level converter for common normalization steps. It can
 select one TIFF scene and optionally export one channel, Z plane, or timepoint
 before changing the container format.
 
+Use `ConvertImageFormat` for deterministic lightweight conversion when imageio or tifffile can read the source.
+Use `BioIOConvertImage` for broad bioio/plugin-backed formats such as CZI, OME-Zarr, or sources that require dedicated microscopy reader plugins.
+
 ## Inputs
 
 - `input_image`: image to convert.

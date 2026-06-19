@@ -7,12 +7,13 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow.validation import serialize_output_schema
+from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments
 from bioimageflow_common_tools import Files
 import bioimageflow_spot_tools.detection as spot_detection
 from bioimageflow_spot_tools import (
     AssignSpotsToLabels,
+    AtlasSpotDetection,
     DetectSpots,
     FilterSpots,
     RenderSpots,
@@ -61,10 +62,14 @@ def test_detect_spots_finds_synthetic_puncta(tmp_path: Path) -> None:
 
 
 def test_spot_label_output_schemas_declare_uint32_label_contract() -> None:
+    atlas_inputs = serialize_input_schema(AtlasSpotDetection)
+    atlas_outputs = serialize_output_schema(AtlasSpotDetection)
     detect_schema = serialize_output_schema(DetectSpots)
     render_schema = serialize_output_schema(RenderSpots)
     labels_schema = serialize_output_schema(SpotsToLabels)
 
+    assert atlas_inputs["input_image"]["image_spec"]["formats"] == ["tiff"]
+    assert atlas_outputs["output_image"]["image_spec"]["semantics"] == ["binary"]
     assert detect_schema["output_labels"]["image_spec"]["dtypes"] == ["uint32"]
     assert render_schema["output_image"]["image_spec"]["dtypes"] == ["uint32", "uint8"]
     assert render_schema["output_image"]["image_spec"]["semantics"] == ["binary", "label"]

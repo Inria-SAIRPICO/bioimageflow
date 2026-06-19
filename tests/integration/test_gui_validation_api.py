@@ -275,13 +275,6 @@ class TestFromDictToDict:
         assert isinstance(wf, Workflow)
         assert sum(1 for e in errs if e.kind == "unknown_tool") == 2
 
-    def test_collect_errors_kwarg_is_removed(self, tmp_path: Path) -> None:
-        # The removed `collect_errors=` kwarg must
-        # raise TypeError.
-        with pytest.raises(TypeError):
-            Workflow.from_dict(self._bad_data(tmp_path), collect_errors=True)  # type: ignore[call-overload]
-
-
 # ---------------------------------------------------------------------------
 # A4 — Workflow.validate
 # ---------------------------------------------------------------------------

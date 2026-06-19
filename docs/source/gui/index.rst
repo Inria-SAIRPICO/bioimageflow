@@ -16,7 +16,6 @@ Workflow scripts and tool authors should read the
    wire_format
    from_dict
    workflow_session
-   platform_migration_guide
    tool_registry
    live_validation
    planning_and_cache

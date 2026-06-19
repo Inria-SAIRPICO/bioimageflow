@@ -2,7 +2,7 @@ Quick Start
 ===========
 
 This guide walks you through building and running your first BioImageFlow
-pipeline in under 5 minutes.
+pipeline.
 
 Files created by BioImageFlow
 -----------------------------

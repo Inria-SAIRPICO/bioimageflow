@@ -1,14 +1,14 @@
 """
 Parameter Space Exploration Workflow
 
-This workflow demonstrates combinatorial parameter testing for the Atlas spot
+This workflow demonstrates combinatorial parameter testing for the AtlasSpotDetection
 detection algorithm on a set of fluorescence microscopy images.
 
 The workflow:
 1. Lists input images from a directory using the Files tool.
 2. Generates parameter value lists for sensitivity and size using Generate.
 3. Performs a Cartesian product (cross-join) to create a full parameter grid.
-4. Executes Atlas detection for each image/parameter combination.
+4. Executes AtlasSpotDetection for each image/parameter combination.
 5. Creates a mosaic visualization of all detection results.
 """
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.node import Node
 from bioimageflow_common_tools import CrossJoin, Files, Generate, Mosaic
-from bioimageflow_common_tools.atlas import Atlas
+from bioimageflow_spot_tools import AtlasSpotDetection
 
 
 def build_parameter_space_workflow(
@@ -79,8 +79,8 @@ def build_parameter_space_workflow(
         # Note: order matters for CrossJoin; we pass images first so that the
         # output includes columns: path, filename, sensitivity, and size.
 
-        # Step 4: Atlas detection for each combination
-        detections = Atlas()(
+        # Step 4: AtlasSpotDetection for each combination
+        detections = AtlasSpotDetection()(
             input_image=param_grid["path"],
             p_value=param_grid["sensitivity"],
             gaussian_std=param_grid["size"],
@@ -88,7 +88,7 @@ def build_parameter_space_workflow(
         )
 
         # Step 5: Mosaic of all detection results. Mosaic accepts scalar image
-        # semantics, so Atlas's binary detections can be visualized directly.
+        # semantics, so AtlasSpotDetection's binary masks can be visualized directly.
         mosaic = Mosaic()(
             input_image=detections["output_image"],
             columns=6,

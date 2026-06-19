@@ -4,6 +4,7 @@ Tools for puncta and spot quantification.
 
 ## Tools
 
+- `AtlasSpotDetection`: wraps the external Atlas CLI for adaptive 2D TIFF spot detection.
 - `DetectSpots`: detects local maxima after DoG/LoG-compatible filtering and returns one dataframe row per spot plus a label image.
 - `AssignSpotsToLabels`: samples a label image at each detected spot coordinate.
 - `SpotSummary`: aggregates spot counts and intensities per label.

@@ -10,11 +10,9 @@
 ```{toctree}
 :maxdepth: 1
 
-tools/atlas
 tools/collect
 tools/concat
 tools/connected_components
-tools/convert_image
 tools/cross_join
 tools/extract_channel
 tools/files

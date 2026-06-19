@@ -34,20 +34,6 @@ The package is intended for users who need to assemble or inspect workflows with
   images.
 - <a href="tools/mosaic.md">Mosaic</a>: build a grid image from workflow rows.
 
-## Legacy Module Documentation
-
-These wrappers remain documented for existing workflows, but they are not
-re-exported from `bioimageflow_common_tools` and should not be treated as
-current public common-tools APIs.
-
-- <a href="tools/atlas.md">Atlas</a>: legacy module-level wrapper for the Atlas spot detection
-  CLI, currently used by existing FISH examples. Its core dependency is the
-  external Atlas CLI from the `bioimageit::atlas` conda package.
-- <a href="tools/convert_image.md">ConvertImage</a>: legacy module-level bioio conversion wrapper.
-  Prefer `bioimageflow-io-tools` for new simple OME normalization workflows.
-  Its core dependencies are bioio, bioio writer plugins, Pillow, NumPy, and
-  tifffile.
-
 ## Demo Workflow
 
 - <a href="workflows/common_glue.md">Common glue workflow</a>: source discovery,

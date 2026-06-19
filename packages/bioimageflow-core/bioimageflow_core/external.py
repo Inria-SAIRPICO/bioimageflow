@@ -220,7 +220,7 @@ def run_external_command_with_staged_output(
 ) -> Any:
     """Run a command with one file output redirected through a short path.
 
-    Some legacy native tools fail when asked to write directly to long or
+    Some external native tools fail when asked to write directly to long or
     symlink-expanded paths. This helper replaces the requested output path in
     ``command`` with a short temporary file, runs the command, then copies the
     produced file back to the requested final path.

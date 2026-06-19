@@ -126,10 +126,10 @@ runs in its own environment, and emits a one-row output DataFrame:
 Both flavours are valid sources; pick the one that matches the
 environment requirements of the loader.
 
-Branching falls out for free
+Branching
 ----------------------------
 
-There is no separate "branching" mechanism in BioImageFlow — branches are
+Branches are
 just two nodes that read the same upstream column:
 
 .. code-block:: python

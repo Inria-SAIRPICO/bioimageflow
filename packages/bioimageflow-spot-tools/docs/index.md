@@ -11,6 +11,8 @@ Big-FISH remains a future optional evaluation backend, not a current default dep
 
 ## Tools
 
+- <a href="tools/atlas_spot_detection.md">AtlasSpotDetection</a>: external Atlas CLI-backed
+  adaptive spot detection for 2D TIFF intensity images.
 - <a href="tools/detect_spots.md">DetectSpots</a>: LoG, DoG, or local-maxima spot
   detection.
 - <a href="tools/assign_spots_to_labels.md">AssignSpotsToLabels</a>: sample label values

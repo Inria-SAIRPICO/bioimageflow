@@ -8,7 +8,7 @@ Sub-workflows defined here:
 
   SpotDetection
   ~~~~~~~~~~~~~
-  Extract a channel → detect spots with Atlas → label connected components.
+  Extract a channel → detect spots with AtlasSpotDetection → label connected components.
   Used twice in the FISH pipeline (once for FOLS2, once for CSF1R).
 
   SpotAnalysis  (nested — contains SpotDetection)
@@ -28,11 +28,11 @@ from bioimageflow_common_tools import (
     ConnectedComponents,
     LabelOverlaps,
 )
-from bioimageflow_common_tools.atlas import Atlas
+from bioimageflow_spot_tools import AtlasSpotDetection
 
 
 # ---------------------------------------------------------------------------
-# SpotDetection: Extract channel → Atlas → Connected components
+# SpotDetection: Extract channel → AtlasSpotDetection → Connected components
 # ---------------------------------------------------------------------------
 
 class SpotDetection(SubWorkflow):
@@ -40,7 +40,7 @@ class SpotDetection(SubWorkflow):
 
     Pipeline::
 
-        ExtractChannel → Atlas → ConnectedComponents
+        ExtractChannel → AtlasSpotDetection → ConnectedComponents
 
     Inputs
     ------
@@ -97,7 +97,7 @@ class SpotDetection(SubWorkflow):
 
     def build(self, inputs):  # type: ignore[override]
         extract = ExtractChannel()
-        atlas = Atlas()
+        atlas = AtlasSpotDetection()
         cc = ConnectedComponents()
 
         channel = extract(

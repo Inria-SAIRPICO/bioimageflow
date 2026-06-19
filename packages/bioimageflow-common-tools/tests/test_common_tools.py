@@ -45,6 +45,8 @@ def test_common_exports_exclude_moved_heavy_tools() -> None:
     assert (
         importlib.util.find_spec("bioimageflow_common_tools.stardist_segmenter") is None
     )
+    assert importlib.util.find_spec("bioimageflow_common_tools.atlas") is None
+    assert importlib.util.find_spec("bioimageflow_common_tools.convert_image") is None
 
 
 def test_common_package_all_exports_only_public_tools() -> None:
@@ -82,7 +84,7 @@ class BlockBioImageFlow:
         return None
 
 sys.meta_path.insert(0, BlockBioImageFlow())
-import bioimageflow_common_tools.atlas
+import bioimageflow_common_tools.connected_components
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
@@ -95,7 +97,7 @@ import bioimageflow_common_tools.atlas
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_common_docs_separate_public_tools_from_legacy_module_docs() -> None:
+def test_common_docs_list_only_public_tools() -> None:
     index = (
         Path(__file__).parents[1]
         / "docs"
@@ -103,8 +105,8 @@ def test_common_docs_separate_public_tools_from_legacy_module_docs() -> None:
     ).read_text()
 
     assert "## Public Tools" in index
-    assert "## Legacy Module Documentation" in index
-    public_tools = index.split("## Legacy Module Documentation", maxsplit=1)[0]
+    assert "## Compatibility Tools" not in index
+    public_tools = index
     assert "Files" in public_tools
     assert 'href="tools/files.md"' in public_tools
     assert "Mosaic" in public_tools

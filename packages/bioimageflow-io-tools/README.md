@@ -1,11 +1,9 @@
 # bioimageflow-io-tools
 
-Optional BioImageFlow package for deterministic image ingestion, metadata
-inspection, axis validation, slicing, and lightweight format conversion.
+Optional BioImageFlow package for image ingestion, metadata inspection, axis validation, slicing, lightweight format conversion, and explicit bioio/plugin-backed conversion.
 
-Core libraries: imageio, NumPy, tifffile, and the package's minimal OME-Zarr
-writer. The package intentionally avoids heavy Bio-Formats dependencies for the
-current P0 tools so tests can run quickly with generated TIFF fixtures.
+Core libraries for lightweight tools are imageio, NumPy, tifffile, and the package's minimal OME-Zarr writer.
+`BioIOConvertImage` declares a separate bioio/plugin-backed runtime for broad formats such as CZI and OME-Zarr.
 
 ## Tools
 
@@ -13,6 +11,7 @@ current P0 tools so tests can run quickly with generated TIFF fixtures.
 - `ReadImageMetadata`
 - `ValidateImageLayout`
 - `ConvertImageFormat`
+- `BioIOConvertImage`
 - `ConvertToOmeTiff`
 - `ConvertToOmeZarr`
 - `SelectScene`

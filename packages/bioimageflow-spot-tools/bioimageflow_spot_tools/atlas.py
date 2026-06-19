@@ -1,4 +1,4 @@
-"""Atlas — adaptive spot detection via external CLI."""
+"""AtlasSpotDetection — adaptive spot detection via external CLI."""
 
 import tempfile
 import time
@@ -67,13 +67,13 @@ def _ensure_generated_blobs_file(work_dir: Path) -> Path:
     return blobs_file.resolve()
 
 
-class Atlas(ProcessingTool):
+class AtlasSpotDetection(ProcessingTool):
     """ATLAS adaptive spot detection.
 
     The spot size is automatically selected and the detection threshold
     adapts to the local image dynamics. Wraps the ``atlas`` CLI tool.
     """
-    display_name = "Atlas"
+    display_name = "Atlas Spot Detection"
     documentation = (
         "ATLAS is a spot detection method. The spots size is "
         "automatically selected and the detection threshold adapts to "
@@ -151,7 +151,7 @@ class Atlas(ProcessingTool):
         else:
             work_dir = context.work_dir
             if context.row_dir is None:
-                raise ValueError("Atlas.process_row requires context.row_dir.")
+                raise ValueError("AtlasSpotDetection.process_row requires context.row_dir.")
             row_dir = context.row_dir
         work_dir.mkdir(parents=True, exist_ok=True)
         row_dir.mkdir(parents=True, exist_ok=True)

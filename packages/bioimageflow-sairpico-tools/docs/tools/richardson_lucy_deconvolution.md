@@ -15,7 +15,8 @@ available.
 - `psf_image`: existing 3D PSF image required only for `3D` mode.
 - `niter`: iteration count. Default `15`; minimum `1`.
 - `regularization_lambda`: regularization value for non-3D modes. Default
-  `0.0`. The wrapper passes it to the legacy `-lambda` CLI option.
+  `0.0`. The wrapper passes it to the SAIRPICO `-lambda` CLI option; the Python
+  name avoids the reserved keyword `lambda`.
 - `padding`: whether to process border pixels with padding. Default `False`.
 
 ## Outputs

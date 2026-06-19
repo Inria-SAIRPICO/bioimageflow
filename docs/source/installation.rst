@@ -16,6 +16,12 @@ Install from PyPI
 
    pip install bioimageflow
 
+or in a `uv <https://docs.astral.sh/uv/>`_ project:
+
+.. code-block:: bash
+
+   uv add bioimageflow
+
 This installs both ``bioimageflow`` (the orchestrator) and ``bioimageflow-core``
 (the worker-safe core).
 
@@ -32,7 +38,7 @@ classes:
 
    pip install bioimageflow-common-tools
 
-The package is **not** part of the core surface; it is a curated set of basic
+The package is not part of the core surface; it is a curated set of basic
 tools built on top of ``bioimageflow`` and ``bioimageflow-core``. Workflow
 authors are free to use it directly, write their own tools following the same
 patterns, or mix both.

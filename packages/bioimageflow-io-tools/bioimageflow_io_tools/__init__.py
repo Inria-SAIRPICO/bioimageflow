@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .bioio_convert import BioIOConvertImage as BioIOConvertImage
     from .image_io import ConvertImageFormat as ConvertImageFormat
     from .image_io import ConvertToOmeTiff as ConvertToOmeTiff
     from .image_io import ConvertToOmeZarr as ConvertToOmeZarr
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 
 
 _EXPORTS = {
+    "BioIOConvertImage": ("bioio_convert", "BioIOConvertImage"),
     "ConvertImageFormat": ("image_io", "ConvertImageFormat"),
     "ConvertToOmeTiff": ("image_io", "ConvertToOmeTiff"),
     "ConvertToOmeZarr": ("image_io", "ConvertToOmeZarr"),
@@ -32,6 +34,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "BioIOConvertImage",
     "ConvertImageFormat",
     "ConvertToOmeTiff",
     "ConvertToOmeZarr",

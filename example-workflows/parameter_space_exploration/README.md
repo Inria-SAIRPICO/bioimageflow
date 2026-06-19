@@ -15,7 +15,7 @@ The workflow:
 1. Lists input images using the `Files` tool.
 2. Generates parameter value lists using the `Generate` tool (one for sensitivity, one for size).
 3. Performs a Cartesian product using `CrossJoin`.
-4. Executes `Atlas` spot detection on each image/parameter combination.
+4. Executes `AtlasSpotDetection` on each image/parameter combination.
 5. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
 
 ## Prerequisites
@@ -51,7 +51,7 @@ tests construct the graph without running Atlas.
 
 ## Test coverage
 
-Default tests verify that all parameter-grid and Atlas/mosaic nodes are
+Default tests verify that all parameter-grid and AtlasSpotDetection/mosaic nodes are
 registered in the workflow graph. Execution should be covered by an optional
 slow test with known input images and the Atlas binary available.
 
@@ -61,4 +61,4 @@ You can modify the parameter values, image pattern, mosaic columns, and tile siz
 
 ## GUI editing
 
-The dynamic-output schema added by `Generate.resolve_outputs` and the merge-tool `resolve_merge_schema` overrides means that this workflow is also buildable in the BioImageFlow platform GUI: per-column output pins for `Generate` and the downstream `CrossJoin` are resolved as soon as `column_name` is set, so dragging `param_grid["sensitivity"]` into `Atlas.p_value` works without any Python.
+The dynamic-output schema added by `Generate.resolve_outputs` and the merge-tool `resolve_merge_schema` overrides means that this workflow is also buildable in the BioImageFlow platform GUI: per-column output pins for `Generate` and the downstream `CrossJoin` are resolved as soon as `column_name` is set, so dragging `param_grid["sensitivity"]` into `AtlasSpotDetection.p_value` works without any Python.

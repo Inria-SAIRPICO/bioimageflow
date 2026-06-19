@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .atlas import AtlasSpotDetection as AtlasSpotDetection
     from .assignment import AssignSpotsToLabels as AssignSpotsToLabels
     from .detection import DetectSpots as DetectSpots
     from .summary import SpotSummary as SpotSummary
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 _EXPORTS = {
     "AssignSpotsToLabels": ("assignment", "AssignSpotsToLabels"),
+    "AtlasSpotDetection": ("atlas", "AtlasSpotDetection"),
     "DetectSpots": ("detection", "DetectSpots"),
     "FilterSpots": ("table_tools", "FilterSpots"),
     "RenderSpots": ("table_tools", "RenderSpots"),
@@ -27,6 +29,7 @@ _EXPORTS = {
 
 __all__ = [
     "AssignSpotsToLabels",
+    "AtlasSpotDetection",
     "DetectSpots",
     "FilterSpots",
     "RenderSpots",

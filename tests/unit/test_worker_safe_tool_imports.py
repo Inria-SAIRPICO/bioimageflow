@@ -27,8 +27,8 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
 
         modules = [
             "bioimageflow_common_tools",
-            "bioimageflow_common_tools.atlas",
             "bioimageflow_io_tools",
+            "bioimageflow_io_tools.bioio_convert",
             "bioimageflow_io_tools.image_io",
             "bioimageflow_restoration_tools",
             "bioimageflow_restoration_tools.restore",
@@ -39,6 +39,7 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             "bioimageflow_segmentation_tools",
             "bioimageflow_segmentation_tools.classical",
             "bioimageflow_spot_tools",
+            "bioimageflow_spot_tools.atlas",
             "bioimageflow_spot_tools.assignment",
             "bioimageflow_spot_tools.detection",
             "bioimageflow_tracking_tools",
@@ -56,6 +57,7 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
                 "Mosaic",
             ],
             "bioimageflow_io_tools": [
+                "BioIOConvertImage",
                 "ConvertImageFormat",
                 "ConvertToOmeTiff",
                 "ConvertToOmeZarr",
@@ -111,6 +113,7 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             ],
             "bioimageflow_spot_tools": [
                 "AssignSpotsToLabels",
+                "AtlasSpotDetection",
                 "DetectSpots",
                 "RenderSpots",
                 "SpotsToLabels",

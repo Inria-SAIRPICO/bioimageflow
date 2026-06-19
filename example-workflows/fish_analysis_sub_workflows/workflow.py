@@ -4,7 +4,7 @@ FISH Image Analysis Workflow — using Sub-Workflows
 
 This is a refactored version of the fish_analysis workflow that uses
 SubWorkflows to eliminate duplication. The original workflow repeats the
-same three-step pattern (ExtractChannel → Atlas → ConnectedComponents)
+same three-step pattern (ExtractChannel → AtlasSpotDetection → ConnectedComponents)
 for both the FOLS2 and CSF1R channels. Here, that pattern is packaged
 as a reusable ``SpotDetection`` sub-workflow.
 
@@ -123,7 +123,7 @@ def build_fish_workflow(
         # -- 4. Spot analysis for each channel --
         #
         # This is where sub-workflows shine: instead of repeating
-        # ExtractChannel → Atlas → ConnectedComponents → LabelOverlaps
+        # ExtractChannel → AtlasSpotDetection → ConnectedComponents → LabelOverlaps
         # for each channel, we call SpotAnalysis twice with different params.
         #
         # SpotAnalysis is a *nested* sub-workflow: it contains SpotDetection

@@ -72,7 +72,7 @@ def test_sairpico_tools_have_serializable_schemas(tool_cls: type[ProcessingTool]
     assert all("type" in field for field in outputs.values())
 
 
-def test_legacy_lambda_parameter_is_renamed() -> None:
+def test_reserved_lambda_parameter_is_exposed_with_python_safe_name() -> None:
     richardson_schema = serialize_input_schema(RichardsonLucyDeconvolution)
     wiener_schema = serialize_input_schema(WienerDeconvolution)
 
@@ -98,7 +98,7 @@ def test_deconvolution_psf_schema_serializes_as_image_input() -> None:
         assert psf_schema["image_spec"]["formats"] == ["png", "tif", "tiff"]
 
 
-def test_legacy_input_image_formats_are_declared() -> None:
+def test_sairpico_input_image_formats_are_declared() -> None:
     image_input_tools = [
         RichardsonLucyDeconvolution,
         WienerDeconvolution,
