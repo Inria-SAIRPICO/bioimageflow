@@ -446,7 +446,7 @@ def test_fake_dependency_priority_workflow_tests_stay_in_fast_tier() -> None:
     fake_dependency_test_names = {
         "test_cellpose_stardist_workflow_executes_with_fake_model_runtimes",
         "test_parameter_space_workflow_executes_with_fake_atlas_binary",
-        "test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary",
+        "test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binary",
     }
     forbidden_markers = {
         "acceptance",

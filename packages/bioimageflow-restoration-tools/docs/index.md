@@ -13,6 +13,8 @@ SAIRPICO command-line restoration tools live in `bioimageflow-sairpico-tools`.
 
 - [RestoreImage](tools/restore_image.md): apply a TV, bilateral, Gaussian, or
   unsharp-style restoration baseline.
+- [CAREamicsPredict](tools/careamics_predict.md): CAREamics-style prediction with deterministic baseline mode.
+- [RestorationMetrics](tools/restoration_metrics.md): compare degraded and restored images against a clean reference.
 - [BenchmarkRestoration](tools/benchmark_restoration.md): generate a synthetic clean/degraded/restored benchmark and dataframe metrics.
 - [GaussianDenoise](tools/gaussian_denoise.md): Gaussian smoothing baseline.
 - [MedianDenoise](tools/median_denoise.md): median denoising baseline.

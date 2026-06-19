@@ -38,13 +38,12 @@ from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
-from bioimageflow_common_tools import Collect, ExtractChannel, ConnectedComponents, LabelOverlaps
+from bioimageflow_common_tools import Collect, ExtractChannel
 from bioimageflow_io_tools import ReadImage
 from bioimageflow_segmentation_tools import Cellpose3
 from bioimageflow_segmentation_tools import ThresholdSegment
 from bioimageflow_spot_tools import (
     AssignSpotsToLabels,
-    AtlasSpotDetection,
     DetectSpots,
     SpotSummary,
 )
@@ -56,6 +55,7 @@ if _this_dir not in sys.path:
 
 from tools.download_images import DownloadImages  # noqa: E402
 from tools.average_spots_per_nucleus import AverageSpotsPerNucleus  # noqa: E402
+from tools.marker_spot_analysis import MarkerSpotAnalysis  # noqa: E402
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
@@ -105,59 +105,34 @@ def build_fish_workflow(
             name="read_image",
         )
 
-        # -- 3. Channel extraction (3 parallel branches) --
-        ch_fols2 = ExtractChannel()(
-            input_image=converted["output_image"], channel=0,
-            name="extract_ch0_fols2",
-        )
-        ch_csfr1 = ExtractChannel()(
-            input_image=converted["output_image"], channel=1,
-            name="extract_ch1_csfr1",
-        )
+        # -- 3. Nuclei channel extraction before Cellpose v3 --
         ch_nuclei = ExtractChannel()(
             input_image=converted["output_image"], channel=2,
             name="extract_ch2_nuclei",
         )
-
-        # -- 4. Spot detection (channels 0 & 1) --
-        spots_fols2 = AtlasSpotDetection()(
-            input_image=ch_fols2["output_image"],
-            name="atlas_fols2",
-        )
-        spots_csfr1 = AtlasSpotDetection()(
-            input_image=ch_csfr1["output_image"],
-            name="atlas_csfr1",
-        )
-
-        labels_fols2 = ConnectedComponents()(
-            input_image=spots_fols2["output_image"],
-            name="cc_fols2",
-        )
-        labels_csfr1 = ConnectedComponents()(
-            input_image=spots_csfr1["output_image"],
-            name="cc_csfr1",
-        )
-
-        # -- 5. Nuclei segmentation (channel 2) --
         nuclei = Cellpose3()(
             input_image=ch_nuclei["output_image"],
             model_type="nuclei",
             name="cellpose3_nuclei",
         )
 
-        # -- 6. Spatial correlation --
-        overlaps_fols2 = LabelOverlaps()(
-            label_image=labels_fols2["output_image"],
-            reference_image=nuclei["mask"],
-            name="overlaps_fols2",
+        # -- 4. Marker spot analysis branches --
+        overlaps_fols2 = MarkerSpotAnalysis()(
+            input_image=converted["output_image"],
+            nuclei_labels=nuclei["mask"],
+            marker_name="FOLS2",
+            channel=0,
+            name="fols2_marker_spot_analysis",
         )
-        overlaps_csfr1 = LabelOverlaps()(
-            label_image=labels_csfr1["output_image"],
-            reference_image=nuclei["mask"],
-            name="overlaps_csfr1",
+        overlaps_csfr1 = MarkerSpotAnalysis()(
+            input_image=converted["output_image"],
+            nuclei_labels=nuclei["mask"],
+            marker_name="CSF1R",
+            channel=1,
+            name="csf1r_marker_spot_analysis",
         )
 
-        # -- 7. Statistical aggregation --
+        # -- 5. Statistical aggregation --
         stats = AverageSpotsPerNucleus()(
             overlaps_fols2, overlaps_csfr1,
             name="avg_spots_per_nucleus",

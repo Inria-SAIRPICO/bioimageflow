@@ -4,8 +4,10 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .linking import BTrackLink as BTrackLink
     from .labels import LabelsToObjects as LabelsToObjects
     from .linking import LinkObjects as LinkObjects
+    from .linking import UltrackLink as UltrackLink
     from .metrics import TrackMetrics as TrackMetrics
     from .table_tools import FilterObjects as FilterObjects
     from .table_tools import TrackQualityMetrics as TrackQualityMetrics
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
 
 
 _EXPORTS = {
+    "BTrackLink": ("linking", "BTrackLink"),
     "FilterObjects": ("table_tools", "FilterObjects"),
     "LabelsToObjects": ("labels", "LabelsToObjects"),
     "LinkObjects": ("linking", "LinkObjects"),
@@ -23,9 +26,11 @@ _EXPORTS = {
     "TrackSummary": ("table_tools", "TrackSummary"),
     "TrackTableValidate": ("table_tools", "TrackTableValidate"),
     "TracksToLabels": ("table_tools", "TracksToLabels"),
+    "UltrackLink": ("linking", "UltrackLink"),
 }
 
 __all__ = [
+    "BTrackLink",
     "FilterObjects",
     "LabelsToObjects",
     "LinkObjects",
@@ -34,6 +39,7 @@ __all__ = [
     "TrackSummary",
     "TrackTableValidate",
     "TracksToLabels",
+    "UltrackLink",
 ]
 
 

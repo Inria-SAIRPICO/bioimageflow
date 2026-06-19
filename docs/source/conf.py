@@ -71,3 +71,8 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
 }
+
+
+def setup(app):
+    app.add_js_file("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js")
+    app.add_js_file(None, body="mermaid.initialize({startOnLoad: true});")

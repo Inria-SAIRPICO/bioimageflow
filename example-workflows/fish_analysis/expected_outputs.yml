@@ -1,0 +1,21 @@
+workflow: fish_analysis
+outputs:
+  terminal_node: avg_spots_per_nucleus
+  required_columns:
+    - image_index
+    - avg_fols2_per_nucleus
+    - avg_csfr1_per_nucleus
+    - total_nuclei_fols2
+    - total_nuclei_csfr1
+    - total_fols2_spots
+    - total_csfr1_spots
+  required_nodes:
+    - download_cil_images
+    - read_image
+    - extract_ch2_nuclei
+    - cellpose3_nuclei
+    - fols2_marker_spot_analysis
+    - csf1r_marker_spot_analysis
+  deterministic_acceptance:
+    min_rows: 1
+    min_label_count: 1

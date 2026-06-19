@@ -1,0 +1,21 @@
+workflow: parameter_space_exploration
+outputs:
+  terminal_node: results_mosaic
+  required_columns:
+    - mosaic_path
+    - image_count
+  upstream_columns:
+    - path
+    - sensitivity
+    - size
+    - output_image
+  required_nodes:
+    - input_images
+    - sensitivity_values
+    - size_values
+    - parameter_grid
+    - atlas_detections
+    - results_mosaic
+  deterministic_acceptance:
+    row_count_formula: n_images * n_param_combinations
+    default_param_combinations: 6

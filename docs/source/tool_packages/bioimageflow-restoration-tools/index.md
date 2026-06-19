@@ -12,8 +12,10 @@
 
 tools/background_subtract
 tools/benchmark_restoration
+tools/careamics_predict
 tools/gaussian_denoise
 tools/median_denoise
+tools/restoration_metrics
 tools/restore_image
 tools/richardson_lucy_restoration
 tools/unsharp_mask

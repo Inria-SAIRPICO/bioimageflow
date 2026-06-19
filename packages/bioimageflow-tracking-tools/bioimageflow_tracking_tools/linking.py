@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import (
     Category,
+    EnvironmentSpec,
     GUIMeta,
     IOModel,
 )
@@ -89,3 +90,84 @@ class LinkObjects(DataFrameTool):
         result["track_id"] = [assignments[index] for index in result.index]
         result["track_count"] = len(set(assignments.values()))
         return result.drop(columns=["_bif_frame_sort", "_bif_label_sort"])
+
+
+ultrack_env = EnvironmentSpec(
+    name="tracking-ultrack",
+    dependencies={
+        "python": "3.12",
+        "pip": ["ultrack", "numpy", "pandas"],
+    },
+)
+
+btrack_env = EnvironmentSpec(
+    name="tracking-btrack",
+    dependencies={
+        "python": "3.12",
+        "pip": ["btrack", "numpy", "pandas"],
+    },
+)
+
+
+class UltrackLink(LinkObjects):
+    """Link objects with an Ultrack-compatible adapter."""
+
+    display_name = "Ultrack Link"
+    documentation = (
+        "Link object tables with Ultrack when runtime='ultrack'. The default "
+        "deterministic runtime uses the package nearest-neighbor linker for local tests."
+    )
+    tags = ["tracking", "ultrack", "linking"]
+    environment = ultrack_env
+
+    class Inputs(LinkObjects.Inputs):
+        runtime: Annotated[
+            str,
+            GUIMeta(
+                display_name="Runtime",
+                description="'deterministic' for tests or 'ultrack' for the real runtime.",
+            ),
+        ] = "deterministic"
+
+    def transform(self, df: Any, arguments: Any) -> Any:
+        runtime = str(getattr(arguments, "runtime", "deterministic"))
+        if runtime == "deterministic":
+            return super().transform(df, arguments)
+        if runtime != "ultrack":
+            raise ValueError("runtime must be 'deterministic' or 'ultrack'.")
+        ultrack = __import__("ultrack")
+        if hasattr(ultrack, "link_objects"):
+            return ultrack.link_objects(df, max_distance=arguments.max_distance)
+        return ultrack.Linker(max_distance=arguments.max_distance).link(df)
+
+
+class BTrackLink(LinkObjects):
+    """Link objects with a btrack-compatible adapter."""
+
+    display_name = "btrack Link"
+    documentation = (
+        "Link object tables with btrack when runtime='btrack'. The default "
+        "deterministic runtime uses the package nearest-neighbor linker for local tests."
+    )
+    tags = ["tracking", "btrack", "linking"]
+    environment = btrack_env
+
+    class Inputs(LinkObjects.Inputs):
+        runtime: Annotated[
+            str,
+            GUIMeta(
+                display_name="Runtime",
+                description="'deterministic' for tests or 'btrack' for the real runtime.",
+            ),
+        ] = "deterministic"
+
+    def transform(self, df: Any, arguments: Any) -> Any:
+        runtime = str(getattr(arguments, "runtime", "deterministic"))
+        if runtime == "deterministic":
+            return super().transform(df, arguments)
+        if runtime != "btrack":
+            raise ValueError("runtime must be 'deterministic' or 'btrack'.")
+        btrack = __import__("btrack")
+        if hasattr(btrack, "link_objects"):
+            return btrack.link_objects(df, max_distance=arguments.max_distance)
+        return btrack.Linker(max_distance=arguments.max_distance).link(df)

@@ -10,9 +10,11 @@ from bioimageflow.validation import serialize_input_schema, serialize_output_sch
 from bioimageflow_core import BaseTool
 from bioimageflow_segmentation_tools import (
     Cellpose3,
+    CellposeSAM,
     DistanceWatershedSegment,
     FilterLabels,
     LocalThresholdSegment,
+    nnInteractive,
     OtsuThresholdSegment,
     PostprocessLabels,
     SplitTouchingObjects,
@@ -21,12 +23,16 @@ from bioimageflow_segmentation_tools import (
     WatershedSegment,
 )
 from bioimageflow_segmentation_tools.cellpose_v3 import cellpose_v3_env
+from bioimageflow_segmentation_tools.cellpose_sam import cellpose_sam_env
 from bioimageflow_segmentation_tools.classical import classical_segmentation_env
+from bioimageflow_segmentation_tools.nninteractive import nninteractive_env
 from bioimageflow_segmentation_tools.stardist_segmenter import stardist_env
 
 
 SEGMENTATION_TOOLS = [
     Cellpose3,
+    CellposeSAM,
+    nnInteractive,
     StarDistSegmenter,
     ThresholdSegment,
     OtsuThresholdSegment,
@@ -46,6 +52,7 @@ def test_segmentation_package_all_exports_only_public_tools() -> None:
 
     assert sorted(segmentation.__all__) == [
         "Cellpose3",
+        "CellposeSAM",
         "DistanceWatershedSegment",
         "FilterLabels",
         "LocalThresholdSegment",
@@ -55,6 +62,7 @@ def test_segmentation_package_all_exports_only_public_tools() -> None:
         "StarDistSegmenter",
         "ThresholdSegment",
         "WatershedSegment",
+        "nnInteractive",
     ]
     assert "classical" not in segmentation.__all__
     assert all(issubclass(getattr(segmentation, name), BaseTool) for name in segmentation.__all__)
@@ -79,6 +87,12 @@ def test_heavy_tool_environments_are_isolated() -> None:
     assert StarDistSegmenter.environment is stardist_env
     assert "stardist==0.9.2" in stardist_env.dependencies["pip"]
     assert "cellpose==3.1.1.1" not in stardist_env.dependencies["pip"]
+
+    assert CellposeSAM.environment is cellpose_sam_env
+    assert "cellpose" in cellpose_sam_env.dependencies["pip"]
+
+    assert nnInteractive.environment is nninteractive_env
+    assert "nninteractive" in nninteractive_env.dependencies["pip"]
 
 
 def test_classical_tools_share_lightweight_environment() -> None:

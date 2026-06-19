@@ -1,0 +1,23 @@
+workflow: bbbc038_segmentation_benchmark
+outputs:
+  terminal_node: benchmark_segmentation_methods
+  required_columns:
+    - method
+    - input_image
+    - predicted_label_image
+    - reference_label_image
+    - predicted_label_count
+    - reference_label_count
+    - true_positive_pixels
+    - false_positive_pixels
+    - false_negative_pixels
+    - foreground_iou
+    - foreground_dice
+  methods:
+    - cellpose3
+    - cellpose_sam
+    - stardist
+    - classical_threshold
+  deterministic_acceptance:
+    row_count: 4
+    min_foreground_iou: 0.80

@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+import types
 
 import imageio.v3 as iio
 import numpy as np
@@ -10,6 +12,7 @@ from bioimageflow.validation import serialize_output_schema
 from bioimageflow_core import Arguments
 from bioimageflow_common_tools import Files
 from bioimageflow_tracking_tools import (
+    BTrackLink,
     FilterObjects,
     LabelsToObjects,
     LinkObjects,
@@ -18,6 +21,7 @@ from bioimageflow_tracking_tools import (
     TrackSummary,
     TrackTableValidate,
     TracksToLabels,
+    UltrackLink,
 )
 
 pytestmark = pytest.mark.package_tools
@@ -74,6 +78,70 @@ def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
     assert tracks["track_count"].iloc[0] == 2
     assert metrics["track_length"].tolist() == [3, 3]
     assert metrics["mean_track_length"].iloc[0] == 3.0
+
+
+def test_ultrack_and_btrack_adapters_use_deterministic_linker(tmp_path: Path) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+    objects = LabelsToObjects().process_row(Arguments(label_image=str(label_path)))
+    object_table = pd.DataFrame([vars(row) for row in objects])
+
+    ultrack_tracks = UltrackLink().transform(
+        object_table,
+        Arguments(max_distance=5.0, runtime="deterministic"),
+    )
+    btrack_tracks = BTrackLink().transform(
+        object_table,
+        Arguments(max_distance=5.0, runtime="deterministic"),
+    )
+
+    assert set(ultrack_tracks["track_id"]) == {1, 2}
+    assert set(btrack_tracks["track_id"]) == {1, 2}
+    assert ultrack_tracks["track_count"].iloc[0] == 2
+    assert btrack_tracks["track_count"].iloc[0] == 2
+
+
+def test_ultrack_and_btrack_adapters_dispatch_fake_runtimes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table = pd.DataFrame(
+        [{"frame": 0, "label": 1, "y": 1.0, "x": 2.0, "area": 4}]
+    )
+
+    ultrack_module = types.ModuleType("ultrack")
+    btrack_module = types.ModuleType("btrack")
+
+    def fake_ultrack_link(df: pd.DataFrame, *, max_distance: float) -> pd.DataFrame:
+        result = df.copy()
+        result["track_id"] = 10
+        result["track_count"] = 1
+        result["runtime"] = f"ultrack:{max_distance}"
+        return result
+
+    def fake_btrack_link(df: pd.DataFrame, *, max_distance: float) -> pd.DataFrame:
+        result = df.copy()
+        result["track_id"] = 20
+        result["track_count"] = 1
+        result["runtime"] = f"btrack:{max_distance}"
+        return result
+
+    ultrack_module.link_objects = fake_ultrack_link
+    btrack_module.link_objects = fake_btrack_link
+    monkeypatch.setitem(sys.modules, "ultrack", ultrack_module)
+    monkeypatch.setitem(sys.modules, "btrack", btrack_module)
+
+    ultrack_result = UltrackLink().transform(
+        table,
+        Arguments(max_distance=3.0, runtime="ultrack"),
+    )
+    btrack_result = BTrackLink().transform(
+        table,
+        Arguments(max_distance=4.0, runtime="btrack"),
+    )
+
+    assert ultrack_result.iloc[0]["track_id"] == 10
+    assert ultrack_result.iloc[0]["runtime"] == "ultrack:3.0"
+    assert btrack_result.iloc[0]["track_id"] == 20
+    assert btrack_result.iloc[0]["runtime"] == "btrack:4.0"
 
 
 def test_empty_tracking_tables_keep_declared_contracts() -> None:

@@ -1,0 +1,17 @@
+workflow: cell_counting_phenotyping
+outputs:
+  terminal_node: summarize_phenotypes
+  required_columns:
+    - image
+    - object_count
+    - mean_area
+    - total_area
+    - mean_centroid_y
+    - mean_centroid_x
+  required_nodes:
+    - segment_cells
+    - measure_regions
+    - summarize_phenotypes
+  deterministic_acceptance:
+    row_count: 1
+    min_object_count: 1

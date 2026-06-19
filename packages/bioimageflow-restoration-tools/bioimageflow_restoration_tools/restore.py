@@ -7,6 +7,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
+    EnvironmentSpec,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -115,3 +116,165 @@ class RestoreImage(ProcessingTool):
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, restored.astype(np.float32))
         return self.Outputs(output_image=output)
+
+
+careamics_env = EnvironmentSpec(
+    name="restoration-careamics",
+    dependencies={
+        "python": "3.12",
+        "pip": ["careamics", "imageio", "numpy", "tifffile"],
+    },
+)
+
+
+class CAREamicsPredict(ProcessingTool):
+    """Run CAREamics prediction or a deterministic baseline fallback."""
+
+    display_name = "CAREamics Predict"
+    documentation = (
+        "Run CAREamics restoration inference from a checkpoint. The deterministic "
+        "baseline mode keeps examples and unit tests local; real CAREamics execution "
+        "is intended for model-runtime tests."
+    )
+    category = Category.RESTORATION
+    tags = ["restoration", "careamics", "noise2void", "deep learning"]
+    environment = careamics_env
+
+    class Inputs(IOModel):
+        input_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta(
+                display_name="Input image",
+                description="2D scalar image to restore.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
+        ]
+        checkpoint: Annotated[
+            Path | None,
+            GUIMeta(
+                display_name="Checkpoint",
+                description="Optional CAREamics checkpoint path.",
+                connectable=Connectable.NEVER,
+            ),
+        ] = None
+        backend: Annotated[
+            str,
+            GUIMeta(
+                display_name="Backend",
+                description="'baseline' for deterministic tests or 'careamics' for real inference.",
+                connectable=Connectable.NEVER,
+            ),
+        ] = "baseline"
+        method: str = "tv_chambolle"
+        weight: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.01)] = 0.1
+
+    class Outputs(IOModel):
+        output_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta(display_name="Restored image"),
+        ] = Template("{input_image.stem}_careamics_restored.tif")
+        backend_used: Annotated[str, GUIMeta(display_name="Backend used")]
+
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import imageio.v3 as iio
+        import numpy as np
+
+        image = iio.imread(arguments.input_image).astype(np.float32)
+        backend = str(arguments.backend)
+        if backend == "careamics":
+            restored = _careamics_predict(image, arguments.checkpoint)
+        elif backend == "baseline":
+            restored = restore_array(
+                image,
+                method=str(arguments.method),
+                weight=float(arguments.weight),
+            )
+        else:
+            raise ValueError("backend must be 'baseline' or 'careamics'.")
+
+        output = Path(arguments.output_image)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        iio.imwrite(output, np.asarray(restored, dtype=np.float32))
+        return self.Outputs(output_image=output, backend_used=backend)
+
+
+class RestorationMetrics(ProcessingTool):
+    """Compare degraded and restored images against a clean reference."""
+
+    display_name = "Restoration Metrics"
+    documentation = "Compute MSE, PSNR, and residual noise estimates for restoration evaluation."
+    category = Category.MEASUREMENT
+    tags = ["restoration", "metrics", "psnr", "noise"]
+    environment = GENERAL_ENV
+
+    class Inputs(IOModel):
+        clean_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta(display_name="Clean reference", connectable=Connectable.BY_DEFAULT),
+        ]
+        degraded_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta(display_name="Degraded image", connectable=Connectable.BY_DEFAULT),
+        ]
+        restored_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            GUIMeta(display_name="Restored image", connectable=Connectable.BY_DEFAULT),
+        ]
+
+    class Outputs(IOModel):
+        clean_image: Annotated[str, GUIMeta(display_name="Clean image")]
+        degraded_image: Annotated[str, GUIMeta(display_name="Degraded image")]
+        restored_image: Annotated[str, GUIMeta(display_name="Restored image")]
+        mse_degraded: Annotated[float, GUIMeta(display_name="MSE degraded")]
+        mse_restored: Annotated[float, GUIMeta(display_name="MSE restored")]
+        degraded_psnr: Annotated[float, GUIMeta(display_name="Degraded PSNR")]
+        restored_psnr: Annotated[float, GUIMeta(display_name="Restored PSNR")]
+        residual_noise_degraded: Annotated[float, GUIMeta(display_name="Degraded residual noise")]
+        residual_noise_restored: Annotated[float, GUIMeta(display_name="Restored residual noise")]
+
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import imageio.v3 as iio
+        import numpy as np
+
+        clean = iio.imread(arguments.clean_image).astype(np.float32)
+        degraded = iio.imread(arguments.degraded_image).astype(np.float32)
+        restored = iio.imread(arguments.restored_image).astype(np.float32)
+        if clean.shape != degraded.shape or clean.shape != restored.shape:
+            raise ValueError("clean_image, degraded_image, and restored_image must match.")
+
+        mse_degraded = float(np.mean((degraded - clean) ** 2))
+        mse_restored = float(np.mean((restored - clean) ** 2))
+        return self.Outputs(
+            clean_image=str(arguments.clean_image),
+            degraded_image=str(arguments.degraded_image),
+            restored_image=str(arguments.restored_image),
+            mse_degraded=mse_degraded,
+            mse_restored=mse_restored,
+            degraded_psnr=_psnr(mse_degraded, clean),
+            restored_psnr=_psnr(mse_restored, clean),
+            residual_noise_degraded=float(np.std(degraded - clean)),
+            residual_noise_restored=float(np.std(restored - clean)),
+        )
+
+
+def _careamics_predict(image: Any, checkpoint: Path | None) -> Any:
+    careamics = __import__("careamics")
+    if hasattr(careamics, "predict"):
+        return careamics.predict(image, checkpoint=checkpoint)
+    model = careamics.CAREamist(source=checkpoint)
+    return model.predict(image)
+
+
+def _psnr(mse: float, clean: Any) -> float:
+    import math
+    import numpy as np
+
+    if mse <= 0.0:
+        return float("inf")
+    data_range = float(np.max(clean) - np.min(clean)) or 1.0
+    return float(20.0 * math.log10(data_range) - 10.0 * math.log10(mse))

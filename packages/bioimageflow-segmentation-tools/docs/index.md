@@ -28,6 +28,8 @@ Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in iso
 - [PostprocessLabels](tools/postprocess_labels.md): minimum-size filtering and
   sequential relabeling.
 - [Cellpose3](tools/cellpose3.md): Cellpose v3 pretrained model wrapper.
+- [CellposeSAM](tools/cellpose_sam.md): Cellpose-SAM model wrapper.
+- [nnInteractive](tools/nninteractive.md): prompt-driven nnInteractive wrapper.
 - [StarDistSegmenter](tools/stardist_segmenter.md): StarDist 2D pretrained
   model wrapper.
 

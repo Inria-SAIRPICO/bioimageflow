@@ -1,0 +1,15 @@
+workflow: low_snr_restoration
+data:
+  source: Generated low-SNR microscopy-like fixture
+  source_urls: []
+  license: Generated fixture
+  citation: CAREamics / Noise2Void / CARE-style restoration evaluation workflow
+  normal_ci: generated clean and degraded images
+  public_data: optional low-SNR crop can replace generated fixture
+  markers:
+    - model_runtime
+  selected_files:
+    - low_snr_clean.tif
+    - low_snr_degraded.tif
+  expected_layout: YX
+  expected_dtype: float32

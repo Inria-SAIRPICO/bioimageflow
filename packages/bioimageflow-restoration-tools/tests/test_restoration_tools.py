@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+import types
 
 import imageio.v3 as iio
 import numpy as np
@@ -9,9 +11,11 @@ from bioimageflow_core import Arguments
 from bioimageflow_restoration_tools import (
     BackgroundSubtract,
     BenchmarkRestoration,
+    CAREamicsPredict,
     GaussianDenoise,
     MedianDenoise,
     RestoreImage,
+    RestorationMetrics,
     RichardsonLucyRestoration,
     UnsharpMask,
 )
@@ -41,6 +45,70 @@ def test_restore_image_improves_noisy_synthetic_image(tmp_path: Path) -> None:
     restored = iio.imread(result.output_image).astype(np.float32)
     assert restored.shape == noisy.shape
     assert np.mean((restored - clean) ** 2) < np.mean((noisy - clean) ** 2)
+
+
+def test_careamics_predict_baseline_and_restoration_metrics(tmp_path: Path) -> None:
+    clean = np.zeros((48, 48), dtype=np.float32)
+    clean[14:34, 14:34] = 1.0
+    rng = np.random.default_rng(11)
+    degraded = np.clip(clean + rng.normal(0.0, 0.18, clean.shape), 0.0, 1.0)
+    clean_path = tmp_path / "clean.tif"
+    degraded_path = tmp_path / "degraded.tif"
+    restored_path = tmp_path / "restored.tif"
+    iio.imwrite(clean_path, clean)
+    iio.imwrite(degraded_path, degraded.astype(np.float32))
+
+    restored = CAREamicsPredict().process_row(
+        Arguments(
+            input_image=degraded_path,
+            output_image=restored_path,
+            backend="baseline",
+            method="tv_chambolle",
+            weight=0.12,
+            checkpoint=None,
+        )
+    )
+    metrics = RestorationMetrics().process_row(
+        Arguments(
+            clean_image=clean_path,
+            degraded_image=degraded_path,
+            restored_image=restored.output_image,
+        )
+    )
+
+    assert restored.backend_used == "baseline"
+    assert Path(restored.output_image).exists()
+    assert metrics.mse_restored < metrics.mse_degraded
+    assert metrics.restored_psnr > metrics.degraded_psnr
+
+
+def test_careamics_predict_executes_with_fake_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    careamics_module = types.ModuleType("careamics")
+
+    def fake_predict(image: np.ndarray, *, checkpoint: Path | None) -> np.ndarray:
+        return np.asarray(image, dtype=np.float32) + 1.0
+
+    careamics_module.predict = fake_predict
+    monkeypatch.setitem(sys.modules, "careamics", careamics_module)
+
+    image_path = tmp_path / "input.tif"
+    iio.imwrite(image_path, np.zeros((8, 8), dtype=np.float32))
+    result = CAREamicsPredict().process_row(
+        Arguments(
+            input_image=image_path,
+            output_image=tmp_path / "restored.tif",
+            checkpoint=None,
+            backend="careamics",
+            method="tv_chambolle",
+            weight=0.1,
+        )
+    )
+
+    assert result.backend_used == "careamics"
+    np.testing.assert_array_equal(iio.imread(result.output_image), np.ones((8, 8)))
 
 
 def test_benchmark_restoration_returns_metrics(tmp_path: Path) -> None:

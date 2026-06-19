@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+import types
 
 import imageio.v3 as iio
 import numpy as np
@@ -13,9 +15,11 @@ from bioimageflow import Workflow
 from bioimageflow_core import Arguments
 from bioimageflow_segmentation_tools import (
     Cellpose3,
+    CellposeSAM,
     DistanceWatershedSegment,
     FilterLabels,
     LocalThresholdSegment,
+    nnInteractive,
     OtsuThresholdSegment,
     PostprocessLabels,
     SplitTouchingObjects,
@@ -42,6 +46,80 @@ def test_threshold_segment_labels_synthetic_objects(tmp_path: Path) -> None:
     labels = iio.imread(labels_path)
     assert result.object_count == 2
     assert set(np.unique(labels)) == {0, 1, 2}
+
+
+def test_cellpose_sam_executes_with_fake_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cellpose_module = types.ModuleType("cellpose")
+    models_module = types.ModuleType("cellpose.models")
+
+    class FakeCellposeModel:
+        def __init__(self, model_type: str) -> None:
+            self.model_type = model_type
+
+        def eval(self, image: np.ndarray, **_: object) -> tuple[np.ndarray]:
+            labels = np.zeros(image.shape[-2:], dtype=np.uint32)
+            labels[2:5, 2:5] = 1
+            labels[6:8, 6:8] = 2
+            return (labels,)
+
+    models_module.CellposeModel = FakeCellposeModel
+    cellpose_module.models = models_module
+    monkeypatch.setitem(sys.modules, "cellpose", cellpose_module)
+    monkeypatch.setitem(sys.modules, "cellpose.models", models_module)
+
+    image_path = tmp_path / "input.tif"
+    iio.imwrite(image_path, np.zeros((10, 10), dtype=np.float32))
+    result = CellposeSAM().process_row(
+        Arguments(
+            input_image=image_path,
+            model_type="cpsam",
+            diameter=0.0,
+            flow_threshold=0.4,
+            cellprob_threshold=0.0,
+            mask=tmp_path / "mask.tif",
+        )
+    )
+
+    assert result.cell_count == 2
+    assert int(iio.imread(result.mask).max()) == 2
+
+
+def test_nninteractive_executes_with_fake_predict_function(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    nninteractive_module = types.ModuleType("nninteractive")
+
+    def fake_predict(
+        image: np.ndarray,
+        *,
+        model_path: Path | None,
+        prompt_points: list[tuple[int, int]],
+    ) -> np.ndarray:
+        labels = np.zeros(image.shape, dtype=np.uint32)
+        for label, (y, x) in enumerate(prompt_points, start=1):
+            labels[y, x] = label
+        return labels
+
+    nninteractive_module.predict = fake_predict
+    monkeypatch.setitem(sys.modules, "nninteractive", nninteractive_module)
+
+    image_path = tmp_path / "input.tif"
+    iio.imwrite(image_path, np.zeros((10, 10), dtype=np.float32))
+    result = nnInteractive().process_row(
+        Arguments(
+            input_image=image_path,
+            model_path=None,
+            prompt_points="2,3;7,8",
+            mask=tmp_path / "mask.tif",
+        )
+    )
+
+    assert result.object_count == 2
+    assert int(iio.imread(result.mask).max()) == 2
 
 
 def test_otsu_threshold_segment_uses_global_otsu_threshold(tmp_path: Path) -> None:

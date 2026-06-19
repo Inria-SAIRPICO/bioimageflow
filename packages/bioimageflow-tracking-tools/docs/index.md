@@ -12,6 +12,8 @@ The current linker is greedy nearest-neighbor, so it is transparent and determin
 
 - [LabelsToObjects](tools/labels_to_objects.md): convert labels into object centroid dataframe rows.
 - [LinkObjects](tools/link_objects.md): greedy nearest-neighbor frame linking.
+- [UltrackLink](tools/ultrack_link.md): Ultrack adapter with deterministic fallback mode.
+- [BTrackLink](tools/btrack_link.md): btrack adapter with deterministic fallback mode.
 - [TrackMetrics](tools/track_metrics.md): track length, displacement, speed, and
   area summaries.
 - [FilterObjects](tools/filter_objects.md): filter object dataframe rows by area, frame, intensity, and position.

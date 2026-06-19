@@ -1,3 +1,5 @@
+:orphan:
+
 Priority Workflows
 ==================
 
@@ -5,9 +7,6 @@ These runnable workflow examples cover package-split imports, public benchmark
 structure, SAIRPICO command wrappers, and OME output normalization. The default
 test path uses tiny synthetic fixtures and avoids public downloads or
 heavyweight binaries.
-
-.. image:: priority_workflows.svg
-   :alt: Priority workflow overview
 
 FISH Analysis
 -------------

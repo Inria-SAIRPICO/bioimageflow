@@ -29,28 +29,23 @@ def _write_multichannel_input(data_dir: Path) -> None:
 
 
 @pytest.mark.model_runtime
-def test_cellpose_stardist_workflow_executes_with_real_model_runtimes(
+def test_bbbc038_benchmark_public_model_runtime_smoke(
     tmp_path: Path,
     complete_wetlands_config: dict,
 ) -> None:
-    data_dir = tmp_path / "cellpose_stardist" / "data"
-    _write_multichannel_input(data_dir)
-
-    module = _load_module(_example("cellpose3_stardist"))
-    wf, cellpose, stardist = module.build_segmentation_workflow(
-        data_dir=str(data_dir),
-        storage_path=str(tmp_path / "cellpose_stardist" / "bif"), engine="wetlands",
+    module = _load_module(_example("bbbc038_segmentation_benchmark"))
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / "bbbc038_benchmark"),
+        engine="direct",
         wetlands_config=complete_wetlands_config,
     )
 
-    result = wf.compute(cellpose, stardist)
+    result = wf.compute(terminal)
 
-    cellpose_result = result["cellpose3_nuclei"]
-    stardist_result = result["stardist_nuclei"]
-    assert Path(cellpose_result.iloc[0]["mask"]).exists()
-    assert Path(stardist_result.iloc[0]["mask"]).exists()
-    assert int(cellpose_result.iloc[0]["cell_count"]) >= 0
-    assert int(stardist_result.iloc[0]["object_count"]) >= 0
+    assert {"cellpose3", "cellpose_sam", "stardist", "classical_threshold"} == set(
+        result["method"]
+    )
+    assert all(Path(path).exists() for path in result["predicted_label_image"])
 
 
 @pytest.mark.external_binary
@@ -85,7 +80,7 @@ def test_sairpico_workflow_executes_with_real_binaries(
     tmp_path: Path,
     complete_wetlands_config: dict,
 ) -> None:
-    module = _load_module(_example("sairpico_restoration_smoke"))
+    module = _load_module(_example("sairpico_deconvolution"))
     wf, terminal = module.build_workflow(
         storage_path=str(tmp_path / "sairpico"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
@@ -94,8 +89,9 @@ def test_sairpico_workflow_executes_with_real_binaries(
     result = wf.compute(terminal)
 
     assert len(result) == 1
-    assert Path(result.iloc[0]["output_image"]).exists()
-    assert Path(result.iloc[0]["output_image_1"]).exists()
+    assert Path(result.iloc[0]["psf_image"]).exists()
+    assert Path(result.iloc[0]["denoised_image"]).exists()
+    assert Path(result.iloc[0]["deconvolved_image"]).exists()
 
 
 @pytest.mark.public_data
@@ -125,9 +121,9 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
 @pytest.mark.parametrize(
     ("workflow_name", "artifact_column"),
     [
-        ("puncta_analysis", None),
-        ("restoration_benchmark", "restored_image"),
-        ("tracking_analysis", None),
+        ("cell_counting_phenotyping", None),
+        ("low_snr_restoration", "restored_image"),
+        ("live_cell_tracking", None),
     ],
 )
 def test_specialized_workflow_acceptance_smoke(

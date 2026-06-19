@@ -20,14 +20,14 @@ def _load_module(path: Path):
     ("workflow_name", "artifact_column", "expected_columns", "min_rows"),
     [
         pytest.param(
-            "puncta_analysis",
+            "cell_counting_phenotyping",
             None,
-            {"label", "spot_count", "mean_intensity", "total_intensity", "label_count"},
+            {"image", "object_count", "mean_area", "total_area"},
             1,
-            id="puncta_analysis",
+            id="cell_counting_phenotyping",
         ),
         pytest.param(
-            "restoration_benchmark",
+            "low_snr_restoration",
             "restored_image",
             {
                 "clean_image",
@@ -39,14 +39,14 @@ def _load_module(path: Path):
                 "restored_psnr",
             },
             1,
-            id="restoration_benchmark",
+            id="low_snr_restoration",
         ),
         pytest.param(
-            "tracking_analysis",
+            "live_cell_tracking",
             None,
-            {"track_id", "track_length", "track_count", "mean_track_length"},
-            1,
-            id="tracking_analysis",
+            {"tracker", "track_id", "track_length", "track_count", "mean_track_length"},
+            2,
+            id="live_cell_tracking",
         ),
     ],
 )
@@ -60,7 +60,10 @@ def test_specialized_example_workflow_executes(
     root = Path(__file__).resolve().parents[2]
     workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)
-    wf, node = module.build_workflow(storage_path=str(tmp_path / workflow_name))
+    wf, node = module.build_workflow(
+        storage_path=str(tmp_path / workflow_name),
+        engine="direct",
+    )
 
     result = wf.compute(node)
 

@@ -10,15 +10,19 @@ if TYPE_CHECKING:
     from .baselines import RichardsonLucyRestoration as RichardsonLucyRestoration
     from .baselines import UnsharpMask as UnsharpMask
     from .benchmark import BenchmarkRestoration as BenchmarkRestoration
+    from .restore import CAREamicsPredict as CAREamicsPredict
     from .restore import RestoreImage as RestoreImage
+    from .restore import RestorationMetrics as RestorationMetrics
 
 
 _EXPORTS = {
     "BackgroundSubtract": ("baselines", "BackgroundSubtract"),
     "BenchmarkRestoration": ("benchmark", "BenchmarkRestoration"),
+    "CAREamicsPredict": ("restore", "CAREamicsPredict"),
     "GaussianDenoise": ("baselines", "GaussianDenoise"),
     "MedianDenoise": ("baselines", "MedianDenoise"),
     "RestoreImage": ("restore", "RestoreImage"),
+    "RestorationMetrics": ("restore", "RestorationMetrics"),
     "RichardsonLucyRestoration": ("baselines", "RichardsonLucyRestoration"),
     "UnsharpMask": ("baselines", "UnsharpMask"),
 }
@@ -26,9 +30,11 @@ _EXPORTS = {
 __all__ = [
     "BackgroundSubtract",
     "BenchmarkRestoration",
+    "CAREamicsPredict",
     "GaussianDenoise",
     "MedianDenoise",
     "RestoreImage",
+    "RestorationMetrics",
     "RichardsonLucyRestoration",
     "UnsharpMask",
 ]

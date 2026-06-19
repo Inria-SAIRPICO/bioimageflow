@@ -1,11 +1,10 @@
+:orphan:
+
 Specialized Tool Workflows
 ==========================
 
 These lightweight tool packages ship with matching synthetic workflows. The
 default test path avoids public data and heavyweight optional libraries.
-
-.. image:: specialized_tool_workflows.svg
-   :alt: Specialized tool workflow overview
 
 Spot Tools
 ----------

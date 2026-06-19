@@ -95,8 +95,9 @@ def test_fish_heavy_workflow_constructs_with_package_imports(tmp_path: Path) -> 
 
     assert terminal.name == "avg_spots_per_nucleus"
     assert {
-        "atlas_fols2",
-        "atlas_csfr1",
+        "extract_ch2_nuclei",
+        "fols2_marker_spot_analysis",
+        "csf1r_marker_spot_analysis",
         "cellpose3_nuclei",
         "avg_spots_per_nucleus",
     } <= set(wf.nodes)
@@ -125,15 +126,24 @@ def test_synthetic_fish_workflow_executes(tmp_path: Path) -> None:
 def test_bbbc038_segmentation_benchmark_constructs_and_executes(tmp_path: Path) -> None:
     module = _load_module(_example("bbbc038_segmentation_benchmark"))
 
-    wf, terminal = module.build_workflow(storage_path=str(tmp_path / "bbbc038"))
-    assert {"threshold_nuclei", "benchmark_against_reference"} <= set(wf.nodes)
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / "bbbc038"),
+        engine="direct",
+    )
+    assert {"benchmark_segmentation_methods"} <= set(wf.nodes)
 
     result = wf.compute(terminal)
-    assert len(result) == 1
-    row = result.iloc[0]
-    assert row["predicted_label_count"] == 2
-    assert row["reference_label_count"] == 2
-    assert row["foreground_iou"] > 0.95
+    assert len(result) == 4
+    assert set(result["method"]) == {
+        "cellpose3",
+        "cellpose_sam",
+        "stardist",
+        "classical_threshold",
+    }
+    assert result["predicted_label_count"].min() == 2
+    assert result["reference_label_count"].min() == 2
+    assert result["foreground_iou"].min() > 0.80
+    assert all(Path(path).exists() for path in result["predicted_label_image"])
 
 
 @pytest.mark.acceptance
@@ -262,30 +272,31 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     assert {call[0] for call in calls} == {"atlas"}
 
 
-def test_fish_sub_workflow_constructs_with_package_imports(
+def test_canonical_fish_workflow_contains_marker_sub_workflow_nodes(
     tmp_path: Path,
 ) -> None:
-    fish_sub = _load_module(_example("fish_analysis_sub_workflows"))
-    wf, terminal = fish_sub.build_fish_workflow(
-        storage_path=str(tmp_path / "fish_sub" / "bif"),
-        data_dir=str(tmp_path / "fish_sub" / "data"),
+    module = _load_module(_example("fish_analysis"))
+    wf, terminal = module.build_fish_workflow(
+        storage_path=str(tmp_path / "fish_canonical" / "bif"),
+        data_dir=str(tmp_path / "fish_canonical" / "data"),
     )
     assert terminal.name == "avg_spots_per_nucleus"
     assert {
         "download_cil_images",
         "read_image",
+        "extract_ch2_nuclei",
         "cellpose3_nuclei",
-        "fols2_analysis",
-        "csfr1_analysis",
+        "fols2_marker_spot_analysis",
+        "csf1r_marker_spot_analysis",
         "avg_spots_per_nucleus",
     } <= set(wf.nodes)
 
 
-def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
+def test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_module(_example("sairpico_restoration_smoke"))
+    module = _load_module(_example("sairpico_deconvolution"))
     calls: list[list[str]] = []
 
     def fake_run(command: list[object], output_path: Path) -> None:
@@ -293,9 +304,9 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
         calls.append(command_parts)
         output = Path(command_parts[command_parts.index("-o") + 1])
         assert output == output_path
-        input_path = Path(command_parts[command_parts.index("-i") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
-        if input_path.exists():
+        if "-i" in command_parts:
+            input_path = Path(command_parts[command_parts.index("-i") + 1])
             iio.imwrite(
                 output,
                 np.asarray(iio.imread(input_path), dtype=np.float32),
@@ -303,8 +314,13 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
                 photometric="minisblack",
             )
         else:
-            output.touch()
+            iio.imwrite(output, np.ones((5, 16, 16), dtype=np.float32), extension=".tif")
 
+    monkeypatch.setitem(
+        module.GaussianPSF.process_row.__globals__,
+        "_run_with_staged_output",
+        fake_run,
+    )
     monkeypatch.setitem(
         module.MedianDenoising.process_row.__globals__,
         "_run_with_staged_output",
@@ -322,17 +338,23 @@ def test_sairpico_smoke_workflow_constructs_and_executes_with_fake_binary(
     )
     assert wf.engine_type == "direct"
     assert {
-        "median_denoise_2d",
-        "richardson_lucy_2d",
-        "collect_sairpico_outputs",
+        "sairpico_gaussian_psf",
+        "sairpico_median_denoise",
+        "sairpico_richardson_lucy",
+        "sairpico_deconvolution_metrics",
     } <= set(wf.nodes)
 
     result = wf.compute(terminal)
     assert len(result) == 1
-    assert Path(result.iloc[0]["output_image"]).exists()
-    assert Path(result.iloc[0]["output_image_1"]).exists()
-    assert {call[0] for call in calls} == {"simgmedian2d", "simgrichardsonlucy2d"}
-    assert calls[1][calls[1].index("-i") + 1] == result.iloc[0]["output_image"]
+    assert Path(result.iloc[0]["psf_image"]).exists()
+    assert Path(result.iloc[0]["denoised_image"]).exists()
+    assert Path(result.iloc[0]["deconvolved_image"]).exists()
+    assert {call[0] for call in calls} == {
+        "simggaussian3dpsf",
+        "simgmedian2d",
+        "simgrichardsonlucy2d",
+    }
+    assert result.iloc[0]["deconvolved_sharpness"] >= 0.0
 
 
 def test_sairpico_command_construction_without_binaries(
@@ -414,7 +436,7 @@ def test_sairpico_command_construction_without_binaries(
 def test_bbbc038_public_data_path_is_documented() -> None:
     docs = (
         Path(__file__).resolve().parents[2]
-        / "docs/source/priority_workflows/index.rst"
+        / "docs/source/workflows/index.rst"
     ).read_text()
     assert "BBBC038" in docs
     assert "Broad Bioimage" in docs
@@ -424,21 +446,31 @@ def test_bbbc038_public_data_path_is_documented() -> None:
 def test_example_workflow_documentation_records_review_contract() -> None:
     root = Path(__file__).resolve().parents[2]
     docs = [
-        root / "docs/source/priority_workflows/index.rst",
-        root / "docs/source/specialized_tool_workflows/index.rst",
-        root / "packages/bioimageflow-io-tools/docs/workflows/ome_normalization.md",
+        root / "docs/source/workflows/index.rst",
+        root / "example-workflows/fish_analysis/data_manifest.yml",
+        root / "example-workflows/fish_analysis/expected_outputs.yml",
+        root / "example-workflows/parameter_space_exploration/data_manifest.yml",
+        root / "example-workflows/parameter_space_exploration/expected_outputs.yml",
+        root / "example-workflows/bbbc038_segmentation_benchmark/data_manifest.yml",
+        root / "example-workflows/bbbc038_segmentation_benchmark/expected_outputs.yml",
+        root / "example-workflows/cell_counting_phenotyping/data_manifest.yml",
+        root / "example-workflows/cell_counting_phenotyping/expected_outputs.yml",
+        root / "example-workflows/low_snr_restoration/data_manifest.yml",
+        root / "example-workflows/low_snr_restoration/expected_outputs.yml",
+        root / "example-workflows/sairpico_deconvolution/data_manifest.yml",
+        root / "example-workflows/sairpico_deconvolution/expected_outputs.yml",
+        root / "example-workflows/live_cell_tracking/data_manifest.yml",
+        root / "example-workflows/live_cell_tracking/expected_outputs.yml",
         root / "packages/bioimageflow-segmentation-tools/docs/workflows/bbbc038_segmentation_benchmark.md",
-        root / "packages/bioimageflow-sairpico-tools/docs/workflows/sairpico_restoration_smoke.md",
-        root / "packages/bioimageflow-spot-tools/docs/workflows/puncta_analysis.md",
-        root / "packages/bioimageflow-restoration-tools/docs/workflows/restoration_benchmark.md",
-        root / "packages/bioimageflow-tracking-tools/docs/workflows/tracking_analysis.md",
         root / "example-workflows/parameter_space_exploration/README.md",
-        root / "example-workflows/cellpose3_stardist/README.md",
-        root / "example-workflows/fish_analysis_sub_workflows/README.md",
     ]
     for doc_path in docs:
         text = doc_path.read_text()
-        assert "Analysis question" in text
-        assert "Data" in text
-        assert "Expected" in text
-        assert "Test" in text
+        if doc_path.suffix in {".yml", ".yaml"}:
+            assert "workflow:" in text
+            assert "outputs:" in text or "data:" in text
+        else:
+            assert "Analysis question" in text
+            assert "Data" in text
+            assert "Expected" in text
+            assert "Test" in text

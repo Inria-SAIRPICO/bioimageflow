@@ -10,6 +10,7 @@
 ```{toctree}
 :maxdepth: 1
 
+tools/btrack_link
 tools/filter_objects
 tools/labels_to_objects
 tools/link_objects
@@ -18,5 +19,6 @@ tools/track_quality_metrics
 tools/track_summary
 tools/track_table_validate
 tools/tracks_to_labels
+tools/ultrack_link
 workflows/tracking_analysis
 ```

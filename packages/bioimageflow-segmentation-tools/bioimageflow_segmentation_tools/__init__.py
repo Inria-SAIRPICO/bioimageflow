@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .cellpose_sam import CellposeSAM as CellposeSAM
     from .cellpose_v3 import Cellpose3 as Cellpose3
     from .classical import DistanceWatershedSegment as DistanceWatershedSegment
     from .classical import FilterLabels as FilterLabels
@@ -13,15 +14,18 @@ if TYPE_CHECKING:
     from .classical import SplitTouchingObjects as SplitTouchingObjects
     from .classical import ThresholdSegment as ThresholdSegment
     from .classical import WatershedSegment as WatershedSegment
+    from .nninteractive import nnInteractive as nnInteractive
     from .stardist_segmenter import StarDistSegmenter as StarDistSegmenter
 
 
 _EXPORTS = {
+    "CellposeSAM": ("cellpose_sam", "CellposeSAM"),
     "Cellpose3": ("cellpose_v3", "Cellpose3"),
     "DistanceWatershedSegment": ("classical", "DistanceWatershedSegment"),
     "FilterLabels": ("classical", "FilterLabels"),
     "LocalThresholdSegment": ("classical", "LocalThresholdSegment"),
     "OtsuThresholdSegment": ("classical", "OtsuThresholdSegment"),
+    "nnInteractive": ("nninteractive", "nnInteractive"),
     "PostprocessLabels": ("classical", "PostprocessLabels"),
     "SplitTouchingObjects": ("classical", "SplitTouchingObjects"),
     "StarDistSegmenter": ("stardist_segmenter", "StarDistSegmenter"),
@@ -30,6 +34,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "CellposeSAM",
     "Cellpose3",
     "DistanceWatershedSegment",
     "FilterLabels",
@@ -40,6 +45,7 @@ __all__ = [
     "StarDistSegmenter",
     "ThresholdSegment",
     "WatershedSegment",
+    "nnInteractive",
 ]
 
 
