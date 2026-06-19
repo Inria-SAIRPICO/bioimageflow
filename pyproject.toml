@@ -66,6 +66,7 @@ markers = [
     "model_runtime: tests that require optional model runtimes or model downloads",
     "package_tools: tests owned by optional tool packages",
     "shared_memory: deterministic tests requiring POSIX/shared-memory platform support",
+    "compat: deterministic Python-version compatibility smoke coverage",
 ]
 
 [tool.ruff]

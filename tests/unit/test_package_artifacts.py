@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Mapping
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tarfile
@@ -17,6 +18,7 @@ pytestmark = pytest.mark.packaging
 
 
 ROOT = Path(__file__).parents[2]
+PREBUILT_ARTIFACTS_ENV = "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR"
 TOOL_PACKAGE_NAMES = {
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
@@ -59,8 +61,35 @@ def _normalized_name(name: str) -> str:
     return name.replace("-", "_")
 
 
+def _artifact_dir_from_env(environ: Mapping[str, str] = os.environ) -> Path | None:
+    value = environ.get(PREBUILT_ARTIFACTS_ENV)
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
+
+
+def _assert_expected_artifacts_exist(out_dir: Path) -> None:
+    missing = []
+    for distribution_name in _distribution_names():
+        normalized = _normalized_name(distribution_name)
+        if not list(out_dir.glob(f"{normalized}-*.whl")):
+            missing.append(f"{normalized}-*.whl")
+        if not list(out_dir.glob(f"{normalized}-*.tar.gz")):
+            missing.append(f"{normalized}-*.tar.gz")
+    assert missing == []
+
+
 @pytest.fixture(scope="session")
 def built_artifacts(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    prebuilt_artifacts_dir = _artifact_dir_from_env()
+    if prebuilt_artifacts_dir is not None:
+        assert prebuilt_artifacts_dir.is_dir()
+        _assert_expected_artifacts_exist(prebuilt_artifacts_dir)
+        return prebuilt_artifacts_dir
+
     out_dir = tmp_path_factory.mktemp("package-artifacts")
     result = subprocess.run(
         ["uv", "build", "--all-packages", "--out-dir", str(out_dir)],
@@ -101,6 +130,16 @@ def _forbidden_members(members: list[str]) -> list[str]:
         if parts.intersection(FORBIDDEN_ARTIFACT_PARTS):
             offenders.append(member)
     return sorted(offenders)
+
+
+def test_relative_prebuilt_artifact_dir_resolves_from_repo_root() -> None:
+    assert _artifact_dir_from_env({PREBUILT_ARTIFACTS_ENV: "dist/packages"}) == (
+        ROOT / "dist/packages"
+    )
+
+
+def test_missing_prebuilt_artifact_dir_env_keeps_local_build_fallback() -> None:
+    assert _artifact_dir_from_env({}) is None
 
 
 def test_wheels_exclude_docs_tests_and_generated_artifacts(built_artifacts: Path) -> None:

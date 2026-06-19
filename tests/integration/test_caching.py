@@ -33,6 +33,7 @@ from .conftest import FileLoader, StubSegmenter
 
 class TestCacheHit:
 
+    @pytest.mark.compat
     def test_second_run_uses_cache(self, tmp_workspace):
         """Running the same workflow twice should use cached results."""
         load = FileLoader()
@@ -82,6 +83,7 @@ class TestCacheHit:
 
 class TestCacheMiss:
 
+    @pytest.mark.compat
     def test_different_parameter_invalidates_cache(self, tmp_workspace):
         load = FileLoader()
         segment = StubSegmenter()

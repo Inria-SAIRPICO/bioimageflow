@@ -479,6 +479,7 @@ def _force_current_record(storage: Storage, result_key: str, record_id: str) -> 
     current_path.write_text(json.dumps(pointer.to_dict(), indent=2, sort_keys=True))
 
 
+@pytest.mark.compat
 def test_dataframe_tool_compute_publishes_record_and_uses_cache_hit(tmp_path: Path) -> None:
     storage_path = tmp_path / "results"
     CountingTable.executions = 0

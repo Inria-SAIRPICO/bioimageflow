@@ -8,7 +8,7 @@ Covers ``_jsonify_default``, ``_display_type_name``, ``_extract_choices``,
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 import pytest
 
@@ -45,50 +45,40 @@ from bioimageflow.validation import (
 # ---------------------------------------------------------------------------
 
 
+class _Mode(str, Enum):
+    FAST = "fast"
+    ACCURATE = "accurate"
+
+
+class _CustomDefault:
+    def __str__(self) -> str:
+        return "custom-obj"
+
+
 class TestJsonifyDefault:
-    def test_none(self) -> None:
-        assert _jsonify_default(None) is None
-
-    def test_bool(self) -> None:
-        assert _jsonify_default(True) is True
-
-    def test_int(self) -> None:
-        assert _jsonify_default(42) == 42
-
-    def test_float(self) -> None:
-        assert _jsonify_default(1.5) == 1.5
-
-    def test_str(self) -> None:
-        assert _jsonify_default("hello") == "hello"
-
-    def test_path(self) -> None:
-        assert _jsonify_default(Path("a/b.txt")) == str(Path("a/b.txt"))
-
-    def test_enum(self) -> None:
-        class Color(str, Enum):
-            RED = "red"
-            BLUE = "blue"
-
-        assert _jsonify_default(Color.RED) == "red"
-
-    def test_list(self) -> None:
-        assert _jsonify_default([1, "two", Path("p")]) == [1, "two", str(Path("p"))]
-
-    def test_tuple(self) -> None:
-        assert _jsonify_default(("a", "b")) == ["a", "b"]
-
-    def test_dict(self) -> None:
-        assert _jsonify_default({"k": Path("p")}) == {"k": str(Path("p"))}
-
-    def test_nested(self) -> None:
-        assert _jsonify_default([(1, 2), {"x": Path("a")}]) == [[1, 2], {"x": str(Path("a"))}]
-
-    def test_fallback(self) -> None:
-        class Custom:
-            def __str__(self) -> str:
-                return "custom-obj"
-
-        assert _jsonify_default(Custom()) == "custom-obj"
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(None, None, id="none"),
+            pytest.param(True, True, id="bool"),
+            pytest.param(42, 42, id="int"),
+            pytest.param(1.5, 1.5, id="float"),
+            pytest.param("hello", "hello", id="str"),
+            pytest.param(Path("a/b.txt"), str(Path("a/b.txt")), id="path"),
+            pytest.param(_Mode.FAST, "fast", id="enum"),
+            pytest.param([1, "two", Path("p")], [1, "two", str(Path("p"))], id="list"),
+            pytest.param(("a", "b"), ["a", "b"], id="tuple"),
+            pytest.param({"k": Path("p")}, {"k": str(Path("p"))}, id="dict"),
+            pytest.param(
+                [(1, 2), {"x": Path("a")}],
+                [[1, 2], {"x": str(Path("a"))}],
+                id="nested",
+            ),
+            pytest.param(_CustomDefault(), "custom-obj", id="fallback"),
+        ],
+    )
+    def test_jsonify_default(self, value: Any, expected: Any) -> None:
+        assert _jsonify_default(value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -97,61 +87,30 @@ class TestJsonifyDefault:
 
 
 class TestDisplayTypeName:
-    def test_int(self) -> None:
-        assert _display_type_name(int) == "int"
-
-    def test_float(self) -> None:
-        assert _display_type_name(float) == "float"
-
-    def test_str(self) -> None:
-        assert _display_type_name(str) == "str"
-
-    def test_bool(self) -> None:
-        assert _display_type_name(bool) == "bool"
-
-    def test_path(self) -> None:
-        assert _display_type_name(Path) == "Path"
-
-    def test_list(self) -> None:
-        assert _display_type_name(list[int]) == "list"
-
-    def test_dict(self) -> None:
-        assert _display_type_name(dict[str, int]) == "dict"
-
-    def test_tuple(self) -> None:
-        assert _display_type_name(tuple[str, str]) == "tuple"
-
-    def test_literal_str(self) -> None:
-        assert _display_type_name(Literal["a", "b"]) == "str"
-
-    def test_literal_int(self) -> None:
-        assert _display_type_name(Literal[1, 2]) == "int"
-
-    def test_enum_subclass(self) -> None:
-        class Mode(str, Enum):
-            FAST = "fast"
-            ACCURATE = "accurate"
-
-        assert _display_type_name(Mode) == "str"
-
-    def test_annotated_unwraps(self) -> None:
-        assert _display_type_name(Annotated[int, GUIMeta(min=0)]) == "int"
-
-    def test_optional_unwraps(self) -> None:
-        assert _display_type_name(int | None) == "int"
-
-    def test_optional_annotated(self) -> None:
-        assert _display_type_name(Optional[Annotated[int, GUIMeta(min=0)]]) == "int"
-
-    def test_image_field_path(self) -> None:
-        assert _display_type_name(Annotated[Path, ImageSpec()]) == "ImageFile"
-
-    def test_image_shared(self) -> None:
-        assert _display_type_name(ImageShared()) == "ImageShared"
-
-    def test_plain_path_with_non_imagespec_annotation(self) -> None:
-        # ImageSpec is absent, so this is serialized as a plain Path.
-        assert _display_type_name(Annotated[Path, GUIMeta(display_name="p")]) == "Path"
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [
+            pytest.param(int, "int", id="int"),
+            pytest.param(float, "float", id="float"),
+            pytest.param(str, "str", id="str"),
+            pytest.param(bool, "bool", id="bool"),
+            pytest.param(Path, "Path", id="path"),
+            pytest.param(list[int], "list", id="list"),
+            pytest.param(dict[str, int], "dict", id="dict"),
+            pytest.param(tuple[str, str], "tuple", id="tuple"),
+            pytest.param(Literal["a", "b"], "str", id="literal-str"),
+            pytest.param(Literal[1, 2], "int", id="literal-int"),
+            pytest.param(_Mode, "str", id="enum"),
+            pytest.param(Annotated[int, GUIMeta(min=0)], "int", id="annotated"),
+            pytest.param(int | None, "int", id="optional"),
+            pytest.param(Optional[Annotated[int, GUIMeta(min=0)]], "int", id="optional-annotated"),
+            pytest.param(Annotated[Path, ImageSpec()], "ImageFile", id="image-path"),
+            pytest.param(ImageShared(), "ImageShared", id="image-shared"),
+            pytest.param(Annotated[Path, GUIMeta(display_name="p")], "Path", id="plain-path"),
+        ],
+    )
+    def test_display_type_name(self, annotation: Any, expected: str) -> None:
+        assert _display_type_name(annotation) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -160,27 +119,19 @@ class TestDisplayTypeName:
 
 
 class TestExtractChoices:
-    def test_plain_type(self) -> None:
-        assert _extract_choices(int) is None
-
-    def test_literal_str(self) -> None:
-        assert _extract_choices(Literal["a", "b", "c"]) == ["a", "b", "c"]
-
-    def test_literal_int(self) -> None:
-        assert _extract_choices(Literal[1, 2, 3]) == ["1", "2", "3"]
-
-    def test_enum(self) -> None:
-        class Mode(str, Enum):
-            FAST = "fast"
-            ACCURATE = "accurate"
-
-        assert _extract_choices(Mode) == ["fast", "accurate"]
-
-    def test_annotated_literal(self) -> None:
-        assert _extract_choices(Annotated[Literal["a", "b"], GUIMeta()]) == ["a", "b"]
-
-    def test_optional_literal(self) -> None:
-        assert _extract_choices(Literal["a", "b"] | None) == ["a", "b"]
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [
+            pytest.param(int, None, id="plain-type"),
+            pytest.param(Literal["a", "b", "c"], ["a", "b", "c"], id="literal-str"),
+            pytest.param(Literal[1, 2, 3], ["1", "2", "3"], id="literal-int"),
+            pytest.param(_Mode, ["fast", "accurate"], id="enum"),
+            pytest.param(Annotated[Literal["a", "b"], GUIMeta()], ["a", "b"], id="annotated"),
+            pytest.param(Literal["a", "b"] | None, ["a", "b"], id="optional"),
+        ],
+    )
+    def test_extract_choices(self, annotation: Any, expected: list[str] | None) -> None:
+        assert _extract_choices(annotation) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -189,36 +140,26 @@ class TestExtractChoices:
 
 
 class TestIsNullable:
-    def test_bare_int(self) -> None:
-        assert _is_nullable(int) is False
-
-    def test_int_or_none(self) -> None:
-        assert _is_nullable(int | None) is True
-
-    def test_optional_int(self) -> None:
-        assert _is_nullable(Optional[int]) is True
-
-    def test_annotated_optional(self) -> None:
-        assert _is_nullable(Annotated[int | None, GUIMeta(min=0)]) is True
-
-    def test_annotated_non_optional(self) -> None:
-        assert _is_nullable(Annotated[int, GUIMeta(min=0)]) is False
-
-    def test_image_field_path_non_optional(self) -> None:
-        # Annotated[Path, ImageSpec(...)] has no None.
-        assert (
-            _is_nullable(Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})])
-            is False
-        )
-
-    def test_three_way_union_with_none(self) -> None:
-        assert _is_nullable(int | str | None) is True
-
-    def test_literal(self) -> None:
-        assert _is_nullable(Literal["a", "b"]) is False
-
-    def test_optional_literal(self) -> None:
-        assert _is_nullable(Optional[Literal["a", "b"]]) is True
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [
+            pytest.param(int, False, id="bare-int"),
+            pytest.param(int | None, True, id="int-or-none"),
+            pytest.param(Optional[int], True, id="optional-int"),
+            pytest.param(Annotated[int | None, GUIMeta(min=0)], True, id="annotated-optional"),
+            pytest.param(Annotated[int, GUIMeta(min=0)], False, id="annotated-non-optional"),
+            pytest.param(
+                Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})],
+                False,
+                id="image-path",
+            ),
+            pytest.param(int | str | None, True, id="three-way-union"),
+            pytest.param(Literal["a", "b"], False, id="literal"),
+            pytest.param(Optional[Literal["a", "b"]], True, id="optional-literal"),
+        ],
+    )
+    def test_is_nullable(self, annotation: Any, expected: bool) -> None:
+        assert _is_nullable(annotation) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -227,17 +168,21 @@ class TestIsNullable:
 
 
 class TestSerializeConnectable:
-    def test_never(self) -> None:
-        assert _serialize_connectable(Connectable.NEVER) == "never"
-
-    def test_not_by_default(self) -> None:
-        assert _serialize_connectable(Connectable.NOT_BY_DEFAULT) == "not_by_default"
-
-    def test_by_default(self) -> None:
-        assert _serialize_connectable(Connectable.BY_DEFAULT) == "by_default"
-
-    def test_none_defaults_to_not_by_default(self) -> None:
-        assert _serialize_connectable(None) == "not_by_default"
+    @pytest.mark.parametrize(
+        ("connectable", "expected"),
+        [
+            pytest.param(Connectable.NEVER, "never", id="never"),
+            pytest.param(Connectable.NOT_BY_DEFAULT, "not_by_default", id="not-by-default"),
+            pytest.param(Connectable.BY_DEFAULT, "by_default", id="by-default"),
+            pytest.param(None, "not_by_default", id="none-default"),
+        ],
+    )
+    def test_serialize_connectable(
+        self,
+        connectable: Connectable | None,
+        expected: str,
+    ) -> None:
+        assert _serialize_connectable(connectable) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -246,11 +191,6 @@ class TestSerializeConnectable:
 
 
 _ENV = EnvironmentSpec(name="test-schema", dependencies={})
-
-
-class _Mode(str, Enum):
-    FAST = "fast"
-    ACCURATE = "accurate"
 
 
 class _SchemaTool(ProcessingTool):

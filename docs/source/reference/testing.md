@@ -31,7 +31,14 @@ CI runs the required fast matrix with deterministic non-fast and complete/resour
 uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 ```
 
-The GitLab CI regular-test matrix runs that command on Python 3.10, 3.11, and 3.12.
+The GitLab CI regular-test matrix runs that command on Python 3.10 and 3.12.
+Python 3.11 runs the `compat` smoke selector on every pipeline, and the full deterministic Python 3.11 validation is scheduled/manual and release-required.
+
+Run the Python-version compatibility smoke selector with:
+
+```bash
+uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+```
 
 For restricted sandboxes that cannot create POSIX shared-memory segments, agents may run a partial local fast loop with shared-memory tests excluded:
 
@@ -55,6 +62,7 @@ Deterministic non-fast tests are required coverage, but they are not part of eve
 Use these markers when coverage is valuable but too broad or artifact-oriented for the fast loop:
 
 - `acceptance`: high-level workflow or example coverage that executes deterministic scenarios;
+- `compat`: deterministic Python-version compatibility smoke coverage;
 - `packaging`: build artifact, wheel, sdist, or package metadata artifact checks;
 - `package_tools`: package-local deterministic coverage that is required in a separate CI job;
 - `shared_memory`: deterministic tests requiring POSIX/shared-memory platform support;
@@ -70,6 +78,13 @@ Run package artifact checks with:
 
 ```bash
 uv run pytest tests/unit/test_package_artifacts.py
+```
+
+To validate an existing package artifact directory instead of building inside the test fixture, point the test at the prebuilt output:
+
+```bash
+uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 ```
 
 Run deterministic package-tool coverage with:
@@ -169,6 +184,7 @@ uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
 

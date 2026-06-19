@@ -254,78 +254,195 @@ def test_diagnostics_are_not_public_workflow_tools() -> None:
     assert not hasattr(bioimageflow_sairpico_tools, "SairpicoVersionReport")
 
 
-def test_gaussian_psf_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[tuple[list[str], bool]] = []
-
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
-        calls.append((command, bool(run_kwargs["check"])))
-        output_path = Path(command[command.index("-o") + 1])
-        output_path.write_text("psf")
-
-    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-    output = tmp_path / "psf.tif"
-
-    result = GaussianPSF().process_row(Arguments(
-        width=32,
-        height=24,
-        depth=8,
-        sigmaxy=1.2,
-        sigmaz=2.3,
-        output_image=output,
-    ))
-
-    assert calls == [([
-        "simggaussian3dpsf",
-        "-o", calls[0][0][calls[0][0].index("-o") + 1],
-        "-sigmaxy", "1.2",
-        "-sigmaz", "2.3",
-        "-depth", "8",
-        "-height", "24",
-        "-width", "32",
-    ], True)]
-    staged_output = Path(calls[0][0][calls[0][0].index("-o") + 1])
-    assert staged_output != output
-    assert output.read_text() == "psf"
-    assert result.output_image == output
+def _materialize_sairpico_arguments(
+    values: dict[str, object],
+    tmp_path: Path,
+    output_image: Path,
+) -> Arguments:
+    arguments: dict[str, object] = {}
+    for key, value in values.items():
+        if isinstance(value, str) and value.startswith("{tmp}/"):
+            path = tmp_path / value.removeprefix("{tmp}/")
+            if key == "psf_image":
+                path.touch()
+            arguments[key] = path
+        else:
+            arguments[key] = value
+    arguments["output_image"] = output_image
+    return Arguments(**arguments)
 
 
-def test_richardson_lucy_2d_uses_regularization_lambda(
+def _resolve_sairpico_command_template(
+    expected: list[str],
+    tmp_path: Path,
+    staged_output: Path,
+) -> list[str]:
+    tokens = []
+    for token in expected:
+        if token == "{output}":
+            tokens.append(str(staged_output))
+        elif token.startswith("{tmp}/"):
+            tokens.append(str(tmp_path / token.removeprefix("{tmp}/")))
+        else:
+            tokens.append(token)
+    return tokens
+
+
+@pytest.mark.parametrize(
+    (
+        "tool_cls",
+        "argument_values",
+        "expected_command",
+        "output_text",
+    ),
+    [
+        pytest.param(
+            GaussianPSF,
+            {
+                "width": 32,
+                "height": 24,
+                "depth": 8,
+                "sigmaxy": 1.2,
+                "sigmaz": 2.3,
+            },
+            [
+                "simggaussian3dpsf",
+                "-o", "{output}",
+                "-sigmaxy", "1.2",
+                "-sigmaz", "2.3",
+                "-depth", "8",
+                "-height", "24",
+                "-width", "32",
+            ],
+            "psf",
+            id="gaussian-psf",
+        ),
+        pytest.param(
+            RichardsonLucyDeconvolution,
+            {
+                "input_image": "{tmp}/input.tif",
+                "deconvolution_type": "2D",
+                "sigma": 1.5,
+                "psf_image": None,
+                "niter": 7,
+                "regularization_lambda": 0.25,
+                "padding": True,
+            },
+            [
+                "simgrichardsonlucy2d",
+                "-i", "{tmp}/input.tif",
+                "-o", "{output}",
+                "-niter", "7",
+                "-padding", "true",
+                "-sigma", "1.5",
+                "-lambda", "0.25",
+            ],
+            "deconvolved",
+            id="richardson-lucy-2d",
+        ),
+        pytest.param(
+            SpitfireDeconvolution,
+            {
+                "input_image": "{tmp}/input.tif",
+                "deconvolution_type": "3D",
+                "sigma": 1.5,
+                "psf_image": "{tmp}/psf.tif",
+                "regularization": 12.0,
+                "weighting": 0.6,
+                "method": "HV",
+                "padding": False,
+                "niter": 150,
+            },
+            [
+                "simgspitfiredeconv3d",
+                "-i", "{tmp}/input.tif",
+                "-o", "{output}",
+                "-regularization", "12.0",
+                "-weighting", "0.6",
+                "-method", "HV",
+                "-padding", "false",
+                "-niter", "150",
+                "-psf", "{tmp}/psf.tif",
+            ],
+            "spitfire",
+            id="spitfire-3d",
+        ),
+        pytest.param(
+            MedianDenoising,
+            {
+                "input_image": "{tmp}/input.tif",
+                "denoising_type": "4D",
+                "radius_x": 2,
+                "radius_y": 3,
+                "radius_z": 4,
+                "radius_t": 5,
+                "padding": True,
+            },
+            [
+                "simgmedian4d",
+                "-i", "{tmp}/input.tif",
+                "-o", "{output}",
+                "-rx", "2",
+                "-ry", "3",
+                "-padding", "true",
+                "-rz", "4",
+                "-rt", "5",
+            ],
+            "median",
+            id="median-4d",
+        ),
+        pytest.param(
+            HotspotDetection,
+            {
+                "input_image": "{tmp}/input.tif",
+                "patch_size": 3,
+                "neighborhood_size": 5,
+                "p_value": 0.2,
+            },
+            [
+                "hotSpotDetection",
+                "-i", "{tmp}/input.tif",
+                "-o", "{output}",
+                "-m", "3",
+                "-n", "5",
+                "-pv", "0.2",
+            ],
+            "hotspot",
+            id="hotspot-detection",
+        ),
+    ],
+)
+def test_sairpico_command_wrappers_stage_outputs_and_pass_expected_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    tool_cls: type[ProcessingTool],
+    argument_values: dict[str, object],
+    expected_command: list[str],
+    output_text: str,
 ) -> None:
     calls: list[list[str]] = []
 
     def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
         assert run_kwargs["check"] is True
         calls.append(command)
-        Path(command[command.index("-o") + 1]).write_text("deconvolved")
+        output_path = Path(command[command.index("-o") + 1])
+        output_path.write_text(output_text)
 
     monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-    input_image = tmp_path / "input.tif"
     output_image = tmp_path / "output.tif"
+    arguments = _materialize_sairpico_arguments(argument_values, tmp_path, output_image)
 
-    RichardsonLucyDeconvolution().process_row(Arguments(
-        input_image=input_image,
-        deconvolution_type="2D",
-        sigma=1.5,
-        psf_image=None,
-        niter=7,
-        regularization_lambda=0.25,
-        padding=True,
-        output_image=output_image,
-    ))
-
-    assert calls == [[
-        "simgrichardsonlucy2d",
-        "-i", str(input_image),
-        "-o", calls[0][calls[0].index("-o") + 1],
-        "-niter", "7",
-        "-padding", "true",
-        "-sigma", "1.5",
-        "-lambda", "0.25",
-    ]]
+    result = tool_cls().process_row(arguments)
+    assert len(calls) == 1
+    staged_output = Path(calls[0][calls[0].index("-o") + 1])
+    assert calls[0] == _resolve_sairpico_command_template(
+        expected_command,
+        tmp_path,
+        staged_output,
+    )
     assert Path(calls[0][calls[0].index("-o") + 1]) != output_image
-    assert output_image.read_text() == "deconvolved"
+    assert output_image.read_text() == output_text
+    assert result.output_image == output_image
 
 
 def test_wiener_3d_requires_existing_psf_before_subprocess(
@@ -352,84 +469,17 @@ def test_wiener_3d_requires_existing_psf_before_subprocess(
         ))
 
 
-def test_spitfire_3d_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
-        assert run_kwargs["check"] is True
-        calls.append(command)
-        Path(command[command.index("-o") + 1]).write_text("spitfire")
-
-    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-    psf = tmp_path / "psf.tif"
-    psf.touch()
-
-    SpitfireDeconvolution().process_row(Arguments(
-        input_image=tmp_path / "input.tif",
-        deconvolution_type="3D",
-        sigma=1.5,
-        psf_image=psf,
-        regularization=12.0,
-        weighting=0.6,
-        method="HV",
-        padding=False,
-        niter=150,
-        output_image=tmp_path / "output.tif",
-    ))
-
-    assert calls == [[
-        "simgspitfiredeconv3d",
-        "-i", str(tmp_path / "input.tif"),
-        "-o", calls[0][calls[0].index("-o") + 1],
-        "-regularization", "12.0",
-        "-weighting", "0.6",
-        "-method", "HV",
-        "-padding", "false",
-        "-niter", "150",
-        "-psf", str(psf),
-    ]]
-    assert Path(calls[0][calls[0].index("-o") + 1]) != tmp_path / "output.tif"
-    assert (tmp_path / "output.tif").read_text() == "spitfire"
-
-
-def test_median_4d_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
-        assert run_kwargs["check"] is True
-        calls.append(command)
-        Path(command[command.index("-o") + 1]).write_text("median")
-
-    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-
-    MedianDenoising().process_row(Arguments(
-        input_image=tmp_path / "input.tif",
-        denoising_type="4D",
-        radius_x=2,
-        radius_y=3,
-        radius_z=4,
-        radius_t=5,
-        padding=True,
-        output_image=tmp_path / "output.tif",
-    ))
-
-    assert calls == [[
-        "simgmedian4d",
-        "-i", str(tmp_path / "input.tif"),
-        "-o", calls[0][calls[0].index("-o") + 1],
-        "-rx", "2",
-        "-ry", "3",
-        "-padding", "true",
-        "-rz", "4",
-        "-rt", "5",
-    ]]
-    assert Path(calls[0][calls[0].index("-o") + 1]) != tmp_path / "output.tif"
-    assert (tmp_path / "output.tif").read_text() == "median"
-
-
-def test_cimg_denoising_command_omits_false_flags(
+@pytest.mark.parametrize(
+    "algorithm",
+    [
+        pytest.param(None, id="omits-unset-algorithm-and-false-flags"),
+        pytest.param("PEWA", id="includes-set-algorithm"),
+    ],
+)
+def test_cimg_denoising_command_builds_optional_flags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    algorithm: str | None,
 ) -> None:
     calls: list[list[str]] = []
 
@@ -447,7 +497,7 @@ def test_cimg_denoising_command_omits_false_flags(
         alpha=0.0,
         scale=1.0,
         intensity_range=1.0,
-        algorithm=None,
+        algorithm=algorithm,
         gaussian_noise=0.0,
         poisson_noise=False,
         manual_sigma=0.0,
@@ -465,81 +515,14 @@ def test_cimg_denoising_command_omits_false_flags(
     assert "" not in command
     assert "-np" not in command
     assert "-stab" not in command
-    assert "-algo" not in command
     assert "-range" in command
+    if algorithm is None:
+        assert "-algo" not in command
+    else:
+        assert command[-2:] == ["-algo", algorithm]
+        assert algorithm in command
     assert Path(command[command.index("-o") + 1]) != tmp_path / "output.tif"
     assert (tmp_path / "output.tif").read_text() == "cimg"
-
-
-def test_cimg_denoising_command_includes_algorithm_when_set(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
-        assert run_kwargs["check"] is True
-        calls.append(command)
-        Path(command[command.index("-o") + 1]).write_text("cimg")
-
-    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-
-    CImgDenoising().process_row(Arguments(
-        input_image=tmp_path / "input.tif",
-        first=0,
-        last=-1,
-        alpha=0.0,
-        scale=1.0,
-        intensity_range=1.0,
-        algorithm="PEWA",
-        gaussian_noise=0.0,
-        poisson_noise=False,
-        manual_sigma=0.0,
-        stabilize_poisson=False,
-        patch=3,
-        neighborhood=7,
-        denoising_parameter=-1.0,
-        sparsity_parameter=0.6,
-        iterations=4,
-        output_image=tmp_path / "output.tif",
-    ))
-
-    command = calls[0]
-    assert "" not in command
-    assert command[-2:] == ["-algo", "PEWA"]
-    assert "PEWA" in command
-    assert Path(command[command.index("-o") + 1]) != tmp_path / "output.tif"
-    assert (tmp_path / "output.tif").read_text() == "cimg"
-
-
-def test_hotspot_detection_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
-        assert run_kwargs["check"] is True
-        calls.append(command)
-        Path(command[command.index("-o") + 1]).write_text("hotspot")
-
-    monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
-
-    HotspotDetection().process_row(Arguments(
-        input_image=tmp_path / "input.tif",
-        patch_size=3,
-        neighborhood_size=5,
-        p_value=0.2,
-        output_image=tmp_path / "output.tif",
-    ))
-
-    assert calls == [[
-        "hotSpotDetection",
-        "-i", str(tmp_path / "input.tif"),
-        "-o", calls[0][calls[0].index("-o") + 1],
-        "-m", "3",
-        "-n", "5",
-        "-pv", "0.2",
-    ]]
-    assert Path(calls[0][calls[0].index("-o") + 1]) != tmp_path / "output.tif"
-    assert (tmp_path / "output.tif").read_text() == "hotspot"
 
 
 def test_validate_sairpico_environment_reports_missing_binaries(

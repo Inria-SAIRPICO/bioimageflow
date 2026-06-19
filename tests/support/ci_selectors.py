@@ -9,6 +9,8 @@ FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
 FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND = (
     f'uv run pytest tests -m "{FAST_TEST_SELECTOR} and not shared_memory"'
 )
+PYTHON_COMPAT_TEST_SELECTOR = f"compat and {FAST_TEST_SELECTOR}"
+PYTHON_COMPAT_TEST_COMMAND = f'uv run pytest tests -m "{PYTHON_COMPAT_TEST_SELECTOR}"'
 
 ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
 ACCEPTANCE_TEST_COMMAND = f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"'
@@ -17,6 +19,10 @@ PACKAGE_TOOLS_TEST_SELECTOR = "package_tools and not complete"
 PACKAGE_TOOLS_TEST_COMMAND = f'uv run pytest -m "{PACKAGE_TOOLS_TEST_SELECTOR}"'
 
 PACKAGE_ARTIFACTS_COMMAND = "uv run pytest tests/unit/test_package_artifacts.py"
+CI_PACKAGE_ARTIFACTS_COMMAND = (
+    "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages "
+    "uv run pytest tests/unit/test_package_artifacts.py"
+)
 PACKAGE_METADATA_CONTRACTS_COMMAND = (
     "uv run pytest tests/unit/test_package_artifacts.py "
     "tests/unit/test_package_docs_dependency_posture.py "

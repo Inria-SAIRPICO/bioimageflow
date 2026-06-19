@@ -9,7 +9,8 @@ This reference page keeps the release, packaging, and CI contract shared by firs
 
 The orchestrator, core package, and companion tool packages are released with lockstep versions so workflow examples and package docs describe one coherent BioImageFlow distribution.
 The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
-The deterministic CI matrix validates the main development/runtime surface on Python 3.10, 3.11, and 3.12, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
+The deterministic CI matrix validates the main development/runtime surface with full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
+Full deterministic Python 3.11 validation is scheduled/manual and release-required, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
 
 Package metadata separates distribution dependencies from isolated runtime dependencies.
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
@@ -26,6 +27,7 @@ uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --out-dir dist/packages
+BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
 
