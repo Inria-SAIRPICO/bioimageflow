@@ -11,24 +11,24 @@ Big-FISH remains a future optional evaluation backend, not a current default dep
 
 ## Tools
 
-- <a href="tools/atlas_spot_detection.md">AtlasSpotDetection</a>: external Atlas CLI-backed
+- [AtlasSpotDetection](tools/atlas_spot_detection.md): external Atlas CLI-backed
   adaptive spot detection for 2D TIFF intensity images.
-- <a href="tools/detect_spots.md">DetectSpots</a>: LoG, DoG, or local-maxima spot
+- [DetectSpots](tools/detect_spots.md): LoG, DoG, or local-maxima spot
   detection.
-- <a href="tools/assign_spots_to_labels.md">AssignSpotsToLabels</a>: sample label values
+- [AssignSpotsToLabels](tools/assign_spots_to_labels.md): sample label values
   at spot coordinates.
-- <a href="tools/spot_summary.md">SpotSummary</a>: aggregate assigned spot counts and
+- [SpotSummary](tools/spot_summary.md): aggregate assigned spot counts and
   intensities per label.
-- <a href="tools/filter_spots.md">FilterSpots</a>: filter spot dataframe rows by numeric thresholds and masks.
-- <a href="tools/render_spots.md">RenderSpots</a>: render coordinates to label or mask images.
-- <a href="tools/spots_to_labels.md">SpotsToLabels</a>: create spot label images from dataframe rows or masks.
-- <a href="tools/spot_colocalization.md">SpotColocalization</a>: match two upstream spot dataframes by distance.
-- <a href="tools/spot_quality_metrics.md">SpotQualityMetrics</a>: compute SNR, local background,
+- [FilterSpots](tools/filter_spots.md): filter spot dataframe rows by numeric thresholds and masks.
+- [RenderSpots](tools/render_spots.md): render coordinates to label or mask images.
+- [SpotsToLabels](tools/spots_to_labels.md): create spot label images from dataframe rows or masks.
+- [SpotColocalization](tools/spot_colocalization.md): match two upstream spot dataframes by distance.
+- [SpotQualityMetrics](tools/spot_quality_metrics.md): compute SNR, local background,
   and nearest-neighbor distances.
 
 ## Demo Workflow
 
-- <a href="workflows/puncta_analysis.md">Puncta analysis workflow</a>: detect puncta,
+- [Puncta analysis workflow](workflows/puncta_analysis.md): detect puncta,
   assign them to labels, and summarize per-object signal.
 
 ## Tests and Demo Data

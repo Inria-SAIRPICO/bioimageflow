@@ -91,6 +91,32 @@ def test_package_index_links_are_standalone_relative_links() -> None:
     assert offenders == []
 
 
+def test_package_index_doc_links_use_markdown_not_raw_html() -> None:
+    offenders = []
+    link_pattern = re.compile(
+        r"<a\s+[^>]*href=[\"']((?:tools|workflows)/[^\"']+\.md)[\"']",
+        re.IGNORECASE,
+    )
+
+    for path in sorted((ROOT / "packages").glob("*/docs/index.md")):
+        for href in link_pattern.findall(path.read_text()):
+            offenders.append(f"{path.relative_to(ROOT)}: {href}")
+
+    assert offenders == []
+
+
+def test_package_index_doc_links_point_to_existing_pages() -> None:
+    offenders = []
+    link_pattern = re.compile(r"(?<!!)\[[^\]]+\]\(((?:tools|workflows)/[^)\s#]+\.md)(?:#[^)]+)?\)")
+
+    for path in sorted((ROOT / "packages").glob("*/docs/index.md")):
+        for href in link_pattern.findall(path.read_text()):
+            if not (path.parent / href).exists():
+                offenders.append(f"{path.relative_to(ROOT)}: {href}")
+
+    assert offenders == []
+
+
 def test_tool_package_reference_documents_release_and_ci_contract() -> None:
     text = _text("docs/source/reference/tool_packages.md")
 

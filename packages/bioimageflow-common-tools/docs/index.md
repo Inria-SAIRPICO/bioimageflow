@@ -13,30 +13,30 @@ The package is intended for users who need to assemble or inspect workflows with
 
 ## Public Tools
 
-- <a href="tools/files.md">Files</a>: create a source table from files in a directory.
-- <a href="tools/table_from_csv.md">TableFromCsv</a>: load CSV or TSV metadata as a source
+- [Files](tools/files.md): create a source table from files in a directory.
+- [TableFromCsv](tools/table_from_csv.md): load CSV or TSV metadata as a source
   table.
-- <a href="tools/generate.md">Generate</a>: create a source table from literal values.
-- <a href="tools/inner_join.md">InnerJoin</a>: merge upstream rows on their index.
-- <a href="tools/cross_join.md">CrossJoin</a>: create all row combinations.
-- <a href="tools/join_on_column.md">JoinOnColumn</a>: join tables on a named column.
-- <a href="tools/concat.md">Concat</a>: append rows from multiple tables.
-- <a href="tools/collect.md">Collect</a>: collect ancestor columns into one table.
-- <a href="tools/filter_table_rows.md">FilterTableRows</a>: filter rows by a simple
+- [Generate](tools/generate.md): create a source table from literal values.
+- [InnerJoin](tools/inner_join.md): merge upstream rows on their index.
+- [CrossJoin](tools/cross_join.md): create all row combinations.
+- [JoinOnColumn](tools/join_on_column.md): join tables on a named column.
+- [Concat](tools/concat.md): append rows from multiple tables.
+- [Collect](tools/collect.md): collect ancestor columns into one table.
+- [FilterTableRows](tools/filter_table_rows.md): filter rows by a simple
   predicate.
-- <a href="tools/select_columns.md">SelectColumns</a>: keep and optionally rename columns.
-- <a href="tools/write_table.md">WriteTable</a>: persist an upstream table to CSV or TSV.
-- <a href="tools/extract_channel.md">ExtractChannel</a>: write one channel from a
+- [SelectColumns](tools/select_columns.md): keep and optionally rename columns.
+- [WriteTable](tools/write_table.md): persist an upstream table to CSV or TSV.
+- [ExtractChannel](tools/extract_channel.md): write one channel from a
   channel-first image.
-- <a href="tools/connected_components.md">ConnectedComponents</a>: label foreground
+- [ConnectedComponents](tools/connected_components.md): label foreground
   components in a binary image.
-- <a href="tools/label_overlaps.md">LabelOverlaps</a>: count pixel overlaps between label
+- [LabelOverlaps](tools/label_overlaps.md): count pixel overlaps between label
   images.
-- <a href="tools/mosaic.md">Mosaic</a>: build a grid image from workflow rows.
+- [Mosaic](tools/mosaic.md): build a grid image from workflow rows.
 
 ## Demo Workflow
 
-- <a href="workflows/common_glue.md">Common glue workflow</a>: source discovery,
+- [Common glue workflow](workflows/common_glue.md): source discovery,
   parameter generation, and table expansion.
 
 ## Tests and Demo Data

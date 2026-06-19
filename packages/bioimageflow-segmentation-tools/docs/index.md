@@ -11,29 +11,29 @@ Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in iso
 
 ## Tools
 
-- <a href="tools/threshold_segment.md">ThresholdSegment</a>: threshold and connected
+- [ThresholdSegment](tools/threshold_segment.md): threshold and connected
   component labeling.
-- <a href="tools/otsu_threshold_segment.md">OtsuThresholdSegment</a>: global Otsu thresholding
+- [OtsuThresholdSegment](tools/otsu_threshold_segment.md): global Otsu thresholding
   with connected-component labeling.
-- <a href="tools/local_threshold_segment.md">LocalThresholdSegment</a>: Sauvola adaptive
+- [LocalThresholdSegment](tools/local_threshold_segment.md): Sauvola adaptive
   thresholding with connected-component labeling.
-- <a href="tools/watershed_segment.md">WatershedSegment</a>: marker-controlled foreground
+- [WatershedSegment](tools/watershed_segment.md): marker-controlled foreground
   splitting.
-- <a href="tools/distance_watershed_segment.md">DistanceWatershedSegment</a>: marker-free
+- [DistanceWatershedSegment](tools/distance_watershed_segment.md): marker-free
   distance-transform watershed.
-- <a href="tools/split_touching_objects.md">SplitTouchingObjects</a>: split clumped label masks
+- [SplitTouchingObjects](tools/split_touching_objects.md): split clumped label masks
   with distance watershed semantics.
-- <a href="tools/filter_labels.md">FilterLabels</a>: filter labels by area, border contact,
+- [FilterLabels](tools/filter_labels.md): filter labels by area, border contact,
   intensity, and shape.
-- <a href="tools/postprocess_labels.md">PostprocessLabels</a>: minimum-size filtering and
+- [PostprocessLabels](tools/postprocess_labels.md): minimum-size filtering and
   sequential relabeling.
-- <a href="tools/cellpose3.md">Cellpose3</a>: Cellpose v3 pretrained model wrapper.
-- <a href="tools/stardist_segmenter.md">StarDistSegmenter</a>: StarDist 2D pretrained
+- [Cellpose3](tools/cellpose3.md): Cellpose v3 pretrained model wrapper.
+- [StarDistSegmenter](tools/stardist_segmenter.md): StarDist 2D pretrained
   model wrapper.
 
 ## Demo Workflow
 
-- <a href="workflows/bbbc038_segmentation_benchmark.md">BBBC038 segmentation benchmark</a>:
+- [BBBC038 segmentation benchmark](workflows/bbbc038_segmentation_benchmark.md):
   synthetic nuclei segmentation with a path to public BBBC038 validation.
 
 ## Tests and Demo Data

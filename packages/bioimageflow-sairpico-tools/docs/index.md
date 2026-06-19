@@ -7,22 +7,22 @@ the original binaries in conda-backed `EnvironmentSpec` definitions.
 
 The public tools are:
 
-- <a href="tools/gaussian_psf.md">GaussianPSF</a>: generate a 3D Gaussian PSF with
+- [GaussianPSF](tools/gaussian_psf.md): generate a 3D Gaussian PSF with
   `simggaussian3dpsf`.
-- <a href="tools/gibson_lanni_psf.md">GibsonLanniPSF</a>: generate a 3D Gibson-Lanni PSF
+- [GibsonLanniPSF](tools/gibson_lanni_psf.md): generate a 3D Gibson-Lanni PSF
   with `simggibsonlannipsf`.
-- <a href="tools/richardson_lucy_deconvolution.md">RichardsonLucyDeconvolution</a>: run
+- [RichardsonLucyDeconvolution](tools/richardson_lucy_deconvolution.md): run
   2D, 2D-slice, or 3D Richardson-Lucy deconvolution.
-- <a href="tools/wiener_deconvolution.md">WienerDeconvolution</a>: run 2D, 2D-slice, or
+- [WienerDeconvolution](tools/wiener_deconvolution.md): run 2D, 2D-slice, or
   3D Wiener deconvolution.
-- <a href="tools/spitfire_deconvolution.md">SpitfireDeconvolution</a>: run 2D, 2D-slice,
+- [SpitfireDeconvolution](tools/spitfire_deconvolution.md): run 2D, 2D-slice,
   or 3D SPITFIR(e) deconvolution.
-- <a href="tools/median_denoising.md">MedianDenoising</a>: run 2D, 3D, or 4D median
+- [MedianDenoising](tools/median_denoising.md): run 2D, 3D, or 4D median
   filtering.
-- <a href="tools/cimg_denoising.md">CImgDenoising</a>: run the CImg `denoise` command.
-- <a href="tools/hotspot_detection.md">HotspotDetection</a>: run `hotSpotDetection` for
+- [CImgDenoising](tools/cimg_denoising.md): run the CImg `denoise` command.
+- [HotspotDetection](tools/hotspot_detection.md): run `hotSpotDetection` for
   sparse hotspot detection.
-- <a href="tools/hotspot_to_spots.md">HotspotToSpots</a>: convert hotspot images into spot tables.
+- [HotspotToSpots](tools/hotspot_to_spots.md): convert hotspot images into spot tables.
 
 The package declares three environments:
 
@@ -46,4 +46,4 @@ workflow builders.
 
 Demo workflow:
 
-- <a href="workflows/sairpico_restoration_smoke.md">SAIRPICO restoration smoke</a>
+- [SAIRPICO restoration smoke](workflows/sairpico_restoration_smoke.md)

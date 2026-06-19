@@ -10,35 +10,35 @@ Core lightweight libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr 
 
 ## Tools
 
-- <a href="tools/bioio_convert_image.md">BioIOConvertImage</a>: broad bioio/plugin-backed
+- [BioIOConvertImage](tools/bioio_convert_image.md): broad bioio/plugin-backed
   format conversion for CZI, OME-Zarr, OME-TIFF, TIFF, PNG, and similar formats.
-- <a href="tools/read_image.md">ReadImage</a>: read an image and write a workflow-local
+- [ReadImage](tools/read_image.md): read an image and write a workflow-local
   copy.
-- <a href="tools/read_image_metadata.md">ReadImageMetadata</a>: report shape, dtype,
+- [ReadImageMetadata](tools/read_image_metadata.md): report shape, dtype,
   dimensionality, and a lightweight axes guess.
-- <a href="tools/validate_image_layout.md">ValidateImageLayout</a>: check declared layout
+- [ValidateImageLayout](tools/validate_image_layout.md): check declared layout
   length, required axes, and optional minimum sizes.
-- <a href="tools/convert_image_format.md">ConvertImageFormat</a>: select optional scene,
+- [ConvertImageFormat](tools/convert_image_format.md): select optional scene,
   channel, Z, or T dimensions and convert to imageio outputs, OME-TIFF, or
   minimal OME-Zarr by output suffix.
-- <a href="tools/convert_to_ome_tiff.md">ConvertToOmeTiff</a>: convert an image file to
+- [ConvertToOmeTiff](tools/convert_to_ome_tiff.md): convert an image file to
   OME-TIFF with axis metadata.
-- <a href="tools/convert_to_ome_zarr.md">ConvertToOmeZarr</a>: convert an image file to a
+- [ConvertToOmeZarr](tools/convert_to_ome_zarr.md): convert an image file to a
   single-scale OME-Zarr v2 directory.
-- <a href="tools/select_scene.md">SelectScene</a>: extract scene 0 from ordinary images or
+- [SelectScene](tools/select_scene.md): extract scene 0 from ordinary images or
   a TIFF series by index.
-- <a href="tools/select_timepoint.md">SelectTimepoint</a>: select one T index from a
+- [SelectTimepoint](tools/select_timepoint.md): select one T index from a
   declared layout.
-- <a href="tools/select_channel.md">SelectChannel</a>: select one C index from a declared
+- [SelectChannel](tools/select_channel.md): select one C index from a declared
   layout.
-- <a href="tools/select_z_range.md">SelectZRange</a>: select a start-inclusive,
+- [SelectZRange](tools/select_z_range.md): select a start-inclusive,
   stop-exclusive Z slab from a declared layout.
-- <a href="tools/select_dimensions.md">SelectDimensions</a>: select a channel, z plane, or
+- [SelectDimensions](tools/select_dimensions.md): select a channel, z plane, or
   timepoint from declared axis layouts.
 
 ## Demo Workflow
 
-- <a href="workflows/ome_normalization.md">OME normalization workflow</a>: read, slice,
+- [OME normalization workflow](workflows/ome_normalization.md): read, slice,
   and export a tiny OME-compatible image fixture.
 
 ## Tests and Demo Data

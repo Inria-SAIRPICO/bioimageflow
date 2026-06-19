@@ -12,27 +12,27 @@ small enough to test with generated arrays.
 
 ## Tools
 
-- <a href="tools/region_properties.md">RegionProperties</a>: area, centroid, and bounding
+- [RegionProperties](tools/region_properties.md): area, centroid, and bounding
   box per label.
-- <a href="tools/shape_properties.md">ShapeProperties</a>: deterministic extended shape
+- [ShapeProperties](tools/shape_properties.md): deterministic extended shape
   features per label.
-- <a href="tools/intensity_properties.md">IntensityProperties</a>: intensity summary per
+- [IntensityProperties](tools/intensity_properties.md): intensity summary per
   label.
-- <a href="tools/count_labels.md">CountLabels</a>: count objects and labeled pixels.
-- <a href="tools/summarize_table.md">SummarizeTable</a>: summarize numeric table columns.
-- <a href="tools/label_benchmark.md">LabelBenchmark</a>: foreground pixel agreement
+- [CountLabels](tools/count_labels.md): count objects and labeled pixels.
+- [SummarizeTable](tools/summarize_table.md): summarize numeric table columns.
+- [LabelBenchmark](tools/label_benchmark.md): foreground pixel agreement
   between predicted and reference labels.
-- <a href="tools/object_matching_metrics.md">ObjectMatchingMetrics</a>: greedy object matching
+- [ObjectMatchingMetrics](tools/object_matching_metrics.md): greedy object matching
   from predicted labels to reference labels.
-- <a href="tools/dice_iou.md">DiceIoU</a>: binary foreground Dice and IoU for masks or labels.
-- <a href="tools/aggregate_per_image.md">AggregatePerImage</a>: per-image summaries from
+- [DiceIoU](tools/dice_iou.md): binary foreground Dice and IoU for masks or labels.
+- [AggregatePerImage](tools/aggregate_per_image.md): per-image summaries from
   object-level feature tables.
-- <a href="tools/normalize_features.md">NormalizeFeatures</a>: z-score, robust, or min-max
+- [NormalizeFeatures](tools/normalize_features.md): z-score, robust, or min-max
   normalization for feature columns.
 
 ## Demo Workflow
 
-- <a href="workflows/object_measurement.md">Object measurement workflow</a>: measure label
+- [Object measurement workflow](workflows/object_measurement.md): measure label
   geometry, intensity, counts, and summary tables from generated fixtures.
 
 ## Tests and Demo Data
