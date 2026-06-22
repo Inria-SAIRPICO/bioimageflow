@@ -107,10 +107,10 @@ Goal
   Does CAREamics-style restoration improve a low-SNR microscopy image?
 
 Data
-  Normal tests use generated clean/degraded images. Real CAREamics checkpoints are opt-in model-runtime validation.
+  Use a paired low-SNR microscopy crop, clean or high-SNR reference image, and CAREamics checkpoint. Model-runtime validation remains opt-in.
 
 Command
-  ``python example-workflows/low_snr_restoration/workflow.py``
+  ``python example-workflows/low_snr_restoration/workflow.py --clean-image data/low_snr_clean_crop.tif --degraded-image data/low_snr_degraded_crop.tif --checkpoint models/careamics.ckpt``
 
 How it works
   The workflow runs a CAREamics-facing restoration prediction step, compares the restored image with the noisy input and clean reference where available, and produces a side-by-side restoration assessment.
@@ -119,7 +119,7 @@ Results
   Restored image, metrics table, and comparison preview.
 
 Interpretation
-  A useful restoration should reduce MSE and increase PSNR relative to the degraded input on the pinned fixture.
+  A useful restoration should reduce MSE and increase PSNR relative to the degraded input on the same validation crop.
 
 sairpico_deconvolution
 ----------------------

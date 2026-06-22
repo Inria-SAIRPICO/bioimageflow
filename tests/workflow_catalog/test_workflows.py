@@ -84,6 +84,20 @@ def _write_cell_counting_input(path: Path) -> Path:
     return path
 
 
+def _write_restoration_pair(data_dir: Path) -> tuple[Path, Path]:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    yy, xx = np.mgrid[0:48, 0:48]
+    clean = np.zeros((48, 48), dtype=np.float32)
+    clean[(yy - 24) ** 2 + (xx - 24) ** 2 <= 11**2] = 1.0
+    clean[(yy - 16) ** 2 + (xx - 16) ** 2 <= 4**2] = 0.6
+    degraded = np.clip(clean * 0.8 + 0.05, 0.0, 1.0)
+    clean_path = data_dir / "low_snr_clean_crop.tif"
+    degraded_path = data_dir / "low_snr_degraded_crop.tif"
+    iio.imwrite(clean_path, clean)
+    iio.imwrite(degraded_path, degraded.astype(np.float32))
+    return clean_path, degraded_path
+
+
 def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     cellpose_module = cast(Any, types.ModuleType("cellpose"))
     cellpose_models_module = cast(Any, types.ModuleType("cellpose.models"))
@@ -304,6 +318,52 @@ def test_cell_counting_public_workflow_does_not_generate_fixture() -> None:
 
     assert "_write_fixture" not in source
     assert "synthetic_cell_counting" not in source
+
+
+def test_low_snr_restoration_consumes_supplied_images_and_writes_preview(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_module(_example("low_snr_restoration"))
+    clean_image, degraded_image = _write_restoration_pair(tmp_path / "restoration_data")
+    expected_checkpoint = tmp_path / "careamics_checkpoint.ckpt"
+    expected_checkpoint.write_text("fake checkpoint")
+    careamics_module = types.ModuleType("careamics")
+
+    def fake_predict(image: Any, *, checkpoint: Path | None) -> Any:
+        assert checkpoint == expected_checkpoint
+        return iio.imread(clean_image).astype(np.float32)
+
+    careamics_module.predict = fake_predict
+    monkeypatch.setitem(sys.modules, "careamics", careamics_module)
+
+    wf, terminal = module.build_workflow(
+        clean_image=str(clean_image),
+        degraded_image=str(degraded_image),
+        checkpoint=str(expected_checkpoint),
+        storage_path=str(tmp_path / "low_snr"),
+        engine="direct",
+    )
+
+    assert {
+        "careamics_n2v_restoration",
+        "evaluate_restoration",
+        "restoration_preview",
+        "restoration_results",
+    } <= set(wf.nodes)
+    assert "low_snr_fixture" not in wf.nodes
+    result = wf.compute(terminal)
+    assert result.iloc[0]["mse_restored"] < result.iloc[0]["mse_degraded"]
+    assert Path(result.iloc[0]["restored_image"]).exists()
+    assert Path(result.iloc[0]["preview_image"]).exists()
+
+
+def test_low_snr_public_workflow_does_not_generate_fixture() -> None:
+    source = _example("low_snr_restoration").read_text()
+
+    assert "LowSNRFixture" not in source
+    assert "low_snr_fixture" not in source
+    assert "Generated" not in source
 
 
 def test_parameter_space_workflow_constructs_with_package_imports(

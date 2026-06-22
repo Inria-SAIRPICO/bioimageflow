@@ -6,7 +6,10 @@ import types
 from typing import Any
 import pytest
 
-from tests.workflow_catalog.test_workflows import _write_cell_counting_input
+from tests.workflow_catalog.test_workflows import (
+    _write_cell_counting_input,
+    _write_restoration_pair,
+)
 
 
 pytestmark = pytest.mark.acceptance
@@ -100,6 +103,13 @@ def test_specialized_example_workflow_executes(
     }
     if workflow_name == "cell_counting_phenotyping":
         kwargs["input_image"] = str(_write_cell_counting_input(tmp_path / "bbbc038_crop.tif"))
+    if workflow_name == "low_snr_restoration":
+        clean_image, degraded_image = _write_restoration_pair(tmp_path / "restoration_data")
+        checkpoint = tmp_path / "careamics_checkpoint.ckpt"
+        checkpoint.write_text("fake checkpoint")
+        kwargs["clean_image"] = str(clean_image)
+        kwargs["degraded_image"] = str(degraded_image)
+        kwargs["checkpoint"] = str(checkpoint)
     wf, node = module.build_workflow(**kwargs)
 
     result = wf.compute(node)

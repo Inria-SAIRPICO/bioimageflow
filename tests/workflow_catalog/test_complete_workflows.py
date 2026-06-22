@@ -7,7 +7,11 @@ import imageio.v3 as iio
 import numpy as np
 import pytest
 
-from tests.workflow_catalog.test_workflows import _load_module, _write_cell_counting_input
+from tests.workflow_catalog.test_workflows import (
+    _load_module,
+    _write_cell_counting_input,
+    _write_restoration_pair,
+)
 
 
 pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
@@ -154,6 +158,14 @@ def test_specialized_workflow_acceptance_smoke(
     }
     if workflow_name == "cell_counting_phenotyping":
         kwargs["input_image"] = str(_write_cell_counting_input(tmp_path / "bbbc038_crop.tif"))
+    if workflow_name == "low_snr_restoration":
+        checkpoint_env = os.environ.get("BIOIMAGEFLOW_CAREAMICS_CHECKPOINT")
+        if checkpoint_env is None:
+            pytest.skip("set BIOIMAGEFLOW_CAREAMICS_CHECKPOINT to run CAREamics model-runtime validation")
+        clean_image, degraded_image = _write_restoration_pair(tmp_path / "restoration_data")
+        kwargs["clean_image"] = str(clean_image)
+        kwargs["degraded_image"] = str(degraded_image)
+        kwargs["checkpoint"] = checkpoint_env
     wf, terminal = module.build_workflow(**kwargs)
 
     result = wf.compute(terminal)
