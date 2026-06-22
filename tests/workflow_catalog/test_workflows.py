@@ -691,7 +691,7 @@ def test_sairpico_command_construction_without_binaries(
 def test_bbbc038_public_data_path_is_documented() -> None:
     docs = (
         Path(__file__).resolve().parents[2]
-        / "docs/source/workflows/index.rst"
+        / "docs/source/workflows/bbbc038_segmentation_benchmark.rst"
     ).read_text()
     assert "BBBC038" in docs
     assert "Broad Bioimage" in docs
@@ -701,7 +701,6 @@ def test_bbbc038_public_data_path_is_documented() -> None:
 def test_example_workflow_documentation_records_review_contract() -> None:
     root = Path(__file__).resolve().parents[2]
     docs = [
-        root / "docs/source/workflows/index.rst",
         root / "example-workflows/fish_analysis/data_manifest.yml",
         root / "example-workflows/fish_analysis/expected_outputs.yml",
         root / "example-workflows/parameter_space_exploration/data_manifest.yml",
@@ -725,6 +724,16 @@ def test_example_workflow_documentation_records_review_contract() -> None:
             assert "workflow:" in text
             assert "outputs:" in text or "data:" in text
         else:
-            assert "Data" in text
             assert "Expected" not in text
             assert "Analysis " + "question" not in text
+
+    workflow_pages = sorted((root / "docs/source/workflows").glob("*.rst"))
+    workflow_pages = [path for path in workflow_pages if path.name != "index.rst"]
+    assert len(workflow_pages) == 7
+    for doc_path in workflow_pages:
+        text = doc_path.read_text()
+        assert "What you will inspect" in text
+        assert ".. figure:: images/" in text
+        assert '.. raw:: html\n\n   <pre class="mermaid">' in text
+        assert "Goal\n" not in text
+        assert "How it works\n" not in text
