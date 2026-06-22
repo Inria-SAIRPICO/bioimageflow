@@ -37,17 +37,21 @@ class AverageSpotsPerNucleus(DataFrameTool):
                 "Average number of distinct FOLS2 spots overlapping each nucleus."
             ),
         )]
-        avg_csfr1_per_nucleus: Annotated[float, GUIMeta(
+        avg_csf1r_per_nucleus: Annotated[float, GUIMeta(
             display_name="Avg CSF1R spots / nucleus",
             description=(
                 "Average number of distinct CSF1R spots overlapping each nucleus."
             ),
         )]
+        total_nuclei: Annotated[int, GUIMeta(
+            display_name="Total nuclei",
+            description="Number of segmented nuclei represented in the overlap table.",
+        )]
         total_nuclei_fols2: Annotated[int, GUIMeta(
             display_name="Nuclei with FOLS2",
             description="Number of nuclei that overlap at least one FOLS2 spot.",
         )]
-        total_nuclei_csfr1: Annotated[int, GUIMeta(
+        total_nuclei_csf1r: Annotated[int, GUIMeta(
             display_name="Nuclei with CSF1R",
             description="Number of nuclei that overlap at least one CSF1R spot.",
         )]
@@ -57,7 +61,7 @@ class AverageSpotsPerNucleus(DataFrameTool):
                 "Total number of FOLS2 spot-nucleus associations across the image."
             ),
         )]
-        total_csfr1_spots: Annotated[int, GUIMeta(
+        total_csf1r_spots: Annotated[int, GUIMeta(
             display_name="Total CSF1R spots",
             description=(
                 "Total number of CSF1R spot-nucleus associations across the image."
@@ -72,25 +76,29 @@ class AverageSpotsPerNucleus(DataFrameTool):
             )
 
         fols2 = self._summarize_overlap_dataframe(dfs[0], "fols2")
-        csfr1 = self._summarize_overlap_dataframe(dfs[1], "csfr1")
+        csf1r = self._summarize_overlap_dataframe(dfs[1], "csf1r")
 
-        result = fols2.join(csfr1, how="outer")
+        result = fols2.join(csf1r, how="outer")
         for col in result.columns:
             if col.startswith("avg_"):
                 result[col] = result[col].fillna(0.0)
             else:
                 result[col] = result[col].fillna(0).astype(int)
+        result["total_nuclei"] = result[
+            ["observed_nuclei_fols2", "observed_nuclei_csf1r"]
+        ].max(axis=1)
 
         result.index.name = None
         result["image_index"] = result.index.astype(str)
         ordered_columns = [
             "image_index",
             "avg_fols2_per_nucleus",
-            "avg_csfr1_per_nucleus",
+            "avg_csf1r_per_nucleus",
+            "total_nuclei",
             "total_nuclei_fols2",
-            "total_nuclei_csfr1",
+            "total_nuclei_csf1r",
             "total_fols2_spots",
-            "total_csfr1_spots",
+            "total_csf1r_spots",
         ]
         return result[ordered_columns]
 
@@ -113,6 +121,12 @@ class AverageSpotsPerNucleus(DataFrameTool):
         work = df.copy()
         work["image_index"] = [cls._parent_index(idx) for idx in work.index]
         image_indices = pd.Index(work["image_index"].drop_duplicates().astype(str))
+        observed_nuclei = (
+            work.loc[work["reference_label"] > 0]
+            .groupby("image_index")["reference_label"]
+            .nunique()
+            .rename(f"observed_nuclei_{label}")
+        )
 
         real = work[
             (work["reference_label"] > 0)
@@ -122,22 +136,40 @@ class AverageSpotsPerNucleus(DataFrameTool):
             return pd.DataFrame(
                 {
                     f"avg_{label}_per_nucleus": 0.0,
+                    f"observed_nuclei_{label}": observed_nuclei.reindex(
+                        image_indices, fill_value=0
+                    ),
                     f"total_nuclei_{label}": 0,
                     f"total_{label}_spots": 0,
                 },
                 index=image_indices,
             )
 
-        spots_per_nucleus = (
-            real.groupby(["image_index", "reference_label"])["spot_label"]
-            .nunique()
+        all_nuclei = (
+            work.loc[work["reference_label"] > 0, ["image_index", "reference_label"]]
+            .drop_duplicates()
+            .set_index(["image_index", "reference_label"])
         )
-        summary = spots_per_nucleus.groupby("image_index").agg(["mean", "count", "sum"])
+        positive_spots_per_nucleus = real.groupby(
+            ["image_index", "reference_label"]
+        )["spot_label"].nunique()
+        spots_per_nucleus = (
+            all_nuclei.join(positive_spots_per_nucleus.rename("spot_count"))
+            ["spot_count"]
+            .fillna(0)
+        )
+        summary = spots_per_nucleus.groupby("image_index").agg(["mean", "sum"])
+        positive_nuclei = (
+            positive_spots_per_nucleus.groupby("image_index")
+            .count()
+            .rename(f"total_nuclei_{label}")
+        )
         summary = summary.rename(
             columns={
                 "mean": f"avg_{label}_per_nucleus",
-                "count": f"total_nuclei_{label}",
                 "sum": f"total_{label}_spots",
             }
         )
+        summary = summary.join(positive_nuclei, how="outer")
+        summary = summary.join(observed_nuclei, how="outer")
         return summary.reindex(image_indices, fill_value=0)

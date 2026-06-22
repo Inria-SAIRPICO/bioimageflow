@@ -36,16 +36,9 @@ from pathlib import Path
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
-from bioimageflow.node import Node
 
-from bioimageflow_common_tools import Collect, ExtractChannel, Files
+from bioimageflow_common_tools import ExtractChannel
 from bioimageflow_segmentation_tools import Cellpose3
-from bioimageflow_segmentation_tools import ThresholdSegment
-from bioimageflow_spot_tools import (
-    AssignSpotsToLabels,
-    DetectSpots,
-    SpotSummary,
-)
 
 # Workflow-specific tools
 _this_dir = str(Path(__file__).resolve().parent)
@@ -117,7 +110,7 @@ def build_fish_workflow(
             channel=0,
             name="fols2_marker_spot_analysis",
         )
-        overlaps_csfr1 = MarkerSpotAnalysis()(
+        overlaps_csf1r = MarkerSpotAnalysis()(
             input_image=download["path"],
             nuclei_labels=nuclei["mask"],
             marker_name="CSF1R",
@@ -127,120 +120,11 @@ def build_fish_workflow(
 
         # -- 5. Statistical aggregation --
         stats = AverageSpotsPerNucleus()(
-            overlaps_fols2, overlaps_csfr1,
+            overlaps_fols2, overlaps_csf1r,
             name="avg_spots_per_nucleus",
         )
 
     return wf, stats  # type: ignore[possibly-undefined]  # always defined in with-block
-
-
-def build_synthetic_fish_workflow(
-    storage_path: str = "./fish_synthetic_results",
-    engine: str = "wetlands",
-    wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
-    """Build a lightweight FISH-like workflow for tests and examples.
-
-    This graph keeps the same high-level shape as the CIL workflow but replaces
-    AtlasSpotDetection and Cellpose with small package tools that can run on a synthetic
-    fixture in normal CI.
-    """
-    import imageio.v3 as iio
-    import numpy as np
-
-    storage = Path(storage_path)
-    data_dir = storage / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    image = np.zeros((3, 48, 48), dtype=np.float32)
-    nuclei = [(16, 16, 8), (32, 31, 7)]
-    yy, xx = np.mgrid[0:48, 0:48]
-    for cy, cx, radius in nuclei:
-        mask = (yy - cy) ** 2 + (xx - cx) ** 2 <= radius**2
-        image[2, mask] = 1.0
-    for channel, coordinates in {
-        0: [(15, 16), (33, 30), (32, 34)],
-        1: [(17, 15), (31, 31)],
-    }.items():
-        for y, x in coordinates:
-            image[channel, y, x] = 12.0
-            image[channel, y - 1 : y + 2, x - 1 : x + 2] += 2.0
-
-    source = data_dir / "synthetic_fish_cyx.tif"
-    iio.imwrite(source, image, photometric="minisblack")
-
-    wf = Workflow(
-        storage_path=str(storage / "bif"),
-        engine=engine,
-        wetlands_config=wetlands_config,
-    )
-    with wf:
-        input_image = Files()(
-            path=str(data_dir),
-            pattern=source.name,
-            name="synthetic_fish_input",
-        )
-        ch_fols2 = ExtractChannel()(
-            input_image=input_image["path"],
-            channel=0,
-            name="extract_fols2",
-        )
-        ch_csf1r = ExtractChannel()(
-            input_image=input_image["path"],
-            channel=1,
-            name="extract_csf1r",
-        )
-        ch_nuclei = ExtractChannel()(
-            input_image=input_image["path"],
-            channel=2,
-            name="extract_nuclei",
-        )
-        nuclei_labels = ThresholdSegment()(
-            input_image=ch_nuclei["output_image"],
-            threshold=0.5,
-            name="segment_nuclei_threshold",
-        )
-        fols2_spots = DetectSpots()(
-            input_image=ch_fols2["output_image"],
-            method="dog",
-            threshold=0.2,
-            min_distance=4,
-            name="detect_fols2_spots",
-        )
-        csf1r_spots = DetectSpots()(
-            input_image=ch_csf1r["output_image"],
-            method="dog",
-            threshold=0.2,
-            min_distance=4,
-            name="detect_csf1r_spots",
-        )
-        fols2_assigned = AssignSpotsToLabels()(
-            spot_id=fols2_spots["spot_id"],
-            y=fols2_spots["y"],
-            x=fols2_spots["x"],
-            intensity=fols2_spots["intensity"],
-            score=fols2_spots["score"],
-            label_image=nuclei_labels["labels"],
-            name="assign_fols2_to_nuclei",
-        )
-        csf1r_assigned = AssignSpotsToLabels()(
-            spot_id=csf1r_spots["spot_id"],
-            y=csf1r_spots["y"],
-            x=csf1r_spots["x"],
-            intensity=csf1r_spots["intensity"],
-            score=csf1r_spots["score"],
-            label_image=nuclei_labels["labels"],
-            name="assign_csf1r_to_nuclei",
-        )
-        fols2_summary = SpotSummary()(fols2_assigned, name="summarize_fols2")
-        csf1r_summary = SpotSummary()(csf1r_assigned, name="summarize_csf1r")
-        summary = Collect()(
-            fols2_summary,
-            csf1r_summary,
-            name="summarize_synthetic_fish",
-        )
-
-    return wf, summary
 
 
 def main() -> None:

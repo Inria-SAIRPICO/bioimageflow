@@ -28,15 +28,21 @@ def _write_multichannel_input(data_dir: Path) -> None:
     iio.imwrite(data_dir / "synthetic_cyx.tif", image, photometric="minisblack")
 
 
+@pytest.mark.public_data
 @pytest.mark.model_runtime
 def test_bbbc038_benchmark_public_model_runtime_smoke(
     tmp_path: Path,
     complete_wetlands_config: dict,
 ) -> None:
+    data_dir = os.environ.get("BIOIMAGEFLOW_BBBC038_DATA_DIR")
+    if data_dir is None:
+        pytest.skip("set BIOIMAGEFLOW_BBBC038_DATA_DIR to a BBBC038 stage1_train subset")
+
     module = _load_module(_example("bbbc038_segmentation_benchmark"))
     wf, terminal = module.build_workflow(
         storage_path=str(tmp_path / "bbbc038_benchmark"),
-        engine="direct",
+        data_dir=data_dir,
+        engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
 
@@ -114,7 +120,11 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
     result = wf.compute(terminal)
 
     assert not result.empty
-    assert {"avg_fols2_per_nucleus", "avg_csfr1_per_nucleus"} <= set(result.columns)
+    assert {
+        "avg_fols2_per_nucleus",
+        "avg_csf1r_per_nucleus",
+        "total_nuclei",
+    } <= set(result.columns)
 
 
 @pytest.mark.slow

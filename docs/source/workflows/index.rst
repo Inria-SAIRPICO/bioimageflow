@@ -23,7 +23,7 @@ Goal
   How many FOLS2 and CSF1R FISH marker spots overlap each segmented nucleus?
 
 Data
-  Public validation uses Cell Image Library records ``13432``, ``13434``, ``13436``, and ``13438``. Normal tests use a generated CYX fixture.
+  Public validation uses Cell Image Library records ``13432``, ``13434``, ``13436``, and ``13438``. Normal tests verify graph and output contracts without downloading the CIL files.
 
 Command
   ``python example-workflows/fish_analysis/workflow.py``
@@ -32,7 +32,7 @@ How it works
   The workflow downloads four Cell Image Library FISH images, extracts the nuclei channel before Cellpose v3 segmentation, runs the same ``MarkerSpotAnalysis`` sub-workflow for FOLS2 and CSF1R, and summarizes marker spots per nucleus.
 
 Results
-  Per-nucleus and per-image FOLS2 and CSF1R spot summaries, nuclei labels, marker spot tables, and preview overlays.
+  Per-image FOLS2 and CSF1R spot summaries, nuclei labels, and marker-overlap tables.
 
 Interpretation
   Higher average marker spots per nucleus indicate stronger marker signal in segmented nuclei for that image.
@@ -65,13 +65,13 @@ Goal
   How do planned nuclei segmentation methods compare against reference labels?
 
 Data
-  Public validation uses a named subset from the Broad Bioimage Benchmark Collection BBBC038 ``stage1_train``. Normal tests use a generated image/reference pair.
+  Use a named subset from the Broad Bioimage Benchmark Collection BBBC038 ``stage1_train`` with each sample's original ``images/`` and ``masks/`` folders.
 
 Command
-  ``python example-workflows/bbbc038_segmentation_benchmark/workflow.py``
+  ``python example-workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset``
 
 How it works
-  The workflow prepares BBBC038-style images and reference masks, runs Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method on the same images, then compares each prediction to the reference labels.
+  The workflow lists BBBC038 sample folders, builds a reference label image from each sample's instance-mask files, prepares a 2D intensity image for segmentation, runs Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method as separate graph branches, then benchmarks each prediction against the same reference labels.
 
 Results
   Predicted label images, overlays, and a benchmark metrics table with one row per method and image.
