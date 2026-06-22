@@ -325,9 +325,9 @@ stardist_env = EnvironmentSpec(
 )
 ```
 
-Multiple tools reference the same `EnvironmentSpec`. The framework passes `spec.name` and `spec.dependencies` to `wetlands.EnvironmentManager.create()`. If an environment with that name already exists, BioImageFlow validates a dependency hash match before reuse; on mismatch it raises `EnvironmentMismatchError` describing expected vs existing dependencies.
+Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates the workflow graph before execution: reachable tools sharing the same `name` must declare identical `dependencies`, or `EnvironmentMismatchError` is raised with the conflicting tool names and dependency declarations. During Wetlands execution, BioImageFlow passes the augmented environment recipe to `wetlands.EnvironmentManager.create()`, and Wetlands validates whether any existing same-name managed environment can be reused.
 
-**Dependency normalization:** Before hashing, the framework normalizes the dependency specification to avoid false mismatches:
+**Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
 - Dependency lists are sorted alphabetically (e.g., `["numpy", "cellpose"]` and `["cellpose", "numpy"]` produce the same hash).
 - Version strings are normalized to PEP 440 canonical form (e.g., `"3.0"` and `"3.0.0"` are treated as equivalent).
 - Whitespace is stripped from dependency strings.
@@ -2190,7 +2190,7 @@ When `node.compute()` is called:
    4. **Cache Check:** Derive the result key from node identity, resolved arguments, tool/environment identity, and selected upstream record references. If `current.json` selects a valid reusable record, load cached results and skip to step 10.
    5. **Execution Context:** Create a unique attempt staging directory under `storage_path/cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/` with `assets/`, shared `work/`, `work/rows/`, per-row `work/rows/<safe_row_id>/`, and `work/batch/` children. Build one picklable `ExecutionContext` per input row, plus one batch context. Every context shares the same `work_dir` (`run_dir/work/`) and `rows_dir` (`run_dir/work/rows/`); row contexts receive a private `row_dir`, and the batch context receives a private `batch_dir`. Context paths are runtime details and are not included in result-key material.
    6. **Serialization:** Convert resolved values to `list[dict]` (one dict per row, containing all resolved input values and output paths). When a tool declares `context`, serialize the corresponding `ExecutionContext` separately from `Arguments`.
-   7. **Backend Preparation:** If `engine="direct"`, instantiate or reuse the tool in the orchestrator process and do not launch Wetlands. If `engine="wetlands"`, create/reuse the Wetlands environment. If an existing Wetlands environment with the same name has a different dependency hash, raise `EnvironmentMismatchError`.
+   7. **Backend Preparation:** If `engine="direct"`, instantiate or reuse the tool in the orchestrator process and do not launch Wetlands. If `engine="wetlands"`, create/reuse the Wetlands environment. Wetlands validates same-name managed environment reuse against its stored recipe and raises its environment reuse error if the requested recipe is incompatible.
    8. **Dispatch:** If `process_batch` was overridden, call one batch operation. Otherwise, call all `process_row` operations. The direct backend calls tool methods in the orchestrator process. The Wetlands backend uses `env.submit()` for batch work and `env.map_tasks()` for row work. When `engine="wetlands"` and the effective `max_workers > 1`, rows may execute in parallel across worker processes. Results are always collected in submission order to preserve deterministic DataFrame construction.
    8b. **Output Validation:** After `process_row`/`process_batch` returns, the runtime performs lightweight `isinstance` checks on each output field against the tool's `Outputs` annotations (e.g., image path fields must be `Path` or `str`, `int` fields must be `int`). These checks use only the standard library (no Pydantic) and add negligible overhead. Errors are raised with clear context pointing to the tool code.
    9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
@@ -3188,7 +3188,8 @@ manager = EnvironmentManager(
 env = manager.create("cellpose_env", {"conda": ["cellpose==3.1.0"]})
 ```
 
-- If an environment with this name already exists, Wetlands reuses it.
+- If a managed environment with this name already exists, Wetlands reuses it only when its stored recipe matches the requested recipe.
+- Use Wetlands' `replace_existing=True` to intentionally recreate a same-name managed environment with a different recipe, or `load(name)` to intentionally load an existing environment without recipe validation.
 - `create_from_config()` accepts `requirements.txt`, `environment.yml`, `pyproject.toml`, or `pixi.toml`.
 
 ### A.3 Launch Workers

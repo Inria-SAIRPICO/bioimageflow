@@ -14,8 +14,7 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, cast
 
-from bioimageflow_core.environment import EnvironmentSpec, EnvironmentMismatchError
-from bioimageflow.cache import compute_env_hash
+from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow.paths import get_wetlands_path
 
 from wetlands._internal.dependency_manager import Dependency, Dependencies, LocalDependency
@@ -221,7 +220,7 @@ class WetlandsEnvManager:
     """Manages Wetlands environments for ProcessingTool execution.
 
     - Creates environments lazily on first use.
-    - Caches launched environments by name + dependency hash.
+    - Caches launched environments by name.
     - Auto-injects ``bioimageflow-core`` into every environment's pip deps.
     - Provides dispatch helpers that route calls through the Wetlands proxy.
     """
@@ -245,7 +244,6 @@ class WetlandsEnvManager:
 
         self._manager = get_shared_environment_manager(**kwargs)
         self._envs: dict[str, Any] = {}            # name -> wetlands env
-        self._env_hashes: dict[str, str] = {}       # name -> dep hash
         self._launch_configs: dict[str, tuple[int, Any, float | None]] = {}
         # name -> (max_workers, worker_env, worker_timeout)
         self._worker_file = _find_worker_file()
@@ -291,48 +289,34 @@ class WetlandsEnvManager:
         worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> Any:
-        """Get or create a Wetlands environment, validating dependency consistency.
+        """Get or create a Wetlands environment.
 
-        On first creation, ``env.launch(max_workers=..., worker_env=..., worker_timeout=...)``
-        is called.  Subsequent calls with a different ``max_workers`` or
-        ``worker_timeout`` log a warning but do **not** re-launch (Wetlands'
-        ``launch()`` is a no-op when already launched).
+        Wetlands validates same-name environment recipe reuse. On first creation,
+        ``env.launch(max_workers=..., worker_env=..., worker_timeout=...)`` is
+        called. Subsequent calls with a different ``max_workers`` or
+        ``worker_timeout`` log a warning but do **not** re-launch.
 
         This method is thread-safe and may be called concurrently.
         """
         augmented_deps = self._augment_dependencies(env_spec.dependencies)
-        dep_hash = compute_env_hash(cast(dict[str, Any], augmented_deps))
 
-        # Fast path: check without lock first
-        if env_spec.name in self._envs:
-            if self._env_hashes[env_spec.name] != dep_hash:
-                raise EnvironmentMismatchError(
-                    f"Environment '{env_spec.name}' already created with different deps."
-                )
-            prev_workers, _, prev_timeout = self._launch_configs.get(
-                env_spec.name, (1, None, None)
-            )
-            if prev_workers != max_workers:
-                logger.warning(
-                    "Environment '%s' already launched with max_workers=%d; "
-                    "ignoring new max_workers=%d",
-                    env_spec.name, prev_workers, max_workers,
-                )
-            if prev_timeout != worker_timeout:
-                logger.warning(
-                    "Environment '%s' already launched with worker_timeout=%s; "
-                    "ignoring new worker_timeout=%s",
-                    env_spec.name, prev_timeout, worker_timeout,
-                )
-            return self._envs[env_spec.name]
-
-        # Acquire lock for double-checked creation
         with self._lock:
-            # Double-check after acquiring lock
+            env = self._manager.create(env_spec.name, augmented_deps)
             if env_spec.name in self._envs:
-                if self._env_hashes[env_spec.name] != dep_hash:
-                    raise EnvironmentMismatchError(
-                        f"Environment '{env_spec.name}' already created with different deps."
+                prev_workers, _, prev_timeout = self._launch_configs.get(
+                    env_spec.name, (1, None, None)
+                )
+                if prev_workers != max_workers:
+                    logger.warning(
+                        "Environment '%s' already launched with max_workers=%d; "
+                        "ignoring new max_workers=%d",
+                        env_spec.name, prev_workers, max_workers,
+                    )
+                if prev_timeout != worker_timeout:
+                    logger.warning(
+                        "Environment '%s' already launched with worker_timeout=%s; "
+                        "ignoring new worker_timeout=%s",
+                        env_spec.name, prev_timeout, worker_timeout,
                     )
                 return self._envs[env_spec.name]
 
@@ -340,7 +324,6 @@ class WetlandsEnvManager:
                 "Creating Wetlands environment '%s' (max_workers=%d, worker_timeout=%s)",
                 env_spec.name, max_workers, worker_timeout,
             )
-            env = self._manager.create(env_spec.name, augmented_deps)
             launch_kwargs: dict[str, Any] = {}
             if max_workers > 1:
                 launch_kwargs["max_workers"] = max_workers
@@ -350,7 +333,6 @@ class WetlandsEnvManager:
                 launch_kwargs["worker_timeout"] = worker_timeout
             env.launch(**launch_kwargs)
             self._envs[env_spec.name] = env
-            self._env_hashes[env_spec.name] = dep_hash
             self._launch_configs[env_spec.name] = (max_workers, worker_env, worker_timeout)
             return env
 
@@ -405,5 +387,4 @@ class WetlandsEnvManager:
             except Exception:
                 logger.warning("Failed to shut down environment '%s'", name, exc_info=True)
         self._envs.clear()
-        self._env_hashes.clear()
         self._launch_configs.clear()

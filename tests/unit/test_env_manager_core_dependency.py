@@ -24,9 +24,11 @@ class _MutatingWetlandsEnvironment:
     def __init__(self, dependencies: dict[str, Any]) -> None:
         self.dependencies = dependencies
         self.launched = False
+        self.launch_count = 0
 
     def launch(self, **kwargs: Any) -> None:
         self.launched = True
+        self.launch_count += 1
         self.dependencies.setdefault("channels", []).append("bioimageit")
 
 
@@ -43,7 +45,6 @@ def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvMana
     manager = _manager_with_core_dependency(dependency)
     manager._manager = _MutatingWetlandsManager()
     manager._envs = {}
-    manager._env_hashes = {}
     manager._launch_configs = {}
     manager._worker_file = "worker.py"
     manager._lock = threading.RLock()
@@ -132,6 +133,7 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
     second = manager.get_or_create(env_spec)
 
     assert first is second
+    assert first.launch_count == 1
     assert env_spec.dependencies == {
         "python": "3.9",
         "conda": ["bioimageit::simglib=0.1.2"],
@@ -143,6 +145,46 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
         "bioimageit",
         "bioimageit",
     ]
+    assert len(manager._manager.created_dependencies) == 2
+
+
+def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
+    dependency = {
+        "name": "bioimageflow-core",
+        "path": "/repo/packages/bioimageflow-core",
+        "editable": True,
+    }
+
+    class _ValidatingWetlandsManager:
+        def __init__(self) -> None:
+            self.created_dependencies: list[dict[str, Any]] = []
+            self.env = _MutatingWetlandsEnvironment({})
+
+        def create(
+            self, name: str, dependencies: dict[str, Any]
+        ) -> _MutatingWetlandsEnvironment:
+            self.created_dependencies.append(dependencies)
+            if len(self.created_dependencies) > 1:
+                raise RuntimeError("wetlands recipe mismatch")
+            return self.env
+
+    manager = _manager_with_core_dependency(dependency)
+    manager._manager = _ValidatingWetlandsManager()
+    manager._envs = {}
+    manager._launch_configs = {}
+    manager._worker_file = "worker.py"
+    manager._lock = threading.RLock()
+
+    first = EnvironmentSpec(name="shared", dependencies={"pip": ["numpy"]})
+    second = EnvironmentSpec(name="shared", dependencies={"pip": ["scipy"]})
+
+    manager.get_or_create(first)
+
+    with pytest.raises(RuntimeError, match="wetlands recipe mismatch"):
+        manager.get_or_create(second)
+
+    assert len(manager._manager.created_dependencies) == 2
+    assert manager._manager.env.launched is True
 
 
 @pytest.mark.parametrize(

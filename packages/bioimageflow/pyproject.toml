@@ -26,7 +26,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "pydantic",
-    "wetlands>=1.1.0",
+    "wetlands>=1.1.1",
 ]
 
 [project.urls]

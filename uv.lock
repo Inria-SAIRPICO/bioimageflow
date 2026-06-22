@@ -126,7 +126,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "wetlands", specifier = ">=1.1.0" },
+    { name = "wetlands", specifier = ">=1.1.1" },
 ]
 
 [[package]]
@@ -2816,7 +2816,7 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "1.1.0"
+version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "json5" },
@@ -2827,7 +2827,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/7a/15f1f98bad654e9c1f76dc3b99a38b804767cd39d0afe0d85aa8bc20d458/wetlands-1.1.0.tar.gz", hash = "sha256:9bb511c3ad301761eb31254d8ddf89f18b0410fcb7e05c6506ea0bbf6a05d902", size = 563559, upload-time = "2026-06-16T12:31:48.033Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/55/c838bd0416ad91d41495120b276d70214428e416213fcf2aed1a108034f0/wetlands-1.1.1.tar.gz", hash = "sha256:0107c3efc38e32f34fbc6b2deb9c6e415a27a9fd9f65ea0216da952f9159f8c1", size = 575341, upload-time = "2026-06-19T10:35:30.844Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/fb/ed26d523c58087ec878028f8ff4e4f992d76fed7069b500f73ad19a58a11/wetlands-1.1.0-py3-none-any.whl", hash = "sha256:efdd832be3aa60dec303cfbfb4c3a505950d6acf840695345f2bf666d4ce2b99", size = 78755, upload-time = "2026-06-16T12:31:46.39Z" },
+    { url = "https://files.pythonhosted.org/packages/84/0a/03a0a441d4f7edd4f99389f61c066cd15d77f50d477d48c77886b1612773/wetlands-1.1.1-py3-none-any.whl", hash = "sha256:24f68f740c1e9719c9a37ef5ee4cb8e13809056f6fd20d3a8ffcda1742f18321", size = 85231, upload-time = "2026-06-19T10:35:20.406Z" },
 ]

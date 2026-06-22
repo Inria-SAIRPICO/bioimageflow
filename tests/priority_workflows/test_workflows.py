@@ -104,11 +104,15 @@ def test_fish_heavy_workflow_constructs_with_package_imports(tmp_path: Path) -> 
 
 
 @pytest.mark.acceptance
-def test_synthetic_fish_workflow_executes(tmp_path: Path) -> None:
+def test_synthetic_fish_workflow_executes(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
     module = _load_module(_example("fish_analysis"))
 
     wf, terminal = module.build_synthetic_fish_workflow(
-        storage_path=str(tmp_path / "fish_synthetic")
+        storage_path=str(tmp_path / "fish_synthetic"),
+        wetlands_config=complete_wetlands_config,
     )
     result = wf.compute(terminal)
 
@@ -147,10 +151,16 @@ def test_bbbc038_segmentation_benchmark_constructs_and_executes(tmp_path: Path) 
 
 
 @pytest.mark.acceptance
-def test_ome_normalization_executes_tiny_fixture(tmp_path: Path) -> None:
+def test_ome_normalization_executes_tiny_fixture(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
     module = _load_module(_example("ome_normalization"))
 
-    wf, terminal = module.build_workflow(storage_path=str(tmp_path / "ome"))
+    wf, terminal = module.build_workflow(
+        storage_path=str(tmp_path / "ome"),
+        wetlands_config=complete_wetlands_config,
+    )
     assert {
         "read_source",
         "select_channel_z",

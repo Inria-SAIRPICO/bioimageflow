@@ -108,9 +108,9 @@ def test_common_docs_list_only_public_tools() -> None:
     assert "## Compatibility Tools" not in index
     public_tools = index
     assert "Files" in public_tools
-    assert 'href="tools/files.md"' in public_tools
+    assert "[Files](tools/files.md)" in public_tools
     assert "Mosaic" in public_tools
-    assert 'href="tools/mosaic.md"' in public_tools
+    assert "[Mosaic](tools/mosaic.md)" in public_tools
     assert "Atlas" not in public_tools
     assert "ConvertImage" not in public_tools
 
