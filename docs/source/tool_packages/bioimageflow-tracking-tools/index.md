@@ -20,5 +20,4 @@ tools/track_summary
 tools/track_table_validate
 tools/tracks_to_labels
 tools/ultrack_link
-workflows/tracking_analysis
 ```

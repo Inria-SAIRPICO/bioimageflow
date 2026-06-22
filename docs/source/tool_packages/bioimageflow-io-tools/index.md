@@ -14,13 +14,11 @@ tools/bioio_convert_image
 tools/convert_image_format
 tools/convert_to_ome_tiff
 tools/convert_to_ome_zarr
-tools/read_image
-tools/read_image_metadata
+tools/image_metadata
 tools/select_channel
 tools/select_dimensions
 tools/select_scene
 tools/select_timepoint
 tools/select_z_range
 tools/validate_image_layout
-workflows/ome_normalization
 ```

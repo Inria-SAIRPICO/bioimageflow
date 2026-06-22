@@ -26,17 +26,7 @@ Big-FISH remains a future optional evaluation backend, not a current default dep
 - [SpotQualityMetrics](tools/spot_quality_metrics.md): compute SNR, local background,
   and nearest-neighbor distances.
 
-## Demo Workflow
+## Workflow Use
 
-- [Puncta analysis workflow](workflows/puncta_analysis.md): detect puncta,
-  assign them to labels, and summarize per-object signal.
-
-## Tests and Demo Data
-
-Run package tests with:
-
-```bash
-uv run pytest packages/bioimageflow-spot-tools/tests
-```
-
-Tests generate a tiny puncta image and a label mask, then assert exact spot counts, dataframe columns, assignments, and workflow graph execution.
+Use `AtlasSpotDetection` in the FISH spot-counting and parameter-space exploration workflows.
+Use assignment and summary tools to connect spot tables to segmented nuclei or other label images.

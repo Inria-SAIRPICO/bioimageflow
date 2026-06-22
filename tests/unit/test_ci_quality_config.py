@@ -401,7 +401,7 @@ def test_package_artifact_tests_are_packaging_marked() -> None:
 def test_deterministic_acceptance_test_modules_are_acceptance_marked() -> None:
     expected_modules = [
         "tests/integration/test_end_to_end.py",
-        "tests/specialized_tool_workflows/test_example_workflows.py",
+        "tests/workflow_catalog/test_specialized_workflows.py",
     ]
 
     missing = []
@@ -414,13 +414,12 @@ def test_deterministic_acceptance_test_modules_are_acceptance_marked() -> None:
 
 
 def test_priority_workflow_execution_tests_are_acceptance_marked() -> None:
-    module_path = ROOT / "tests/priority_workflows/test_workflows.py"
+    module_path = ROOT / "tests/workflow_catalog/test_workflows.py"
     module = ast.parse(module_path.read_text(), filename=str(module_path))
 
     acceptance_test_names = {
         "test_synthetic_fish_workflow_executes",
         "test_bbbc038_segmentation_benchmark_constructs_and_executes",
-        "test_ome_normalization_executes_tiny_fixture",
     }
     effective_markers_by_test = _test_function_effective_pytestmark_names(module)
 
@@ -435,16 +434,15 @@ def test_priority_workflow_execution_tests_are_acceptance_marked() -> None:
         "test_fish_heavy_workflow_constructs_with_package_imports"
     ]
     assert "acceptance" not in effective_markers_by_test[
-        "test_cellpose_stardist_workflow_constructs_with_package_imports"
+        "test_canonical_fish_workflow_contains_marker_sub_workflow_nodes"
     ]
 
 
 def test_fake_dependency_priority_workflow_tests_stay_in_fast_tier() -> None:
-    module_path = ROOT / "tests/priority_workflows/test_workflows.py"
+    module_path = ROOT / "tests/workflow_catalog/test_workflows.py"
     module = ast.parse(module_path.read_text(), filename=str(module_path))
 
     fake_dependency_test_names = {
-        "test_cellpose_stardist_workflow_executes_with_fake_model_runtimes",
         "test_parameter_space_workflow_executes_with_fake_atlas_binary",
         "test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binary",
     }

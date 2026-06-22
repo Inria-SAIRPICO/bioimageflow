@@ -21,14 +21,14 @@ Output: average number of FOLS2 and CSF1R spots per nucleus per image.
 
 Pipeline topology:
 
-  DownloadImages → ReadImage ─┬─ ExtractChannel(ch0) → AtlasSpotDetection → ConnectedComponents ─┐
-                                  ├─ ExtractChannel(ch1) → AtlasSpotDetection → ConnectedComponents ─┤
-                                  └─ ExtractChannel(ch2) → Cellpose3 ──────────────────┤
-                                                                                        │
-                             LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────┤
-                             LabelOverlaps(CSF1R spots vs nuclei) ◄─────────────────────┘
-                                     │                    │
-                                     └──── AverageSpotsPerNucleus
+  DownloadImages ─┬─ ExtractChannel(ch0) → AtlasSpotDetection → ConnectedComponents ─┐
+                  ├─ ExtractChannel(ch1) → AtlasSpotDetection → ConnectedComponents ─┤
+                  └─ ExtractChannel(ch2) → Cellpose3 ────────────────────────────────┤
+                                                                                     │
+                  LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────────────┤
+                  LabelOverlaps(CSF1R spots vs nuclei) ◄─────────────────────────────┘
+                          │                    │
+                          └──── AverageSpotsPerNucleus
 """
 
 import sys
@@ -38,8 +38,7 @@ from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 from bioimageflow.node import Node
 
-from bioimageflow_common_tools import Collect, ExtractChannel
-from bioimageflow_io_tools import ReadImage
+from bioimageflow_common_tools import Collect, ExtractChannel, Files
 from bioimageflow_segmentation_tools import Cellpose3
 from bioimageflow_segmentation_tools import ThresholdSegment
 from bioimageflow_spot_tools import (
@@ -99,15 +98,9 @@ def build_fish_workflow(
             name="download_cil_images",
         )
 
-        # -- 2. Preprocessing --
-        converted = ReadImage()(
-            input_image=download["path"],
-            name="read_image",
-        )
-
-        # -- 3. Nuclei channel extraction before Cellpose v3 --
+        # -- 2. Nuclei channel extraction before Cellpose v3 --
         ch_nuclei = ExtractChannel()(
-            input_image=converted["output_image"], channel=2,
+            input_image=download["path"], channel=2,
             name="extract_ch2_nuclei",
         )
         nuclei = Cellpose3()(
@@ -118,14 +111,14 @@ def build_fish_workflow(
 
         # -- 4. Marker spot analysis branches --
         overlaps_fols2 = MarkerSpotAnalysis()(
-            input_image=converted["output_image"],
+            input_image=download["path"],
             nuclei_labels=nuclei["mask"],
             marker_name="FOLS2",
             channel=0,
             name="fols2_marker_spot_analysis",
         )
         overlaps_csfr1 = MarkerSpotAnalysis()(
-            input_image=converted["output_image"],
+            input_image=download["path"],
             nuclei_labels=nuclei["mask"],
             marker_name="CSF1R",
             channel=1,
@@ -182,19 +175,23 @@ def build_synthetic_fish_workflow(
         wetlands_config=wetlands_config,
     )
     with wf:
-        read = ReadImage()(input_image=source, name="read_synthetic_fish")
+        input_image = Files()(
+            path=str(data_dir),
+            pattern=source.name,
+            name="synthetic_fish_input",
+        )
         ch_fols2 = ExtractChannel()(
-            input_image=read["output_image"],
+            input_image=input_image["path"],
             channel=0,
             name="extract_fols2",
         )
         ch_csf1r = ExtractChannel()(
-            input_image=read["output_image"],
+            input_image=input_image["path"],
             channel=1,
             name="extract_csf1r",
         )
         ch_nuclei = ExtractChannel()(
-            input_image=read["output_image"],
+            input_image=input_image["path"],
             channel=2,
             name="extract_nuclei",
         )

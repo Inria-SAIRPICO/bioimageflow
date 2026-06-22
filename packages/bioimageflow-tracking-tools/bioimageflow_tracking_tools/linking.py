@@ -1,4 +1,4 @@
-"""Greedy nearest-neighbor object linking."""
+"""Object table linking and tracking-library adapters."""
 
 from typing import Annotated, Any
 
@@ -25,8 +25,7 @@ class LinkObjects(DataFrameTool):
 
     display_name = "Link Objects"
     documentation = (
-        "Greedy nearest-neighbor frame linking. btrack/LapTrack integrations are "
-        "optional and reserved for heavy environments."
+        "Greedy nearest-neighbor frame linking for small object tables."
     )
     category = Category.TRACKING
     tags = ["tracking", "linking", "nearest-neighbor"]
@@ -113,28 +112,11 @@ class UltrackLink(LinkObjects):
     """Link objects with an Ultrack-compatible adapter."""
 
     display_name = "Ultrack Link"
-    documentation = (
-        "Link object tables with Ultrack when runtime='ultrack'. The default "
-        "deterministic runtime uses the package nearest-neighbor linker for local tests."
-    )
+    documentation = "Link object tables with Ultrack."
     tags = ["tracking", "ultrack", "linking"]
     environment = ultrack_env
 
-    class Inputs(LinkObjects.Inputs):
-        runtime: Annotated[
-            str,
-            GUIMeta(
-                display_name="Runtime",
-                description="'deterministic' for tests or 'ultrack' for the real runtime.",
-            ),
-        ] = "deterministic"
-
     def transform(self, df: Any, arguments: Any) -> Any:
-        runtime = str(getattr(arguments, "runtime", "deterministic"))
-        if runtime == "deterministic":
-            return super().transform(df, arguments)
-        if runtime != "ultrack":
-            raise ValueError("runtime must be 'deterministic' or 'ultrack'.")
         ultrack = __import__("ultrack")
         if hasattr(ultrack, "link_objects"):
             return ultrack.link_objects(df, max_distance=arguments.max_distance)
@@ -145,28 +127,11 @@ class BTrackLink(LinkObjects):
     """Link objects with a btrack-compatible adapter."""
 
     display_name = "btrack Link"
-    documentation = (
-        "Link object tables with btrack when runtime='btrack'. The default "
-        "deterministic runtime uses the package nearest-neighbor linker for local tests."
-    )
+    documentation = "Link object tables with btrack."
     tags = ["tracking", "btrack", "linking"]
     environment = btrack_env
 
-    class Inputs(LinkObjects.Inputs):
-        runtime: Annotated[
-            str,
-            GUIMeta(
-                display_name="Runtime",
-                description="'deterministic' for tests or 'btrack' for the real runtime.",
-            ),
-        ] = "deterministic"
-
     def transform(self, df: Any, arguments: Any) -> Any:
-        runtime = str(getattr(arguments, "runtime", "deterministic"))
-        if runtime == "deterministic":
-            return super().transform(df, arguments)
-        if runtime != "btrack":
-            raise ValueError("runtime must be 'deterministic' or 'btrack'.")
         btrack = __import__("btrack")
         if hasattr(btrack, "link_objects"):
             return btrack.link_objects(df, max_distance=arguments.max_distance)

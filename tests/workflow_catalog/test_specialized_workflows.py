@@ -1,6 +1,9 @@
 from pathlib import Path
 
 import importlib.util
+import sys
+import types
+from typing import Any
 import pytest
 
 
@@ -51,12 +54,34 @@ def _load_module(path: Path):
     ],
 )
 def test_specialized_example_workflow_executes(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     workflow_name: str,
     artifact_column: str | None,
     expected_columns: set[str],
     min_rows: int,
 ) -> None:
+    if workflow_name == "low_snr_restoration":
+        careamics_module = types.ModuleType("careamics")
+
+        def fake_predict(image: Any, *, checkpoint: Path | None) -> Any:
+            return image
+
+        careamics_module.predict = fake_predict
+        monkeypatch.setitem(sys.modules, "careamics", careamics_module)
+    if workflow_name == "live_cell_tracking":
+        from bioimageflow_tracking_tools import LinkObjects
+
+        def fake_link_objects(df: Any, *, max_distance: float) -> Any:
+            return LinkObjects().transform(df, type("Args", (), {"max_distance": max_distance})())
+
+        ultrack_module = types.ModuleType("ultrack")
+        btrack_module = types.ModuleType("btrack")
+        ultrack_module.link_objects = fake_link_objects
+        btrack_module.link_objects = fake_link_objects
+        monkeypatch.setitem(sys.modules, "ultrack", ultrack_module)
+        monkeypatch.setitem(sys.modules, "btrack", btrack_module)
+
     root = Path(__file__).resolve().parents[2]
     workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)

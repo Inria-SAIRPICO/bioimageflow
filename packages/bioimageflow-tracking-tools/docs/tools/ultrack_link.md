@@ -1,5 +1,4 @@
 # UltrackLink
 
-`UltrackLink` links object tables with the Ultrack runtime when `runtime="ultrack"`.
-
-The default `runtime="deterministic"` delegates to the package nearest-neighbor linker so workflow tests can run without optional tracking libraries.
+`UltrackLink` links object tables with Ultrack.
+It consumes centroid/object rows and returns track identifiers and track counts for downstream migration metrics.

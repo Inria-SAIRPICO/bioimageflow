@@ -20,7 +20,7 @@ from bioimageflow_restoration_tools import CAREamicsPredict, RestorationMetrics
 
 
 class LowSNRFixture(ProcessingTool):
-    """Write a clean image and a deterministic noisy observation."""
+    """Write a clean image and a seeded noisy observation."""
 
     display_name = "Low-SNR Fixture"
     category = Category.UTILITIES
@@ -66,9 +66,6 @@ def build_workflow(
         fixture = LowSNRFixture()(output_dir=storage / "data", name="low_snr_fixture")
         restored = CAREamicsPredict()(
             input_image=fixture["degraded_image"],
-            backend="baseline",
-            method="tv_chambolle",
-            weight=0.12,
             name="careamics_n2v_restoration",
         )
         metrics = RestorationMetrics()(

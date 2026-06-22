@@ -1,1 +1,0 @@
-"""Restoration benchmark example."""

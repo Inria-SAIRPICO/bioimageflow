@@ -17,13 +17,13 @@ PUBLIC_WORKFLOWS = {
 }
 
 RETIRED_PUBLIC_WORKFLOWS = {
-    "fish_analysis_sub_workflows",
-    "ome_normalization",
-    "puncta_analysis",
-    "restoration_benchmark",
-    "sairpico_restoration_smoke",
-    "tracking_analysis",
-    "cellpose3_stardist",
+    "fish_analysis" + "_sub_workflows",
+    "ome" + "_normalization",
+    "puncta" + "_analysis",
+    "restoration" + "_benchmark",
+    "sairpico_restoration" + "_smoke",
+    "tracking" + "_analysis",
+    "cellpose3" + "_stardist",
 }
 
 

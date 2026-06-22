@@ -1,9 +1,8 @@
 # bioimageflow-io-tools
 
 `bioimageflow-io-tools` is the optional ingestion and conversion package for
-workflow-local image normalization, axis slicing, and simple OME-compatible
-output. It is intentionally focused on deterministic file operations rather
-than biological analysis.
+microscopy image selection, axis slicing, and simple OME-compatible output.
+It is focused on file layout and format handling rather than biological analysis.
 
 Core lightweight libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr writer in the package code.
 `BioIOConvertImage` uses an explicit bioio/plugin-backed environment for broad microscopy formats such as CZI and OME-Zarr.
@@ -12,9 +11,7 @@ Core lightweight libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr 
 
 - [BioIOConvertImage](tools/bioio_convert_image.md): broad bioio/plugin-backed
   format conversion for CZI, OME-Zarr, OME-TIFF, TIFF, PNG, and similar formats.
-- [ReadImage](tools/read_image.md): read an image and write a workflow-local
-  copy.
-- [ReadImageMetadata](tools/read_image_metadata.md): report shape, dtype,
+- [ReadImageMetadata](tools/image_metadata.md): report shape, dtype,
   dimensionality, and a lightweight axes guess.
 - [ValidateImageLayout](tools/validate_image_layout.md): check declared layout
   length, required axes, and optional minimum sizes.
@@ -36,19 +33,7 @@ Core lightweight libraries are imageio, NumPy, tifffile, and a minimal OME-Zarr 
 - [SelectDimensions](tools/select_dimensions.md): select a channel, z plane, or
   timepoint from declared axis layouts.
 
-## Demo Workflow
+## Workflow Use
 
-- [OME normalization workflow](workflows/ome_normalization.md): read, slice,
-  and export a tiny OME-compatible image fixture.
-
-## Tests and Demo Data
-
-Package tests live in `tests/` and can be run with:
-
-```bash
-uv run pytest packages/bioimageflow-io-tools/tests
-```
-
-The tests generate tiny TIFF arrays and validate shape, axes, Zarr metadata,
-and deterministic path outputs. Add committed fixtures only for real-world
-layout examples that cannot be represented by generated arrays.
+Use `BioIOConvertImage` when a workflow needs OME-aware scene, channel, Z, timepoint, or dimension-order handling.
+Use `ConvertImageFormat` for lightweight TIFF/imageio format changes and simple slicing.

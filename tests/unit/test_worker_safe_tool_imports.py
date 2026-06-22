@@ -61,7 +61,6 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
                 "ConvertImageFormat",
                 "ConvertToOmeTiff",
                 "ConvertToOmeZarr",
-                "ReadImage",
                 "ReadImageMetadata",
                 "SelectChannel",
                 "SelectDimensions",
@@ -81,7 +80,6 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             ],
             "bioimageflow_restoration_tools": [
                 "BackgroundSubtract",
-                "BenchmarkRestoration",
                 "GaussianDenoise",
                 "MedianDenoise",
                 "RestoreImage",

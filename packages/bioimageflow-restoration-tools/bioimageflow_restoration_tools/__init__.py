@@ -1,4 +1,4 @@
-"""BioImageFlow restoration tools and synthetic benchmarks."""
+"""BioImageFlow restoration tools."""
 
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from .baselines import MedianDenoise as MedianDenoise
     from .baselines import RichardsonLucyRestoration as RichardsonLucyRestoration
     from .baselines import UnsharpMask as UnsharpMask
-    from .benchmark import BenchmarkRestoration as BenchmarkRestoration
     from .restore import CAREamicsPredict as CAREamicsPredict
     from .restore import RestoreImage as RestoreImage
     from .restore import RestorationMetrics as RestorationMetrics
@@ -17,7 +16,6 @@ if TYPE_CHECKING:
 
 _EXPORTS = {
     "BackgroundSubtract": ("baselines", "BackgroundSubtract"),
-    "BenchmarkRestoration": ("benchmark", "BenchmarkRestoration"),
     "CAREamicsPredict": ("restore", "CAREamicsPredict"),
     "GaussianDenoise": ("baselines", "GaussianDenoise"),
     "MedianDenoise": ("baselines", "MedianDenoise"),
@@ -29,7 +27,6 @@ _EXPORTS = {
 
 __all__ = [
     "BackgroundSubtract",
-    "BenchmarkRestoration",
     "CAREamicsPredict",
     "GaussianDenoise",
     "MedianDenoise",

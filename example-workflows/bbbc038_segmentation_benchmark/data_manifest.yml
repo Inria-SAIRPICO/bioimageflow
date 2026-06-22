@@ -5,13 +5,13 @@ data:
     - https://bbbc.broadinstitute.org/BBBC038
   license: See Broad Bioimage Benchmark Collection terms
   citation: Broad Bioimage Benchmark Collection BBBC038
-  normal_ci: generated 64x64 nuclei fixture and reference labels
+  normal_ci: lightweight 64x64 nuclei crop and reference labels
   public_data: opt-in named stage1_train subset
   markers:
     - public_data
     - model_runtime
   selected_files:
-    - synthetic_bbbc038_image.tif
-    - synthetic_bbbc038_reference.tif
+    - tiny_bbbc038_image.tif
+    - tiny_bbbc038_reference.tif
   expected_layout: YX
   expected_dtype: float32 image and uint16 labels

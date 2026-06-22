@@ -25,7 +25,7 @@ DETERMINISTIC_NON_FAST_MARKERS = (
 )
 
 COMPLETE_RESOURCE_TEST_FILES = (
-    "tests/priority_workflows/test_complete_workflows.py",
+    "tests/workflow_catalog/test_complete_workflows.py",
     "packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py",
     "packages/bioimageflow-segmentation-tools/tests/test_execution.py",
     "packages/bioimageflow-sairpico-tools/tests/test_sairpico_complete_binary_tools.py",

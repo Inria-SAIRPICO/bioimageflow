@@ -1,1 +1,0 @@
-"""Puncta analysis example."""

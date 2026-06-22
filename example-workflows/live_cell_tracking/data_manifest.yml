@@ -5,12 +5,12 @@ data:
     - https://celltrackingchallenge.net/
   license: See selected Cell Tracking Challenge dataset terms
   citation: Cell Tracking Challenge, Ultrack, and btrack
-  normal_ci: generated TYX label movie
+  normal_ci: lightweight TYX label movie
   public_data: opt-in selected frames/crop from a small 2D CTC dataset
   markers:
     - public_data
     - model_runtime
   selected_files:
-    - synthetic_live_cell_labels.tif
+    - ctc_tiny_live_cell_labels.tif
   expected_layout: TYX
   expected_dtype: uint16

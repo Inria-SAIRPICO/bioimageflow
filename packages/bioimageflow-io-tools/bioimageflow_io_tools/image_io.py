@@ -43,43 +43,6 @@ BIOIO_ENV = EnvironmentSpec(
 )
 
 
-class ReadImage(ProcessingTool):
-    """Read an image file and write it to a normalized downstream image path."""
-
-    display_name = "Read Image"
-    documentation = "Read an image file with imageio and write a workflow-local copy."
-    category = Category.CONVERSION
-    tags = ["io", "image"]
-    environment = LIGHTWEIGHT_IO_ENV
-
-    class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(),
-            GUIMeta(
-                display_name="Input image",
-                description="Image file to read.",
-                connectable=Connectable.BY_DEFAULT,
-            ),
-        ]
-
-    class Outputs(IOModel):
-        output_image: Annotated[
-            Path,
-            ImageSpec(),
-            GUIMeta(
-                display_name="Output image",
-                description="Workflow-local image copy.",
-            ),
-        ] = Template("{input_image.stem}{ext}")
-
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        output_path = Path(arguments.output_image)
-        data = _read_image(arguments.input_image)
-        _write_image(data, output_path)
-        return self.Outputs(output_image=output_path)
-
-
 class ReadImageMetadata(ProcessingTool):
     """Read lightweight image metadata without materializing workflow outputs."""
 

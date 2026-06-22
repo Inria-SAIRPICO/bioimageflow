@@ -1,5 +1,4 @@
 # BTrackLink
 
-`BTrackLink` links object tables with the btrack runtime when `runtime="btrack"`.
-
-The default `runtime="deterministic"` delegates to the package nearest-neighbor linker so workflow tests can run without optional tracking libraries.
+`BTrackLink` links object tables with btrack.
+It consumes centroid/object rows and returns track identifiers and track counts for downstream migration metrics.

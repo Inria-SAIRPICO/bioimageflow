@@ -31,14 +31,15 @@ def test_restoration_numpy_baseline_docs_do_not_advertise_scipy_or_skimage_backe
     assert offenders == []
 
 
-def test_restoration_package_docs_describe_skimage_as_optional_for_specific_tools() -> None:
+def test_restoration_package_docs_describe_current_public_tools() -> None:
     text = _text("packages/bioimageflow-restoration-tools/docs/index.md")
     lowered = text.lower()
 
     assert "install-time libraries are imageio and numpy" in lowered
     assert "restoreimage" in lowered
-    assert "benchmarkrestoration" in lowered
-    assert "optional scikit-image" in lowered
+    assert "careamicspredict" in lowered
+    assert "restorationmetrics" in lowered
+    assert "benchmarkrestoration" not in lowered
 
 
 def test_segmentation_index_separates_install_time_libraries_from_model_environments() -> None:

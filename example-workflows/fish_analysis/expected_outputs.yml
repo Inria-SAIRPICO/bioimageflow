@@ -11,7 +11,6 @@ outputs:
     - total_csfr1_spots
   required_nodes:
     - download_cil_images
-    - read_image
     - extract_ch2_nuclei
     - cellpose3_nuclei
     - fols2_marker_spot_analysis

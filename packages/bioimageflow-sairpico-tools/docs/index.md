@@ -44,6 +44,6 @@ diagnostics and tests instead of being exposed as public workflow tools. They do
 not produce image-analysis outputs and should not appear in analyst-facing
 workflow builders.
 
-Demo workflow:
+Workflow use:
 
-- [SAIRPICO restoration smoke](workflows/sairpico_restoration_smoke.md)
+Use the SAIRPICO deconvolution workflow in the main workflow catalog for PSF generation, denoising, deconvolution, and metrics.

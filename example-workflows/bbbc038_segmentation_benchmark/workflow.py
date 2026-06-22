@@ -1,9 +1,9 @@
 """Tiny BBBC038-style nuclei segmentation benchmark workflow.
 
-The default builder writes a synthetic image/reference pair so tests can run
-without downloading the public BBBC038 data. To evaluate real BBBC038 images,
-replace the generated input paths with downloaded images and masks from the
-Broad Bioimage Benchmark Collection.
+The default builder writes a lightweight image/reference pair that preserves
+the BBBC038 raw-image plus reference-mask structure. Public-data validation can
+replace these paths with selected BBBC038 images and masks from the Broad
+Bioimage Benchmark Collection.
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ from bioimageflow.node import Node
 from bioimageflow_core import Arguments, Category, GENERAL_ENV, GUIMeta, IOModel, ProcessingTool
 
 
-def _write_synthetic_bbbc038_fixture(data_dir: Path) -> tuple[Path, Path]:
+def _write_tiny_bbbc038_fixture(data_dir: Path) -> tuple[Path, Path]:
     data_dir.mkdir(parents=True, exist_ok=True)
     yy, xx = np.mgrid[0:64, 0:64]
     image = np.zeros((64, 64), dtype=np.float32)
@@ -29,17 +29,17 @@ def _write_synthetic_bbbc038_fixture(data_dir: Path) -> tuple[Path, Path]:
         reference[mask] = label
     image += np.linspace(0.0, 0.1, image.shape[1], dtype=np.float32)
 
-    image_path = data_dir / "synthetic_bbbc038_image.tif"
-    reference_path = data_dir / "synthetic_bbbc038_reference.tif"
+    image_path = data_dir / "tiny_bbbc038_image.tif"
+    reference_path = data_dir / "tiny_bbbc038_reference.tif"
     iio.imwrite(image_path, image)
     iio.imwrite(reference_path, reference)
     return image_path, reference_path
 
 
-class SyntheticBBBC038Benchmark(ProcessingTool):
-    """Write deterministic method masks and benchmark them against a reference."""
+class BBBC038SegmentationComparison(ProcessingTool):
+    """Write method masks and benchmark them against a reference."""
 
-    display_name = "Synthetic BBBC038 Benchmark"
+    display_name = "BBBC038 Segmentation Comparison"
     category = Category.MEASUREMENT
     environment = GENERAL_ENV
 
@@ -157,9 +157,9 @@ def build_workflow(
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
-    """Build the synthetic BBBC038-style benchmark workflow."""
+    """Build the lightweight BBBC038-style benchmark workflow."""
     storage = Path(storage_path)
-    image_path, reference_path = _write_synthetic_bbbc038_fixture(storage / "data")
+    image_path, reference_path = _write_tiny_bbbc038_fixture(storage / "data")
 
     wf = Workflow(
         storage_path=str(storage / "bif"),
@@ -167,7 +167,7 @@ def build_workflow(
         wetlands_config=wetlands_config,
     )
     with wf:
-        benchmark = SyntheticBBBC038Benchmark()(
+        benchmark = BBBC038SegmentationComparison()(
             input_image=image_path,
             reference_label_image=reference_path,
             output_dir=storage / "masks",

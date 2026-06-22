@@ -36,8 +36,8 @@ def test_test_file_changes_run_that_test_file() -> None:
 
 
 def test_non_fast_test_file_changes_also_run_fast_selector() -> None:
-    assert commands_for_paths(["tests/specialized_tool_workflows/test_example_workflows.py"]) == [
-        "uv run pytest tests/specialized_tool_workflows/test_example_workflows.py",
+    assert commands_for_paths(["tests/workflow_catalog/test_specialized_workflows.py"]) == [
+        "uv run pytest tests/workflow_catalog/test_specialized_workflows.py",
         FAST_TEST_COMMAND,
     ]
 

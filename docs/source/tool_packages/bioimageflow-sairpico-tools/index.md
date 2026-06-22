@@ -19,5 +19,4 @@ tools/median_denoising
 tools/richardson_lucy_deconvolution
 tools/spitfire_deconvolution
 tools/wiener_deconvolution
-workflows/sairpico_restoration_smoke
 ```

@@ -14,8 +14,9 @@ Tools for puncta and spot quantification.
 - `SpotColocalization`: matches two upstream spot dataframes between channels by distance.
 - `SpotQualityMetrics`: computes SNR, local background, and nearest-neighbor distances.
 
-Big-FISH is optional evaluation-only support and is not a normal package dependency. The default tools and tests use lightweight NumPy/imageio code paths.
+ATLAS is the primary external spot detection method used by the FISH and parameter-space exploration workflows.
+The local spot table utilities support assignment, rendering, filtering, and summary after detection.
 
 ## Example
 
-See `example-workflows/puncta_analysis/workflow.py` for a synthetic puncta workflow.
+See the FISH spot-counting and parameter-space exploration workflows in the main workflow catalog.

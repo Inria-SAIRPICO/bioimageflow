@@ -7,7 +7,7 @@ import imageio.v3 as iio
 import numpy as np
 import pytest
 
-from tests.priority_workflows.test_workflows import _load_module
+from tests.workflow_catalog.test_workflows import _load_module
 
 
 pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
@@ -122,8 +122,12 @@ def test_fish_public_cil_workflow_executes_when_downloads_are_allowed(
     ("workflow_name", "artifact_column"),
     [
         ("cell_counting_phenotyping", None),
-        ("low_snr_restoration", "restored_image"),
-        ("live_cell_tracking", None),
+        pytest.param(
+            "low_snr_restoration",
+            "restored_image",
+            marks=pytest.mark.model_runtime,
+        ),
+        pytest.param("live_cell_tracking", None, marks=pytest.mark.model_runtime),
     ],
 )
 def test_specialized_workflow_acceptance_smoke(

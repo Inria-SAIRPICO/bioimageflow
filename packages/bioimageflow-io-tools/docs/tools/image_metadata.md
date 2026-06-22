@@ -36,9 +36,9 @@ or report basic image properties.
 
 ```python
 from bioimageflow_core import Arguments
-from bioimageflow_io_tools import ReadImageMetadata
+import bioimageflow_io_tools
 
-metadata = ReadImageMetadata().process_row(Arguments(input_image="source.tif"))
+metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(Arguments(input_image="source.tif"))
 assert metadata.axes == "CZYX"
 ```
 

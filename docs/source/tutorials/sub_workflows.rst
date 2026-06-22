@@ -33,7 +33,7 @@ to a :class:`~bioimageflow.ColumnRef` from one of the internal nodes:
 
    from bioimageflow import SubWorkflow
    from bioimageflow_core import IOModel, ImageSpec
-   from bioimageflow_io_tools import ReadImage
+   from bioimageflow_io_tools import ConvertImageFormat
    from my_tools import Threshold, Measure
 
    class SegmentAndMeasure(SubWorkflow):
@@ -48,7 +48,7 @@ to a :class:`~bioimageflow.ColumnRef` from one of the internal nodes:
            area: float
 
        def build(self, inputs):
-           prep = ReadImage()(input_image=inputs.image)
+           prep = ConvertImageFormat()(input_image=inputs.image)
            mask = Threshold()(image=prep["output_image"], cutoff=inputs.cutoff)
            stats = Measure()(mask=mask["mask"])
            return {"mask": mask["mask"], "area": stats["area"]}
@@ -144,7 +144,7 @@ Sub-workflows can call other sub-workflows from inside ``build``:
            area: float
 
        def build(self, inputs):
-           prep = ReadImage()(input_image=inputs.image)
+           prep = ConvertImageFormat()(input_image=inputs.image)
            inner = SegmentAndMeasure()(
                image=prep["output_image"], cutoff=inputs.cutoff,
            )

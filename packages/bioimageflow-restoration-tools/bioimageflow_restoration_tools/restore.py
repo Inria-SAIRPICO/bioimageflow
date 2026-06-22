@@ -1,4 +1,4 @@
-"""Restoration baseline backed by scikit-image when available."""
+"""Restoration inference, simple baselines, and metrics."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -44,7 +44,7 @@ def gaussian_blur(image: "Any", sigma: float) -> "Any":
 
 
 def restore_array(image: "Any", method: str = "tv_chambolle", weight: float = 0.1) -> "Any":
-    """Restore an image with scikit-image if installed, otherwise a light fallback."""
+    """Restore an image with a simple image-processing baseline."""
     import numpy as np
 
     image = image.astype(np.float32, copy=False)
@@ -74,16 +74,14 @@ def restore_array(image: "Any", method: str = "tv_chambolle", weight: float = 0.
 
 
 class RestoreImage(ProcessingTool):
-    """Apply a scikit-image restoration baseline to a scalar image."""
+    """Apply a simple image-processing restoration baseline to a scalar image."""
 
     display_name = "Restore Image"
     documentation = (
-        "Restore a noisy or blurred image with a scikit-image baseline. "
-        "When scikit-image is unavailable, a small NumPy fallback keeps default "
-        "tests and examples runnable."
+        "Restore a noisy or blurred image with a simple image-processing baseline."
     )
     category = Category.RESTORATION
-    tags = ["restoration", "denoise", "scikit-image"]
+    tags = ["restoration", "denoise", "baseline"]
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
@@ -128,13 +126,11 @@ careamics_env = EnvironmentSpec(
 
 
 class CAREamicsPredict(ProcessingTool):
-    """Run CAREamics prediction or a deterministic baseline fallback."""
+    """Run CAREamics prediction from a restoration checkpoint."""
 
     display_name = "CAREamics Predict"
     documentation = (
-        "Run CAREamics restoration inference from a checkpoint. The deterministic "
-        "baseline mode keeps examples and unit tests local; real CAREamics execution "
-        "is intended for model-runtime tests."
+        "Run CAREamics restoration inference from a checkpoint."
     )
     category = Category.RESTORATION
     tags = ["restoration", "careamics", "noise2void", "deep learning"]
@@ -158,46 +154,25 @@ class CAREamicsPredict(ProcessingTool):
                 connectable=Connectable.NEVER,
             ),
         ] = None
-        backend: Annotated[
-            str,
-            GUIMeta(
-                display_name="Backend",
-                description="'baseline' for deterministic tests or 'careamics' for real inference.",
-                connectable=Connectable.NEVER,
-            ),
-        ] = "baseline"
-        method: str = "tv_chambolle"
-        weight: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.01)] = 0.1
-
     class Outputs(IOModel):
         output_image: Annotated[
             Path,
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta(display_name="Restored image"),
         ] = Template("{input_image.stem}_careamics_restored.tif")
-        backend_used: Annotated[str, GUIMeta(display_name="Backend used")]
+        model_source: Annotated[str, GUIMeta(display_name="Model source")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
         image = iio.imread(arguments.input_image).astype(np.float32)
-        backend = str(arguments.backend)
-        if backend == "careamics":
-            restored = _careamics_predict(image, arguments.checkpoint)
-        elif backend == "baseline":
-            restored = restore_array(
-                image,
-                method=str(arguments.method),
-                weight=float(arguments.weight),
-            )
-        else:
-            raise ValueError("backend must be 'baseline' or 'careamics'.")
-
+        restored = _careamics_predict(image, arguments.checkpoint)
         output = Path(arguments.output_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.asarray(restored, dtype=np.float32))
-        return self.Outputs(output_image=output, backend_used=backend)
+        model_source = str(arguments.checkpoint) if arguments.checkpoint else "careamics-default"
+        return self.Outputs(output_image=output, model_source=model_source)
 
 
 class RestorationMetrics(ProcessingTool):

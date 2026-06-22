@@ -2,7 +2,7 @@
 
 This example demonstrates how to use BioImageFlow to systematically explore algorithm parameter spaces using a combinatorial DAG pattern.
 
-## Analysis question
+## Goal
 
 Which Atlas sensitivity and spot-size parameters produce useful spot-detection
 results for a microscopy image collection, and how can the outputs be inspected
@@ -38,7 +38,7 @@ Or run directly:
 python example-workflows/parameter_space_exploration/workflow.py ./data ./results
 ```
 
-## Expected Output
+## Results
 
 - A mosaic image (`detections_mosaic.png`) containing all spot detection results arranged in a grid.
 - Console output showing the mosaic path and total image count.
@@ -49,11 +49,9 @@ Use a local or public directory of fluorescence microscopy TIFF images. The
 workflow lists files from `data_dir` with the configured glob pattern. Default
 tests construct the graph without running Atlas.
 
-## Test coverage
+## Validation
 
-Default tests verify that all parameter-grid and AtlasSpotDetection/mosaic nodes are
-registered in the workflow graph. Execution should be covered by an optional
-slow test with known input images and the Atlas binary available.
+Use a known FISH marker crop and the Atlas binary to compare masks and counts across the parameter grid.
 
 ## Customization
 

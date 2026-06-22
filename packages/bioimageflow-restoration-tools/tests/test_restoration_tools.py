@@ -10,7 +10,6 @@ from bioimageflow import Workflow
 from bioimageflow_core import Arguments
 from bioimageflow_restoration_tools import (
     BackgroundSubtract,
-    BenchmarkRestoration,
     CAREamicsPredict,
     GaussianDenoise,
     MedianDenoise,
@@ -47,7 +46,7 @@ def test_restore_image_improves_noisy_synthetic_image(tmp_path: Path) -> None:
     assert np.mean((restored - clean) ** 2) < np.mean((noisy - clean) ** 2)
 
 
-def test_careamics_predict_baseline_and_restoration_metrics(tmp_path: Path) -> None:
+def test_restoration_metrics_compare_degraded_and_restored_images(tmp_path: Path) -> None:
     clean = np.zeros((48, 48), dtype=np.float32)
     clean[14:34, 14:34] = 1.0
     rng = np.random.default_rng(11)
@@ -57,15 +56,12 @@ def test_careamics_predict_baseline_and_restoration_metrics(tmp_path: Path) -> N
     restored_path = tmp_path / "restored.tif"
     iio.imwrite(clean_path, clean)
     iio.imwrite(degraded_path, degraded.astype(np.float32))
-
-    restored = CAREamicsPredict().process_row(
+    restored = RestoreImage().process_row(
         Arguments(
             input_image=degraded_path,
-            output_image=restored_path,
-            backend="baseline",
             method="tv_chambolle",
             weight=0.12,
-            checkpoint=None,
+            output_image=restored_path,
         )
     )
     metrics = RestorationMetrics().process_row(
@@ -76,7 +72,6 @@ def test_careamics_predict_baseline_and_restoration_metrics(tmp_path: Path) -> N
         )
     )
 
-    assert restored.backend_used == "baseline"
     assert Path(restored.output_image).exists()
     assert metrics.mse_restored < metrics.mse_degraded
     assert metrics.restored_psnr > metrics.degraded_psnr
@@ -101,35 +96,11 @@ def test_careamics_predict_executes_with_fake_runtime(
             input_image=image_path,
             output_image=tmp_path / "restored.tif",
             checkpoint=None,
-            backend="careamics",
-            method="tv_chambolle",
-            weight=0.1,
         )
     )
 
-    assert result.backend_used == "careamics"
+    assert result.model_source == "careamics-default"
     np.testing.assert_array_equal(iio.imread(result.output_image), np.ones((8, 8)))
-
-
-def test_benchmark_restoration_returns_metrics(tmp_path: Path) -> None:
-    result = BenchmarkRestoration().process_row(
-        Arguments(
-            image_size=48,
-            noise_sigma=0.12,
-            blur_sigma=1.0,
-            seed=7,
-            clean_image=str(tmp_path / "declared" / "clean_custom.tif"),
-            degraded_image=str(tmp_path / "declared" / "degraded_custom.tif"),
-            restored_image=str(tmp_path / "declared" / "restored_custom.tif"),
-        )
-    )
-
-    assert Path(result.clean_image) == tmp_path / "declared" / "clean_custom.tif"
-    assert Path(result.degraded_image) == tmp_path / "declared" / "degraded_custom.tif"
-    assert Path(result.restored_image) == tmp_path / "declared" / "restored_custom.tif"
-    assert result.restored_psnr > result.degraded_psnr
-    assert result.mse_restored < result.mse_degraded
-    assert Path(result.restored_image).exists()
 
 
 def test_restoration_workflow_graph_runs(tmp_path: Path) -> None:

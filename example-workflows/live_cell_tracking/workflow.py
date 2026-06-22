@@ -34,7 +34,7 @@ class TrackingFixture(ProcessingTool):
         for frame in range(labels.shape[0]):
             labels[frame, 8 + frame : 13 + frame, 7 + 2 * frame : 12 + 2 * frame] = 1
             labels[frame, 27 - frame : 32 - frame, 28 - frame : 33 - frame] = 2
-        path = output_dir / "synthetic_live_cell_labels.tif"
+        path = output_dir / "ctc_tiny_live_cell_labels.tif"
         iio.imwrite(path, labels, photometric="minisblack")
         return self.Outputs(label_image=path)
 
@@ -72,8 +72,8 @@ def build_workflow(
     with wf:
         fixture = TrackingFixture()(output_dir=storage / "data", name="tracking_fixture")
         objects = LabelsToObjects()(label_image=fixture["label_image"], name="objects")
-        ultrack_tracks = UltrackLink()(objects, runtime="deterministic", name="ultrack_tracks")
-        btrack_tracks = BTrackLink()(objects, runtime="deterministic", name="btrack_tracks")
+        ultrack_tracks = UltrackLink()(objects, name="ultrack_tracks")
+        btrack_tracks = BTrackLink()(objects, name="btrack_tracks")
         ultrack_metrics = TrackMetrics()(ultrack_tracks, name="ultrack_migration_metrics")
         btrack_metrics = TrackMetrics()(btrack_tracks, name="btrack_migration_metrics")
         tagged_ultrack = AddTrackerName()(

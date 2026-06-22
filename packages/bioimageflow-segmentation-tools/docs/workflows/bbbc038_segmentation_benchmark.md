@@ -4,7 +4,7 @@ This workflow demonstrates the priority segmentation story: produce label
 images from microscopy inputs, postprocess them, and evaluate them with
 measurement tools.
 
-## Analysis question
+## Goal
 
 Can a segmentation workflow produce nuclei labels that agree with a reference
 mask closely enough for benchmark reporting?
@@ -16,16 +16,13 @@ marker labels. For public validation, use a small BBBC038 subset behind the
 `public_data` marker with documented checksums and expected object-count or IoU
 ranges.
 
-## Expected Results
+## Results
 
-- `ThresholdSegment` should produce one label per connected foreground object.
-- `WatershedSegment` should preserve marker IDs when markers are supplied.
-- `PostprocessLabels` should remove objects below `min_size` and relabel
-  remaining objects sequentially.
-- Deep-learning tools should be graph-constructible without importing their
-  heavy dependencies in the main process.
+- Predicted label images from Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method.
+- Overlays for visual review.
+- Benchmark rows with object counts and foreground overlap metrics.
 
-## Test coverage
+## Validation
 
 The priority workflow test executes the generated fixture, then asserts stable
 label counts and foreground IoU. Public BBBC038 downloads remain a slow

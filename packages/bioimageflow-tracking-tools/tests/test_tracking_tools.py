@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow.validation import serialize_output_schema
+from bioimageflow.validation import serialize_input_schema, serialize_output_schema
 from bioimageflow_core import Arguments
 from bioimageflow_common_tools import Files
 from bioimageflow_tracking_tools import (
@@ -80,27 +80,12 @@ def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
     assert metrics["mean_track_length"].iloc[0] == 3.0
 
 
-def test_ultrack_and_btrack_adapters_use_deterministic_linker(tmp_path: Path) -> None:
-    label_path = _moving_labels(tmp_path / "labels.tif")
-    objects = LabelsToObjects().process_row(Arguments(label_image=str(label_path)))
-    object_table = pd.DataFrame([vars(row) for row in objects])
-
-    ultrack_tracks = UltrackLink().transform(
-        object_table,
-        Arguments(max_distance=5.0, runtime="deterministic"),
-    )
-    btrack_tracks = BTrackLink().transform(
-        object_table,
-        Arguments(max_distance=5.0, runtime="deterministic"),
-    )
-
-    assert set(ultrack_tracks["track_id"]) == {1, 2}
-    assert set(btrack_tracks["track_id"]) == {1, 2}
-    assert ultrack_tracks["track_count"].iloc[0] == 2
-    assert btrack_tracks["track_count"].iloc[0] == 2
+def test_ultrack_and_btrack_adapter_schemas_do_not_expose_runtime_selectors() -> None:
+    assert "runtime" not in serialize_input_schema(UltrackLink)
+    assert "runtime" not in serialize_input_schema(BTrackLink)
 
 
-def test_ultrack_and_btrack_adapters_dispatch_fake_runtimes(
+def test_ultrack_and_btrack_adapters_dispatch_to_tracking_libraries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     table = pd.DataFrame(
@@ -131,11 +116,11 @@ def test_ultrack_and_btrack_adapters_dispatch_fake_runtimes(
 
     ultrack_result = UltrackLink().transform(
         table,
-        Arguments(max_distance=3.0, runtime="ultrack"),
+        Arguments(max_distance=3.0),
     )
     btrack_result = BTrackLink().transform(
         table,
-        Arguments(max_distance=4.0, runtime="btrack"),
+        Arguments(max_distance=4.0),
     )
 
     assert ultrack_result.iloc[0]["track_id"] == 10

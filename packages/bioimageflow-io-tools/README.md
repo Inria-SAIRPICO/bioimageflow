@@ -7,7 +7,6 @@ Core libraries for lightweight tools are imageio, NumPy, tifffile, and the packa
 
 ## Tools
 
-- `ReadImage`
 - `ReadImageMetadata`
 - `ValidateImageLayout`
 - `ConvertImageFormat`
@@ -20,13 +19,5 @@ Core libraries for lightweight tools are imageio, NumPy, tifffile, and the packa
 - `SelectZRange`
 - `SelectDimensions`
 
-## Tests
-
-Run package tests with:
-
-```bash
-uv run pytest packages/bioimageflow-io-tools/tests
-```
-
-The tests create small synthetic images and validate output paths, axis
-selection, OME-TIFF metadata, OME-Zarr structure, and failure modes.
+Use `BioIOConvertImage` for microscopy formats that need scene, channel, Z, timepoint, or dimension-order handling.
+Use `ConvertImageFormat` for simple imageio/tifffile conversions.

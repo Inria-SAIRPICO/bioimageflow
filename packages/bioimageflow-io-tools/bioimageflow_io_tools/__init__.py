@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from .image_io import ConvertImageFormat as ConvertImageFormat
     from .image_io import ConvertToOmeTiff as ConvertToOmeTiff
     from .image_io import ConvertToOmeZarr as ConvertToOmeZarr
-    from .image_io import ReadImage as ReadImage
     from .image_io import ReadImageMetadata as ReadImageMetadata
     from .image_io import SelectChannel as SelectChannel
     from .image_io import SelectDimensions as SelectDimensions
@@ -23,7 +22,6 @@ _EXPORTS = {
     "ConvertImageFormat": ("image_io", "ConvertImageFormat"),
     "ConvertToOmeTiff": ("image_io", "ConvertToOmeTiff"),
     "ConvertToOmeZarr": ("image_io", "ConvertToOmeZarr"),
-    "ReadImage": ("image_io", "ReadImage"),
     "ReadImageMetadata": ("image_io", "ReadImageMetadata"),
     "SelectChannel": ("image_io", "SelectChannel"),
     "SelectDimensions": ("image_io", "SelectDimensions"),
@@ -38,7 +36,6 @@ __all__ = [
     "ConvertImageFormat",
     "ConvertToOmeTiff",
     "ConvertToOmeZarr",
-    "ReadImage",
     "ReadImageMetadata",
     "SelectChannel",
     "SelectDimensions",

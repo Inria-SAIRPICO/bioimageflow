@@ -20,7 +20,6 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
         ConvertImageFormat,
         ConvertToOmeTiff,
         ConvertToOmeZarr,
-        ReadImage,
         ReadImageMetadata,
         SelectChannel,
         SelectDimensions,
@@ -36,7 +35,6 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
 
     for tool in [
         BioIOConvertImage,
-        ReadImage,
         ReadImageMetadata,
         ValidateImageLayout,
         ConvertImageFormat,
@@ -63,13 +61,6 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     bioio_outputs = serialize_output_schema(BioIOConvertImage)
     assert bioio_inputs["dim_order"]["default"] == "TCZYX"
     assert "output_image" in bioio_outputs
-
-    read_output = tmp_path / "read.tif"
-    read = ReadImage().process_row(
-        Arguments(input_image=source, output_image=read_output)
-    )
-    assert read.output_image == read_output
-    np.testing.assert_array_equal(iio.imread(read_output), data)
 
     selected_output = tmp_path / "selected.tif"
     selected = SelectDimensions().process_row(
@@ -108,13 +99,15 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
 
 
 def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> None:
-    from bioimageflow_io_tools import ReadImageMetadata
+    import bioimageflow_io_tools
 
     data = np.arange(2 * 3 * 4 * 5, dtype=np.uint16).reshape(2, 3, 4, 5)
     source = tmp_path / "czyx.tif"
     iio.imwrite(source, data, photometric="minisblack")
 
-    metadata = ReadImageMetadata().process_row(Arguments(input_image=source))
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
 
     assert metadata.shape == [2, 3, 4, 5]
     assert metadata.dtype == "uint16"
@@ -127,7 +120,7 @@ def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> Non
 def test_read_image_metadata_reports_ome_tiff_pixel_sizes(tmp_path: Path) -> None:
     import tifffile
 
-    from bioimageflow_io_tools import ReadImageMetadata
+    import bioimageflow_io_tools
 
     source = tmp_path / "physical_sizes.ome.tiff"
     data = np.zeros((4, 5), dtype=np.uint16)
@@ -143,7 +136,9 @@ def test_read_image_metadata_reports_ome_tiff_pixel_sizes(tmp_path: Path) -> Non
         },
     )
 
-    metadata = ReadImageMetadata().process_row(Arguments(input_image=source))
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
 
     assert metadata.shape == [4, 5]
     assert metadata.axes == "YX"
@@ -468,7 +463,6 @@ def test_io_package_all_exports_only_public_tools() -> None:
         "ConvertImageFormat",
         "ConvertToOmeTiff",
         "ConvertToOmeZarr",
-        "ReadImage",
         "ReadImageMetadata",
         "SelectChannel",
         "SelectDimensions",
@@ -478,6 +472,7 @@ def test_io_package_all_exports_only_public_tools() -> None:
         "ValidateImageLayout",
     ]
     assert "image_io" not in bioimageflow_io_tools.__all__
+    assert not hasattr(bioimageflow_io_tools, "ReadImage")
 
 
 def tifffile_shape(path: Path) -> tuple[int, ...]:

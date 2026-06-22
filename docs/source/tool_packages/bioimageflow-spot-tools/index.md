@@ -19,5 +19,4 @@ tools/spot_colocalization
 tools/spot_quality_metrics
 tools/spot_summary
 tools/spots_to_labels
-workflows/puncta_analysis
 ```

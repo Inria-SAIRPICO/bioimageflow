@@ -153,7 +153,7 @@ Core libraries and binaries:
 
 Candidate tools:
 
-- `ReadImage`: read common image formats with `bioio` plus selected plugins.
+- `BioIOConvertImage`: convert microscopy formats with `bioio` plus selected plugins and explicit scene/channel/Z/T selection.
 - `ConvertImageFormat`: convert common image files, OME-TIFF, and lightweight
   OME-Zarr, with optional scene/channel/Z/T selection.
 - `ConvertToOmeTiff`: convert an image file to OME-TIFF with explicit
@@ -450,8 +450,8 @@ workflow-level results.
 |----------|----------|-----------------|-------------|-----------------|
 | 1 | FISH spot counting per nucleus | common, io, segmentation, measurement, optional sairpico | CIL:13432/13434/13436/13438 | Per-image and per-nucleus tables with spot counts |
 | 1 | Nucleus segmentation benchmark | common, io, segmentation, measurement | BBBC038 | Label masks and IoU/F1/PQ metrics against masks |
-| 1 | SAIRPICO restoration smoke workflow | common, sairpico, measurement | Synthetic blur/noise plus CIL FISH crop | Restored image, PSF output, sharpness/noise metrics |
-| 2 | OME-TIFF and OME-Zarr normalization | common, io | CIL and IDR/OME-Zarr public samples | Shape, dtype, dimension-order, and metadata round-trip report |
+| 1 | SAIRPICO deconvolution workflow | common, sairpico, measurement | CIL FISH crop plus PSF | Deconvolved image, PSF output, sharpness/noise metrics |
+| 2 | Microscopy format conversion examples | common, io | CIL and IDR/OME-Zarr public samples | Shape, dtype, dimension-order, and metadata round-trip report |
 
 ### FISH spot counting per nucleus
 
@@ -471,7 +471,7 @@ Candidate graph:
 
 ```text
 Download or Files
-  -> ReadImage / ConvertImage
+  -> direct image path or BioIOConvertImage when conversion is needed
   -> ExtractChannel(FOLS2) -> SpotDetection -> ConnectedComponents
   -> ExtractChannel(CSF1R) -> SpotDetection -> ConnectedComponents
   -> ExtractChannel(DAPI)  -> CellposeSegment or ThresholdSegment
@@ -514,7 +514,7 @@ Candidate graph:
 
 ```text
 DownloadBBBC038 / Files
-  -> ReadImage
+  -> BioIOConvertImage when conversion is needed
   -> CellposeSegment
   -> StarDist2DSegment
   -> ThresholdSegment + WatershedSegment
@@ -545,7 +545,7 @@ Validation:
 - Schema tests for all segmentation tools even when heavy environments are not
   installed.
 
-### SAIRPICO restoration smoke workflow
+### SAIRPICO deconvolution workflow
 
 Why it is valuable:
 
@@ -594,7 +594,7 @@ Validation:
 - Synthetic blur/noise benchmark should improve PSNR or SSIM against the known
   clean image.
 - PSF tests should assert shape, dtype, positive sum, and central maximum.
-- Public-image smoke tests should assert successful execution and plausible
+- Public-image validation should assert successful execution and plausible
   output intensity range.
 
 ### OME-TIFF and OME-Zarr normalization
@@ -611,11 +611,11 @@ Candidate graph:
 
 ```text
 Files or DownloadPublicImage
-  -> ReadImage
+  -> BioIOConvertImage when conversion is needed
   -> SelectScene / SelectChannel / SelectTimepoint / SelectZRange
   -> ConvertToOmeTiff
   -> ConvertToOmeZarr
-  -> ReadImage
+  -> ReadImageMetadata
   -> CompareImageMetadata
 ```
 
@@ -698,8 +698,8 @@ Examples:
 1. Update the existing FISH example so it uses package boundaries explicitly
    without requiring a Big-FISH-based package.
 2. Add a BBBC038 segmentation benchmark workflow.
-3. Add a SAIRPICO deconvolution smoke workflow with synthetic data.
-4. Add an OME-TIFF / OME-Zarr normalization workflow.
+3. Add a SAIRPICO deconvolution workflow with microscopy data and PSF generation.
+4. Add microscopy format conversion examples as tool-package documentation.
 5. Put workflow data downloads behind explicit scripts or tools, never commit
    large downloaded data into the tool packages.
 6. Record expected metrics in small JSON files so regression tests can compare
@@ -726,7 +726,7 @@ Every new tool package should include four validation layers:
    dependencies.
 2. **Synthetic tests:** run the tool on tiny generated data with known expected
    outputs. These should be fast enough for CI when dependencies are available.
-3. **Public-data smoke workflows:** download a small public dataset or crop,
+3. **Public-data validation workflows:** download a small public dataset or crop,
    run a complete workflow, and assert stable output structure and broad metric
    ranges. These may be marked as optional or slow.
 4. **Benchmark workflows:** compare against public ground truth when available.
@@ -809,7 +809,7 @@ The first workflows to make real should be:
 1. FISH spot counting per nucleus on public CIL images, using existing Atlas,
    SAIRPICO HotSpot, and the implemented spot table/rendering/QC package tools.
 2. Nucleus segmentation benchmark on BBBC038.
-3. SAIRPICO deconvolution/denoising smoke workflow on synthetic and public
+3. SAIRPICO deconvolution/denoising workflow on microscopy
    microscopy data.
 4. OME-TIFF and OME-Zarr normalization on public and synthetic fixtures.
 
