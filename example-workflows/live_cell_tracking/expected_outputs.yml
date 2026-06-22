@@ -13,12 +13,13 @@ outputs:
     - track_count
     - mean_track_length
   required_nodes:
-    - tracking_fixture
     - objects
     - ultrack_tracks
     - btrack_tracks
     - ultrack_migration_metrics
     - btrack_migration_metrics
+    - tag_ultrack_metrics
+    - tag_btrack_metrics
     - migration_metrics
   forbidden_columns:
     - parent_track_id

@@ -16,7 +16,8 @@ The workflow:
 2. Generates parameter value lists using the `Generate` tool (one for sensitivity, one for size).
 3. Performs a Cartesian product using `CrossJoin`.
 4. Executes `AtlasSpotDetection` on each image/parameter combination.
-5. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
+5. Counts connected foreground spots and foreground fraction for each ATLAS mask.
+6. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
 
 ## Prerequisites
 
@@ -40,8 +41,10 @@ python example-workflows/parameter_space_exploration/workflow.py ./data ./result
 
 ## Results
 
-- A mosaic image (`detections_mosaic.png`) containing all spot detection results arranged in a grid.
-- Console output showing the mosaic path and total image count.
+- A parameter-results table with one row per image and parameter combination.
+- Spot-count and foreground-fraction measurements for each ATLAS mask.
+- A mosaic image containing all spot detection results arranged in a grid.
+- Console output showing the mosaic path and total parameter rows.
 
 ## Data
 

@@ -36,7 +36,7 @@ Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in iso
 ## Demo Workflow
 
 - [BBBC038 segmentation benchmark](workflows/bbbc038_segmentation_benchmark.md):
-  synthetic nuclei segmentation with a path to public BBBC038 validation.
+  comparison of Cellpose v3, Cellpose-SAM, StarDist, and a classical branch on BBBC038-style nuclei masks.
 
 ## Tests and Demo Data
 
@@ -46,5 +46,5 @@ Run package tests with:
 uv run pytest packages/bioimageflow-segmentation-tools/tests
 ```
 
-Fast tests execute only the classical tools on generated images and verify that heavy tools build workflow graphs without importing model dependencies.
+Fast tests execute the classical tools on small local fixtures and verify that heavy tools build workflow graphs without importing model dependencies.
 Optional model-runtime validation should be marked `complete`, `wetlands`, and `model_runtime`; public datasets additionally use `public_data` and define expected object-count or benchmark ranges.

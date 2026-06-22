@@ -418,7 +418,6 @@ def test_priority_workflow_execution_tests_are_acceptance_marked() -> None:
     module = ast.parse(module_path.read_text(), filename=str(module_path))
 
     acceptance_test_names = {
-        "test_synthetic_fish_workflow_executes",
         "test_bbbc038_segmentation_benchmark_constructs_and_executes",
     }
     effective_markers_by_test = _test_function_effective_pytestmark_names(module)

@@ -1,47 +1,28 @@
 # BBBC038 Segmentation Benchmark Workflow
 
-This workflow demonstrates the priority segmentation story: produce label
-images from microscopy inputs, postprocess them, and evaluate them with
-measurement tools.
+This workflow compares several nuclei segmentation methods on the same BBBC038-style inputs and evaluates each predicted label image against the sample's reference instance masks.
 
 ## Goal
 
-Can a segmentation workflow produce nuclei labels that agree with a reference
-mask closely enough for benchmark reporting?
+Benchmark Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold branch on a shared nuclei segmentation task.
 
 ## Data
 
-For CI, use generated images with two bright synthetic objects and optional
-marker labels. For public validation, use a small BBBC038 subset behind the
-`public_data` marker with documented checksums and expected object-count or IoU
-ranges.
+Use a selected BBBC038 `stage1_train` subset with the original `images/` and `masks/` folder layout.
+Each sample folder should contain one raw microscopy image under `images/` and one or more per-object reference masks under `masks/`.
+
+## How It Works
+
+The workflow lists sample folders, combines the per-object mask files into one reference label image, prepares a 2D intensity image for segmentation, runs each method in its own branch, and writes one benchmark row per method and image.
 
 ## Results
 
 - Predicted label images from Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method.
-- Overlays for visual review.
-- Benchmark rows with object counts and foreground overlap metrics.
+- Overlay previews for visual comparison.
+- A benchmark table with object counts, foreground IoU, and Dice scores.
 
-## Validation
+## Run
 
-The priority workflow test executes the generated fixture, then asserts stable
-label counts and foreground IoU. Public BBBC038 downloads remain a slow
-extension, not part of the default test path.
-
-```python
-from bioimageflow import Workflow
-from bioimageflow_segmentation_tools import PostprocessLabels, ThresholdSegment
-
-with Workflow(storage_path="results") as wf:
-    labels = ThresholdSegment()(
-        input_image="input.tif",
-        threshold=5.0,
-        name="threshold",
-    )
-    cleaned = PostprocessLabels()(
-        labels=labels["labels"],
-        min_size=16,
-        name="cleaned",
-    )
-    wf.compute(cleaned)
+```bash
+python example-workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset
 ```

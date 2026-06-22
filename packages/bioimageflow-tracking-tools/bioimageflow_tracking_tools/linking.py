@@ -20,15 +20,15 @@ def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
         )
 
 
-class LinkObjects(DataFrameTool):
-    """Link objects frame-to-frame with a lightweight nearest-neighbor method."""
+class _NearestNeighborLinkObjects(DataFrameTool):
+    """Internal nearest-neighbor linker used by deterministic tests."""
 
-    display_name = "Link Objects"
+    display_name = "Nearest Neighbor Link Objects"
     documentation = (
-        "Greedy nearest-neighbor frame linking for small object tables."
+        "Internal greedy nearest-neighbor frame linking for small object tables."
     )
     category = Category.TRACKING
-    tags = ["tracking", "linking", "nearest-neighbor"]
+    tags = ["tracking", "linking"]
 
     class Inputs(IOModel):
         max_distance: Annotated[
@@ -46,7 +46,7 @@ class LinkObjects(DataFrameTool):
     def transform(self, df: Any, arguments: Any) -> Any:
         import numpy as np
 
-        _require_columns(df, {"frame", "label", "y", "x", "area"}, "LinkObjects")
+        _require_columns(df, {"frame", "label", "y", "x", "area"}, "_NearestNeighborLinkObjects")
         if df.empty:
             result = df.copy()
             result["track_id"] = []
@@ -108,7 +108,7 @@ btrack_env = EnvironmentSpec(
 )
 
 
-class UltrackLink(LinkObjects):
+class UltrackLink(_NearestNeighborLinkObjects):
     """Link objects with an Ultrack-compatible adapter."""
 
     display_name = "Ultrack Link"
@@ -123,7 +123,7 @@ class UltrackLink(LinkObjects):
         return ultrack.Linker(max_distance=arguments.max_distance).link(df)
 
 
-class BTrackLink(LinkObjects):
+class BTrackLink(_NearestNeighborLinkObjects):
     """Link objects with a btrack-compatible adapter."""
 
     display_name = "btrack Link"

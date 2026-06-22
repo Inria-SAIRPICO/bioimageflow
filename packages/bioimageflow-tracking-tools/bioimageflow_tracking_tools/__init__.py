@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .linking import BTrackLink as BTrackLink
     from .labels import LabelsToObjects as LabelsToObjects
-    from .linking import LinkObjects as LinkObjects
     from .linking import UltrackLink as UltrackLink
     from .metrics import TrackMetrics as TrackMetrics
     from .table_tools import FilterObjects as FilterObjects
@@ -20,7 +19,6 @@ _EXPORTS = {
     "BTrackLink": ("linking", "BTrackLink"),
     "FilterObjects": ("table_tools", "FilterObjects"),
     "LabelsToObjects": ("labels", "LabelsToObjects"),
-    "LinkObjects": ("linking", "LinkObjects"),
     "TrackMetrics": ("metrics", "TrackMetrics"),
     "TrackQualityMetrics": ("table_tools", "TrackQualityMetrics"),
     "TrackSummary": ("table_tools", "TrackSummary"),
@@ -33,7 +31,6 @@ __all__ = [
     "BTrackLink",
     "FilterObjects",
     "LabelsToObjects",
-    "LinkObjects",
     "TrackMetrics",
     "TrackQualityMetrics",
     "TrackSummary",

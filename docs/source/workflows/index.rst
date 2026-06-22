@@ -1,7 +1,7 @@
 Workflow Catalog
 ================
 
-These are the public example workflows. Each entry shows the goal, data source, command, and practical results a workflow author can expect. Small local fixtures keep the examples quick to try, while selected public-data and model-runtime checks are available for deeper validation.
+These are the public example workflows. Each entry shows the goal, data source, command, and practical results a workflow author can expect. Use the documented input paths for quick local runs, and enable selected public-data and model-runtime checks for deeper validation.
 
 .. raw:: html
 
@@ -23,7 +23,7 @@ Goal
   How many FOLS2 and CSF1R FISH marker spots overlap each segmented nucleus?
 
 Data
-  Public validation uses Cell Image Library records ``13432``, ``13434``, ``13436``, and ``13438``. Normal tests use a generated CYX fixture.
+  Public validation uses Cell Image Library records ``13432``, ``13434``, ``13436``, and ``13438``. Normal tests verify graph and output contracts without downloading the CIL files.
 
 Command
   ``python example-workflows/fish_analysis/workflow.py``
@@ -32,7 +32,7 @@ How it works
   The workflow downloads four Cell Image Library FISH images, extracts the nuclei channel before Cellpose v3 segmentation, runs the same ``MarkerSpotAnalysis`` sub-workflow for FOLS2 and CSF1R, and summarizes marker spots per nucleus.
 
 Results
-  Per-nucleus and per-image FOLS2 and CSF1R spot summaries, nuclei labels, marker spot tables, and preview overlays.
+  Per-image FOLS2 and CSF1R spot summaries, nuclei labels, and marker-overlap tables.
 
 Interpretation
   Higher average marker spots per nucleus indicate stronger marker signal in segmented nuclei for that image.
@@ -44,7 +44,7 @@ Goal
   How sensitive are ATLAS spot counts and masks to a small parameter grid?
 
 Data
-  Normal tests use a generated spot image. Public-data validation can reuse a FISH marker channel crop.
+  Use a FISH marker-channel crop, such as a FOLS2 or CSF1R channel extracted from a CIL FISH image.
 
 Command
   ``python example-workflows/parameter_space_exploration/workflow.py``
@@ -65,13 +65,13 @@ Goal
   How do planned nuclei segmentation methods compare against reference labels?
 
 Data
-  Public validation uses a named subset from the Broad Bioimage Benchmark Collection BBBC038 ``stage1_train``. Normal tests use a generated image/reference pair.
+  Use a named subset from the Broad Bioimage Benchmark Collection BBBC038 ``stage1_train`` with each sample's original ``images/`` and ``masks/`` folders.
 
 Command
-  ``python example-workflows/bbbc038_segmentation_benchmark/workflow.py``
+  ``python example-workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset``
 
 How it works
-  The workflow prepares BBBC038-style images and reference masks, runs Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method on the same images, then compares each prediction to the reference labels.
+  The workflow lists BBBC038 sample folders, builds a reference label image from each sample's instance-mask files, prepares a 2D intensity image for segmentation, runs Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method as separate graph branches, then benchmarks each prediction against the same reference labels.
 
 Results
   Predicted label images, overlays, and a benchmark metrics table with one row per method and image.
@@ -86,13 +86,13 @@ Goal
   How many cells are in an image, and what are their basic region phenotypes?
 
 Data
-  Normal tests use a generated BBBC038-style crop. Public validation can reuse a BBBC038 crop.
+  Use a small nuclei crop from a BBBC038 sample or another 2D microscopy image where threshold segmentation is a reasonable default.
 
 Command
-  ``python example-workflows/cell_counting_phenotyping/workflow.py``
+  ``python example-workflows/cell_counting_phenotyping/workflow.py --input-image data/bbbc038_crop.tif``
 
 How it works
-  The workflow segments a small microscopy crop, measures object region properties, and aggregates per-image phenotype summaries.
+  The workflow segments a small microscopy crop, measures object geometry, shape, and intensity features, and aggregates per-image phenotype summaries.
 
 Results
   A label image, object feature table, and per-image count and phenotype summary.
@@ -107,10 +107,10 @@ Goal
   Does CAREamics-style restoration improve a low-SNR microscopy image?
 
 Data
-  Normal tests use generated clean/degraded images. Real CAREamics checkpoints are opt-in model-runtime validation.
+  Use a paired low-SNR microscopy crop, clean or high-SNR reference image, and CAREamics checkpoint. Model-runtime validation remains opt-in.
 
 Command
-  ``python example-workflows/low_snr_restoration/workflow.py``
+  ``python example-workflows/low_snr_restoration/workflow.py --clean-image data/low_snr_clean_crop.tif --degraded-image data/low_snr_degraded_crop.tif --checkpoint models/careamics.ckpt``
 
 How it works
   The workflow runs a CAREamics-facing restoration prediction step, compares the restored image with the noisy input and clean reference where available, and produces a side-by-side restoration assessment.
@@ -119,7 +119,7 @@ Results
   Restored image, metrics table, and comparison preview.
 
 Interpretation
-  A useful restoration should reduce MSE and increase PSNR relative to the degraded input on the pinned fixture.
+  A useful restoration should reduce MSE and increase PSNR relative to the degraded input on the same validation crop.
 
 sairpico_deconvolution
 ----------------------
@@ -128,16 +128,16 @@ Goal
   What does a SAIRPICO denoise and Richardson-Lucy deconvolution pipeline produce for a small microscopy crop?
 
 Data
-  Normal tests generate a tiny input and monkeypatch SAIRPICO commands. Real SAIRPICO binaries are opt-in.
+  Use a supplied microscopy crop, for example a FISH crop from CIL. Real SAIRPICO binaries are opt-in.
 
 Command
-  ``python example-workflows/sairpico_deconvolution/workflow.py``
+  ``python example-workflows/sairpico_deconvolution/workflow.py --input-image data/13432_fish_crop.tif``
 
 How it works
-  The workflow generates a PSF, runs SAIRPICO denoising and Richardson-Lucy deconvolution, and measures image sharpness and residual noise.
+  The workflow generates a PSF, runs SAIRPICO denoising, feeds the generated PSF into Richardson-Lucy deconvolution, and measures image sharpness and residual noise.
 
 Results
-  PSF image, denoised image, deconvolved image, metrics table, and preview.
+  PSF image, denoised image, deconvolved image, and metrics table.
 
 Interpretation
   Sharpness and residual-noise metrics provide quick regression signals for deconvolution behavior.
@@ -146,19 +146,19 @@ live_cell_tracking
 ------------------
 
 Goal
-  What migration tracks and metrics do Ultrack and btrack adapters produce for a short 2D time series?
+  What migration tracks and metrics do Ultrack and btrack adapters produce for a short 2D label movie?
 
 Data
-  Normal tests use a generated TYX label movie. Public validation can use selected frames from a small Cell Tracking Challenge 2D dataset.
+  Use a TYX label movie from selected frames of a 2D Cell Tracking Challenge dataset.
 
 Command
-  ``python example-workflows/live_cell_tracking/workflow.py``
+  ``python example-workflows/live_cell_tracking/workflow.py --label-image data/ctc_label_movie.tif``
 
 How it works
-  The workflow loads a short 2D time series or label movie, runs Ultrack and btrack adapters, and computes basic migration metrics from each track table.
+  The workflow loads a short TYX label movie, runs Ultrack and btrack adapters, and computes basic migration metrics from each track table.
 
 Results
-  Track tables, migration metrics, and overlay frames. Lineage and division analysis are intentionally out of scope.
+  Track tables and migration metrics. Lineage and division analysis are intentionally out of scope.
 
 Interpretation
   Track length, displacement, mean speed, and mean area summarize migration behavior without division analysis.

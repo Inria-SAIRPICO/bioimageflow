@@ -1,7 +1,7 @@
 [project]
 name = "bioimageflow-restoration-tools"
 version = "0.1.6"
-description = "Restoration baselines and benchmarks for BioImageFlow"
+description = "Restoration inference and image-quality metrics for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "BioImageFlow Contributors" }]

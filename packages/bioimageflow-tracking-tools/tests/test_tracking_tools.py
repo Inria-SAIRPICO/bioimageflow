@@ -15,7 +15,6 @@ from bioimageflow_tracking_tools import (
     BTrackLink,
     FilterObjects,
     LabelsToObjects,
-    LinkObjects,
     TrackMetrics,
     TrackQualityMetrics,
     TrackSummary,
@@ -23,6 +22,7 @@ from bioimageflow_tracking_tools import (
     TracksToLabels,
     UltrackLink,
 )
+from bioimageflow_tracking_tools.linking import _NearestNeighborLinkObjects
 
 pytestmark = pytest.mark.package_tools
 
@@ -65,7 +65,7 @@ def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
     label_path = _moving_labels(tmp_path / "labels.tif")
     objects = LabelsToObjects().process_row(Arguments(label_image=str(label_path)))
     object_table = pd.DataFrame([vars(row) for row in objects])
-    tracks = LinkObjects().transform(
+    tracks = _NearestNeighborLinkObjects().transform(
         object_table,
         Arguments(max_distance=5.0),
     )
@@ -83,6 +83,13 @@ def test_link_objects_and_track_metrics(tmp_path: Path) -> None:
 def test_ultrack_and_btrack_adapter_schemas_do_not_expose_runtime_selectors() -> None:
     assert "runtime" not in serialize_input_schema(UltrackLink)
     assert "runtime" not in serialize_input_schema(BTrackLink)
+
+
+def test_nearest_neighbor_linker_is_not_public_package_api() -> None:
+    import bioimageflow_tracking_tools as tracking_tools
+
+    assert "LinkObjects" not in tracking_tools.__all__
+    assert not hasattr(tracking_tools, "LinkObjects")
 
 
 def test_ultrack_and_btrack_adapters_dispatch_to_tracking_libraries(
@@ -134,7 +141,7 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
         columns=pd.Index(["frame", "label", "y", "x", "area", "object_count"])
     )
 
-    tracks = LinkObjects().transform(objects, Arguments(max_distance=5.0))
+    tracks = _NearestNeighborLinkObjects().transform(objects, Arguments(max_distance=5.0))
     summary = TrackSummary().transform(tracks, Arguments())
     quality = TrackQualityMetrics().transform(tracks, Arguments(min_track_length=2))
     validation = TrackTableValidate().transform(tracks, Arguments())
@@ -176,7 +183,7 @@ def test_tracking_workflow_graph_runs(tmp_path: Path) -> None:
 
     with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         objects = LabelsToObjects()(label_image=label_path, name="objects")
-        tracks = LinkObjects()(
+        tracks = _NearestNeighborLinkObjects()(
             objects,
             name="links",
         )
@@ -271,7 +278,7 @@ def test_tracking_workflow_all_background_writes_zero_track_artifact(
 
     with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         objects = LabelsToObjects()(label_image=label_path, name="objects")
-        tracks = LinkObjects()(objects, name="links")
+        tracks = _NearestNeighborLinkObjects()(objects, name="links")
         rendered = TracksToLabels()(
             track_id=tracks["track_id"],
             frame=tracks["frame"],
@@ -304,7 +311,7 @@ def test_tracking_workflow_all_background_writes_one_artifact_per_source(
     with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         files = Files()(path=image_dir, pattern="*.tif", name="files")
         objects = LabelsToObjects()(label_image=files["path"], name="objects")
-        tracks = LinkObjects()(objects, name="links")
+        tracks = _NearestNeighborLinkObjects()(objects, name="links")
         rendered = TracksToLabels()(
             track_id=tracks["track_id"],
             frame=tracks["frame"],

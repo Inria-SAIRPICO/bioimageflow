@@ -7,9 +7,8 @@ Inputs are `input_image`, `threshold`, and `above`. Output `labels` is a label
 image; `object_count` is the maximum assigned component label. The implementation
 uses package-local connected-component logic over the generated foreground mask.
 
-Use it for simple, demonstrative segmentation and as a deterministic baseline
-for tests. If objects touch, they remain one component; use `WatershedSegment`
-when marker-controlled splitting is needed.
+Use it for simple classical segmentation when one scalar threshold is appropriate.
+If objects touch, they remain one component; use `WatershedSegment` when marker-controlled splitting is needed.
 
 ## Dependencies and Core Libraries
 

@@ -33,7 +33,7 @@ available.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core processing and templating.
-- SAIRPICO `simglib` environment with `sylvainprigent::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
 - External commands: `simgrichardsonlucy2d`,
   `simgrichardsonlucy2dslice`, and `simgrichardsonlucy3d`.
 

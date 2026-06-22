@@ -9,7 +9,6 @@ Ultrack and btrack are declared in their own runtime environments.
 ## Tools
 
 - [LabelsToObjects](tools/labels_to_objects.md): convert labels into object centroid dataframe rows.
-- [LinkObjects](tools/link_objects.md): small-table nearest-neighbor frame linking.
 - [UltrackLink](tools/ultrack_link.md): Ultrack object-table adapter.
 - [BTrackLink](tools/btrack_link.md): btrack object-table adapter.
 - [TrackMetrics](tools/track_metrics.md): track length, displacement, speed, and

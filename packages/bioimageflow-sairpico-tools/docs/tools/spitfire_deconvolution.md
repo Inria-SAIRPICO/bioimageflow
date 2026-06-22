@@ -34,7 +34,7 @@ commands.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core processing and schema classes.
-- SAIRPICO `simglib` environment with `sylvainprigent::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
 - External commands: `simgspitfiredeconv2d`,
   `simgspitfiredeconv2dslice`, and `simgspitfiredeconv3d`.
 

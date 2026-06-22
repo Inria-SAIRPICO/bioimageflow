@@ -31,7 +31,7 @@ input without microscope-specific PSF measurement.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core `ProcessingTool`, `ImageSpec`, and templated outputs.
-- SAIRPICO `simglib` environment with `sylvainprigent::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
 - External command: `simggaussian3dpsf`.
 
 ## Minimal Example

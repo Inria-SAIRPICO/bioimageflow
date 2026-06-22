@@ -1,21 +1,20 @@
 # RestoreImage
 
-`RestoreImage` applies a restoration baseline to a 2D scalar image. Supported
+`RestoreImage` applies a simple image-processing restoration method to a 2D scalar image. Supported
 methods are `tv_chambolle`, `bilateral`, `gaussian`, and `unsharp`; available
 behavior depends on whether scikit-image is installed.
 
 Inputs are `input_image`, `method`, and `weight`. Output is `output_image`.
 With scikit-image, TV Chambolle and bilateral denoising use
-`skimage.restoration`; without it, Gaussian and unsharp NumPy fallbacks keep
-examples runnable.
+`skimage.restoration`; Gaussian and unsharp are implemented with NumPy.
 
-Use it for small restoration demos and benchmark baselines. Unsupported methods
-raise `ValueError`, and missing files fail through imageio.
+Use it for simple image-processing comparisons. Unsupported methods raise
+`ValueError`, and missing files fail through imageio.
 
 ## Dependencies and Core Libraries
 
 BioImageFlow core APIs, imageio, NumPy, and scikit-image restoration when
-available. The package keeps NumPy fallbacks for deterministic tests.
+available.
 
 ## Assumptions
 
@@ -35,8 +34,8 @@ RestoreImage().process_row(
 
 ## Expected Results
 
-The output image has the same shape as the input and should be less noisy for
-the synthetic benchmark data.
+The output image has the same shape as the input. Compare it with
+`RestorationMetrics` when a clean or high-SNR reference is available.
 
 ## Failure Modes
 

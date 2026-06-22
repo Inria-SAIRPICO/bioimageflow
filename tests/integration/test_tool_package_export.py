@@ -36,7 +36,7 @@ def test_all_tool_packages_are_not_workflow_custom_classes() -> None:
     from bioimageflow_sairpico_tools import MedianDenoising
     from bioimageflow_segmentation_tools import ThresholdSegment
     from bioimageflow_spot_tools import DetectSpots
-    from bioimageflow_tracking_tools import LinkObjects
+    from bioimageflow_tracking_tools import UltrackLink
 
     for tool_cls in [
         ConvertImageFormat,
@@ -45,6 +45,6 @@ def test_all_tool_packages_are_not_workflow_custom_classes() -> None:
         MedianDenoising,
         ThresholdSegment,
         DetectSpots,
-        LinkObjects,
+        UltrackLink,
     ]:
         assert _is_workflow_custom_class(tool_cls) is False

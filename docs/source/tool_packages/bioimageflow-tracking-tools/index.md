@@ -13,7 +13,6 @@
 tools/btrack_link
 tools/filter_objects
 tools/labels_to_objects
-tools/link_objects
 tools/track_metrics
 tools/track_quality_metrics
 tools/track_summary

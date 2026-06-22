@@ -6,6 +6,12 @@ import types
 from typing import Any
 import pytest
 
+from tests.workflow_catalog.test_workflows import (
+    _write_ctc_label_movie,
+    _write_cell_counting_input,
+    _write_restoration_pair,
+)
+
 
 pytestmark = pytest.mark.acceptance
 
@@ -25,7 +31,14 @@ def _load_module(path: Path):
         pytest.param(
             "cell_counting_phenotyping",
             None,
-            {"image", "object_count", "mean_area", "total_area"},
+            {
+                "image",
+                "object_count",
+                "mean_area",
+                "total_area",
+                "mean_intensity",
+                "mean_perimeter",
+            },
             1,
             id="cell_counting_phenotyping",
         ),
@@ -70,10 +83,13 @@ def test_specialized_example_workflow_executes(
         careamics_module.predict = fake_predict
         monkeypatch.setitem(sys.modules, "careamics", careamics_module)
     if workflow_name == "live_cell_tracking":
-        from bioimageflow_tracking_tools import LinkObjects
+        from bioimageflow_tracking_tools.linking import _NearestNeighborLinkObjects
 
         def fake_link_objects(df: Any, *, max_distance: float) -> Any:
-            return LinkObjects().transform(df, type("Args", (), {"max_distance": max_distance})())
+            return _NearestNeighborLinkObjects().transform(
+                df,
+                type("Args", (), {"max_distance": max_distance})(),
+            )
 
         ultrack_module = types.ModuleType("ultrack")
         btrack_module = types.ModuleType("btrack")
@@ -85,10 +101,22 @@ def test_specialized_example_workflow_executes(
     root = Path(__file__).resolve().parents[2]
     workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)
-    wf, node = module.build_workflow(
-        storage_path=str(tmp_path / workflow_name),
-        engine="direct",
-    )
+    kwargs: dict[str, Any] = {
+        "storage_path": str(tmp_path / workflow_name),
+        "engine": "direct",
+    }
+    if workflow_name == "cell_counting_phenotyping":
+        kwargs["input_image"] = str(_write_cell_counting_input(tmp_path / "bbbc038_crop.tif"))
+    if workflow_name == "low_snr_restoration":
+        clean_image, degraded_image = _write_restoration_pair(tmp_path / "restoration_data")
+        checkpoint = tmp_path / "careamics_checkpoint.ckpt"
+        checkpoint.write_text("fake checkpoint")
+        kwargs["clean_image"] = str(clean_image)
+        kwargs["degraded_image"] = str(degraded_image)
+        kwargs["checkpoint"] = str(checkpoint)
+    if workflow_name == "live_cell_tracking":
+        kwargs["label_image"] = str(_write_ctc_label_movie(tmp_path / "ctc_labels.tif"))
+    wf, node = module.build_workflow(**kwargs)
 
     result = wf.compute(node)
 

@@ -25,7 +25,7 @@ Because `lambda` is a reserved Python keyword, BioImageFlow exposes this paramet
 
 The package declares three `EnvironmentSpec` instances:
 
-- `simglib`: `sylvainprigent::simglib=0.1.2`, used by PSF, deconvolution, and
+- `simglib`: `bioimageit::simglib=0.1.2`, used by PSF, deconvolution, and
   median denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0`, used by
   `CImgDenoising`.

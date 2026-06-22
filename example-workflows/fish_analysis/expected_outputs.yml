@@ -4,11 +4,12 @@ outputs:
   required_columns:
     - image_index
     - avg_fols2_per_nucleus
-    - avg_csfr1_per_nucleus
+    - avg_csf1r_per_nucleus
+    - total_nuclei
     - total_nuclei_fols2
-    - total_nuclei_csfr1
+    - total_nuclei_csf1r
     - total_fols2_spots
-    - total_csfr1_spots
+    - total_csf1r_spots
   required_nodes:
     - download_cil_images
     - extract_ch2_nuclei
