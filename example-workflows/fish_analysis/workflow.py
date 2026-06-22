@@ -31,8 +31,10 @@ Pipeline topology:
                           └──── AverageSpotsPerNucleus
 """
 
+import importlib.util
 import sys
 from pathlib import Path
+from typing import Any
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
@@ -40,14 +42,36 @@ from bioimageflow.engine import SequentialEngine
 from bioimageflow_common_tools import ExtractChannel
 from bioimageflow_segmentation_tools import Cellpose3
 
-# Workflow-specific tools
-_this_dir = str(Path(__file__).resolve().parent)
-if _this_dir not in sys.path:
-    sys.path.insert(0, _this_dir)
+def _load_workflow_tool(
+    module_filename: str,
+    class_name: str,
+    expected_type: type[Any],
+) -> Any:
+    module_path = Path(__file__).resolve().parent / "tools" / module_filename
+    module_name = f"bioimageflow_fish_analysis_{module_path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load workflow tool from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    tool_class = getattr(module, class_name)
+    if not issubclass(tool_class, expected_type):
+        raise TypeError(f"{class_name} is not a {expected_type.__name__}")
+    return tool_class
 
-from tools.download_images import DownloadImages  # noqa: E402
-from tools.average_spots_per_nucleus import AverageSpotsPerNucleus  # noqa: E402
-from tools.marker_spot_analysis import MarkerSpotAnalysis  # noqa: E402
+
+DownloadImages = _load_workflow_tool("download_images.py", "DownloadImages", object)
+AverageSpotsPerNucleus = _load_workflow_tool(
+    "average_spots_per_nucleus.py",
+    "AverageSpotsPerNucleus",
+    object,
+)
+MarkerSpotAnalysis = _load_workflow_tool(
+    "marker_spot_analysis.py",
+    "MarkerSpotAnalysis",
+    object,
+)
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif

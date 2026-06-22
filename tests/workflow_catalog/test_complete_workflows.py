@@ -91,6 +91,7 @@ def test_parameter_space_workflow_executes_with_real_atlas_binary(
     assert len(result) == 6
     assert int(result.iloc[0]["image_count"]) == 6
     assert Path(result.iloc[0]["mosaic_path"]).exists()
+    assert {"label_count", "object_pixel_count", "foreground_fraction"} <= set(result.columns)
 
 
 @pytest.mark.external_binary

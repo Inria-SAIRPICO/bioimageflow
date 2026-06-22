@@ -393,14 +393,16 @@ def test_parameter_space_workflow_constructs_with_package_imports(
         data_dir=str(tmp_path / "atlas_parameter_sweep" / "data"),
         storage_path=str(tmp_path / "atlas_parameter_sweep" / "bif"),
     )
-    assert terminal.name == "results_mosaic"
+    assert terminal.name == "parameter_results"
     assert {
         "input_images",
         "sensitivity_values",
         "size_values",
         "parameter_grid",
         "atlas_detections",
+        "spot_mask_counts",
         "results_mosaic",
+        "parameter_results",
     } <= set(wf.nodes)
 
 
@@ -439,6 +441,8 @@ def test_parameter_space_workflow_executes_with_fake_atlas_binary(
     assert len(result) == 6
     assert int(result.iloc[0]["image_count"]) == 6
     assert Path(result.iloc[0]["mosaic_path"]).exists()
+    assert {"label_count", "object_pixel_count", "foreground_fraction"} <= set(result.columns)
+    assert result["label_count"].min() >= 1
     assert len(calls) == 6
     assert {call[0] for call in calls} == {"atlas"}
 

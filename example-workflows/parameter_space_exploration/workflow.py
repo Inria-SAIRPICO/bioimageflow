@@ -14,10 +14,123 @@ The workflow:
 
 from __future__ import annotations
 
-from bioimageflow import Workflow, configure_wetlands
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Annotated, Any
+
+import imageio.v3 as iio
+import numpy as np
+import pandas as pd
+
+from bioimageflow import DataFrameTool, Workflow, configure_wetlands
 from bioimageflow.node import Node
 from bioimageflow_common_tools import CrossJoin, Files, Generate, Mosaic
+from bioimageflow_core import (
+    Arguments,
+    Category,
+    Connectable,
+    GENERAL_ENV,
+    GUIMeta,
+    ImageSpec,
+    IOModel,
+    Layout,
+    ProcessingTool,
+    Semantic,
+)
 from bioimageflow_spot_tools import AtlasSpotDetection
+
+
+def _neighbor_offsets(ndim: int) -> Iterable[tuple[int, ...]]:
+    for axis in range(ndim):
+        for direction in (-1, 1):
+            offset = [0] * ndim
+            offset[axis] = direction
+            yield tuple(offset)
+
+
+def _count_foreground_components(mask: np.ndarray) -> int:
+    foreground = np.asarray(mask) > 0
+    visited = np.zeros(foreground.shape, dtype=bool)
+    component_count = 0
+    offsets = tuple(_neighbor_offsets(foreground.ndim))
+    for start in zip(*np.nonzero(foreground), strict=False):
+        if visited[start]:
+            continue
+        component_count += 1
+        stack = [start]
+        visited[start] = True
+        while stack:
+            current = stack.pop()
+            for offset in offsets:
+                neighbor = tuple(
+                    index + delta for index, delta in zip(current, offset, strict=False)
+                )
+                if any(
+                    index < 0 or index >= size
+                    for index, size in zip(neighbor, foreground.shape, strict=False)
+                ):
+                    continue
+                if foreground[neighbor] and not visited[neighbor]:
+                    visited[neighbor] = True
+                    stack.append(neighbor)
+    return component_count
+
+
+class SpotMaskMetrics(ProcessingTool):
+    """Compute simple count and foreground metrics for ATLAS spot masks."""
+
+    display_name = "Spot Mask Metrics"
+    category = Category.MEASUREMENT
+    environment = GENERAL_ENV
+
+    class Inputs(IOModel):
+        input_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.BINARY}, layouts={Layout.PLANAR}),
+            GUIMeta(
+                display_name="Spot mask",
+                description="Binary spot mask to count.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
+        ]
+
+    class Outputs(IOModel):
+        label_count: Annotated[int, GUIMeta(display_name="Spot count")]
+        object_pixel_count: Annotated[int, GUIMeta(display_name="Foreground pixels")]
+        foreground_fraction: Annotated[float, GUIMeta(display_name="Foreground fraction")]
+
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        mask = np.asarray(iio.imread(arguments.input_image))
+        foreground_pixels = int((mask > 0).sum())
+        return self.Outputs(
+            label_count=_count_foreground_components(mask),
+            object_pixel_count=foreground_pixels,
+            foreground_fraction=float(foreground_pixels / mask.size) if mask.size else 0.0,
+        )
+
+
+class ParameterSweepResults(DataFrameTool):
+    """Combine parameter rows, mask counts, and the mosaic preview path."""
+
+    display_name = "Parameter Sweep Results"
+    category = Category.MEASUREMENT
+
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(IOModel):
+        pass
+
+    def merge_dataframes(self, dfs: list[Any], arguments: Any) -> pd.DataFrame:
+        if len(dfs) != 2:
+            raise ValueError("ParameterSweepResults expects count and mosaic tables.")
+        counts = pd.DataFrame(dfs[0]).copy()
+        mosaic = pd.DataFrame(dfs[1])
+        if "mosaic_path" in mosaic.columns and not mosaic.empty:
+            counts["mosaic_path"] = mosaic["mosaic_path"].iloc[0]
+        if "image_count" in mosaic.columns and not mosaic.empty:
+            counts["image_count"] = int(mosaic["image_count"].iloc[0])
+        return counts
 
 
 def build_parameter_space_workflow(
@@ -87,7 +200,13 @@ def build_parameter_space_workflow(
             name="atlas_detections"
         )
 
-        # Step 5: Mosaic of all detection results. Mosaic accepts scalar image
+        # Step 5: Count connected foreground components for each ATLAS mask.
+        counts = SpotMaskMetrics()(
+            input_image=detections["output_image"],
+            name="spot_mask_counts",
+        )
+
+        # Step 6: Mosaic of all detection results. Mosaic accepts scalar image
         # semantics, so AtlasSpotDetection's binary masks can be visualized directly.
         mosaic = Mosaic()(
             input_image=detections["output_image"],
@@ -95,7 +214,13 @@ def build_parameter_space_workflow(
             name="results_mosaic"
         )
 
-    return wf, mosaic
+        results = ParameterSweepResults()(
+            counts,
+            mosaic,
+            name="parameter_results",
+        )
+
+    return wf, results
 
 
 def main() -> None:
@@ -110,7 +235,7 @@ def main() -> None:
     result_df = wf.compute(mosaic)
     print("Workflow complete.")
     print(f"Mosaic saved to: {result_df['mosaic_path'].iloc[0]}")
-    print(f"Total images processed: {result_df['image_count'].iloc[0]}")
+    print(f"Total parameter rows processed: {len(result_df)}")
 
 
 if __name__ == "__main__":
