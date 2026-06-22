@@ -146,19 +146,19 @@ live_cell_tracking
 ------------------
 
 Goal
-  What migration tracks and metrics do Ultrack and btrack adapters produce for a short 2D time series?
+  What migration tracks and metrics do Ultrack and btrack adapters produce for a short 2D label movie?
 
 Data
-  Normal tests use a generated TYX label movie. Public validation can use selected frames from a small Cell Tracking Challenge 2D dataset.
+  Use a TYX label movie from selected frames of a 2D Cell Tracking Challenge dataset.
 
 Command
-  ``python example-workflows/live_cell_tracking/workflow.py``
+  ``python example-workflows/live_cell_tracking/workflow.py --label-image data/ctc_label_movie.tif``
 
 How it works
-  The workflow loads a short 2D time series or label movie, runs Ultrack and btrack adapters, and computes basic migration metrics from each track table.
+  The workflow loads a short TYX label movie, runs Ultrack and btrack adapters, and computes basic migration metrics from each track table.
 
 Results
-  Track tables, migration metrics, and overlay frames. Lineage and division analysis are intentionally out of scope.
+  Track tables and migration metrics. Lineage and division analysis are intentionally out of scope.
 
 Interpretation
   Track length, displacement, mean speed, and mean area summarize migration behavior without division analysis.

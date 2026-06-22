@@ -13,7 +13,6 @@ outputs:
     - track_count
     - mean_track_length
   required_nodes:
-    - tracking_fixture
     - objects
     - ultrack_tracks
     - btrack_tracks

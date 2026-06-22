@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tests.workflow_catalog.test_workflows import (
+    _write_ctc_label_movie,
     _write_cell_counting_input,
     _write_restoration_pair,
 )
@@ -82,10 +83,13 @@ def test_specialized_example_workflow_executes(
         careamics_module.predict = fake_predict
         monkeypatch.setitem(sys.modules, "careamics", careamics_module)
     if workflow_name == "live_cell_tracking":
-        from bioimageflow_tracking_tools import LinkObjects
+        from bioimageflow_tracking_tools.linking import _NearestNeighborLinkObjects
 
         def fake_link_objects(df: Any, *, max_distance: float) -> Any:
-            return LinkObjects().transform(df, type("Args", (), {"max_distance": max_distance})())
+            return _NearestNeighborLinkObjects().transform(
+                df,
+                type("Args", (), {"max_distance": max_distance})(),
+            )
 
         ultrack_module = types.ModuleType("ultrack")
         btrack_module = types.ModuleType("btrack")
@@ -110,6 +114,8 @@ def test_specialized_example_workflow_executes(
         kwargs["clean_image"] = str(clean_image)
         kwargs["degraded_image"] = str(degraded_image)
         kwargs["checkpoint"] = str(checkpoint)
+    if workflow_name == "live_cell_tracking":
+        kwargs["label_image"] = str(_write_ctc_label_movie(tmp_path / "ctc_labels.tif"))
     wf, node = module.build_workflow(**kwargs)
 
     result = wf.compute(node)

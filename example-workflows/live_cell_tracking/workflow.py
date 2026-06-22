@@ -1,42 +1,16 @@
 """Live-cell migration tracking workflow with Ultrack and btrack adapters."""
 
+import argparse
 from pathlib import Path
 from typing import Annotated, Any
 
-import imageio.v3 as iio
-import numpy as np
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
 from bioimageflow.node import Node
-from bioimageflow_core import Arguments, Category, GENERAL_ENV, GUIMeta, IOModel, ProcessingTool
+from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_common_tools import Concat
 from bioimageflow_tracking_tools import BTrackLink, LabelsToObjects, TrackMetrics, UltrackLink
-
-
-class TrackingFixture(ProcessingTool):
-    """Write a tiny TYX label movie with two migrating objects."""
-
-    display_name = "Tracking Fixture"
-    category = Category.UTILITIES
-    environment = GENERAL_ENV
-
-    class Inputs(IOModel):
-        output_dir: Annotated[Path, GUIMeta(display_name="Output directory")]
-
-    class Outputs(IOModel):
-        label_image: Annotated[Path, GUIMeta(display_name="Label movie")]
-
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        output_dir = Path(arguments.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        labels = np.zeros((4, 40, 40), dtype=np.uint16)
-        for frame in range(labels.shape[0]):
-            labels[frame, 8 + frame : 13 + frame, 7 + 2 * frame : 12 + 2 * frame] = 1
-            labels[frame, 27 - frame : 32 - frame, 28 - frame : 33 - frame] = 2
-        path = output_dir / "ctc_tiny_live_cell_labels.tif"
-        iio.imwrite(path, labels, photometric="minisblack")
-        return self.Outputs(label_image=path)
 
 
 class AddTrackerName(DataFrameTool):
@@ -58,11 +32,14 @@ class AddTrackerName(DataFrameTool):
 
 
 def build_workflow(
+    label_image: str | None = None,
     storage_path: str = "./live_cell_tracking_results",
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build an Ultrack/btrack migration metrics workflow without lineage outputs."""
+    if label_image is None:
+        raise ValueError("build_workflow requires label_image.")
     storage = Path(storage_path)
     wf = Workflow(
         storage_path=str(storage / "bif"),
@@ -70,8 +47,7 @@ def build_workflow(
         wetlands_config=wetlands_config,
     )
     with wf:
-        fixture = TrackingFixture()(output_dir=storage / "data", name="tracking_fixture")
-        objects = LabelsToObjects()(label_image=fixture["label_image"], name="objects")
+        objects = LabelsToObjects()(label_image=label_image, name="objects")
         ultrack_tracks = UltrackLink()(objects, name="ultrack_tracks")
         btrack_tracks = BTrackLink()(objects, name="btrack_tracks")
         ultrack_metrics = TrackMetrics()(ultrack_tracks, name="ultrack_migration_metrics")
@@ -91,5 +67,16 @@ def build_workflow(
 
 
 if __name__ == "__main__":
-    workflow, terminal = build_workflow()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--label-image", required=True, help="TYX label movie or CTC-style label stack.")
+    parser.add_argument(
+        "--storage-path",
+        default="./live_cell_tracking_results",
+        help="Directory for workflow outputs.",
+    )
+    args = parser.parse_args()
+    workflow, terminal = build_workflow(
+        label_image=args.label_image,
+        storage_path=args.storage_path,
+    )
     print(workflow.compute(terminal).to_string(index=False))

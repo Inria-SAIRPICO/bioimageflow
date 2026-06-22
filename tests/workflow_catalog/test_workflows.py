@@ -107,6 +107,16 @@ def _write_sairpico_input(path: Path) -> Path:
     return path
 
 
+def _write_ctc_label_movie(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    labels = np.zeros((4, 40, 40), dtype=np.uint16)
+    for frame in range(labels.shape[0]):
+        labels[frame, 8 + frame : 13 + frame, 7 + 2 * frame : 12 + 2 * frame] = 1
+        labels[frame, 27 - frame : 32 - frame, 28 - frame : 33 - frame] = 2
+    iio.imwrite(path, labels, photometric="minisblack")
+    return path
+
+
 def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     cellpose_module = cast(Any, types.ModuleType("cellpose"))
     cellpose_models_module = cast(Any, types.ModuleType("cellpose.models"))
@@ -545,6 +555,57 @@ def test_sairpico_public_workflow_does_not_generate_fixture() -> None:
     assert "SairpicoInputFixture" not in source
     assert "sairpico_input" not in source
     assert "synthetic_sairpico_input" not in source
+
+
+def test_live_cell_tracking_consumes_supplied_label_movie(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_tracking_tools.linking import _NearestNeighborLinkObjects
+
+    module = _load_module(_example("live_cell_tracking"))
+    label_image = _write_ctc_label_movie(tmp_path / "ctc_labels.tif")
+
+    def fake_link_objects(df: Any, *, max_distance: float) -> Any:
+        return _NearestNeighborLinkObjects().transform(
+            df,
+            type("Args", (), {"max_distance": max_distance})(),
+        )
+
+    ultrack_module = types.ModuleType("ultrack")
+    btrack_module = types.ModuleType("btrack")
+    ultrack_module.link_objects = fake_link_objects
+    btrack_module.link_objects = fake_link_objects
+    monkeypatch.setitem(sys.modules, "ultrack", ultrack_module)
+    monkeypatch.setitem(sys.modules, "btrack", btrack_module)
+
+    wf, terminal = module.build_workflow(
+        label_image=str(label_image),
+        storage_path=str(tmp_path / "tracking"),
+        engine="direct",
+    )
+
+    assert terminal.name == "migration_metrics"
+    assert {
+        "objects",
+        "ultrack_tracks",
+        "btrack_tracks",
+        "ultrack_migration_metrics",
+        "btrack_migration_metrics",
+        "migration_metrics",
+    } <= set(wf.nodes)
+    assert "tracking_fixture" not in wf.nodes
+    result = wf.compute(terminal)
+    assert set(result["tracker"]) == {"ultrack", "btrack"}
+    assert {"parent_track_id", "division_time"}.isdisjoint(result.columns)
+
+
+def test_live_cell_tracking_public_workflow_does_not_generate_fixture() -> None:
+    source = _example("live_cell_tracking").read_text()
+
+    assert "TrackingFixture" not in source
+    assert "tracking_fixture" not in source
+    assert "ctc_tiny" not in source
 
 
 def test_sairpico_command_construction_without_binaries(

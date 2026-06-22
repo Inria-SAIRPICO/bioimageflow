@@ -180,6 +180,11 @@ def test_specialized_workflow_acceptance_smoke(
         kwargs["clean_image"] = str(clean_image)
         kwargs["degraded_image"] = str(degraded_image)
         kwargs["checkpoint"] = checkpoint_env
+    if workflow_name == "live_cell_tracking":
+        label_image = os.environ.get("BIOIMAGEFLOW_CTC_LABEL_IMAGE")
+        if label_image is None:
+            pytest.skip("set BIOIMAGEFLOW_CTC_LABEL_IMAGE to run live-cell tracking model-runtime validation")
+        kwargs["label_image"] = label_image
     wf, terminal = module.build_workflow(**kwargs)
 
     result = wf.compute(terminal)

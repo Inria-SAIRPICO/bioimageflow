@@ -5,7 +5,6 @@ Tools for label-stack object extraction, Ultrack and btrack adapters, and migrat
 ## Tools
 
 - `LabelsToObjects`: converts 2D or TYX label images into object centroid and area tables.
-- `LinkObjects`: links small object tables with nearest-neighbor frame-to-frame matching.
 - `UltrackLink`: links object tables with Ultrack.
 - `BTrackLink`: links object tables with btrack.
 - `TrackMetrics`: computes track length, displacement, speed, and area summaries.

@@ -1,16 +1,16 @@
 workflow: live_cell_tracking
 data:
-  source: Cell Tracking Challenge-style tiny 2D crop
+  source: supplied Cell Tracking Challenge-style 2D label movie
   source_urls:
     - https://celltrackingchallenge.net/
   license: See selected Cell Tracking Challenge dataset terms
   citation: Cell Tracking Challenge, Ultrack, and btrack
-  normal_ci: lightweight TYX label movie
-  public_data: opt-in selected frames/crop from a small 2D CTC dataset
+  normal_ci: supplied TYX label movie
+  public_data: opt-in selected frames/crop from a 2D CTC dataset
   markers:
     - public_data
     - model_runtime
   selected_files:
-    - ctc_tiny_live_cell_labels.tif
+    - ctc_label_movie.tif
   expected_layout: TYX
   expected_dtype: uint16
