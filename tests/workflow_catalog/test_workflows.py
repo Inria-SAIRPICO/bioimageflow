@@ -98,6 +98,15 @@ def _write_restoration_pair(data_dir: Path) -> tuple[Path, Path]:
     return clean_path, degraded_path
 
 
+def _write_sairpico_input(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yy, xx = np.mgrid[0:32, 0:32]
+    image = np.exp(-(((yy - 16) ** 2 + (xx - 16) ** 2) / 42.0)).astype(np.float32)
+    image += 0.08 * np.exp(-(((yy - 10) ** 2 + (xx - 23) ** 2) / 8.0)).astype(np.float32)
+    iio.imwrite(path, image)
+    return path
+
+
 def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     cellpose_module = cast(Any, types.ModuleType("cellpose"))
     cellpose_models_module = cast(Any, types.ModuleType("cellpose.models"))
@@ -464,6 +473,7 @@ def test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binar
     tmp_path: Path,
 ) -> None:
     module = _load_module(_example("sairpico_deconvolution"))
+    input_image = _write_sairpico_input(tmp_path / "cil_fish_crop.tif")
     calls: list[list[str]] = []
 
     def fake_run(command: list[object], output_path: Path) -> None:
@@ -500,6 +510,7 @@ def test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binar
     )
 
     wf, terminal = module.build_workflow(
+        input_image=str(input_image),
         storage_path=str(tmp_path / "sairpico"),
         engine="direct",
     )
@@ -507,9 +518,11 @@ def test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binar
     assert {
         "sairpico_gaussian_psf",
         "sairpico_median_denoise",
+        "sairpico_psf_denoised_inputs",
         "sairpico_richardson_lucy",
         "sairpico_deconvolution_metrics",
     } <= set(wf.nodes)
+    assert "sairpico_input" not in wf.nodes
 
     result = wf.compute(terminal)
     assert len(result) == 1
@@ -519,9 +532,19 @@ def test_sairpico_deconvolution_workflow_constructs_and_executes_with_fake_binar
     assert {call[0] for call in calls} == {
         "simggaussian3dpsf",
         "simgmedian2d",
-        "simgrichardsonlucy2d",
+        "simgrichardsonlucy3d",
     }
+    rl_call = next(call for call in calls if call[0] == "simgrichardsonlucy3d")
+    assert "-psf" in rl_call
     assert result.iloc[0]["deconvolved_sharpness"] >= 0.0
+
+
+def test_sairpico_public_workflow_does_not_generate_fixture() -> None:
+    source = _example("sairpico_deconvolution").read_text()
+
+    assert "SairpicoInputFixture" not in source
+    assert "sairpico_input" not in source
+    assert "synthetic_sairpico_input" not in source
 
 
 def test_sairpico_command_construction_without_binaries(

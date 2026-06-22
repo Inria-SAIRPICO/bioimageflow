@@ -10,9 +10,9 @@ outputs:
     - deconvolved_sharpness
     - denoised_residual_noise
   required_nodes:
-    - sairpico_input
     - sairpico_gaussian_psf
     - sairpico_median_denoise
+    - sairpico_psf_denoised_inputs
     - sairpico_richardson_lucy
     - sairpico_deconvolution_metrics
   deterministic_acceptance:

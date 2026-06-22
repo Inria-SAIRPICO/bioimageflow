@@ -128,16 +128,16 @@ Goal
   What does a SAIRPICO denoise and Richardson-Lucy deconvolution pipeline produce for a small microscopy crop?
 
 Data
-  Normal tests generate a tiny input and monkeypatch SAIRPICO commands. Real SAIRPICO binaries are opt-in.
+  Use a supplied microscopy crop, for example a FISH crop from CIL. Real SAIRPICO binaries are opt-in.
 
 Command
-  ``python example-workflows/sairpico_deconvolution/workflow.py``
+  ``python example-workflows/sairpico_deconvolution/workflow.py --input-image data/13432_fish_crop.tif``
 
 How it works
-  The workflow generates a PSF, runs SAIRPICO denoising and Richardson-Lucy deconvolution, and measures image sharpness and residual noise.
+  The workflow generates a PSF, runs SAIRPICO denoising, feeds the generated PSF into Richardson-Lucy deconvolution, and measures image sharpness and residual noise.
 
 Results
-  PSF image, denoised image, deconvolved image, metrics table, and preview.
+  PSF image, denoised image, deconvolved image, and metrics table.
 
 Interpretation
   Sharpness and residual-noise metrics provide quick regression signals for deconvolution behavior.

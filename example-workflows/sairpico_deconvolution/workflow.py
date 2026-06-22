@@ -1,5 +1,6 @@
 """SAIRPICO PSF, denoising, deconvolution, and metric workflow."""
 
+import argparse
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -9,36 +10,13 @@ import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
 from bioimageflow.node import Node
-from bioimageflow_core import Arguments, Category, GENERAL_ENV, GUIMeta, IOModel, ProcessingTool
+from bioimageflow_common_tools import CrossJoin
+from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_sairpico_tools import (
     GaussianPSF,
     MedianDenoising,
     RichardsonLucyDeconvolution,
 )
-
-
-class SairpicoInputFixture(ProcessingTool):
-    """Write a tiny blurred input image for SAIRPICO examples."""
-
-    display_name = "SAIRPICO Input Fixture"
-    category = Category.UTILITIES
-    environment = GENERAL_ENV
-
-    class Inputs(IOModel):
-        output_dir: Annotated[Path, GUIMeta(display_name="Output directory")]
-
-    class Outputs(IOModel):
-        input_image: Annotated[Path, GUIMeta(display_name="Input image")]
-
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        output_dir = Path(arguments.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        yy, xx = np.mgrid[0:32, 0:32]
-        image = np.exp(-(((yy - 16) ** 2 + (xx - 16) ** 2) / 42.0)).astype(np.float32)
-        image += 0.08 * np.exp(-(((yy - 10) ** 2 + (xx - 23) ** 2) / 8.0)).astype(np.float32)
-        path = output_dir / "synthetic_sairpico_input.tif"
-        iio.imwrite(path, image)
-        return self.Outputs(input_image=path)
 
 
 class DeconvolutionMetrics(DataFrameTool):
@@ -48,7 +26,7 @@ class DeconvolutionMetrics(DataFrameTool):
     category = Category.MEASUREMENT
 
     class Inputs(IOModel):
-        pass
+        input_image: Annotated[Path, GUIMeta(display_name="Input image")]
 
     class Outputs(IOModel):
         input_image: Annotated[str, GUIMeta(display_name="Input image")]
@@ -60,14 +38,14 @@ class DeconvolutionMetrics(DataFrameTool):
         denoised_residual_noise: Annotated[float, GUIMeta(display_name="Denoised residual noise")]
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> pd.DataFrame:
-        if len(dfs) != 4:
-            raise ValueError("DeconvolutionMetrics expects fixture, psf, denoised, and deconvolved tables.")
-        fixture, psf, denoised_table, deconvolved_table = (pd.DataFrame(df) for df in dfs)
+        if len(dfs) != 2:
+            raise ValueError("DeconvolutionMetrics expects combined PSF/denoised and deconvolved tables.")
+        psf_denoised, deconvolved_table = (pd.DataFrame(df) for df in dfs)
         rows = []
-        for index in range(min(len(fixture), len(psf), len(denoised_table), len(deconvolved_table))):
-            input_path = str(fixture.iloc[index]["input_image"])
-            psf_path = str(psf.iloc[index]["output_image"])
-            denoised_path = str(denoised_table.iloc[index]["output_image"])
+        for index in range(min(len(psf_denoised), len(deconvolved_table))):
+            input_path = str(arguments.input_image)
+            psf_path = str(psf_denoised.iloc[index]["output_image_left"])
+            denoised_path = str(psf_denoised.iloc[index]["output_image_right"])
             deconvolved_path = str(deconvolved_table.iloc[index]["output_image"])
             input_image = iio.imread(input_path).astype(np.float32)
             denoised = iio.imread(denoised_path).astype(np.float32)
@@ -95,11 +73,14 @@ def _sharpness(image: np.ndarray) -> float:
 
 
 def build_workflow(
+    input_image: str | None = None,
     storage_path: str = "./sairpico_deconvolution_results",
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
     """Build a SAIRPICO deconvolution workflow with metrics."""
+    if input_image is None:
+        raise ValueError("build_workflow requires input_image.")
     storage = Path(storage_path)
     wf = Workflow(
         storage_path=str(storage / "bif"),
@@ -107,7 +88,6 @@ def build_workflow(
         wetlands_config=wetlands_config,
     )
     with wf:
-        fixture = SairpicoInputFixture()(output_dir=storage / "data", name="sairpico_input")
         psf = GaussianPSF()(
             width=16,
             height=16,
@@ -117,32 +97,48 @@ def build_workflow(
             name="sairpico_gaussian_psf",
         )
         denoised = MedianDenoising()(
-            input_image=fixture["input_image"],
+            input_image=input_image,
             denoising_type="2D",
             radius_x=1,
             radius_y=1,
             padding=True,
             name="sairpico_median_denoise",
         )
+        psf_denoised = CrossJoin()(
+            psf,
+            denoised,
+            name="sairpico_psf_denoised_inputs",
+        )
         deconvolved = RichardsonLucyDeconvolution()(
-            input_image=denoised["output_image"],
-            deconvolution_type="2D",
+            input_image=psf_denoised["output_image_right"],
+            deconvolution_type="3D",
             sigma=1.2,
+            psf_image=psf_denoised["output_image_left"],
             niter=3,
             regularization_lambda=0.01,
             padding=True,
             name="sairpico_richardson_lucy",
         )
         metrics = DeconvolutionMetrics()(
-            fixture,
-            psf,
-            denoised,
+            psf_denoised,
             deconvolved,
+            input_image=input_image,
             name="sairpico_deconvolution_metrics",
         )
     return wf, metrics
 
 
 if __name__ == "__main__":
-    workflow, terminal = build_workflow()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input-image", required=True, help="Microscopy crop to denoise and deconvolve.")
+    parser.add_argument(
+        "--storage-path",
+        default="./sairpico_deconvolution_results",
+        help="Directory for workflow outputs.",
+    )
+    args = parser.parse_args()
+    workflow, terminal = build_workflow(
+        input_image=args.input_image,
+        storage_path=args.storage_path,
+    )
     print(workflow.compute(terminal).to_string(index=False))

@@ -34,7 +34,7 @@ and working distance.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core tool and image schema classes.
-- SAIRPICO `simglib` environment with `sylvainprigent::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
 - External command: `simggibsonlannipsf`.
 
 ## Minimal Example

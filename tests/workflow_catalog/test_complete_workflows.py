@@ -32,6 +32,15 @@ def _write_multichannel_input(data_dir: Path) -> None:
     iio.imwrite(data_dir / "synthetic_cyx.tif", image, photometric="minisblack")
 
 
+def _write_sairpico_input(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yy, xx = np.mgrid[0:32, 0:32]
+    image = np.exp(-(((yy - 16) ** 2 + (xx - 16) ** 2) / 42.0)).astype(np.float32)
+    image += 0.08 * np.exp(-(((yy - 10) ** 2 + (xx - 23) ** 2) / 8.0)).astype(np.float32)
+    iio.imwrite(path, image)
+    return path
+
+
 @pytest.mark.public_data
 @pytest.mark.model_runtime
 def test_bbbc038_benchmark_public_model_runtime_smoke(
@@ -90,8 +99,13 @@ def test_sairpico_workflow_executes_with_real_binaries(
     tmp_path: Path,
     complete_wetlands_config: dict,
 ) -> None:
+    input_image = os.environ.get("BIOIMAGEFLOW_SAIRPICO_INPUT_IMAGE")
+    if input_image is None:
+        pytest.skip("set BIOIMAGEFLOW_SAIRPICO_INPUT_IMAGE to run SAIRPICO binary validation")
+
     module = _load_module(_example("sairpico_deconvolution"))
     wf, terminal = module.build_workflow(
+        input_image=input_image,
         storage_path=str(tmp_path / "sairpico"), engine="wetlands",
         wetlands_config=complete_wetlands_config,
     )
