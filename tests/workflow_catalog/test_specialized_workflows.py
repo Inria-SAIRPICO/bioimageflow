@@ -6,6 +6,8 @@ import types
 from typing import Any
 import pytest
 
+from tests.workflow_catalog.test_workflows import _write_cell_counting_input
+
 
 pytestmark = pytest.mark.acceptance
 
@@ -25,7 +27,14 @@ def _load_module(path: Path):
         pytest.param(
             "cell_counting_phenotyping",
             None,
-            {"image", "object_count", "mean_area", "total_area"},
+            {
+                "image",
+                "object_count",
+                "mean_area",
+                "total_area",
+                "mean_intensity",
+                "mean_perimeter",
+            },
             1,
             id="cell_counting_phenotyping",
         ),
@@ -85,10 +94,13 @@ def test_specialized_example_workflow_executes(
     root = Path(__file__).resolve().parents[2]
     workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)
-    wf, node = module.build_workflow(
-        storage_path=str(tmp_path / workflow_name),
-        engine="direct",
-    )
+    kwargs: dict[str, Any] = {
+        "storage_path": str(tmp_path / workflow_name),
+        "engine": "direct",
+    }
+    if workflow_name == "cell_counting_phenotyping":
+        kwargs["input_image"] = str(_write_cell_counting_input(tmp_path / "bbbc038_crop.tif"))
+    wf, node = module.build_workflow(**kwargs)
 
     result = wf.compute(node)
 

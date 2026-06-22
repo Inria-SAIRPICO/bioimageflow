@@ -74,6 +74,16 @@ def _write_tiny_bbbc038_subset(data_dir: Path, *, sample_count: int = 1) -> Path
     return data_dir
 
 
+def _write_cell_counting_input(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yy, xx = np.mgrid[0:64, 0:64]
+    image = np.zeros((64, 64), dtype=np.float32)
+    for cy, cx, radius, value in [(18, 18, 7, 0.8), (42, 25, 9, 1.0), (36, 47, 6, 0.7)]:
+        image[(yy - cy) ** 2 + (xx - cx) ** 2 <= radius**2] = value
+    iio.imwrite(path, image)
+    return path
+
+
 def _install_fake_model_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     cellpose_module = cast(Any, types.ModuleType("cellpose"))
     cellpose_models_module = cast(Any, types.ModuleType("cellpose.models"))
@@ -254,6 +264,46 @@ def test_bbbc038_workflow_source_has_no_collapsed_benchmark_tool() -> None:
     assert "BBBC038SegmentationComparison" not in source
     assert "class Synthetic" not in source
     assert "masks = {" not in source
+
+
+def test_cell_counting_workflow_consumes_supplied_image_and_measures_features(
+    tmp_path: Path,
+) -> None:
+    module = _load_module(_example("cell_counting_phenotyping"))
+    input_image = _write_cell_counting_input(tmp_path / "bbbc038_crop.tif")
+
+    wf, terminal = module.build_workflow(
+        input_image=str(input_image),
+        storage_path=str(tmp_path / "cell_counting"),
+        engine="direct",
+    )
+
+    assert terminal.name == "summarize_phenotypes"
+    assert {
+        "segment_cells",
+        "measure_regions",
+        "measure_shape_features",
+        "measure_intensity_features",
+        "region_shape_table",
+        "object_feature_table",
+        "summarize_phenotypes",
+    } <= set(wf.nodes)
+    result = wf.compute(terminal)
+    assert {
+        "object_count",
+        "mean_area",
+        "mean_intensity",
+        "mean_perimeter",
+        "mean_equivalent_diameter",
+    } <= set(result.columns)
+    assert int(result.iloc[0]["object_count"]) >= 1
+
+
+def test_cell_counting_public_workflow_does_not_generate_fixture() -> None:
+    source = _example("cell_counting_phenotyping").read_text()
+
+    assert "_write_fixture" not in source
+    assert "synthetic_cell_counting" not in source
 
 
 def test_parameter_space_workflow_constructs_with_package_imports(

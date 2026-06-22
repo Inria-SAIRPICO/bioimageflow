@@ -1,7 +1,7 @@
 Workflow Catalog
 ================
 
-These are the public example workflows. Each entry shows the goal, data source, command, and practical results a workflow author can expect. Small local fixtures keep the examples quick to try, while selected public-data and model-runtime checks are available for deeper validation.
+These are the public example workflows. Each entry shows the goal, data source, command, and practical results a workflow author can expect. Use the documented input paths for quick local runs, and enable selected public-data and model-runtime checks for deeper validation.
 
 .. raw:: html
 
@@ -44,7 +44,7 @@ Goal
   How sensitive are ATLAS spot counts and masks to a small parameter grid?
 
 Data
-  Normal tests use a generated spot image. Public-data validation can reuse a FISH marker channel crop.
+  Use a FISH marker-channel crop, such as a FOLS2 or CSF1R channel extracted from a CIL FISH image.
 
 Command
   ``python example-workflows/parameter_space_exploration/workflow.py``
@@ -86,13 +86,13 @@ Goal
   How many cells are in an image, and what are their basic region phenotypes?
 
 Data
-  Normal tests use a generated BBBC038-style crop. Public validation can reuse a BBBC038 crop.
+  Use a small nuclei crop from a BBBC038 sample or another 2D microscopy image where threshold segmentation is a reasonable default.
 
 Command
-  ``python example-workflows/cell_counting_phenotyping/workflow.py``
+  ``python example-workflows/cell_counting_phenotyping/workflow.py --input-image data/bbbc038_crop.tif``
 
 How it works
-  The workflow segments a small microscopy crop, measures object region properties, and aggregates per-image phenotype summaries.
+  The workflow segments a small microscopy crop, measures object geometry, shape, and intensity features, and aggregates per-image phenotype summaries.
 
 Results
   A label image, object feature table, and per-image count and phenotype summary.

@@ -1,15 +1,15 @@
 workflow: cell_counting_phenotyping
 data:
-  source: BBBC038-style synthetic crop
+  source: BBBC038 nuclei crop
   source_urls:
     - https://bbbc.broadinstitute.org/BBBC038
-  license: See Broad Bioimage Benchmark Collection terms for public-data variants
+  license: See Broad Bioimage Benchmark Collection terms
   citation: Broad Bioimage Benchmark Collection BBBC038
-  normal_ci: generated 64x64 nuclei fixture
-  public_data: optional BBBC038 crop reuse
+  normal_ci: supplied small BBBC038-style nuclei crop
+  public_data: selected BBBC038 nuclei crop
   markers:
     - public_data
   selected_files:
-    - synthetic_cell_counting_image.tif
+    - stage1_train/<sample_id>/images/<image_file>
   expected_layout: YX
   expected_dtype: float32

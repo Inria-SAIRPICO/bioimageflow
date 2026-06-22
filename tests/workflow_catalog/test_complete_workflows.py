@@ -7,7 +7,7 @@ import imageio.v3 as iio
 import numpy as np
 import pytest
 
-from tests.workflow_catalog.test_workflows import _load_module
+from tests.workflow_catalog.test_workflows import _load_module, _write_cell_counting_input
 
 
 pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
@@ -147,10 +147,14 @@ def test_specialized_workflow_acceptance_smoke(
     complete_wetlands_config: dict,
 ) -> None:
     module = _load_module(_example(workflow_name))
-    wf, terminal = module.build_workflow(
-        storage_path=str(tmp_path / workflow_name), engine="wetlands",
-        wetlands_config=complete_wetlands_config,
-    )
+    kwargs = {
+        "storage_path": str(tmp_path / workflow_name),
+        "engine": "wetlands",
+        "wetlands_config": complete_wetlands_config,
+    }
+    if workflow_name == "cell_counting_phenotyping":
+        kwargs["input_image"] = str(_write_cell_counting_input(tmp_path / "bbbc038_crop.tif"))
+    wf, terminal = module.build_workflow(**kwargs)
 
     result = wf.compute(terminal)
 

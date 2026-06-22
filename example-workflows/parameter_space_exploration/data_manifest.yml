@@ -5,12 +5,12 @@ data:
     - https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
   license: See Cell Image Library record terms
   citation: Cell Image Library record 13432
-  normal_ci: generated tiny spot image
-  public_data: opt-in CIL crop extraction
+  normal_ci: supplied FISH marker-channel crop
+  public_data: opt-in CIL marker-channel crop extraction
   markers:
     - public_data
     - external_binary
   selected_files:
-    - synthetic spot image in normal CI
+    - 13432_fols2_crop.tif
   expected_layout: YX
   expected_dtype: uint8
