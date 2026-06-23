@@ -56,7 +56,7 @@ def _extract_image_directives(text: str) -> list[tuple[str, str]]:
 
 @pytest.mark.parametrize("workflow_name", sorted(PUBLIC_WORKFLOWS))
 def test_public_workflows_have_data_and_output_contracts(workflow_name: str) -> None:
-    workflow_dir = _root() / "example-workflows" / workflow_name
+    workflow_dir = _root() / "example_workflows" / workflow_name
     manifest_path = workflow_dir / "data_manifest.yml"
     expected_path = workflow_dir / "expected_outputs.yml"
 
@@ -97,7 +97,7 @@ def test_public_workflow_has_tutorial_page_with_diagram_and_images(workflow_name
     text = page.read_text()
 
     assert workflow_name in text
-    assert f"example-workflows/{workflow_name}/workflow.py" in text
+    assert f"example_workflows/{workflow_name}/workflow.py" in text
     assert '.. raw:: html\n\n   <pre class="mermaid">' in text
     assert "flowchart" in text
     assert "Analysis " + "question" not in text

@@ -16,7 +16,7 @@ Run the workflow with a label stack:
 
 .. code-block:: bash
 
-   python example-workflows/live_cell_tracking/workflow.py --label-image data/ctc_label_movie.tif
+   python example_workflows/live_cell_tracking/workflow.py --label-image data/ctc_label_movie.tif
 
 Prepare a TYX label image where each frame contains integer object labels.
 If you start from raw fluorescence frames, add a segmentation workflow before this tracking workflow rather than making the tracking adapter infer detections implicitly.

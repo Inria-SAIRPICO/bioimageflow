@@ -50,7 +50,7 @@ def test_docs_and_ci_config_changes_run_quality_contracts_and_docs_build() -> No
 
 
 def test_example_workflow_changes_run_acceptance_and_package_tools() -> None:
-    assert commands_for_paths(["example-workflows/fish_analysis/workflow.py"]) == [
+    assert commands_for_paths(["example_workflows/fish_analysis/workflow.py"]) == [
         ACCEPTANCE_TEST_COMMAND,
         PACKAGE_TOOLS_TEST_COMMAND,
     ]

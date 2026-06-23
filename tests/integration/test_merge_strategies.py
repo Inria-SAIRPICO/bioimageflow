@@ -209,7 +209,7 @@ class TestMergeSchemaPropagation:
             assert set(schema.keys()) >= {"path", "mask", "cell_count"}
 
     def test_cross_join_schema_parameter_space_pattern(self):
-        """The exact pattern from example-workflows/parameter_space_exploration."""
+        """The exact pattern from example_workflows/parameter_space_exploration."""
         from bioimageflow_common_tools import Files, Generate
 
         with Workflow(engine="direct"):

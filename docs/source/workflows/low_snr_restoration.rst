@@ -16,7 +16,7 @@ Run the workflow with supplied images and a checkpoint:
 
 .. code-block:: bash
 
-   python example-workflows/low_snr_restoration/workflow.py --clean-image data/low_snr_clean_crop.tif --degraded-image data/low_snr_degraded_crop.tif --checkpoint models/careamics.ckpt
+   python example_workflows/low_snr_restoration/workflow.py --clean-image data/low_snr_clean_crop.tif --degraded-image data/low_snr_degraded_crop.tif --checkpoint models/careamics.ckpt
 
 Keep the clean and degraded crops registered and cropped to the same field of view.
 The metrics only make sense when every pixel in the clean reference corresponds to the same specimen location in the degraded image.

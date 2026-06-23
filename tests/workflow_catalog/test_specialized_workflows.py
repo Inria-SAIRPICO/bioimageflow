@@ -21,8 +21,19 @@ def _load_module(path: Path):
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    workflow_dir = str(path.parent)
+    sys.path.insert(0, workflow_dir)
+    try:
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        try:
+            sys.path.remove(workflow_dir)
+        except ValueError:
+            pass
+        for name in list(sys.modules):
+            if name == "tools" or name.startswith("tools."):
+                del sys.modules[name]
 
 
 @pytest.mark.parametrize(
@@ -99,7 +110,7 @@ def test_specialized_example_workflow_executes(
         monkeypatch.setitem(sys.modules, "btrack", btrack_module)
 
     root = Path(__file__).resolve().parents[2]
-    workflow_path = root / "example-workflows" / workflow_name / "workflow.py"
+    workflow_path = root / "example_workflows" / workflow_name / "workflow.py"
     module = _load_module(workflow_path)
     kwargs: dict[str, Any] = {
         "storage_path": str(tmp_path / workflow_name),

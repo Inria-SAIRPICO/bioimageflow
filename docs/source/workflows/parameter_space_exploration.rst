@@ -16,7 +16,7 @@ Run the example on a directory of marker-channel TIFFs:
 
 .. code-block:: bash
 
-   python example-workflows/parameter_space_exploration/workflow.py ./data ./parameter_space_results
+   python example_workflows/parameter_space_exploration/workflow.py ./data ./parameter_space_results
 
 For a real FISH tuning session, prepare one or more marker-channel crops and keep the image naming meaningful.
 The workflow preserves the image path and parameter columns so that the final rows can be traced back to both the source crop and the ATLAS settings.

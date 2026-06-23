@@ -30,13 +30,7 @@ The workflow:
 
 ```bash
 # From the repository root
-python -m example-workflows.parameter_space_exploration.workflow /path/to/data /path/to/output
-```
-
-Or run directly:
-
-```bash
-python example-workflows/parameter_space_exploration/workflow.py ./data ./results
+python example_workflows/parameter_space_exploration/workflow.py ./data ./results
 ```
 
 ## Results

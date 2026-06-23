@@ -18,13 +18,24 @@ def _load_module(path: Path) -> Any:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    workflow_dir = str(path.parent)
+    sys.path.insert(0, workflow_dir)
+    try:
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        try:
+            sys.path.remove(workflow_dir)
+        except ValueError:
+            pass
+        for name in list(sys.modules):
+            if name == "tools" or name.startswith("tools."):
+                del sys.modules[name]
 
 
 def _example(name: str) -> Path:
     root = Path(__file__).resolve().parents[2]
-    return root / "example-workflows" / name / "workflow.py"
+    return root / "example_workflows" / name / "workflow.py"
 
 
 def _write_multichannel_input(data_dir: Path) -> Path:
@@ -196,12 +207,21 @@ def test_fish_public_module_exposes_one_canonical_workflow() -> None:
     assert public_builders == ["build_fish_workflow"]
 
 
+def test_fish_workflow_uses_regular_tool_imports() -> None:
+    source = _example("fish_analysis").read_text()
+
+    assert "_load_workflow_tool" not in source
+    assert "spec_from_file_location" not in source
+    assert "from tools import" in source
+    assert "from .tools import" not in source
+
+
 def test_fish_public_contract_uses_csf1r_spelling() -> None:
     root = Path(__file__).resolve().parents[2]
     public_paths = [
-        root / "example-workflows/fish_analysis/workflow.py",
-        root / "example-workflows/fish_analysis/expected_outputs.yml",
-        root / "example-workflows/fish_analysis/data_manifest.yml",
+        root / "example_workflows/fish_analysis/workflow.py",
+        root / "example_workflows/fish_analysis/expected_outputs.yml",
+        root / "example_workflows/fish_analysis/data_manifest.yml",
         root / "docs/source/workflows/index.rst",
     ]
     combined = "\n".join(path.read_text() for path in public_paths)
@@ -215,7 +235,7 @@ def test_fish_public_contract_uses_csf1r_spelling() -> None:
 def test_fish_average_spots_includes_nuclei_with_zero_marker_spots() -> None:
     module = _load_module(
         Path(__file__).resolve().parents[2]
-        / "example-workflows/fish_analysis/tools/average_spots_per_nucleus.py"
+        / "example_workflows/fish_analysis/tools/average_spots_per_nucleus.py"
     )
     tool = module.AverageSpotsPerNucleus()
     fols2 = pd.DataFrame(
@@ -470,7 +490,7 @@ def test_canonical_fish_workflow_contains_marker_sub_workflow_nodes(
 def test_marker_spot_analysis_is_real_atlas_subworkflow() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "example-workflows/fish_analysis/tools/marker_spot_analysis.py"
+        / "example_workflows/fish_analysis/tools/marker_spot_analysis.py"
     ).read_text()
 
     assert "class MarkerSpotAnalysis(SubWorkflow)" in source
@@ -701,22 +721,22 @@ def test_bbbc038_public_data_path_is_documented() -> None:
 def test_example_workflow_documentation_records_review_contract() -> None:
     root = Path(__file__).resolve().parents[2]
     docs = [
-        root / "example-workflows/fish_analysis/data_manifest.yml",
-        root / "example-workflows/fish_analysis/expected_outputs.yml",
-        root / "example-workflows/parameter_space_exploration/data_manifest.yml",
-        root / "example-workflows/parameter_space_exploration/expected_outputs.yml",
-        root / "example-workflows/bbbc038_segmentation_benchmark/data_manifest.yml",
-        root / "example-workflows/bbbc038_segmentation_benchmark/expected_outputs.yml",
-        root / "example-workflows/cell_counting_phenotyping/data_manifest.yml",
-        root / "example-workflows/cell_counting_phenotyping/expected_outputs.yml",
-        root / "example-workflows/low_snr_restoration/data_manifest.yml",
-        root / "example-workflows/low_snr_restoration/expected_outputs.yml",
-        root / "example-workflows/sairpico_deconvolution/data_manifest.yml",
-        root / "example-workflows/sairpico_deconvolution/expected_outputs.yml",
-        root / "example-workflows/live_cell_tracking/data_manifest.yml",
-        root / "example-workflows/live_cell_tracking/expected_outputs.yml",
+        root / "example_workflows/fish_analysis/data_manifest.yml",
+        root / "example_workflows/fish_analysis/expected_outputs.yml",
+        root / "example_workflows/parameter_space_exploration/data_manifest.yml",
+        root / "example_workflows/parameter_space_exploration/expected_outputs.yml",
+        root / "example_workflows/bbbc038_segmentation_benchmark/data_manifest.yml",
+        root / "example_workflows/bbbc038_segmentation_benchmark/expected_outputs.yml",
+        root / "example_workflows/cell_counting_phenotyping/data_manifest.yml",
+        root / "example_workflows/cell_counting_phenotyping/expected_outputs.yml",
+        root / "example_workflows/low_snr_restoration/data_manifest.yml",
+        root / "example_workflows/low_snr_restoration/expected_outputs.yml",
+        root / "example_workflows/sairpico_deconvolution/data_manifest.yml",
+        root / "example_workflows/sairpico_deconvolution/expected_outputs.yml",
+        root / "example_workflows/live_cell_tracking/data_manifest.yml",
+        root / "example_workflows/live_cell_tracking/expected_outputs.yml",
         root / "packages/bioimageflow-segmentation-tools/docs/workflows/bbbc038_segmentation_benchmark.md",
-        root / "example-workflows/parameter_space_exploration/README.md",
+        root / "example_workflows/parameter_space_exploration/README.md",
     ]
     for doc_path in docs:
         text = doc_path.read_text()

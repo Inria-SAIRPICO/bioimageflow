@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEXT_SUFFIXES = {".py", ".md", ".rst", ".yml", ".yaml", ".toml"}
 SCAN_ROOTS = [
     ROOT / "docs",
-    ROOT / "example-workflows",
+    ROOT / "example_workflows",
     ROOT / "packages",
     ROOT / "tests",
 ]
@@ -62,13 +62,13 @@ def test_retired_workflow_and_docs_directories_are_absent() -> None:
     retired = [
         ROOT / ("docs/source/" + "priority" + "_workflows"),
         ROOT / ("docs/source/" + "specialized_tool" + "_workflows"),
-        ROOT / ("example-workflows/" + "cellpose3" + "_stardist"),
-        ROOT / ("example-workflows/" + "fish_analysis" + "_sub_workflows"),
-        ROOT / ("example-workflows/" + "ome" + "_normalization"),
-        ROOT / ("example-workflows/" + "puncta" + "_analysis"),
-        ROOT / ("example-workflows/" + "restoration" + "_benchmark"),
-        ROOT / ("example-workflows/" + "sairpico_restoration" + "_smoke"),
-        ROOT / ("example-workflows/" + "tracking" + "_analysis"),
+        ROOT / ("example_workflows/" + "cellpose3" + "_stardist"),
+        ROOT / ("example_workflows/" + "fish_analysis" + "_sub_workflows"),
+        ROOT / ("example_workflows/" + "ome" + "_normalization"),
+        ROOT / ("example_workflows/" + "puncta" + "_analysis"),
+        ROOT / ("example_workflows/" + "restoration" + "_benchmark"),
+        ROOT / ("example_workflows/" + "sairpico_restoration" + "_smoke"),
+        ROOT / ("example_workflows/" + "tracking" + "_analysis"),
     ]
 
     assert [path.relative_to(ROOT) for path in retired if path.exists()] == []

@@ -16,7 +16,7 @@ Run the workflow with a selected BBBC038 subset:
 
 .. code-block:: bash
 
-   python example-workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset
+   python example_workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset
 
 For a reviewed benchmark, use named samples from the Broad Bioimage Benchmark Collection rather than arbitrary local microscopy images.
 The image above visualizes the folder semantics expected by the workflow; the benchmark itself is designed around the real BBBC038 ``stage1_train`` structure.

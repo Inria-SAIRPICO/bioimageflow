@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
 
 def _example(name: str) -> Path:
     root = Path(__file__).resolve().parents[2]
-    return root / "example-workflows" / name / "workflow.py"
+    return root / "example_workflows" / name / "workflow.py"
 
 
 def _write_multichannel_input(data_dir: Path) -> None:

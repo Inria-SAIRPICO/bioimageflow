@@ -16,7 +16,7 @@ Run the example with a real crop:
 
 .. code-block:: bash
 
-   python example-workflows/cell_counting_phenotyping/workflow.py --input-image data/bbbc038_crop.tif
+   python example_workflows/cell_counting_phenotyping/workflow.py --input-image data/bbbc038_crop.tif
 
 A BBBC038 crop is a good source for this workflow because the image content matches the segmentation and measurement assumptions.
 If you use a different modality, inspect the labels before interpreting area or intensity summaries.

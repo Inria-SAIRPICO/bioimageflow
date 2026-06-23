@@ -85,7 +85,7 @@ def _is_docs_path(parts: Sequence[str]) -> bool:
 
 
 def _is_example_workflow_path(parts: Sequence[str]) -> bool:
-    return bool(parts) and parts[0] == "example-workflows"
+    return bool(parts) and parts[0] == "example_workflows"
 
 
 def _is_test_path(parts: Sequence[str]) -> bool:

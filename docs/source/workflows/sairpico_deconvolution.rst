@@ -16,7 +16,7 @@ Run the workflow with a supplied crop:
 
 .. code-block:: bash
 
-   python example-workflows/sairpico_deconvolution/workflow.py --input-image data/13432_fish_crop.tif
+   python example_workflows/sairpico_deconvolution/workflow.py --input-image data/13432_fish_crop.tif
 
 FISH CIL crops are convenient lightweight inputs for this tutorial.
 For a production deconvolution run, use a crop and PSF model that match the microscope and acquisition settings.

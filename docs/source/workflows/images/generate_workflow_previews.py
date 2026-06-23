@@ -27,6 +27,12 @@ def _read_image(path: Path) -> np.ndarray | None:
     return np.asarray(iio.imread(path))
 
 
+def _read_first_match(pattern: str) -> np.ndarray | None:
+    for path in sorted(SOURCE_ROOT.glob(pattern)):
+        return _read_image(path)
+    return None
+
+
 def _normalize(image: np.ndarray) -> np.ndarray:
     data = np.asarray(image, dtype=float)
     if data.ndim > 2:
@@ -109,6 +115,41 @@ def _save_grid(workflow: str, name: str, panels: list[Image.Image], columns: int
     canvas.save(target_dir / name)
 
 
+def _save_image_grid(
+    workflow: str,
+    name: str,
+    images: list[np.ndarray | Image.Image],
+    columns: int = 2,
+    gap: int = 8,
+    background: tuple[int, int, int] = (8, 10, 14),
+) -> None:
+    target_dir = OUT / workflow
+    target_dir.mkdir(parents=True, exist_ok=True)
+    panels: list[Image.Image] = []
+    for image in images:
+        if isinstance(image, np.ndarray):
+            if image.ndim == 2:
+                image = np.repeat(image[..., None], 3, axis=-1)
+            panels.append(Image.fromarray(image.astype(np.uint8)).convert("RGB"))
+        else:
+            panels.append(image.convert("RGB"))
+    panel_w = max(panel.width for panel in panels)
+    panel_h = max(panel.height for panel in panels)
+    rows = math.ceil(len(panels) / columns)
+    canvas = Image.new(
+        "RGB",
+        (panel_w * columns + gap * (columns - 1), panel_h * rows + gap * (rows - 1)),
+        background,
+    )
+    for index, panel in enumerate(panels):
+        if panel.size != (panel_w, panel_h):
+            panel = panel.resize((panel_w, panel_h), Image.Resampling.BILINEAR)
+        x = (index % columns) * (panel_w + gap)
+        y = (index // columns) * (panel_h + gap)
+        canvas.paste(panel, (x, y))
+    canvas.save(target_dir / name)
+
+
 def _draw_table(rows: list[tuple[str, str]], size: tuple[int, int] = (760, 420)) -> Image.Image:
     image = Image.new("RGB", size, "white")
     draw = ImageDraw.Draw(image)
@@ -170,6 +211,43 @@ def _color_labels(labels: np.ndarray) -> np.ndarray:
     return palette[labels % len(palette)]
 
 
+def _channel_color(channel: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
+    gray = _normalize(channel).astype(float) / 255.0
+    rgb = np.zeros((*gray.shape, 3), dtype=np.uint8)
+    for index, value in enumerate(color):
+        rgb[..., index] = (gray * value).astype(np.uint8)
+    return rgb
+
+
+def _dilate_mask(mask: np.ndarray, radius: int = 2) -> np.ndarray:
+    binary = np.asarray(mask) > 0
+    padded = np.pad(binary, radius, mode="constant", constant_values=False)
+    result = np.zeros_like(binary)
+    for dy in range(2 * radius + 1):
+        for dx in range(2 * radius + 1):
+            result |= padded[dy : dy + binary.shape[0], dx : dx + binary.shape[1]]
+    return result
+
+
+def _label_spot_overlay(
+    labels: np.ndarray | None,
+    fols2_spots: np.ndarray | None,
+    csf1r_spots: np.ndarray | None,
+    fallback_rgb: np.ndarray,
+) -> np.ndarray:
+    if labels is None:
+        overlay = np.clip(fallback_rgb.astype(float) * 0.35, 0, 255).astype(np.uint8)
+    else:
+        colored = _color_labels(labels)
+        background = np.full_like(colored, [14, 16, 22])
+        overlay = np.where((np.asarray(labels) > 0)[..., None], colored, background)
+    if fols2_spots is not None:
+        overlay[_dilate_mask(fols2_spots, radius=2)] = [60, 255, 120]
+    if csf1r_spots is not None:
+        overlay[_dilate_mask(csf1r_spots, radius=2)] = [255, 70, 80]
+    return overlay
+
+
 def _overlay(base: np.ndarray, labels: np.ndarray | None = None, spots: np.ndarray | None = None) -> np.ndarray:
     if base.ndim == 2:
         rgb = np.repeat(_normalize(base)[..., None], 3, axis=-1)
@@ -184,30 +262,36 @@ def _overlay(base: np.ndarray, labels: np.ndarray | None = None, spots: np.ndarr
 
 
 def fish_assets() -> None:
-    image = _read_image(SOURCE_ROOT / "example-workflows/fish_analysis/data/13432.tif")
+    image = _read_image(SOURCE_ROOT / "example_workflows/fish_analysis/data/13432.tif")
     image = _center_crop(image if image is not None else _fish_like_image(), 420)
     rgb = _rgb_from_cyx(image)
-    nuclei = _read_image(SOURCE_ROOT / "fish_results/data/cellpose_nuclei/20260506_155957_5edb1c20fa3e/assets/13432.ome_ch2_mask.tiff")
-    spots = _read_image(SOURCE_ROOT / "fish_results/data/atlas_fols2/20260506_160048_1f367c30be4e/assets/13432.ome_ch0_detections.tiff")
+    nuclei = _read_first_match("fish_results/data/cellpose_nuclei/*/assets/13432.ome_ch2_mask.tiff")
+    fols2_spots = _read_first_match("fish_results/data/atlas_fols2/*/assets/13432.ome_ch0_detections.tiff")
+    csf1r_spots = _read_first_match("fish_results/data/atlas_csf*/*/assets/13432.ome_ch1_detections.tiff")
     if nuclei is not None:
         nuclei = _center_crop(nuclei, 420)
-    if spots is not None:
-        spots = _center_crop(spots, 420)
-    _save_grid(
+    if fols2_spots is not None:
+        fols2_spots = _center_crop(fols2_spots, 420)
+    if csf1r_spots is not None:
+        csf1r_spots = _center_crop(csf1r_spots, 420)
+    _save_image_grid(
         "fish_analysis",
-        "cil_fish_input.png",
+        "fish_input_channels.png",
         [
-            _panel("CIL 13432 FISH crop", rgb),
-            _panel("Nuclei channel used for Cellpose", _normalize(image[2] if image.ndim == 3 else image)),
+            rgb,
+            _channel_color(image[0] if image.ndim == 3 else image, (0, 255, 90)),
+            _channel_color(image[1] if image.ndim == 3 else image, (255, 70, 70)),
+            _channel_color(image[2] if image.ndim == 3 else image, (80, 130, 255)),
         ],
     )
-    _save_grid(
+    _save_image_grid(
         "fish_analysis",
-        "fish_outputs.png",
+        "fish_spot_segmentation_overlay.png",
         [
-            _panel("Cellpose nuclei boundaries", _overlay(rgb, nuclei, None)),
-            _panel("FOLS2 spot detections over image", _overlay(rgb, nuclei, spots)),
+            _label_spot_overlay(nuclei, fols2_spots, csf1r_spots, rgb),
         ],
+        columns=1,
+        gap=0,
     )
 
 
