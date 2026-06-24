@@ -20,6 +20,7 @@ dev = [
     "furo>=2025.12.19",
     "imageio",
     "numpy",
+    "pillow",
     "pytest",
     "tifffile",
     "sphinx>=8.1.3",

@@ -33,10 +33,6 @@ Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in iso
 - [StarDistSegmenter](tools/stardist_segmenter.md): StarDist 2D pretrained
   model wrapper.
 
-## Demo Workflow
-
-- [BBBC038 segmentation benchmark](workflows/bbbc038_segmentation_benchmark.md):
-  comparison of Cellpose v3, Cellpose-SAM, StarDist, and a classical branch on BBBC038-style nuclei masks.
 
 ## Tests and Demo Data
 
