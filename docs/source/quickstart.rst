@@ -71,15 +71,12 @@ Declare its inputs, outputs, and the environment it needs:
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
+       ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template,
    )
 
    class InvertImage(ProcessingTool):
        display_name = "Invert"
-       environment = EnvironmentSpec(
-           name="imageio",
-           dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
-       )
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -136,7 +133,9 @@ What happens:
 The result is a pandas DataFrame with one column per output field.
 Owned output assets are stored in immutable records under
 ``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/`` and the
-run view under ``./bif_data/runs/`` points back to the selected record.
+JSON run view under ``./bif_data/views/runs/`` points back to the selected record.
+Pass ``output_view="symlink"`` or ``output_view="copy"`` to ``Workflow`` when
+you also want browseable files under ``./bif_data/outputs/latest/``.
 :doc:`concepts/caching` covers the cache lifecycle, ``plan()`` and
 ``invalidate()``. Wetlands environments for this run are kept under
 ``./wetlands`` because the script called ``configure_wetlands()``.

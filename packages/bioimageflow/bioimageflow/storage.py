@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import shutil
 import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
@@ -45,6 +46,7 @@ _SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _INTEGER_RE = re.compile(r"^-?[0-9]+$")
 _UNSIGNED_INTEGER_RE = re.compile(r"^[0-9]+$")
 _RECORD_MANIFEST_FIELDS = frozenset({"schema", "result_key", "record_id", "dataframe", "outputs"})
+_OUTPUT_VIEW_MODES = frozenset({"none", "symlink", "copy", "hardlink"})
 
 
 class CacheCorruptionError(RuntimeError):
@@ -60,6 +62,15 @@ def canonical_json_bytes(value: Any) -> bytes:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _validate_output_view_mode(mode: str) -> str:
+    value = str(mode)
+    if value not in _OUTPUT_VIEW_MODES:
+        raise ValueError(
+            f"Invalid output_view mode '{value}'. Expected one of {sorted(_OUTPUT_VIEW_MODES)}."
+        )
+    return value
 
 
 def _sha256_token(prefix: str, value: Any) -> str:
@@ -644,12 +655,20 @@ class Storage:
         return self.storage_path / "cache" / "v1"
 
     @property
+    def views_root(self) -> Path:
+        return self.storage_path / "views"
+
+    @property
     def runs_root(self) -> Path:
-        return self.storage_path / "runs"
+        return self.views_root / "runs"
 
     @property
     def latest_root(self) -> Path:
-        return self.storage_path / "latest"
+        return self.views_root / "latest"
+
+    @property
+    def outputs_root(self) -> Path:
+        return self.storage_path / "outputs"
 
     def result_dir(self, result_key: str) -> Path:
         first, second = result_shard_parts(result_key)
@@ -730,7 +749,7 @@ class Storage:
         return result_path
 
     def update_latest_node(self, node_key: str, run_id: str) -> Path:
-        """Atomically point ``latest/<node-key>`` at a run-node view."""
+        """Atomically point ``views/latest/<node-key>`` at a run-node view."""
         target = self.run_node_dir(run_id, node_key)
         self._validate_run_node_view(run_id, node_key)
         latest_path = self._latest_node_path(node_key)
@@ -738,7 +757,7 @@ class Storage:
         return latest_path
 
     def update_latest_success_run(self, run_id: str) -> Path:
-        """Atomically point ``runs/latest-success`` at a successful run view."""
+        """Atomically point ``views/runs/latest-success`` at a successful run view."""
         target = self.run_dir(run_id)
         run = self._load_run_metadata(run_id)
         if run.get("status") != "succeeded":
@@ -746,6 +765,74 @@ class Storage:
         latest_path = self.runs_root / "latest-success.bioimageflow-link.json"
         self._write_link(latest_path, kind="directory", target=target)
         return latest_path
+
+    def materialize_run_outputs(self, run_id: str, mode: str) -> list[Path]:
+        """Materialize owned assets for one run under ``outputs/runs``."""
+        mode = _validate_output_view_mode(mode)
+        if mode == "none":
+            return []
+        safe_run_id = _validate_path_segment(run_id, label="Run ID")
+        run_dir = self.run_dir(safe_run_id)
+        self._load_run_metadata(safe_run_id)
+        nodes_root = run_dir / "nodes"
+        if not nodes_root.exists():
+            return []
+        materialized: list[Path] = []
+        for result_path in sorted(nodes_root.rglob("result.json")):
+            payload = self._load_run_node_payload(result_path)
+            node_key = str(payload["node_key"])
+            self._validate_run_node_view(safe_run_id, node_key)
+            expected_result_path = self.run_node_dir(safe_run_id, node_key) / "result.json"
+            if result_path.resolve() != expected_result_path.resolve():
+                raise CacheCorruptionError("Run node result path does not match its node key.")
+            destination = self.outputs_root / "runs" / safe_run_id / "nodes" / _validate_node_key(node_key)
+            materialized.extend(self._materialize_node_outputs(payload, destination, mode))
+        return materialized
+
+    def materialize_latest_node_outputs(self, node_key: str, mode: str) -> list[Path]:
+        """Materialize owned assets for one latest node pointer under ``outputs/latest``."""
+        mode = _validate_output_view_mode(mode)
+        if mode == "none":
+            return []
+        latest_path = self._latest_node_path(node_key)
+        payload = self._latest_node_payload(latest_path)
+        safe_node_key = _validate_node_key(str(payload["node_key"]))
+        destination = self.outputs_root / "latest" / safe_node_key
+        return self._materialize_node_outputs(payload, destination, mode)
+
+    def materialize_latest_outputs(self, mode: str) -> list[Path]:
+        """Materialize owned assets for all latest node pointers under ``outputs/latest``."""
+        mode = _validate_output_view_mode(mode)
+        if mode == "none":
+            return []
+        if not self.latest_root.exists():
+            return []
+        materialized: list[Path] = []
+        for latest_path in sorted(self.latest_root.rglob("*.bioimageflow-link.json")):
+            payload = self._latest_node_payload(latest_path)
+            node_key = str(payload["node_key"])
+            destination = self.outputs_root / "latest" / _validate_node_key(node_key)
+            materialized.extend(self._materialize_node_outputs(payload, destination, mode))
+        return materialized
+
+    def latest_success_run_id(self) -> str | None:
+        """Return the latest successful run ID from ``views/runs`` if present."""
+        latest_path = self.runs_root / "latest-success.bioimageflow-link.json"
+        if not latest_path.exists():
+            return None
+        run_dir = self._read_link_target(latest_path, kind="directory")
+        try:
+            run_dir.relative_to(self.runs_root.resolve())
+        except ValueError as exc:
+            raise CacheCorruptionError("Latest successful run pointer escapes views/runs.") from exc
+        run_id = run_dir.name
+        expected_run_dir = self.run_dir(run_id).resolve()
+        if run_dir != expected_run_dir:
+            raise CacheCorruptionError("Latest successful run pointer target mismatch.")
+        run = self._load_run_metadata(run_id)
+        if run.get("status") != "succeeded":
+            raise CacheCorruptionError("Latest successful run must reference a successful run.")
+        return run_id
 
     def load_current(self, result_key: str) -> CurrentPointer | None:
         result_dir = self.result_dir(result_key)
@@ -873,6 +960,110 @@ class Storage:
             digest = str(output.get("digest")) if link_kind == "file" and output.get("digest") is not None else None
             self._write_link(link_path, kind=link_kind, target=asset_path, digest=digest)
 
+    def _load_run_node_payload(self, result_path: Path) -> dict[str, Any]:
+        if not result_path.exists():
+            raise CacheCorruptionError("Run node view is missing result.json.")
+        try:
+            payload = json.loads(result_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CacheCorruptionError("Run node result is invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CacheCorruptionError("Run node result must be a JSON object.")
+        return payload
+
+    def _read_link_target(self, path: Path, *, kind: str) -> Path:
+        if not path.exists():
+            raise CacheCorruptionError(f"Run view pointer is missing: {path.name}")
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CacheCorruptionError("Run view pointer is invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CacheCorruptionError("Run view pointer must be a JSON object.")
+        if payload.get("schema") != LINK_SCHEMA:
+            raise CacheCorruptionError("Run view pointer has an invalid schema.")
+        if payload.get("kind") != kind:
+            raise CacheCorruptionError("Run view pointer kind mismatch.")
+        target = payload.get("target")
+        if not isinstance(target, str) or target == "":
+            raise CacheCorruptionError("Run view pointer target is invalid.")
+        target_path = Path(target)
+        if target_path.is_absolute():
+            raise CacheCorruptionError("Run view pointer target must be relative.")
+        resolved = (path.parent / target_path).resolve()
+        try:
+            resolved.relative_to(self.storage_path.resolve())
+        except ValueError as exc:
+            raise CacheCorruptionError("Run view pointer target escapes storage root.") from exc
+        return resolved
+
+    def _latest_node_payload(self, latest_path: Path) -> dict[str, Any]:
+        node_dir = self._read_link_target(latest_path, kind="directory")
+        try:
+            node_dir.relative_to(self.runs_root.resolve())
+        except ValueError as exc:
+            raise CacheCorruptionError("Latest node pointer escapes views/runs.") from exc
+        result_path = node_dir / "result.json"
+        payload = self._load_run_node_payload(result_path)
+        node_key = _validate_node_key(str(payload["node_key"]))
+        run_id = _validate_path_segment(str(payload["run_id"]), label="Run ID")
+        expected_node_dir = self.run_node_dir(run_id, node_key).resolve()
+        if node_dir != expected_node_dir:
+            raise CacheCorruptionError("Latest node pointer target mismatch.")
+        return self._validate_run_node_view(run_id, node_key)
+
+    def _materialize_node_outputs(
+        self,
+        payload: dict[str, Any],
+        node_destination: Path,
+        mode: str,
+    ) -> list[Path]:
+        outputs_destination = node_destination / "outputs"
+        if outputs_destination.exists() or outputs_destination.is_symlink():
+            if outputs_destination.is_dir() and not outputs_destination.is_symlink():
+                shutil.rmtree(outputs_destination)
+            else:
+                outputs_destination.unlink()
+        result_key = str(payload["result_key"])
+        record_id = _validate_record_id(str(payload["record_id"]))
+        record_dir = self.result_dir(result_key) / "records" / record_id
+        manifest = self._load_record_manifest(result_key, record_id)
+        materialized: list[Path] = []
+        for output in manifest.outputs:
+            if output.get("kind") != "owned_asset":
+                continue
+            relative = validate_relative_posix_path(str(output["path"]))
+            asset_path = record_dir / relative
+            try:
+                asset_path.resolve().relative_to(record_dir.resolve())
+            except ValueError as exc:
+                raise CacheCorruptionError(f"Output view asset escapes record directory: {relative}") from exc
+            if not asset_path.exists():
+                raise CacheCorruptionError(f"Output view target is missing: {relative}")
+            destination = outputs_destination / relative
+            self._materialize_path(asset_path, destination, mode)
+            materialized.append(destination)
+        return materialized
+
+    def _materialize_path(self, source: Path, destination: Path, mode: str) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if mode == "symlink":
+            target = os.path.relpath(source, start=destination.parent)
+            os.symlink(target, destination, target_is_directory=source.is_dir())
+            return
+        if mode == "copy":
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+            return
+        if mode == "hardlink":
+            if source.is_dir():
+                raise OSError("Output view hardlink mode does not support directory assets.")
+            os.link(source, destination)
+            return
+        raise ValueError(f"Invalid output_view mode '{mode}'.")
+
     def _load_run_metadata(self, run_id: str) -> dict[str, Any]:
         run_path = self.run_dir(run_id) / "run.json"
         if not run_path.exists():
@@ -894,14 +1085,7 @@ class Storage:
     def _validate_run_node_view(self, run_id: str, node_key: str) -> dict[str, Any]:
         node_dir = self.run_node_dir(run_id, node_key)
         result_path = node_dir / "result.json"
-        if not result_path.exists():
-            raise CacheCorruptionError("Run node view is missing result.json.")
-        try:
-            payload = json.loads(result_path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise CacheCorruptionError("Run node result is invalid JSON.") from exc
-        if not isinstance(payload, dict):
-            raise CacheCorruptionError("Run node result must be a JSON object.")
+        payload = self._load_run_node_payload(result_path)
         if payload.get("schema") != RUN_NODE_RESULT_SCHEMA:
             raise CacheCorruptionError("Run node result has an invalid schema.")
         if payload.get("run_id") != run_id:

@@ -18,17 +18,14 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
+       ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template,
    )
    from bioimageflow import Workflow, configure_wetlands
    from bioimageflow_common_tools import Files
 
    class Threshold(ProcessingTool):
        display_name = "Threshold"
-       environment = EnvironmentSpec(
-           name="imageio",
-           dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
-       )
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]

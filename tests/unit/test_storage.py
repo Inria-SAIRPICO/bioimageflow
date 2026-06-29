@@ -611,7 +611,7 @@ def test_run_metadata_and_node_result_view_write_selected_record(tmp_path: Path)
     assert result["canonical"].endswith(f"cache/v1/results/{result_key[3:5]}/{result_key[5:7]}/{result_key}/records/{record_id}")
     assert result["outputs"] == [asset_output]
 
-    node_dir = tmp_path / "runs" / "run_001" / "nodes" / "Segment_1"
+    node_dir = tmp_path / "views" / "runs" / "run_001" / "nodes" / "Segment_1"
     record_link = json.loads((node_dir / "record.bioimageflow-link.json").read_text())
     assert record_link == {
         "schema": "bioimageflow.link.v1",
@@ -658,7 +658,7 @@ def test_run_node_result_view_exposes_scalar_outputs_without_links(tmp_path: Pat
 
     result = json.loads(result_path.read_text())
     assert result["outputs"] == [scalar_output]
-    assert not (tmp_path / "runs" / "run_scalar" / "nodes" / "HotspotToSpots_1" / "outputs").exists()
+    assert not (tmp_path / "views" / "runs" / "run_scalar" / "nodes" / "HotspotToSpots_1" / "outputs").exists()
 
 
 def test_latest_views_point_to_run_views_and_successful_run(tmp_path: Path) -> None:
@@ -703,6 +703,196 @@ def test_latest_views_point_to_run_views_and_successful_run(tmp_path: Path) -> N
         "kind": "directory",
         "target": "run_002",
     }
+    assert latest_node_path == tmp_path / "views" / "latest" / "Table_1.bioimageflow-link.json"
+    assert latest_success_path == tmp_path / "views" / "runs" / "latest-success.bioimageflow-link.json"
+    assert not (tmp_path / "runs").exists()
+    assert not (tmp_path / "latest").exists()
+
+
+def test_materialize_latest_outputs_copies_owned_assets(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "segment"})
+    asset_output = {
+        "path": "assets/mask.tif",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[asset_output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_copy",
+    )
+    storage.write_run_metadata(
+        "run_copy",
+        workflow_identity="workflow-copy",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_copy",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("Segment_1", "run_copy")
+
+    materialized = storage.materialize_latest_outputs("copy")
+
+    output_path = tmp_path / "outputs" / "latest" / "Segment_1" / "outputs" / "assets" / "mask.tif"
+    assert materialized == [output_path]
+    assert output_path.read_bytes() == b"mask"
+    assert not output_path.is_symlink()
+
+
+def test_materialize_run_outputs_symlinks_owned_assets(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "segment"})
+    asset_output = {
+        "path": "assets/mask.tif",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[asset_output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_symlink",
+    )
+    storage.write_run_metadata(
+        "run_symlink",
+        workflow_identity="workflow-symlink",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_symlink",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+
+    try:
+        materialized = storage.materialize_run_outputs("run_symlink", "symlink")
+    except OSError as exc:
+        pytest.skip(f"symlinks are not supported on this filesystem: {exc}")
+
+    output_path = tmp_path / "outputs" / "runs" / "run_symlink" / "nodes" / "Segment_1" / "outputs" / "assets" / "mask.tif"
+    assert materialized == [output_path]
+    assert output_path.is_symlink()
+    assert output_path.read_bytes() == b"mask"
+
+
+def test_materialize_run_outputs_hardlinks_owned_files(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "segment"})
+    asset_output = {
+        "path": "assets/mask.tif",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[asset_output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_hardlink",
+    )
+    storage.write_run_metadata(
+        "run_hardlink",
+        workflow_identity="workflow-hardlink",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_hardlink",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+
+    try:
+        materialized = storage.materialize_run_outputs("run_hardlink", "hardlink")
+    except OSError as exc:
+        pytest.skip(f"hardlinks are not supported on this filesystem: {exc}")
+
+    output_path = tmp_path / "outputs" / "runs" / "run_hardlink" / "nodes" / "Segment_1" / "outputs" / "assets" / "mask.tif"
+    source_path = storage.result_dir(result_key) / "records" / record_id / "assets" / "mask.tif"
+    assert materialized == [output_path]
+    assert output_path.read_bytes() == b"mask"
+    assert output_path.stat().st_ino == source_path.stat().st_ino
+
+
+def test_materialize_latest_rejects_pointer_escaping_storage(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    latest_path = tmp_path / "views" / "latest" / "Segment_1.bioimageflow-link.json"
+    latest_path.parent.mkdir(parents=True)
+    latest_path.write_text(
+        json.dumps(
+            {
+                "schema": "bioimageflow.link.v1",
+                "kind": "directory",
+                "target": "../../../outside",
+            }
+        )
+    )
+
+    with pytest.raises(CacheCorruptionError, match="escapes storage root"):
+        storage.materialize_latest_outputs("copy")
+
+
+def test_materialize_run_outputs_validates_requested_run_id(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "segment"})
+    asset_output = {
+        "path": "assets/mask.tif",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[asset_output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_requested",
+    )
+    storage.write_run_metadata(
+        "run_requested",
+        workflow_identity="workflow-requested",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_requested",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    result_path = storage.run_node_dir("run_requested", "Segment_1") / "result.json"
+    result = json.loads(result_path.read_text())
+    result["run_id"] = "run_other"
+    result_path.write_text(json.dumps(result))
+
+    with pytest.raises(CacheCorruptionError, match="run ID"):
+        storage.materialize_run_outputs("run_requested", "copy")
 
 
 def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> None:
@@ -767,8 +957,8 @@ def test_run_view_writes_do_not_mutate_current_pointer(tmp_path: Path) -> None:
     latest_path = storage.update_latest_node("outer/Segment_1", "run_004")
 
     assert current_path.read_text() == before
-    assert (tmp_path / "runs" / "run_004" / "nodes" / "outer" / "Segment_1" / "result.json").exists()
-    assert latest_path == tmp_path / "latest" / "outer" / "Segment_1.bioimageflow-link.json"
+    assert (tmp_path / "views" / "runs" / "run_004" / "nodes" / "outer" / "Segment_1" / "result.json").exists()
+    assert latest_path == tmp_path / "views" / "latest" / "outer" / "Segment_1.bioimageflow-link.json"
     latest = json.loads(latest_path.read_text())
     assert latest["target"] == "../../runs/run_004/nodes/outer/Segment_1"
 
@@ -801,6 +991,30 @@ def test_latest_success_rejects_malformed_or_mismatched_run_metadata(tmp_path: P
 
     with pytest.raises(CacheCorruptionError, match="run ID"):
         storage.update_latest_success_run("run_006")
+
+
+def test_latest_success_run_id_requires_succeeded_run(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    storage.write_run_metadata(
+        "run_failed",
+        workflow_identity="workflow-failed",
+        engine="local",
+        status="failed",
+        target_nodes=[],
+    )
+    latest_path = tmp_path / "views" / "runs" / "latest-success.bioimageflow-link.json"
+    latest_path.write_text(
+        json.dumps(
+            {
+                "schema": "bioimageflow.link.v1",
+                "kind": "directory",
+                "target": "run_failed",
+            }
+        )
+    )
+
+    with pytest.raises(CacheCorruptionError, match="successful"):
+        storage.latest_success_run_id()
 
 
 def test_latest_node_validates_complete_run_node_view(tmp_path: Path) -> None:

@@ -7,15 +7,10 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
-    EnvironmentSpec,
+    GENERAL_ENV,
     GUIMeta,
     IOModel,
     ProcessingTool,
-)
-
-download_env = EnvironmentSpec(
-    name="download",
-    dependencies={"python": "3.12", "pip": ["requests"]},
 )
 
 
@@ -29,7 +24,7 @@ class DownloadImages(ProcessingTool):
     documentation = "Download images from URLs to a local directory."
     category = Category.UTILITIES
     tags = ["source", "download"]
-    environment = download_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         urls: Annotated[str, GUIMeta(
@@ -58,7 +53,7 @@ class DownloadImages(ProcessingTool):
         )]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        import requests
+        from urllib.request import urlopen
 
         output_dir = Path(arguments.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -72,10 +67,10 @@ class DownloadImages(ProcessingTool):
 
             if not dest.exists():
                 print(f"Downloading {url} ...")
-                response = requests.get(url, timeout=120)
-                response.raise_for_status()
-                dest.write_bytes(response.content)
-                print(f"  Saved to {dest} ({len(response.content)} bytes)")
+                with urlopen(url, timeout=120) as response:
+                    content = response.read()
+                dest.write_bytes(content)
+                print(f"  Saved to {dest} ({len(content)} bytes)")
             else:
                 print(f"Already downloaded: {dest}")
 

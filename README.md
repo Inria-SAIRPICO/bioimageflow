@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Annotated
 
 from bioimageflow_core import (
-    ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
+    ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template,
 )
 from bioimageflow import Workflow, DataFrameTool
 
@@ -64,10 +64,7 @@ class FileLoader(DataFrameTool):
 # 2. Define a processing tool (runs in an isolated environment)
 class Threshold(ProcessingTool):
     display_name = "Threshold"
-    environment = EnvironmentSpec(
-        name="imageio",
-        dependencies={"python": "3.10", "pip": ["imageio", "numpy"]},
-    )
+    environment = GENERAL_ENV
 
     class Inputs:
         image: Annotated[Path, ImageSpec()]

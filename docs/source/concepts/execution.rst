@@ -80,12 +80,17 @@ Storage layout
    │                   ├── manifest.json
    │                   ├── dataframe.parquet
    │                   └── assets/
-   ├── runs/
-   └── latest/
+   ├── views/
+   │   ├── runs/
+   │   └── latest/
+   └── outputs/
+       ├── runs/
+       └── latest/
 
-``cache/v1`` is the canonical machine-readable cache root. ``runs/`` and
-``latest/`` are human-facing provenance views over selected records and are
-not used to decide cache hits.
+``cache/v1`` is the canonical machine-readable cache root. ``views/runs/``
+and ``views/latest/`` are portable JSON provenance views over selected
+records and are not used to decide cache hits. ``outputs/`` contains optional
+materialized files for human browsing when an output view is enabled.
 
 Result keys
 -----------

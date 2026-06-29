@@ -17,7 +17,6 @@ Recommended layout:
    fish_analysis/
      workflow.py
      tools/
-       __init__.py
        download_images.py
        average_spots_per_nucleus.py
        utils.py
@@ -34,7 +33,8 @@ tools:
 .. code-block:: python
 
    from bioimageflow import Workflow
-   from tools import DownloadImages, AverageSpotsPerNucleus
+   from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
+   from tools.download_images import DownloadImages
 
    with Workflow() as wf:
        images = DownloadImages()(dataset="demo")
@@ -49,8 +49,10 @@ separately installing the custom tool code.
 
 Keep workflow-local tools small and explicit:
 
-- Put tool classes in ``tools/*.py`` and re-export them from
-  ``tools/__init__.py`` for readable imports.
+- Put tool classes in ``tools/*.py`` and import them from their concrete modules in ``workflow.py``, for example ``from tools.download_images import DownloadImages``.
+- The ``tools/`` directory may omit ``__init__.py`` on supported Python versions.
+  If you add ``tools/__init__.py`` as a regular package marker, keep it empty or limited to a docstring.
+  Do not use eager barrel exports such as ``from .some_tool import SomeTool`` there, because workers import one tool module inside that tool's isolated environment and should not need dependencies for unrelated tools.
 - Put helper modules, package constants, and small runtime assets needed
   by the custom tools under ``tools/``. Use relative imports inside that
   package, for example ``from .utils import normalize``.
@@ -106,13 +108,13 @@ Minimal example
    from pathlib import Path
    from typing import Annotated
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, GUIMeta, Connectable, ImageSpec, Arguments,
+       ProcessingTool, GENERAL_ENV, GUIMeta, Connectable, ImageSpec, Arguments,
        Template,
    )
 
    class GaussianBlur(ProcessingTool):
        display_name = "Gaussian Blur"
-       environment = EnvironmentSpec(name="skimage", dependencies={})
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -131,7 +133,9 @@ Minimal example
            return self.Outputs(blurred=arguments.blurred)
 
 The ``skimage`` imports are inside ``process_row`` because they belong to
-the worker environment declared by the tool. This keeps schema discovery,
+the worker environment declared by the tool.
+``GENERAL_ENV`` already includes numpy, scipy, scikit-image, imageio, tifffile, and Pillow, so ordinary scientific image processing, downloading with the Python standard library, and simple file utilities should use it instead of declaring one-off environments.
+This keeps schema discovery,
 documentation generation, workflow loading, and GUI inspection from failing
 when the worker-only dependency is not installed in the main process.
 
@@ -139,6 +143,8 @@ Anatomy:
 
 - **display_name**: human-readable label for UIs and documentation. Runtime progress events use scoped node names; cache identity uses result keys.
 - **environment**: declares the conda/pip dependencies this tool needs.
+  Use ``GENERAL_ENV`` for tools whose runtime dependencies are covered by the general scientific stack.
+  Declare a custom ``EnvironmentSpec`` only for specialized dependencies such as Cellpose, StarDist, SimpleITK, BioIO, command-line tools, model runtimes, or other packages not in ``GENERAL_ENV``.
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.
 - **Outputs**: path fields with ``Template(...)`` defaults are **output path templates**
@@ -155,7 +161,7 @@ Outputs aren't limited to file paths. Return scalars for measurements:
 
    class MeasureIntensity(ProcessingTool):
        display_name = "Measure Intensity"
-       environment = EnvironmentSpec(name="skimage", dependencies={})
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -214,7 +220,7 @@ single input row. This is useful for tiling or splitting:
 
    class TileImage(ProcessingTool):
        display_name = "Tile"
-       environment = EnvironmentSpec(name="skimage", dependencies={})
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]
@@ -417,19 +423,19 @@ Multiple tools can share the same environment:
 
 .. code-block:: python
 
-   skimage_env = EnvironmentSpec(
-       name="skimage",
-       dependencies={"pip": ["scikit-image>=0.22"]},
+   importbio_env = EnvironmentSpec(
+       name="importbio",
+       dependencies={"pip": ["importbio>=1.0"]},
    )
 
    class ToolA(ProcessingTool):
        display_name = "Tool A"
-       environment = skimage_env
+       environment = importbio_env
        # ...
 
    class ToolB(ProcessingTool):
        display_name = "Tool B"
-       environment = skimage_env
+       environment = importbio_env
        # ...
 
 The framework validates that all tools sharing an environment name declare

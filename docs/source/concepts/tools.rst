@@ -56,7 +56,10 @@ Key properties:
 - **Isolated execution**: each tool declares an
   :class:`~bioimageflow_core.EnvironmentSpec`. Use
   :data:`~bioimageflow_core.GENERAL_ENV` for tools that only need standard
-  scientific packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow).
+  scientific packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow)
+  or the Python standard library.
+  Simple download, path, CSV/table, and file utility tools should use
+  ``GENERAL_ENV`` instead of declaring one-off environments.
   Tools with specialized dependencies declare their own ``EnvironmentSpec``.
 - **Row-level parallelism**: ``process_row`` is called once per row, enabling
   future parallel execution.

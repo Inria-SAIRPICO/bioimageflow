@@ -45,22 +45,27 @@ All paths below are rooted at `Workflow.storage_path`.
             current.json
             conflicts/
               <conflict-id>.json
-  runs/
-    <run-id>/
-      run.json
-      nodes/
-        <node-key>/
-          result.json
-          record.bioimageflow-link.json
-          outputs/
-    latest-success.bioimageflow-link.json
-  latest/
-    <node-key>.bioimageflow-link.json
+  views/
+    runs/
+      <run-id>/
+        run.json
+        nodes/
+          <node-key>/
+            result.json
+            record.bioimageflow-link.json
+            outputs/
+      latest-success.bioimageflow-link.json
+    latest/
+      <node-key>.bioimageflow-link.json
+  outputs/
+    runs/
+    latest/
   provenance_graph.json
 ```
 
 `cache/v1/` is private machine-readable storage.
-`runs/` and `latest/` are user-facing views.
+`views/` contains portable JSON provenance and pointer views.
+`outputs/` contains optional materialized files for human browsing.
 `provenance_graph.json` remains a workflow-level provenance artifact and is outside the cache namespace.
 
 ## Terms and Identifiers
@@ -227,7 +232,7 @@ An attempt directory may be incomplete, internally inconsistent, or changing whi
 It may contain temporary files, partially written dataframe files, partially written assets, row scratch files, batch scratch files, and logs.
 
 No reader may use files from `attempts/` as reusable cache output.
-Downstream nodes, cache lookup, `runs/`, and `latest/` must point only to records selected by `current.json`.
+Downstream nodes, cache lookup, `views/runs/`, and `views/latest/` must point only to records selected by `current.json`.
 
 ### `records/`
 
@@ -506,7 +511,7 @@ Failure to write a conflict report must not make a non-current candidate record 
 Each workflow execution creates a run directory:
 
 ```text
-runs/<run-id>/
+views/runs/<run-id>/
   run.json
   nodes/
     <node-key>/
@@ -552,8 +557,8 @@ Long-lived immutable run-history validation is a remaining hardening task.
 Example:
 
 ```text
-runs/<run-id>/nodes/segmentation/record.bioimageflow-link.json
-runs/<run-id>/nodes/segmentation/outputs/mask.tif.bioimageflow-link.json
+views/runs/<run-id>/nodes/segmentation/record.bioimageflow-link.json
+views/runs/<run-id>/nodes/segmentation/outputs/mask.tif.bioimageflow-link.json
 ```
 
 The run view records what the run used, including cache hits from previous runs.
@@ -561,27 +566,27 @@ It must not be used to decide cache hits.
 
 ## Latest View
 
-`latest/` is a mutable per-node convenience view.
+`views/latest/` is a mutable per-node convenience view.
 Each entry points to the latest successful result for that node, even if the workflow run later fails on another node.
 
 ```text
-latest/<node-key>.bioimageflow-link.json
+views/latest/<node-key>.bioimageflow-link.json
 ```
 
 The latest fully successful workflow run is tracked separately with a pointer file:
 
 ```text
-runs/latest-success.bioimageflow-link.json
+views/runs/latest-success.bioimageflow-link.json
 ```
 
 The latest view should be updated after the run view has been written.
-Updating `latest/<node-key>` must be atomic:
+Updating `views/latest/<node-key>` must be atomic:
 
 1. Create a temporary pointer file in the same parent directory.
 2. Atomically replace the existing latest entry with the temporary entry.
 
-If a workflow run fails or is cancelled, the engine may still update `latest/<node-key>` for nodes that successfully resolved to a selected record before the failure.
-It must not update `runs/latest-success.bioimageflow-link.json` unless the whole requested workflow run completed successfully.
+If a workflow run fails or is cancelled, the engine may still update `views/latest/<node-key>` for nodes that successfully resolved to a selected record before the failure.
+It must not update `views/runs/latest-success.bioimageflow-link.json` unless the whole requested workflow run completed successfully.
 
 The latest view is allowed to change over time.
 It must not be included in result-key hashing.
@@ -594,7 +599,7 @@ This avoids platform-specific symlink permissions and keeps the public run view 
 Directory pointer example:
 
 ```text
-runs/<run-id>/nodes/<node-key>/record.bioimageflow-link.json
+views/runs/<run-id>/nodes/<node-key>/record.bioimageflow-link.json
 ```
 
 ```json
@@ -608,14 +613,14 @@ runs/<run-id>/nodes/<node-key>/record.bioimageflow-link.json
 File pointer example:
 
 ```text
-runs/<run-id>/nodes/<node-key>/outputs/mask.tif.bioimageflow-link.json
+views/runs/<run-id>/nodes/<node-key>/outputs/mask.tif.bioimageflow-link.json
 ```
 
 ```json
 {
   "schema": "bioimageflow.link.v1",
   "kind": "file",
-  "target": "../../../../cache/v1/results/ab/cd/rk_.../records/rec_.../assets/mask.tif",
+  "target": "../../../../../cache/v1/results/ab/cd/rk_.../records/rec_.../assets/mask.tif",
   "digest": "sha256:..."
 }
 ```
@@ -625,8 +630,9 @@ Pointer targets should use normalized relative paths when possible.
 Output pointer targets resolve to the selected canonical record's owned assets, not to attempt staging directories or a separate run-local record copy.
 The path below `outputs/` preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json`.
 
-The engine may offer export modes that materialize real symlinks or copied files for users.
-Exported symlinks and copied files are not canonical cache records.
+`Workflow(output_view=...)` and `Workflow.export_outputs(...)` may materialize owned assets under `outputs/runs/` and `outputs/latest/`.
+Supported materialization modes are `symlink`, `copy`, and `hardlink`; `none` leaves only the portable JSON views.
+Materialized files are disposable human-facing outputs and are not canonical cache records.
 
 ## Invalidation, Retention, and Transient Cleanup
 
@@ -722,8 +728,10 @@ cache/v1/results/<result-shard>/<result-key>/
   records/<record-id>/
   current.json
 
-runs/<run-id>/
-latest/
+views/runs/<run-id>/
+views/latest/
+outputs/runs/
+outputs/latest/
 ```
 
 `docs/source/specs.md` summarizes this contract and should remain aligned with this reference document.

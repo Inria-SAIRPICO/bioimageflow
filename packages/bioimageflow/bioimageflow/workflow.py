@@ -10,12 +10,12 @@ import sys
 import tempfile
 import threading
 import zipfile
-from collections.abc import Callable, Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, cast, overload
 from typing import TYPE_CHECKING
 
 from bioimageflow.node import (
@@ -80,6 +80,58 @@ class ProgressEvent:
     timestamp: float = 0.0
     result_key: str | None = None
     record_id: str | None = None
+
+
+@dataclass(frozen=True)
+class OutputView:
+    """Human-facing output materialization policy."""
+
+    mode: Literal["none", "symlink", "copy", "hardlink"] = "none"
+    scope: Literal["latest", "runs", "both"] = "latest"
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"none", "symlink", "copy", "hardlink"}:
+            raise ValueError(
+                "Invalid output_view mode. Expected 'none', 'symlink', 'copy', or 'hardlink'."
+            )
+        if self.scope not in {"latest", "runs", "both"}:
+            raise ValueError(
+                "Invalid output_view scope. Expected 'latest', 'runs', or 'both'."
+            )
+
+    def to_dict(self) -> dict[str, str]:
+        return {"mode": self.mode, "scope": self.scope}
+
+
+def _coerce_output_view_mode(value: str) -> Literal["none", "symlink", "copy", "hardlink"]:
+    if value not in {"none", "symlink", "copy", "hardlink"}:
+        raise ValueError(
+            "Invalid output_view mode. Expected 'none', 'symlink', 'copy', or 'hardlink'."
+        )
+    return cast(Literal["none", "symlink", "copy", "hardlink"], value)
+
+
+def _coerce_output_view_scope(value: str) -> Literal["latest", "runs", "both"]:
+    if value not in {"latest", "runs", "both"}:
+        raise ValueError(
+            "Invalid output_view scope. Expected 'latest', 'runs', or 'both'."
+        )
+    return cast(Literal["latest", "runs", "both"], value)
+
+
+def _normalize_output_view(value: "OutputView | Mapping[str, Any] | str | None") -> OutputView | None:
+    if value is None:
+        return None
+    if isinstance(value, OutputView):
+        return value
+    if isinstance(value, str):
+        return OutputView(mode=_coerce_output_view_mode(value))
+    if isinstance(value, Mapping):
+        return OutputView(
+            mode=_coerce_output_view_mode(str(value.get("mode", "none"))),
+            scope=_coerce_output_view_scope(str(value.get("scope", "latest"))),
+        )
+    raise TypeError("output_view must be None, a mode string, a mapping, or OutputView.")
 
 
 @dataclass(frozen=True)
@@ -174,6 +226,7 @@ class Workflow:
         on_progress: Callable[[ProgressEvent], None] | None = None,
         wetlands_config: dict[str, Any] | None = None,
         max_workers: int = 1,
+        output_view: OutputView | Mapping[str, Any] | str | None = None,
     ) -> None:
         if engine not in {"direct", "wetlands"}:
             raise ValueError(
@@ -189,6 +242,7 @@ class Workflow:
         self.on_progress = on_progress
         self.wetlands_config = wetlands_config
         self.max_workers = max_workers
+        self.output_view = _normalize_output_view(output_view)
         self._env_configs: dict[str, WorkflowEnvironment] = {}
         self._cancel_event = threading.Event()
         self._nodes: dict[str, Node] = {}
@@ -818,6 +872,47 @@ class Workflow:
         else:
             self._finish_run_view("succeeded", update_latest_success=True)
 
+    def export_outputs(
+        self,
+        *,
+        mode: Literal["symlink", "copy", "hardlink"] = "symlink",
+        scope: Literal["latest", "runs", "both"] = "latest",
+        run_id: str | None = None,
+    ) -> list[Path]:
+        """Materialize human-facing output files from the portable JSON views."""
+        if scope not in {"latest", "runs", "both"}:
+            raise ValueError("Invalid output_view scope. Expected 'latest', 'runs', or 'both'.")
+        from bioimageflow.storage import CacheCorruptionError, Storage
+
+        storage = Storage(self.storage_path)
+        materialized: list[Path] = []
+        if scope in {"latest", "both"}:
+            materialized.extend(storage.materialize_latest_outputs(mode))
+        if scope in {"runs", "both"}:
+            selected_run_id = run_id or storage.latest_success_run_id()
+            if selected_run_id is None:
+                raise CacheCorruptionError("No successful run view is available for output export.")
+            materialized.extend(storage.materialize_run_outputs(selected_run_id, mode))
+        return materialized
+
+    def _auto_export_outputs(
+        self,
+        run_id: str,
+        *,
+        latest_node: str | None = None,
+        runs: bool,
+    ) -> None:
+        output_view = self.output_view
+        if output_view is None or output_view.mode == "none":
+            return
+        from bioimageflow.storage import Storage
+
+        storage = Storage(self.storage_path)
+        if latest_node is not None and output_view.scope in {"latest", "both"}:
+            storage.materialize_latest_node_outputs(latest_node, output_view.mode)
+        if runs and output_view.scope in {"runs", "both"}:
+            storage.materialize_run_outputs(run_id, output_view.mode)
+
     def _start_run_view(self, targets: list[Node]) -> None:
         from bioimageflow.storage import Storage
 
@@ -859,6 +954,8 @@ class Workflow:
         )
         if update_latest_success:
             storage.update_latest_success_run(run_id)
+        if status == "succeeded":
+            self._auto_export_outputs(run_id, latest_node=None, runs=True)
 
     def _workflow_identity(self, target_nodes: list[str]) -> str:
         payload = {
@@ -1021,6 +1118,8 @@ class Workflow:
                 "execution": self.execution,
             },
         }
+        if self.output_view is not None:
+            result["config"]["output_view"] = self.output_view.to_dict()
         if custom_tool_modules:
             result["custom_tool_modules"] = custom_tool_modules
         return result
@@ -1192,6 +1291,7 @@ class Workflow:
             storage_path=storage_path,
             engine=engine if engine is not None else config.get("engine", "wetlands"),
             execution=execution if execution is not None else config.get("execution", "parallel"),
+            output_view=config.get("output_view"),
         )
         if on_progress is not None:
             wf_kwargs["on_progress"] = on_progress

@@ -774,7 +774,9 @@ Naming:
 Environment design:
 
 - Use `GENERAL_ENV` for tools that only need numpy, scipy, scikit-image,
-  imageio, tifffile, or Pillow.
+  imageio, tifffile, Pillow, or the Python standard library.
+- Use `GENERAL_ENV` for simple source, download, path, CSV/table, and file
+  utility tools unless they need a specialized dependency. This is important to avoid creating environments for simple tasks.
 - Use one shared environment per heavy dependency family:
   `bioio`, `cellpose`, `stardist`, `sairpico-simglib`,
   `sairpico-hotspot`, `sairpico-cimgdenoising`.

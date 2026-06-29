@@ -50,7 +50,7 @@ workflow mechanics:
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImageSpec, Arguments, Template,
+       ProcessingTool, EnvironmentSpec, GENERAL_ENV, ImageSpec, Arguments, Template,
    )
    from bioimageflow import DataFrameTool
 
@@ -98,10 +98,7 @@ workflow mechanics:
    class Measure(ProcessingTool):
        """Measure region properties from a label mask."""
        display_name = "Measure"
-       environment = EnvironmentSpec(
-           name="skimage",
-           dependencies={"python": "3.10", "pip": ["scikit-image"]},
-       )
+       environment = GENERAL_ENV
 
        class Inputs:
            mask: Annotated[Path, ImageSpec(semantics={"label"})]
@@ -157,8 +154,11 @@ Each arrow represents a column binding --- ``raw["image"]`` feeds into the
 
 During execution, generated masks are stored as record-owned assets under
 ``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/assets/``.
-The run view under ``./bif_data/runs/`` points to the selected record, and the
-Cellpose environment for ``Segment`` is created under ``./wetlands``.
+The JSON run view under ``./bif_data/views/runs/`` points to the selected
+record. If you construct the workflow with ``output_view="symlink"`` or
+``output_view="copy"``, browseable latest outputs are materialized under
+``./bif_data/outputs/latest/``. The Cellpose environment for ``Segment`` is
+created under ``./wetlands``.
 
 Computing multiple targets
 --------------------------

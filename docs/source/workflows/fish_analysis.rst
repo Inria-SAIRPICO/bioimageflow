@@ -6,8 +6,7 @@ The ``fish_analysis`` workflow analyzes fluorescence in situ hybridization (FISH
 The workflow processes three-channel microscopy images: channel 0 contains the green FOLS2 signal, channel 1 contains the red CSF1R signal, and channel 2 contains the blue nuclear stain.
 For each image in the batch, the analytical goal is to estimate the average number of FOLS2 and CSF1R spots per nucleus.
 
-The public-data run uses CIL records ``13432``, ``13434``, ``13436``, and ``13438``.
-The graph can be inspected without downloading the images; full execution downloads the CIL TIFFs and runs ATLAS-backed spot detection together with Cellpose-backed nuclei segmentation.
+The execution downloads the CIL TIFFs and runs ATLAS-backed spot detection together with Cellpose-backed nuclei segmentation.
 
 .. figure:: images/fish_analysis/fish_input_channels.png
    :alt: Four-panel FISH input preview showing a merged color image and the FOLS2, CSF1R, and nuclei channels.
@@ -21,7 +20,6 @@ Run the workflow from the repository root:
    python example_workflows/fish_analysis/workflow.py
 
 The workflow stores raw CIL downloads under the configured data directory and writes BioImageFlow node outputs under the workflow storage path.
-For real runs, the workflow directory records the selected public image records and the expected result files alongside the Python graph.
 
 Workflow Logic
 --------------

@@ -408,15 +408,16 @@ def _current_pointer_files(storage_path: Path) -> list[Path]:
 
 
 def _run_dirs(storage_path: Path) -> list[Path]:
-    runs_root = storage_path / "runs"
+    runs_root = storage_path / "views" / "runs"
     if not runs_root.exists():
         return []
     return sorted(path for path in runs_root.iterdir() if path.is_dir())
 
 
 def _latest_success_run_dir(storage_path: Path) -> Path:
-    latest = json.loads((storage_path / "runs" / "latest-success.bioimageflow-link.json").read_text())
-    return storage_path / "runs" / latest["target"]
+    runs_root = storage_path / "views" / "runs"
+    latest = json.loads((runs_root / "latest-success.bioimageflow-link.json").read_text())
+    return runs_root / latest["target"]
 
 
 def _invalidated_node_names(invalidated) -> set[str]:
@@ -571,7 +572,7 @@ def test_compute_writes_run_view_for_dataframe_cache_miss_and_hit(tmp_path: Path
     assert second_result["result_key"] == first_result["result_key"]
     assert second_result["record_id"] == first_result["record_id"]
     assert second_result["cache_hit"] is True
-    latest_node = json.loads((storage_path / "latest" / f"{node_name}.bioimageflow-link.json").read_text())
+    latest_node = json.loads((storage_path / "views" / "latest" / f"{node_name}.bioimageflow-link.json").read_text())
     assert latest_node["target"] == f"../runs/{second_run.name}/nodes/{node_name}"
     assert _latest_success_run_dir(storage_path) == second_run
 
@@ -595,6 +596,107 @@ def test_compute_writes_run_view_output_pointers_for_processing_assets(tmp_path:
     assert output_link["kind"] == "file"
     assert output_link["digest"] == result["outputs"][0]["digest"]
     assert output_link["target"].endswith(f"records/{result['record_id']}/{asset_path}")
+
+
+def test_compute_with_output_view_materializes_latest_outputs(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(engine="direct", storage_path=storage_path, output_view="copy") as wf:
+        node = SourceAssetWriter()(text="visible")
+        wf.compute(node)
+        node_name = node.name
+
+    [run_dir] = _run_dirs(storage_path)
+    result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
+    asset_path = result["outputs"][0]["path"]
+    latest_output = storage_path / "outputs" / "latest" / node_name / "outputs" / asset_path
+
+    assert latest_output.read_text() == "visible"
+    assert not latest_output.is_symlink()
+    assert (storage_path / "views" / "latest" / f"{node_name}.bioimageflow-link.json").exists()
+
+
+def test_compute_with_output_view_materializes_run_outputs(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(
+        engine="direct",
+        storage_path=storage_path,
+        output_view={"mode": "copy", "scope": "runs"},
+    ) as wf:
+        node = SourceAssetWriter()(text="run-visible")
+        wf.compute(node)
+        node_name = node.name
+
+    [run_dir] = _run_dirs(storage_path)
+    result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
+    asset_path = result["outputs"][0]["path"]
+    run_output = storage_path / "outputs" / "runs" / run_dir.name / "nodes" / node_name / "outputs" / asset_path
+
+    assert run_output.read_text() == "run-visible"
+    assert not (storage_path / "outputs" / "latest").exists()
+
+
+def test_export_outputs_materializes_after_compute(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="manual")
+        wf.compute(node)
+        node_name = node.name
+        materialized = wf.export_outputs(mode="copy", scope="latest")
+
+    output_path = storage_path / "outputs" / "latest" / node_name / "outputs" / "assets" / "mask_0.txt"
+    assert materialized == [output_path]
+    assert output_path.read_text() == "manual"
+
+
+def test_export_run_outputs_uses_latest_success_pointer(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="latest-success")
+        wf.compute(node)
+        node_name = node.name
+
+    exporter = Workflow(engine="direct", storage_path=storage_path)
+    materialized = exporter.export_outputs(mode="copy", scope="runs")
+
+    [run_dir] = _run_dirs(storage_path)
+    output_path = storage_path / "outputs" / "runs" / run_dir.name / "nodes" / node_name / "outputs" / "assets" / "mask_0.txt"
+    assert materialized == [output_path]
+    assert output_path.read_text() == "latest-success"
+
+
+def test_latest_output_view_ignores_stale_latest_pointers_after_invalidation(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(engine="direct", storage_path=storage_path, output_view="copy") as wf:
+        stale = SourceAssetWriter()(text="stale")
+        wf.compute(stale)
+        wf.invalidate([stale.name])
+        fresh = SourceAssetWriter()(text="fresh")
+        wf.compute(fresh)
+        fresh_name = fresh.name
+
+    fresh_output = storage_path / "outputs" / "latest" / fresh_name / "outputs" / "assets" / "mask_0.txt"
+    assert fresh_output.read_text() == "fresh"
+
+
+def test_failed_run_scope_output_view_preserves_original_error(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(
+        engine="direct",
+        storage_path=storage_path,
+        output_view={"mode": "hardlink", "scope": "runs"},
+    ) as wf:
+        table = SourceAssetWriter()(text="ok")
+        failing = FailingDataFrameTool()(table)
+        with pytest.raises(RuntimeError, match="planned failure"):
+            wf.compute(failing)
+
+    assert not (storage_path / "outputs" / "runs").exists()
 
 
 def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:
@@ -688,8 +790,8 @@ def test_failed_compute_keeps_successful_node_latest_without_latest_success(tmp_
     assert run["status"] == "failed"
     assert (run_dir / "nodes" / table_name / "result.json").exists()
     assert not (run_dir / "nodes" / failing_name / "result.json").exists()
-    assert not (storage_path / "runs" / "latest-success.bioimageflow-link.json").exists()
-    latest_node = json.loads((storage_path / "latest" / f"{table_name}.bioimageflow-link.json").read_text())
+    assert not (storage_path / "views" / "runs" / "latest-success.bioimageflow-link.json").exists()
+    latest_node = json.loads((storage_path / "views" / "latest" / f"{table_name}.bioimageflow-link.json").read_text())
     assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{table_name}"
 
 
@@ -707,8 +809,8 @@ def test_failed_parallel_compute_keeps_successful_sibling_run_view(tmp_path: Pat
     run = json.loads((run_dir / "run.json").read_text())
     assert run["status"] == "failed"
     assert (run_dir / "nodes" / success_name / "result.json").exists()
-    assert not (storage_path / "runs" / "latest-success.bioimageflow-link.json").exists()
-    latest_node = json.loads((storage_path / "latest" / f"{success_name}.bioimageflow-link.json").read_text())
+    assert not (storage_path / "views" / "runs" / "latest-success.bioimageflow-link.json").exists()
+    latest_node = json.loads((storage_path / "views" / "latest" / f"{success_name}.bioimageflow-link.json").read_text())
     assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{success_name}"
 
 

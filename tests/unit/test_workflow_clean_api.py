@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from bioimageflow import Workflow
+from bioimageflow import OutputView, Workflow
 from bioimageflow.engine import DefaultEngine, SequentialEngine
 from bioimageflow.node import get_active_workflow
 
@@ -77,6 +77,40 @@ def test_workflow_to_dict_uses_clean_config(tmp_path) -> None:
     assert "use_wetlands" not in config
     assert "max_age" not in config
     assert "max_executions" not in config
+
+
+def test_workflow_output_view_normalizes_and_round_trips(tmp_path) -> None:
+    wf = Workflow(
+        storage_path=tmp_path,
+        engine="direct",
+        output_view={"mode": "copy", "scope": "both"},
+    )
+
+    assert wf.output_view == OutputView(mode="copy", scope="both")
+    config = wf.to_dict()["config"]
+    assert config["output_view"] == {"mode": "copy", "scope": "both"}
+
+    loaded = Workflow.from_dict({"nodes": [], "edges": [], "config": config})
+
+    assert loaded.output_view == OutputView(mode="copy", scope="both")
+
+
+def test_workflow_output_view_string_shorthand() -> None:
+    wf = Workflow(output_view="symlink")
+
+    assert wf.output_view == OutputView(mode="symlink", scope="latest")
+
+
+@pytest.mark.parametrize(
+    "output_view",
+    [
+        {"mode": "invalid", "scope": "latest"},
+        {"mode": "copy", "scope": "invalid"},
+    ],
+)
+def test_workflow_rejects_invalid_output_view(output_view: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="output_view"):
+        Workflow(output_view=output_view)
 
 
 def test_workflow_from_dict_defaults_to_wetlands_engine() -> None:

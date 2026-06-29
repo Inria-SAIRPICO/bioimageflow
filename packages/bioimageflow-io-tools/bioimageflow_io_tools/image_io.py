@@ -10,6 +10,7 @@ from bioimageflow_core import (
     Category,
     Connectable,
     EnvironmentSpec,
+    GENERAL_ENV,
     GUIMeta,
     ImageSpec,
     IOModel,
@@ -20,13 +21,6 @@ from bioimageflow_core import (
 )
 
 
-LIGHTWEIGHT_IO_ENV = EnvironmentSpec(
-    name="bioimageflow-lightweight-io",
-    dependencies={
-        "python": "3.12",
-        "pip": ["imageio", "numpy", "tifffile"],
-    },
-)
 
 BIOIO_ENV = EnvironmentSpec(
     name="bioimageflow-bioio",
@@ -50,7 +44,7 @@ class ReadImageMetadata(ProcessingTool):
     documentation = "Report image shape, dtype, dimensionality, and a pragmatic axes guess."
     category = Category.CONVERSION
     tags = ["io", "metadata", "image"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -91,7 +85,7 @@ class ValidateImageLayout(ProcessingTool):
     documentation = "Validate layout length, required axes, and optional minimum axis sizes."
     category = Category.UTILITIES
     tags = ["io", "metadata", "validation", "layout"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -153,7 +147,7 @@ class ConvertImageFormat(ProcessingTool):
     )
     category = Category.CONVERSION
     tags = ["io", "conversion", "format-conversion", "ome-tiff", "ome-zarr"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -228,7 +222,7 @@ class SelectScene(ProcessingTool):
     documentation = "Extract scene 0 from ordinary images or a tifffile series by index."
     category = Category.IMAGE_PROCESSING
     tags = ["io", "scene-selection"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -268,7 +262,7 @@ class SelectDimensions(ProcessingTool):
     documentation = "Select channel, z, and time indices from CZYX, TCYX, or TZYX images."
     category = Category.IMAGE_PROCESSING
     tags = ["io", "dimension-selection"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -341,7 +335,7 @@ class SelectTimepoint(ProcessingTool):
     documentation = "Select one zero-based T index from a declared image layout."
     category = Category.IMAGE_PROCESSING
     tags = ["io", "dimension-selection", "time"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(
@@ -389,7 +383,7 @@ class SelectChannel(ProcessingTool):
     documentation = "Select one zero-based C index from a declared image layout."
     category = Category.IMAGE_PROCESSING
     tags = ["io", "dimension-selection", "channel"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(
@@ -437,7 +431,7 @@ class SelectZRange(ProcessingTool):
     documentation = "Select a start-inclusive, stop-exclusive Z range from a declared layout."
     category = Category.IMAGE_PROCESSING
     tags = ["io", "dimension-selection", "z"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(), GUIMeta(
@@ -492,7 +486,7 @@ class ConvertToOmeTiff(ProcessingTool):
     )
     category = Category.CONVERSION
     tags = ["io", "conversion", "ome-tiff"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -541,7 +535,7 @@ class ConvertToOmeZarr(ProcessingTool):
     )
     category = Category.CONVERSION
     tags = ["io", "conversion", "ome-zarr", "zarr"]
-    environment = LIGHTWEIGHT_IO_ENV
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[

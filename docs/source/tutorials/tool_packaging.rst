@@ -105,15 +105,11 @@ ProcessingTool
 
    # my_tools/segmenter.py
    from bioimageflow_core.tool import ProcessingTool, IOModel
-   from bioimageflow_core.environment import EnvironmentSpec
+   from bioimageflow_core.environment import GENERAL_ENV
 
    class MySegmenter(ProcessingTool):
        display_name = "My Segmenter"
-
-       environment = EnvironmentSpec(
-           name="my_tools",
-           dependencies={"pip": ["numpy", "scikit-image"], "python": "3.12"},
-       )
+       environment = GENERAL_ENV
 
        class Inputs(IOModel):
            image: str

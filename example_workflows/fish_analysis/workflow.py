@@ -38,7 +38,9 @@ from bioimageflow.engine import SequentialEngine
 
 from bioimageflow_common_tools import ExtractChannel
 from bioimageflow_segmentation_tools import Cellpose3
-from tools import AverageSpotsPerNucleus, DownloadImages, MarkerSpotAnalysis
+from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
+from tools.download_images import DownloadImages
+from tools.marker_spot_analysis import MarkerSpotAnalysis
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif

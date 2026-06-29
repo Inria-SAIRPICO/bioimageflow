@@ -59,6 +59,8 @@ workflow examples, or authoring documentation.
   are classes re-exported from a package `__init__.py`, classes documented in
   a package README/Sphinx page, or classes used by an example workflow.
 - Confirm `ProcessingTool` imports respect the worker process boundary.
+- Confirm workflow-local `tools/` directories either omit `__init__.py` or keep it empty/docstring-only. If an `__init__.py` is present, it must not use eager barrel exports such as `from .some_tool import SomeTool`.
+- Confirm simple source, download, path, CSV/table, and file utility `ProcessingTool`s use `GENERAL_ENV` unless they need a specialized dependency outside numpy, scipy, scikit-image, imageio, tifffile, Pillow, or the Python standard library.
 - Confirm examples use new package imports and no migration shim was added.
 - Confirm package ownership by checking the package README, its
   `pyproject.toml`, and the changed imports in example workflows.

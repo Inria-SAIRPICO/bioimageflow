@@ -26,13 +26,13 @@ Producing shared arrays
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, ImageShared, ImageSpec, Arguments, Template,
+       ProcessingTool, GENERAL_ENV, ImageShared, ImageSpec, Arguments, Template,
    )
    from bioimageflow_core.shm import create_shared_output
 
    class Preprocess(ProcessingTool):
        display_name = "Preprocess"
-       environment = EnvironmentSpec(name="skimage", dependencies={})
+       environment = GENERAL_ENV
 
        class Inputs:
            image: Annotated[Path, ImageSpec()]

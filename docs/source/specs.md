@@ -359,7 +359,10 @@ GENERAL_ENV = EnvironmentSpec(
 )
 ```
 
-**When to use `GENERAL_ENV`:** Tools whose only runtime dependencies are a subset of the packages above. For example, a tool that reads an image with imageio, processes it with numpy, and writes it back — no need to declare a custom environment.
+**When to use `GENERAL_ENV`:** Tools whose only runtime dependencies are a subset of the packages above, or the Python standard library.
+For example, a tool that reads an image with imageio, processes it with numpy, and writes it back should use `GENERAL_ENV`.
+So should simple source or utility tools such as HTTP downloads implemented with `urllib`, path normalization, CSV/table glue, and small file operations.
+Do not create one-off environments for these tasks.
 
 **When NOT to use `GENERAL_ENV`:** Tools that require specialized libraries (cellpose, stardist, SimpleITK, bioio, opencv, etc.) still declare their own `EnvironmentSpec`. The general env catches the long tail of tools that just need standard scientific Python.
 
@@ -1545,7 +1548,6 @@ workspace/
     segmentation/
       workflow.json
   tools/
-    __init__.py
     download_images.py
     measure_spots.py
     utils.py
@@ -1559,7 +1561,10 @@ workspace/
 
 Rules:
 
-- Tool classes live under `tools/` and are re-exported from `tools/__init__.py` for readable workflow imports.
+- Tool classes live under `tools/` and workflows import them from concrete modules, for example `from tools.download_images import DownloadImages`.
+- `tools/` may omit `__init__.py` on supported Python versions.
+  If a workflow adds `tools/__init__.py` as a regular package marker, it must be empty or limited to a docstring.
+  Do not use eager barrel exports such as `from .some_tool import SomeTool` in `tools/__init__.py`, because a worker importing one tool module executes the package initializer first and should not need dependencies for unrelated tools.
 - Helper modules, package constants, and small runtime assets needed by custom tools may also live under `tools/`. Use relative imports inside `tools/` so both the main process and workers can import the bundled package.
 - Custom tools must have tests. Minimum coverage is schema serialization / validation plus one small execution test per custom tool behavior. Add integration coverage for tools that touch the workflow graph, output templates, environments, or sub-workflow boundaries.
 - Committed test fixtures live under `tests/data/` and must be small. Generated
@@ -2551,25 +2556,30 @@ workspace/
                 assets/
             current.json
             conflicts/
-  runs/
-    <run-id>/
-      run.json
-      nodes/
-        <node-key>/
-          result.json
-          record.bioimageflow-link.json
-          outputs/
-    latest-success.bioimageflow-link.json
-  latest/
-    <node-key>.bioimageflow-link.json
+  views/
+    runs/
+      <run-id>/
+        run.json
+        nodes/
+          <node-key>/
+            result.json
+            record.bioimageflow-link.json
+            outputs/
+      latest-success.bioimageflow-link.json
+    latest/
+      <node-key>.bioimageflow-link.json
+  outputs/
+    runs/
+    latest/
   provenance_graph.json
 ```
 
 `cache/v1/` is the canonical machine-readable cache root.
 Reusable records are immutable once published.
-`runs/` and `latest/` are human-facing views over selected cache records and must not be used to decide cache hits.
-Run views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
-Implementations may offer symlink or copy export modes, but pointer files are the default run-view representation.
+`views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
+Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
+`outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)` or `Workflow.export_outputs(...)`.
+Supported materialization modes are `symlink`, `copy`, and `hardlink`; materialized files are disposable and are not canonical cache records.
 
 `assets/` contains files that are part of a tool's declared `Outputs`.
 `work/` is reserved for files that exist only to execute the tool: temporary images, implicit files created by external CLIs, unpacked models, and similar intermediates.
@@ -2814,7 +2824,7 @@ from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat
 # === bioimageflow (main process only) ===
 from bioimageflow import (
     DataFrameTool, Passthrough,
-    Workflow,
+    Workflow, OutputView,
     SubWorkflow,
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,

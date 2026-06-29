@@ -48,9 +48,11 @@ imageio, tifffile, and Pillow:
        environment = GENERAL_ENV
        ...
 
-Use it for tools that only need standard scientific packages. Tools
-with specialized dependencies declare their own
-``EnvironmentSpec``.
+Use it for tools that only need standard scientific packages or the Python
+standard library.
+This includes simple source and utility tools such as HTTP downloads implemented with ``urllib``, path normalization, CSV/table glue, and small file operations.
+Do not create one-off environments for these tasks.
+Tools with specialized dependencies such as Cellpose, StarDist, SimpleITK, BioIO, external command-line tools, model runtimes, or packages not included in ``GENERAL_ENV`` declare their own ``EnvironmentSpec``.
 
 ResourceSpec
 ------------

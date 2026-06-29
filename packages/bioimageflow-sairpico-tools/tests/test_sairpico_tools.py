@@ -665,7 +665,7 @@ def test_hotspot_to_spots_publishes_zero_spot_count_metadata(tmp_path: Path) -> 
         "label",
         "spot_count",
     ]
-    [run_dir] = [path for path in (storage_path / "runs").iterdir() if path.is_dir()]
+    [run_dir] = [path for path in (storage_path / "views" / "runs").iterdir() if path.is_dir()]
     run_result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
     result_key = run_result["result_key"]
     storage = Storage(storage_path)

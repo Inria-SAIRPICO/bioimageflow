@@ -7,7 +7,7 @@ import json
 import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
-from bioimageflow_core import BaseTool
+from bioimageflow_core import BaseTool, GENERAL_ENV
 from bioimageflow_segmentation_tools import (
     Cellpose3,
     CellposeSAM,
@@ -24,7 +24,6 @@ from bioimageflow_segmentation_tools import (
 )
 from bioimageflow_segmentation_tools.cellpose_v3 import cellpose_v3_env
 from bioimageflow_segmentation_tools.cellpose_sam import cellpose_sam_env
-from bioimageflow_segmentation_tools.classical import classical_segmentation_env
 from bioimageflow_segmentation_tools.nninteractive import nninteractive_env
 from bioimageflow_segmentation_tools.stardist_segmenter import stardist_env
 
@@ -93,23 +92,6 @@ def test_heavy_tool_environments_are_isolated() -> None:
 
     assert nnInteractive.environment is nninteractive_env
     assert "nninteractive" in nninteractive_env.dependencies["pip"]
-
-
-def test_classical_tools_share_lightweight_environment() -> None:
-    assert ThresholdSegment.environment is classical_segmentation_env
-    assert OtsuThresholdSegment.environment is classical_segmentation_env
-    assert LocalThresholdSegment.environment is classical_segmentation_env
-    assert WatershedSegment.environment is classical_segmentation_env
-    assert DistanceWatershedSegment.environment is classical_segmentation_env
-    assert SplitTouchingObjects.environment is classical_segmentation_env
-    assert FilterLabels.environment is classical_segmentation_env
-    assert PostprocessLabels.environment is classical_segmentation_env
-    assert classical_segmentation_env.dependencies["pip"] == [
-        "imageio",
-        "numpy",
-        "scikit-image",
-        "tifffile",
-    ]
 
 
 def test_image_schema_marks_label_outputs_as_image_files() -> None:

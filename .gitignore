@@ -3,6 +3,7 @@
 .claude/worktrees/
 TODO.md
 bif_data/
+fish_results/
 data/
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
 packages/bioimageflow-common-tools/bioimageflow_common_tools/data/*

@@ -8,7 +8,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
-    EnvironmentSpec,
+    GENERAL_ENV,
     GUIMeta,
     ImageSpec,
     IOModel,
@@ -16,14 +16,6 @@ from bioimageflow_core import (
     ProcessingTool,
     Semantic,
     Template,
-)
-
-classical_segmentation_env = EnvironmentSpec(
-    name="segmentation-classical",
-    dependencies={
-        "python": "3.12",
-        "pip": ["imageio", "numpy", "scikit-image", "tifffile"],
-    },
 )
 
 
@@ -153,7 +145,7 @@ class ThresholdSegment(ProcessingTool):
     )
     category = Category.SEGMENTATION
     tags = ["segmentation", "threshold", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -228,7 +220,7 @@ class OtsuThresholdSegment(ProcessingTool):
     documentation = "Compute a global Otsu threshold and label foreground components."
     category = Category.SEGMENTATION
     tags = ["segmentation", "threshold", "otsu", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -291,7 +283,7 @@ class LocalThresholdSegment(ProcessingTool):
     documentation = "Compute a Sauvola adaptive threshold and label foreground."
     category = Category.SEGMENTATION
     tags = ["segmentation", "threshold", "sauvola", "local", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -386,7 +378,7 @@ class WatershedSegment(ProcessingTool):
     )
     category = Category.SEGMENTATION
     tags = ["segmentation", "watershed", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -482,7 +474,7 @@ class DistanceWatershedSegment(ProcessingTool):
     documentation = "Use distance-transform peaks as watershed markers for foreground."
     category = Category.SEGMENTATION
     tags = ["segmentation", "watershed", "distance", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -550,7 +542,7 @@ class SplitTouchingObjects(ProcessingTool):
     documentation = "Split touching foreground inside each label image mask."
     category = Category.SEGMENTATION
     tags = ["segmentation", "labels", "watershed", "postprocessing", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         labels: Annotated[
@@ -623,7 +615,7 @@ class FilterLabels(ProcessingTool):
     documentation = "Remove labels by area, border contact, intensity, or shape."
     category = Category.SEGMENTATION
     tags = ["segmentation", "labels", "filter", "postprocessing", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         labels: Annotated[
@@ -737,7 +729,7 @@ class PostprocessLabels(ProcessingTool):
     )
     category = Category.SEGMENTATION
     tags = ["segmentation", "labels", "postprocessing", "classical"]
-    environment = classical_segmentation_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         labels: Annotated[

@@ -958,6 +958,9 @@ class DefaultEngine:
             cache_hit=cache_hit,
         )
         storage.update_latest_node(node_key, run_id)
+        auto_export = getattr(workflow, "_auto_export_outputs", None)
+        if auto_export is not None:
+            auto_export(run_id, latest_node=node_key, runs=False)
 
     def _selected_record_id(self, workflow: Any, result_key: str) -> str | None:
         pointer = Storage(workflow.storage_path).load_current(result_key)
