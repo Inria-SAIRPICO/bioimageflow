@@ -1,0 +1,22 @@
+workflow: low_snr_restoration
+outputs:
+  terminal_node: restoration_results
+  required_columns:
+    - clean_image
+    - degraded_image
+    - restored_image
+    - mse_degraded
+    - mse_restored
+    - degraded_psnr
+    - restored_psnr
+    - residual_noise_degraded
+    - residual_noise_restored
+    - preview_image
+  required_nodes:
+    - careamics_n2v_restoration
+    - evaluate_restoration
+    - restoration_preview
+    - restoration_results
+  deterministic_acceptance:
+    row_count: 1
+    restored_psnr_greater_than_degraded: true

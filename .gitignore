@@ -4,7 +4,6 @@
 TODO.md
 bif_data/
 data/
-example_outputs/
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/
 packages/bioimageflow-common-tools/bioimageflow_common_tools/data/*
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/blobs.txt

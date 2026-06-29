@@ -78,6 +78,7 @@ Features
    quickstart
    concepts/index
    tutorials/index
+   workflows/index
 
 .. toctree::
    :maxdepth: 2

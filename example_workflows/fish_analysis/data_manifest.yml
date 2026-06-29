@@ -1,0 +1,23 @@
+workflow: fish_analysis
+data:
+  source: Cell Image Library
+  source_urls:
+    - https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
+    - https://cildata.crbs.ucsd.edu/media/images/13434/13434.tif
+    - https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
+    - https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif
+  license: See Cell Image Library record terms
+  citation: Cell Image Library records 13432, 13434, 13436, and 13438
+  normal_ci: graph and contract checks without downloading CIL images
+  public_data: opt-in CIL downloads
+  markers:
+    - public_data
+    - external_binary
+    - model_runtime
+  selected_files:
+    - 13432.tif
+    - 13434.tif
+    - 13436.tif
+    - 13438.tif
+  expected_layout: CYX
+  expected_dtype: uint16

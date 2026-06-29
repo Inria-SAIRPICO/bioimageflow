@@ -1,0 +1,19 @@
+workflow: sairpico_deconvolution
+outputs:
+  terminal_node: sairpico_deconvolution_metrics
+  required_columns:
+    - input_image
+    - psf_image
+    - denoised_image
+    - deconvolved_image
+    - input_sharpness
+    - deconvolved_sharpness
+    - denoised_residual_noise
+  required_nodes:
+    - sairpico_gaussian_psf
+    - sairpico_median_denoise
+    - sairpico_psf_denoised_inputs
+    - sairpico_richardson_lucy
+    - sairpico_deconvolution_metrics
+  deterministic_acceptance:
+    row_count: 1

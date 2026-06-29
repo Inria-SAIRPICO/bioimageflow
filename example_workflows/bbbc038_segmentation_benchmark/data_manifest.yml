@@ -1,0 +1,17 @@
+workflow: bbbc038_segmentation_benchmark
+data:
+  source: BBBC038 stage1_train subset
+  source_urls:
+    - https://bbbc.broadinstitute.org/BBBC038
+  license: See Broad Bioimage Benchmark Collection terms
+  citation: Broad Bioimage Benchmark Collection BBBC038
+  normal_ci: graph and contract tests with BBBC038 stage1_train layout fixtures
+  public_data: opt-in named stage1_train subset
+  markers:
+    - public_data
+    - model_runtime
+  selected_files:
+    - stage1_train/<sample_id>/images/<image_file>
+    - stage1_train/<sample_id>/masks/<object_mask_files>
+  expected_layout: YX or YXC input converted to YX for segmentation
+  expected_dtype: float32 image and uint16 labels
