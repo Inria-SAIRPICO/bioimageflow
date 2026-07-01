@@ -9,6 +9,7 @@ everything else picks up the same instance automatically.
 import inspect
 import json
 import logging
+import threading
 from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
@@ -18,7 +19,7 @@ from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow.paths import get_wetlands_path
 
 from wetlands._internal.dependency_manager import Dependency, Dependencies, LocalDependency
-import threading
+from wetlands.environment_manager import EnvironmentManager
 
 logger = logging.getLogger("bioimageflow")
 
@@ -82,7 +83,7 @@ def _is_local_dependency(dependency: Any) -> bool:
 
 # ── Shared EnvironmentManager singleton ──────────────────────────────
 
-_shared_manager: Any = None
+_shared_manager: EnvironmentManager | None = None
 _shared_manager_lock = threading.Lock()
 _wetlands_config: dict[str, Any] = {}
 
@@ -111,7 +112,7 @@ def configure_wetlands(**config: Any) -> None:
         _wetlands_config = dict(config)
 
 
-def get_shared_environment_manager(**config: Any) -> Any:
+def get_shared_environment_manager(**config: Any) -> EnvironmentManager:
     """Return the process-wide Wetlands ``EnvironmentManager``.
 
     On first call, creates the manager using configuration from
@@ -124,7 +125,6 @@ def get_shared_environment_manager(**config: Any) -> Any:
     with _shared_manager_lock:
         if _shared_manager is not None:
             return _shared_manager
-        from wetlands.environment_manager import EnvironmentManager
         merged = {**_wetlands_config, **config}
         _shared_manager = EnvironmentManager(**merged)
         return _shared_manager

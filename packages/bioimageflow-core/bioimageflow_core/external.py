@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import signal
+import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -45,9 +46,10 @@ def _format_command(command: Sequence[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
-def _run_subprocess(command: Sequence[str], run_kwargs: dict[str, Any]) -> Any:
-    import subprocess
-
+def _run_subprocess(
+    command: Sequence[str],
+    run_kwargs: dict[str, Any],
+) -> subprocess.CompletedProcess[Any]:
     return subprocess.run(command, **run_kwargs)
 
 
@@ -133,7 +135,7 @@ def run_external_command(
     env: Optional[Mapping[str, str]] = None,
     context: Optional[str] = None,
     **kwargs: Any,
-) -> Any:
+) -> subprocess.CompletedProcess[Any]:
     """Run an external command and raise a detailed, picklable failure.
 
     Parameters are forwarded to :func:`subprocess.run`. The command values are
@@ -150,8 +152,6 @@ def run_external_command(
     try:
         return _run_subprocess(command_values, run_kwargs)
     except Exception as exc:
-        import subprocess
-
         if not isinstance(exc, subprocess.CalledProcessError):
             if isinstance(exc, OSError):
                 error = _build_command_error(
@@ -217,7 +217,7 @@ def run_external_command_with_staged_output(
     env: Optional[Mapping[str, str]] = None,
     context: Optional[str] = None,
     **kwargs: Any,
-) -> Any:
+) -> subprocess.CompletedProcess[Any]:
     """Run a command with one file output redirected through a short path.
 
     Some external native tools fail when asked to write directly to long or

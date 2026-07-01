@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from bioimageflow_core.types import Connectable, ImageSpec, extract_gui_meta
 from bioimageflow_core.tool import IOModel, BaseTool, Template
+from pydantic import BaseModel, create_model
 
 
 class SchemaSerializationError(Exception):
@@ -62,10 +63,8 @@ class ValidationError:
     path: tuple[str, ...] = ()
 
 
-def build_pydantic_model(tool_model_cls: type[IOModel]) -> Any:
+def build_pydantic_model(tool_model_cls: type[IOModel]) -> type[BaseModel]:
     """Convert an IOModel declaration into a Pydantic model for validation."""
-    from pydantic import create_model
-
     fields: dict[str, Any] = {}
     for name, annotation in tool_model_cls._get_all_annotations().items():
         default = getattr(tool_model_cls, name, ...)
