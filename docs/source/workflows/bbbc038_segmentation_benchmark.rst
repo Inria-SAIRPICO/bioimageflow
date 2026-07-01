@@ -1,63 +1,95 @@
-BBBC038 Segmentation Benchmark
-==============================
+Benchmarking Nuclei Segmentation on BBBC038
+===========================================
 
-``bbbc038_segmentation_benchmark`` is the public example for comparing segmentation methods against reference instance masks.
-It targets the Broad Bioimage Benchmark Collection BBBC038 ``stage1_train`` layout, where each sample folder contains a raw image under ``images/`` and multiple object masks under ``masks/``.
+The ``bbbc038_segmentation_benchmark`` workflow compares nuclei segmentation methods on the same microscopy images and scores each prediction against reference instance masks.
+It is a compact benchmark graph: the image preparation and reference labels are shared, while Cellpose3, Cellpose-SAM, StarDist, and a classical threshold method are evaluated side by side.
 
-Use this workflow when you want to compare several segmentation branches under the same graph and scoring logic.
-The benchmark includes Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold branch, and each method is evaluated against the same reference label image.
+The data model follows BBBC038v1, the Kaggle 2018 Data Science Bowl nuclei dataset hosted by the Broad Bioimage Benchmark Collection.
+Each sample contains one raw microscopy image and one binary PNG mask per nucleus.
 
 .. figure:: images/bbbc038_segmentation_benchmark/bbbc038_input_reference.png
-   :alt: BBBC038-style nuclei image and reference instance-mask preview
+   :alt: BBBC038 raw image and reference instance labels.
 
-   The workflow expects BBBC038 sample folders with raw images and reference instance masks, then builds one reference label image per sample.
+   BBBC038 input preview.
+   The left panel is the raw nuclei image.
+   The right panel is the reference instance-label image assembled from the per-nucleus mask PNGs, with each nucleus shown in a different color.
 
-Run the workflow with a selected BBBC038 subset:
+Run the workflow from the repository root:
 
 .. code-block:: bash
 
-   python example_workflows/bbbc038_segmentation_benchmark/workflow.py --data-dir data/bbbc038_stage1_train_subset
+   python example_workflows/bbbc038_segmentation_benchmark/workflow.py
 
-For a reviewed benchmark, use named samples from the Broad Bioimage Benchmark Collection rather than arbitrary local microscopy images.
-The image above visualizes the folder semantics expected by the workflow; the benchmark itself is designed around the real BBBC038 ``stage1_train`` structure.
+Workflow Logic
+--------------
 
-Pipeline walkthrough
---------------------
+The workflow builds one reference label image per sample, prepares the raw image for segmentation, runs each method, and then benchmarks every prediction against the same reference.
+Keeping the scoring step shared makes the metric rows directly comparable.
 
 .. raw:: html
 
    <pre class="mermaid">
    flowchart LR
-     samples[BBBC038 stage1_train samples]:::source --> reference[Build reference labels]:::process
-     samples --> prepare[Prepare 2D segmentation images]:::process
-     prepare --> cp3[Cellpose3]:::method
-     prepare --> cpsam[Cellpose-SAM]:::method
-     prepare --> stardist[StarDist]:::method
-     prepare --> classical[Threshold watershed branch]:::method
-     reference --> score[Benchmark each method]:::metric
+     data[BBBC038 sample folders]:::source --> samples[bbbc038_samples]:::process
+     samples --> reference[build_reference_labels]:::process
+     samples --> prepare[prepare_segmentation_images]:::process
+     prepare --> cp3[cellpose3_segmentation]:::method
+     prepare --> cpsam[cellpose_sam_segmentation]:::method
+     prepare --> stardist[stardist_segmentation]:::method
+     prepare --> classical[classical_threshold_segmentation]:::method
+     reference --> score[benchmark method outputs]:::metric
+     samples --> score
      cp3 --> score
      cpsam --> score
      stardist --> score
      classical --> score
-     score --> table[Method-by-image metrics table]:::metric
-     score --> overlays[Prediction overlays]:::artifact
+     score --> table[bbbc038_benchmark_metrics]:::metric
      classDef source fill:#e7f0ff,stroke:#4b73b9,color:#1b2f55
      classDef process fill:#edf8ef,stroke:#4d8f5b,color:#173d20
      classDef method fill:#f3eafd,stroke:#7d57a8,color:#332047
      classDef metric fill:#ffeceb,stroke:#b85b52,color:#4d201c
-     classDef artifact fill:#eef6f8,stroke:#4d8794,color:#16343b
    </pre>
 
-The important design point is that each segmentation method is a separate node.
-This keeps method-specific parameters, environments, and failures visible, while a shared benchmarking step makes the comparison table consistent.
+1. ``bbbc038_samples`` finds sample folders and records the raw image path and mask directory.
+2. ``build_reference_labels`` combines the individual binary masks into one integer-labeled reference image.
+3. ``prepare_segmentation_images`` converts the raw image to the 2D intensity image used by all methods.
+4. ``cellpose3_segmentation`` runs Cellpose v3 with the nuclei model.
+5. ``cellpose_sam_segmentation`` runs Cellpose-SAM on the same prepared image.
+6. ``stardist_segmentation`` runs the ``2D_versatile_fluo`` StarDist model.
+7. ``classical_threshold_segmentation`` runs a threshold-based segmentation method.
+8. The benchmark nodes compare each predicted label image with the reference labels and write one overlay per method.
+9. ``bbbc038_benchmark_metrics`` concatenates the per-method metric rows into the final table.
 
-What you will inspect
----------------------
+Workflow Outputs
+----------------
+
+The workflow writes the reference label image, the prepared segmentation input, one predicted label image per method, one overlay preview per method, and a benchmark table.
 
 .. figure:: images/bbbc038_segmentation_benchmark/bbbc038_method_overlays.png
-   :alt: Segmentation prediction overlays for two benchmark branches
+   :alt: Four segmentation overlays for one BBBC038 sample.
 
-   Overlays are essential for interpreting benchmark metrics because foreground overlap can hide split and merge errors.
+   Output overlay preview for one BBBC038 image.
+   Each quadrant shows one method result: Cellpose3, Cellpose-SAM, StarDist, and the classical threshold method.
+   Red marks reference foreground, green marks predicted foreground, and yellow marks pixels where reference and prediction overlap.
 
-The terminal table contains one row per image and method.
-For a reviewed run, inspect the predicted label images, overlays, and foreground agreement metrics together before drawing conclusions about a method.
+The terminal table has one row per image and method.
+A typical row looks like this:
+
+.. list-table::
+   :header-rows: 1
+
+   * - method
+     - predicted_label_count
+     - reference_label_count
+     - foreground_iou
+     - foreground_dice
+     - overlay_image
+   * - ``cellpose3``
+     - ``31``
+     - ``28``
+     - ``0.78``
+     - ``0.88``
+     - ``.../cellpose3_overlay.png``
+
+The object counts show whether a method is splitting or merging nuclei, while IoU and Dice summarize foreground agreement.
+The overlay image is the quickest way to interpret those numbers, especially when two methods have similar scores but different error patterns.

@@ -247,7 +247,7 @@ class TestMiniPipeline:
         spots_path, ref_path = label_images
 
         stub_env = EnvironmentSpec(
-            name="stub", dependencies={"pip": ["numpy"]}
+            name="stub", dependencies={"pip": ["numpy==2.4.2"]}
         )
 
         class StubLabeler(ProcessingTool):

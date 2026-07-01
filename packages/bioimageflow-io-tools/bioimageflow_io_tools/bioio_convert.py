@@ -17,19 +17,20 @@ from bioimageflow_core import (
 
 bioio_env = EnvironmentSpec(
     name="bioio-all",
+    allow_flexible_versions=True,
     dependencies={
         "python": "3.12",
         "pip": [
             "bioio==3.0.0",
             "pillow==11.1.0",
-            "bioio-ome-zarr",
-            "bioio-ome-tiff",
-            "bioio-czi",
-            "bioio-imageio",
-            "bioio-tifffile",
-            "bioio-tiff-glob",
-        ],
-    },
+            "bioio-ome-zarr==3.5.1",
+            "bioio-ome-tiff==1.4.0",
+            "bioio-czi==2.8.0",
+            "bioio-imageio==1.3.0",
+            "bioio-tifffile==1.3.0",
+            "bioio-tiff-glob==1.2.0",
+        ]
+    }
 )
 
 

@@ -12,6 +12,9 @@ from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_common_tools import Concat
 from bioimageflow_tracking_tools import BTrackLink, LabelsToObjects, TrackMetrics, UltrackLink
 
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "live_cell_tracking"
+
 
 class AddTrackerName(DataFrameTool):
     """Attach the tracker name to a metrics table."""
@@ -33,7 +36,7 @@ class AddTrackerName(DataFrameTool):
 
 def build_workflow(
     label_image: str | None = None,
-    storage_path: str = "./live_cell_tracking_results",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
@@ -42,7 +45,7 @@ def build_workflow(
         raise ValueError("build_workflow requires label_image.")
     storage = Path(storage_path)
     wf = Workflow(
-        storage_path=str(storage / "bif"),
+        storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
@@ -71,7 +74,7 @@ if __name__ == "__main__":
     parser.add_argument("--label-image", required=True, help="TYX label movie or CTC-style label stack.")
     parser.add_argument(
         "--storage-path",
-        default="./live_cell_tracking_results",
+        default=str(DEFAULT_STORAGE_PATH),
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()

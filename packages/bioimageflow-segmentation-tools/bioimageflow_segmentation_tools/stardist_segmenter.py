@@ -21,8 +21,14 @@ stardist_env = EnvironmentSpec(
     name="segmentation-stardist",
     dependencies={
         "python": "3.12",
-        "pip": ["tensorflow", "stardist==0.9.2", "imageio", "numpy", "tifffile"],
-    },
+        "pip": [
+            "tensorflow==2.20.0",
+            "stardist==0.9.2",
+            "imageio==2.37.3",
+            "numpy==2.4.2",
+            "tifffile==2026.3.3",
+        ],
+    }
 )
 
 

@@ -20,6 +20,9 @@ from bioimageflow_core import (
 )
 from bioimageflow_restoration_tools import CAREamicsPredict, RestorationMetrics
 
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "low_snr_restoration"
+
 
 class RestorationPreview(ProcessingTool):
     """Create a side-by-side preview of clean, degraded, and restored images."""
@@ -68,7 +71,7 @@ def build_workflow(
     clean_image: str | None = None,
     degraded_image: str | None = None,
     checkpoint: str | None = None,
-    storage_path: str = "./low_snr_restoration_results",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
@@ -77,7 +80,7 @@ def build_workflow(
         raise ValueError("build_workflow requires clean_image, degraded_image, and checkpoint.")
     storage = Path(storage_path)
     wf = Workflow(
-        storage_path=str(storage / "bif"),
+        storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
@@ -115,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", required=True, help="CAREamics checkpoint.")
     parser.add_argument(
         "--storage-path",
-        default="./low_snr_restoration_results",
+        default=str(DEFAULT_STORAGE_PATH),
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()

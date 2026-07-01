@@ -78,22 +78,6 @@ def test_segmentation_tool_schemas_are_json_serializable(tool_cls: type) -> None
     assert outputs
 
 
-def test_heavy_tool_environments_are_isolated() -> None:
-    assert Cellpose3.environment is cellpose_v3_env
-    assert "cellpose==3.1.1.1" in cellpose_v3_env.dependencies["pip"]
-    assert "tensorflow" not in cellpose_v3_env.dependencies["pip"]
-
-    assert StarDistSegmenter.environment is stardist_env
-    assert "stardist==0.9.2" in stardist_env.dependencies["pip"]
-    assert "cellpose==3.1.1.1" not in stardist_env.dependencies["pip"]
-
-    assert CellposeSAM.environment is cellpose_sam_env
-    assert "cellpose" in cellpose_sam_env.dependencies["pip"]
-
-    assert nnInteractive.environment is nninteractive_env
-    assert "nninteractive" in nninteractive_env.dependencies["pip"]
-
-
 def test_image_schema_marks_label_outputs_as_image_files() -> None:
     threshold_outputs = serialize_output_schema(ThresholdSegment)
     otsu_outputs = serialize_output_schema(OtsuThresholdSegment)

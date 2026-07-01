@@ -32,6 +32,7 @@ Pipeline topology:
 """
 
 import sys
+from pathlib import Path
 
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
@@ -48,10 +49,14 @@ https://cildata.crbs.ucsd.edu/media/images/13434/13434.tif
 https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
 https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
 
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "fish_analysis" / "data"
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "fish_analysis"
+
 
 def build_fish_workflow(
-    storage_path: str = "./fish_results",
-    data_dir: str = "./data",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
+    data_dir: str | Path = DEFAULT_DATA_DIR,
     debug: bool = False,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
@@ -71,7 +76,7 @@ def build_fish_workflow(
         The workflow and the terminal stats node.
     """
     wf = Workflow(
-        storage_path=storage_path,
+        storage_path=str(storage_path),
         engine=engine,
         wetlands_config={**(wetlands_config or {}), "debug": debug},
     )
@@ -80,7 +85,7 @@ def build_fish_workflow(
         # -- 1. Data ingestion --
         download = DownloadImages()(
             urls=CIL_URLS,
-            output_dir=data_dir,
+            output_dir=str(data_dir),
             name="download_cil_images",
         )
 
@@ -121,8 +126,8 @@ def build_fish_workflow(
 
 
 def main() -> None:
-    storage_path = sys.argv[1] if len(sys.argv) > 1 else "./fish_results"
-    data_dir = sys.argv[2] if len(sys.argv) > 2 else "./data"
+    storage_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_STORAGE_PATH
+    data_dir = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_DATA_DIR
 
     configure_wetlands(wetlands_instance_path="./wetlands")
 

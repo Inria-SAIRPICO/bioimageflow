@@ -78,11 +78,11 @@ def test_augment_dependencies_injects_configured_local_core_dependency() -> None
         "editable": True,
     }
     manager = _manager_with_core_dependency(dependency)
-    dependencies = {"python": "3.9", "pip": ["numpy"]}
+    dependencies = {"python": "3.9", "pip": ["numpy==2.4.2"]}
 
     augmented = manager._augment_dependencies(dependencies)
 
-    assert augmented.get("pip") == ["numpy"]
+    assert augmented.get("pip") == ["numpy==2.4.2"]
     assert augmented.get("local") == [dependency]
     assert "local" not in dependencies
 
@@ -97,19 +97,19 @@ def test_augment_dependencies_does_not_mutate_dependency_spec() -> None:
     dependencies = {
         "python": "3.9",
         "channels": ["conda-forge", "bioimageit"],
-        "pip": ["numpy"],
+        "pip": ["numpy==2.4.2"],
     }
 
     augmented = manager._augment_dependencies(dependencies)
     augmented_dict = cast(dict[str, Any], augmented)
     augmented_dict["channels"].append("extra")
-    augmented_dict["pip"].append("scipy")
+    augmented_dict["pip"].append("scipy==1.17.1")
     augmented_dict["local"].append({"name": "other", "path": "/repo/other"})
 
     assert dependencies == {
         "python": "3.9",
         "channels": ["conda-forge", "bioimageit"],
-        "pip": ["numpy"],
+        "pip": ["numpy==2.4.2"],
     }
 
 
@@ -175,8 +175,8 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
     manager._worker_file = "worker.py"
     manager._lock = threading.RLock()
 
-    first = EnvironmentSpec(name="shared", dependencies={"pip": ["numpy"]})
-    second = EnvironmentSpec(name="shared", dependencies={"pip": ["scipy"]})
+    first = EnvironmentSpec(name="shared", dependencies={"pip": ["numpy==2.4.2"]})
+    second = EnvironmentSpec(name="shared", dependencies={"pip": ["scipy==1.17.1"]})
 
     manager.get_or_create(first)
 
@@ -209,7 +209,7 @@ def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
         }
     )
 
-    dependencies = {"python": "3.9", "pip": ["numpy"]}
+    dependencies = {"python": "3.9", "pip": ["numpy==2.4.2"]}
     if isinstance(existing_dependency, dict):
         dependencies["local"] = [existing_dependency]
     else:
@@ -218,8 +218,8 @@ def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
     augmented = manager._augment_dependencies(dependencies)
 
     if isinstance(existing_dependency, dict):
-        assert augmented.get("pip") == ["numpy"]
+        assert augmented.get("pip") == ["numpy==2.4.2"]
         assert augmented.get("local") == [existing_dependency]
     else:
-        assert augmented.get("pip") == ["numpy", existing_dependency]
+        assert augmented.get("pip") == ["numpy==2.4.2", existing_dependency]
         assert "local" not in augmented

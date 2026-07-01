@@ -1,23 +1,22 @@
 # Parameter Space Exploration Workflow
 
-This example demonstrates how to use BioImageFlow to systematically explore algorithm parameter spaces using a combinatorial DAG pattern.
+This demo workflow explores ATLAS spot-detection parameters on FISH marker-channel images using a combinatorial DAG pattern.
 
 ## Goal
 
-Which Atlas sensitivity and spot-size parameters produce useful spot-detection
-results for a microscopy image collection, and how can the outputs be inspected
-as a grid?
+Compare ATLAS sensitivity and spot-size settings on a FOLS2 marker channel from Cell Image Library FISH data.
 
 ## Overview
 
 The workflow:
 
-1. Lists input images using the `Files` tool.
+1. Lists FISH images using the `Files` tool.
 2. Generates parameter value lists using the `Generate` tool (one for sensitivity, one for size).
 3. Performs a Cartesian product using `CrossJoin`.
-4. Executes `AtlasSpotDetection` on each image/parameter combination.
-5. Counts connected foreground spots and foreground fraction for each ATLAS mask.
-6. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
+4. Extracts the marker channel for each image/parameter row.
+5. Executes `AtlasSpotDetection` on each channel-image/parameter combination.
+6. Counts connected foreground spots and foreground fraction for each ATLAS mask.
+7. Creates a mosaic of all detection results using the `Mosaic` tool, which accepts scalar image semantics including Atlas's binary masks.
 
 ## Prerequisites
 
@@ -30,7 +29,7 @@ The workflow:
 
 ```bash
 # From the repository root
-python example_workflows/parameter_space_exploration/workflow.py ./data ./results
+python example_workflows/parameter_space_exploration/workflow.py
 ```
 
 ## Results
@@ -42,13 +41,12 @@ python example_workflows/parameter_space_exploration/workflow.py ./data ./result
 
 ## Data
 
-Use a local or public directory of fluorescence microscopy TIFF images. The
-workflow lists files from `data_dir` with the configured glob pattern. Default
-tests construct the graph without running Atlas.
+The bundled run uses Cell Image Library FISH data so the command above works without extra arguments.
+The workflow can be pointed at another directory of compatible microscopy TIFFs.
 
 ## Validation
 
-Use a known FISH marker crop and the Atlas binary to compare masks and counts across the parameter grid.
+Use the generated masks, foreground metrics, and mosaic to compare the parameter grid.
 
 ## Customization
 

@@ -120,8 +120,13 @@ careamics_env = EnvironmentSpec(
     name="restoration-careamics",
     dependencies={
         "python": "3.12",
-        "pip": ["careamics", "imageio", "numpy", "tifffile"],
-    },
+        "pip": [
+            "careamics==0.3.1",
+            "imageio==2.37.3",
+            "numpy==2.4.2",
+            "tifffile==2026.3.3",
+        ],
+    }
 )
 
 

@@ -48,7 +48,7 @@ def tool_store(tmp_path):
         (pkg_dir / "base.py").write_text(
             "from bioimageflow_core import ProcessingTool, EnvironmentSpec\n"
             "dummy_env = EnvironmentSpec(\n"
-            "    name='dummy', dependencies={'pip': ['numpy']}\n"
+            "    name='dummy', dependencies={'pip': ['numpy==2.4.2']}\n"
             ")\n"
             "class DummyBase(ProcessingTool):\n"
             "    environment = dummy_env\n"

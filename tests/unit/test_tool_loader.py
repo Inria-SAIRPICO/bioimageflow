@@ -65,7 +65,7 @@ def tool_store(tmp_path):
         (pkg_dir / "base.py").write_text(
             "from bioimageflow_core import ProcessingTool, EnvironmentSpec\n"
             "dummy_env = EnvironmentSpec(\n"
-            "    name='dummy', dependencies={'pip': ['numpy']}\n"
+            "    name='dummy', dependencies={'pip': ['numpy==2.4.2']}\n"
             ")\n"
             "class DummyBase(ProcessingTool):\n"
             "    environment = dummy_env\n"
@@ -118,16 +118,95 @@ def tool_store(tmp_path):
     return store
 
 
+@pytest.fixture
+def lazy_tool_store(tmp_path):
+    """Create a tool store with package-level lazy ``__all__`` exports."""
+    store = tmp_path / "tool_packages"
+
+    for version, result_value in [
+        ("1.0.0", "lazy-v1"),
+        ("2.0.0", "lazy-v2"),
+    ]:
+        pkg_dir = store / "lazy_tools" / version / "lazy_tools"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "__init__.py").write_text(
+            "from importlib import import_module\n"
+            "from typing import Any\n\n"
+            "_EXPORTS = {\n"
+            "    'LazyAlpha': ('alpha', 'LazyAlpha'),\n"
+            "    'LazyLoader': ('loader', 'LazyLoader'),\n"
+            "}\n"
+            "__all__ = ['LazyAlpha', 'LazyLoader']\n\n"
+            "def __getattr__(name: str) -> Any:\n"
+            "    try:\n"
+            "        module_name, attribute_name = _EXPORTS[name]\n"
+            "    except KeyError as exc:\n"
+            "        raise AttributeError(name) from exc\n"
+            "    module = import_module(f'.{module_name}', __name__)\n"
+            "    value = getattr(module, attribute_name)\n"
+            "    globals()[name] = value\n"
+            "    return value\n"
+        )
+        (pkg_dir / "alpha.py").write_text(
+            "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n\n"
+            "class LazyAlpha(ProcessingTool):\n"
+            "    display_name = 'Lazy Alpha'\n"
+            "    class Inputs(IOModel):\n"
+            "        value: int = 0\n"
+            "    class Outputs(IOModel):\n"
+            "        result: str\n"
+            "    def process_row(self, arguments: Arguments):\n"
+            f"        return self.Outputs(result='{result_value}')\n"
+        )
+        (pkg_dir / "loader.py").write_text(
+            "import pandas as pd\n"
+            "from bioimageflow.dataframe_tool import DataFrameTool\n"
+            "from bioimageflow_core import IOModel\n\n"
+            "class LazyLoader(DataFrameTool):\n"
+            "    display_name = 'Lazy Loader'\n"
+            "    class Inputs(IOModel):\n"
+            "        count: int = 1\n"
+            "    class Outputs(IOModel):\n"
+            "        value: int\n"
+            "    def transform(self, df, arguments):\n"
+            "        return pd.DataFrame({'value': list(range(arguments.count))})\n"
+        )
+
+    return store
+
+
+@pytest.fixture
+def broken_lazy_tool_store(tmp_path):
+    """Create a lazy package whose public export fails to materialize."""
+    store = tmp_path / "tool_packages"
+    pkg_dir = store / "broken_lazy_tools" / "1.0.0" / "broken_lazy_tools"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text(
+        "__all__ = ['BrokenTool']\n\n"
+        "def __getattr__(name: str):\n"
+        "    raise RuntimeError(f'cannot load {name}')\n"
+    )
+    return store
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_sys_modules():
     """Remove any dummy_tools scoped and canonical modules after each test."""
     yield
     to_remove = [k for k in sys.modules
-                 if k.startswith("dummy_tools__") or k.startswith("dummy_tools")]
+                 if k.startswith(("dummy_tools__", "dummy_tools",
+                                  "lazy_tools__", "lazy_tools",
+                                  "broken_lazy_tools__",
+                                  "broken_lazy_tools"))]
     for k in to_remove:
         del sys.modules[k]
     # Clean sys.path entries that point into tmp tool stores
-    sys.path[:] = [p for p in sys.path if "dummy_tools" not in p]
+    sys.path[:] = [
+        p for p in sys.path
+        if not any(name in p for name in (
+            "dummy_tools", "lazy_tools", "broken_lazy_tools",
+        ))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +296,44 @@ class TestLoadVersionedPackage:
         mod2 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
         assert mod1 is mod2
 
+    def test_lazy_all_exports_are_materialized(self, lazy_tool_store):
+        from bioimageflow.tool_loader import load_versioned_package, _scoped_name
+
+        mod = load_versioned_package("lazy_tools", "1.0.0", lazy_tool_store)
+        scoped = _scoped_name("lazy_tools", "1.0.0")
+
+        assert "LazyAlpha" in vars(mod)
+        assert "LazyLoader" in vars(mod)
+        assert f"{scoped}.alpha" in sys.modules
+        assert f"{scoped}.loader" in sys.modules
+        assert issubclass(mod.LazyAlpha, ProcessingTool)
+        assert issubclass(mod.LazyLoader, DataFrameTool)
+
+    def test_lazy_all_exports_keep_versions_isolated(self, lazy_tool_store):
+        from bioimageflow.tool_loader import load_versioned_package
+
+        v1 = load_versioned_package("lazy_tools", "1.0.0", lazy_tool_store)
+        v2 = load_versioned_package("lazy_tools", "2.0.0", lazy_tool_store)
+
+        assert v1.LazyAlpha is not v2.LazyAlpha
+        assert v1.LazyAlpha._bif_package_version == "1.0.0"
+        assert v2.LazyAlpha._bif_package_version == "2.0.0"
+
+    def test_lazy_export_failure_cleans_partial_package(
+        self, broken_lazy_tool_store
+    ):
+        from bioimageflow.tool_loader import load_versioned_package
+
+        with pytest.raises(RuntimeError, match="cannot load BrokenTool"):
+            load_versioned_package(
+                "broken_lazy_tools", "1.0.0", broken_lazy_tool_store
+            )
+
+        assert "broken_lazy_tools__1_0_0" not in sys.modules
+        assert not any(
+            p.endswith("broken_lazy_tools/1.0.0") for p in sys.path
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: version metadata stamps
@@ -239,6 +356,18 @@ class TestVersionMetadata:
         assert v1.LoaderTool._bif_package == "dummy_tools"
         assert v1.LoaderTool._bif_package_version == "1.0.0"
         assert v1.LoaderTool._bif_canonical_module == "dummy_tools.loader"
+
+    def test_stamp_on_lazy_exported_tools(self, lazy_tool_store):
+        from bioimageflow.tool_loader import load_versioned_package
+
+        mod = load_versioned_package("lazy_tools", "1.0.0", lazy_tool_store)
+
+        assert mod.LazyAlpha._bif_package == "lazy_tools"
+        assert mod.LazyAlpha._bif_package_version == "1.0.0"
+        assert mod.LazyAlpha._bif_canonical_module == "lazy_tools.alpha"
+        assert mod.LazyLoader._bif_package == "lazy_tools"
+        assert mod.LazyLoader._bif_package_version == "1.0.0"
+        assert mod.LazyLoader._bif_canonical_module == "lazy_tools.loader"
 
 
 # ---------------------------------------------------------------------------

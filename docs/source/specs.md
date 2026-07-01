@@ -308,6 +308,7 @@ class EnvironmentSpec:
     """Defines a reusable Wetlands environment specification."""
     name: str          # Wetlands environment name (e.g., "cellpose")
     dependencies: dict  # Wetlands format: {"conda": [...], "pip": [...], "python": "3.12"}
+    allow_flexible_versions: bool = False
 ```
 
 **Defining an environment:**
@@ -321,14 +322,20 @@ cellpose_env = EnvironmentSpec(
 
 stardist_env = EnvironmentSpec(
     name="stardist",
-    dependencies={"conda": ["stardist==0.9", "tensorflow"], "python": "3.11"}
+    dependencies={"conda": ["stardist==0.9", "tensorflow>=2,<3"], "python": "3.11"},
+    allow_flexible_versions=True,
 )
 ```
+
+`EnvironmentSpec` validates package-index dependencies when it is constructed.
+By default, entries in `pip` and `conda` lists use exact pins; bare names such as `"numpy"` or `"tensorflow"` raise `ValueError`.
+Set `allow_flexible_versions=True` only when the environment intentionally accepts resolver flexibility; in that mode explicit constraints such as `">=2,<3"` or `"~=1.2"` are accepted, but bare names still raise.
+Direct references such as `"bioimageflow-core @ file:///..."` and Wetlands local dependency dicts are already anchored and do not need a package-index version specifier.
 
 Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates the workflow graph before execution: reachable tools sharing the same `name` must declare identical `dependencies`, or `EnvironmentMismatchError` is raised with the conflicting tool names and dependency declarations. During Wetlands execution, BioImageFlow passes the augmented environment recipe to `wetlands.EnvironmentManager.create()`, and Wetlands validates whether any existing same-name managed environment can be reused.
 
 **Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
-- Dependency lists are sorted alphabetically (e.g., `["numpy", "cellpose"]` and `["cellpose", "numpy"]` produce the same hash).
+- Dependency lists are sorted alphabetically (e.g., `["numpy==2.4.2", "cellpose==3.1.1.1"]` and `["cellpose==3.1.1.1", "numpy==2.4.2"]` produce the same hash).
 - Version strings are normalized to PEP 440 canonical form (e.g., `"3.0"` and `"3.0.0"` are treated as equivalent).
 - Whitespace is stripped from dependency strings.
 
@@ -338,7 +345,7 @@ It is possible to directly define the EnvironmentSpec in ProcessingTool.environm
 
 *Module: `bioimageflow_core.environment`*
 
-`bioimageflow-core` provides a pre-defined `GENERAL_ENV` constant — a standard scientific image processing environment that covers the majority of "glue" tools. Tools that only need common packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow) should use `GENERAL_ENV` instead of declaring ad-hoc environments.
+`bioimageflow-core` provides a pre-defined `GENERAL_ENV` constant — a standard scientific image processing environment that covers the majority of "glue" tools. Tools that only need common packages (numpy, scipy, scikit-image, imageio, tifffile, Pillow, pandas) should use `GENERAL_ENV` instead of declaring ad-hoc environments.
 
 ```python
 from bioimageflow_core import GENERAL_ENV
@@ -348,12 +355,13 @@ GENERAL_ENV = EnvironmentSpec(
     dependencies={
         "python": "3.12",
         "pip": [
-            "numpy",
-            "scipy",
-            "scikit-image",
-            "imageio",
-            "tifffile",
-            "Pillow",
+            "numpy==2.4.2",
+            "scipy==1.17.1",
+            "scikit-image==0.26.0",
+            "imageio==2.37.3",
+            "tifffile==2026.3.3",
+            "Pillow==12.1.1",
+            "pandas==3.0.1",
         ]
     }
 )
@@ -1401,7 +1409,8 @@ The loading mechanism:
 1. Creates a top-level module entry in `sys.modules` under the scoped name with `submodule_search_locations` pointing at the versioned directory.
 2. Installs a temporary meta-path import hook so that relative imports within the package (e.g., `from .gaussian import GaussianSmooth`) resolve to the versioned directory under the scoped namespace.
 3. Executes the package's `__init__.py`, which triggers all `from .xxx import ...` chains.
-4. Stamps every `BaseTool` and `SubWorkflow` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
+4. Materializes public exports declared in `__all__` by resolving each name with `getattr(package_module, name)`. This supports package-level lazy exports implemented with `__getattr__`, as long as each public export can be imported in the orchestrator process.
+5. Stamps every `BaseTool` and `SubWorkflow` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
 
 This works transparently for all tool types:
 
@@ -1650,7 +1659,7 @@ registered = register(input_image=paired["image_path"], reference=paired["refere
 class DicomLoader(ProcessingTool):
     """List DICOM files and extract metadata — requires pydicom, isolated from main process."""
     display_name = "DICOM Loader"
-    environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom"]})
+    environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom=3.0.1"]})
 
     class Inputs(IOModel):
         directory: str

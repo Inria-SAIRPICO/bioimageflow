@@ -19,7 +19,10 @@ from bioimageflow_core import (
 
 simpleitk_env = EnvironmentSpec(
     name="simpleitk",
-    dependencies={"python": "3.12", "pip": ["SimpleITK", "numpy", "tifffile"]},
+    dependencies={
+        "python": "3.12",
+        "pip": ["SimpleITK==2.5.5", "numpy==2.4.2", "tifffile==2026.3.3"],
+    },
 )
 
 

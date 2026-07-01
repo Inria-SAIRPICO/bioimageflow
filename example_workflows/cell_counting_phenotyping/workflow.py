@@ -17,6 +17,9 @@ from bioimageflow_measurement_tools import (
 )
 from bioimageflow_segmentation_tools import ThresholdSegment
 
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "cell_counting_phenotyping"
+
 
 class PhenotypeSummary(DataFrameTool):
     """Aggregate region rows into one per-image phenotype row."""
@@ -75,7 +78,7 @@ class PhenotypeSummary(DataFrameTool):
 
 def build_workflow(
     input_image: str | None = None,
-    storage_path: str = "./cell_counting_phenotyping_results",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
@@ -86,7 +89,7 @@ def build_workflow(
     image_path = Path(input_image)
 
     wf = Workflow(
-        storage_path=str(storage / "bif"),
+        storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
@@ -134,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--input-image", required=True, help="2D microscopy crop to segment and measure.")
     parser.add_argument(
         "--storage-path",
-        default="./cell_counting_phenotyping_results",
+        default=str(DEFAULT_STORAGE_PATH),
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()

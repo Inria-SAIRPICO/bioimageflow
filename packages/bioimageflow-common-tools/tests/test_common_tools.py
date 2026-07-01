@@ -154,7 +154,7 @@ def test_connected_components_schema_declares_uint32_labels() -> None:
 def test_connected_components_environment_declares_uint32_tiff_writer() -> None:
     from bioimageflow_common_tools.connected_components import simpleitk_env
 
-    assert "tifffile" in simpleitk_env.dependencies["pip"]
+    assert "tifffile==2026.3.3" in simpleitk_env.dependencies["pip"]
 
 
 def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:

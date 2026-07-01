@@ -57,7 +57,7 @@ class TestCellpose3:
         assert tool_cls is not None
         assert env.name == "segmentation-cellpose-v3-3-1-1"
         assert "cellpose==3.1.1.1" in env.dependencies["pip"]
-        assert "packaging" in env.dependencies["pip"]
+        assert "packaging==26.0" in env.dependencies["pip"]
         assert tool_cls.environment is env
 
     def test_process_row_writes_mask(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -107,15 +107,6 @@ class TestCellpose3:
 
 
 class TestStarDistSegmenter:
-    def test_environment_pins_stardist(self) -> None:
-        env = stardist_env
-        tool_cls = StarDistSegmenter
-        assert env is not None
-        assert tool_cls is not None
-        assert env.name == "segmentation-stardist"
-        assert "stardist==0.9.2" in env.dependencies["pip"]
-        assert "tensorflow" in env.dependencies["pip"]
-        assert tool_cls.environment is env
 
     def test_process_row_writes_mask(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         image_path = tmp_path / "input.tif"

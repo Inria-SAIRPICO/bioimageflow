@@ -41,17 +41,17 @@ cellpose_env = EnvironmentSpec(
 
 stardist_env = EnvironmentSpec(
     name="stardist",
-    dependencies={"conda": ["stardist==0.9", "tensorflow"], "python": "3.11"},
+    dependencies={"conda": ["stardist==0.9", "tensorflow==2.20.0"], "python": "3.11"},
 )
 
 imageio_env = EnvironmentSpec(
     name="imageio",
-    dependencies={"conda": ["imageio"], "python": "3.12"},
+    dependencies={"conda": ["imageio=2.37.3"], "python": "3.12"},
 )
 
 numpy_env = EnvironmentSpec(
     name="numpy_only",
-    dependencies={"conda": ["numpy"], "python": "3.12"},
+    dependencies={"conda": ["numpy=2.4.2"], "python": "3.12"},
 )
 
 

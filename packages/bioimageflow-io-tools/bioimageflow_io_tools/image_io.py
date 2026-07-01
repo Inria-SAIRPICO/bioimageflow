@@ -9,7 +9,6 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
-    EnvironmentSpec,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -19,23 +18,6 @@ from bioimageflow_core import (
     Semantic,
     Template,
 )
-
-
-
-BIOIO_ENV = EnvironmentSpec(
-    name="bioimageflow-bioio",
-    dependencies={
-        "python": "3.12",
-        "pip": [
-            "bioio",
-            "bioio-ome-tiff",
-            "bioio-ome-zarr",
-            "bioio-imageio",
-            "bioio-tifffile",
-        ],
-    },
-)
-
 
 class ReadImageMetadata(ProcessingTool):
     """Read lightweight image metadata without materializing workflow outputs."""

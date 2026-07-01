@@ -25,6 +25,7 @@ class InnerJoin(DataFrameTool):
     """Inner join upstream DataFrames on index (default merge behavior)."""
     display_name = "Inner Join"
     category = Category.UTILITIES
+    tags = ["dataframe", "merge", "join"]
 
     class Inputs(IOModel):
         pass
@@ -48,6 +49,7 @@ class CrossJoin(DataFrameTool):
     """Cross join for combinatorial expansion."""
     display_name = "Cross Join"
     category = Category.UTILITIES
+    tags = ["dataframe", "merge", "cross-join"]
 
     class Inputs(IOModel):
         suffixes: Annotated[tuple[str, str], GUIMeta(
@@ -95,6 +97,7 @@ class JoinOnColumn(DataFrameTool):
     """Join upstream DataFrames on a named column."""
     display_name = "Join On Column"
     category = Category.UTILITIES
+    tags = ["dataframe", "merge", "join"]
 
     class Inputs(IOModel):
         join_column: Annotated[str, GUIMeta(
@@ -155,6 +158,7 @@ class Concat(DataFrameTool):
     """Concatenate DataFrames vertically."""
     display_name = "Concat"
     category = Category.UTILITIES
+    tags = ["dataframe", "merge", "concat"]
 
     class Inputs(IOModel):
         pass
@@ -187,6 +191,7 @@ class Collect(DataFrameTool):
     """Gather columns from multiple ancestor nodes into one DataFrame."""
     display_name = "Collect"
     category = Category.UTILITIES
+    tags = ["dataframe", "merge", "collect"]
 
     class Outputs(Passthrough):
         pass

@@ -25,8 +25,9 @@ from bioimageflow_core import (
 atlas_env = EnvironmentSpec(
     name="atlas",
     dependencies={
-        "conda": ["bioimageit::atlas"],
+        "conda": ["bioimageit::atlas>=0"],
     },
+    allow_flexible_versions=True,
 )
 
 

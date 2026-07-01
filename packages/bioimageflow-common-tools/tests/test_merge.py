@@ -9,6 +9,14 @@ from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat
 pytestmark = pytest.mark.package_tools
 
 
+def test_merge_tools_declare_dataframe_tags():
+    assert InnerJoin.tags == ["dataframe", "merge", "join"]
+    assert CrossJoin.tags == ["dataframe", "merge", "cross-join"]
+    assert JoinOnColumn.tags == ["dataframe", "merge", "join"]
+    assert Concat.tags == ["dataframe", "merge", "concat"]
+    assert Collect.tags == ["dataframe", "merge", "collect"]
+
+
 @pytest.fixture
 def df_a():
     return pd.DataFrame({"x": [1, 2, 3]}, index=pd.Index(["0", "1", "2"]))

@@ -1,16 +1,16 @@
 workflow: parameter_space_exploration
 data:
-  source: FISH marker channel crops
+  source: Cell Image Library FISH image
   source_urls:
     - https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
   license: See Cell Image Library record terms
   citation: Cell Image Library record 13432
-  normal_ci: supplied FISH marker-channel crop
-  public_data: opt-in CIL marker-channel crop extraction
+  normal_ci: checked-in CIL record 13432 TIFF shared with fish_analysis
+  public_data: CIL record 13432
   markers:
     - public_data
     - external_binary
   selected_files:
-    - 13432_fols2_crop.tif
-  expected_layout: YX
-  expected_dtype: uint8
+    - ../fish_analysis/data/13432.tif
+  expected_layout: CYX input converted to YX marker channel
+  expected_dtype: uint8 or source TIFF dtype converted by ATLAS

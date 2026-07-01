@@ -57,12 +57,54 @@ def tool_store(tmp_path):
     return store
 
 
+@pytest.fixture
+def tool_store_lazy_exports(tmp_path):
+    """Build a versioned package that exposes tools through lazy __all__."""
+    store = tmp_path / "tool_packages"
+    pkg_dir = store / "lazy_tools" / "1.0.0" / "lazy_tools"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text(
+        "from importlib import import_module\n"
+        "from typing import Any\n\n"
+        "_EXPORTS = {'LazyAlpha': ('alpha', 'LazyAlpha')}\n"
+        "__all__ = ['LazyAlpha']\n\n"
+        "def __getattr__(name: str) -> Any:\n"
+        "    try:\n"
+        "        module_name, attribute_name = _EXPORTS[name]\n"
+        "    except KeyError as exc:\n"
+        "        raise AttributeError(name) from exc\n"
+        "    module = import_module(f'.{module_name}', __name__)\n"
+        "    value = getattr(module, attribute_name)\n"
+        "    globals()[name] = value\n"
+        "    return value\n"
+    )
+    (pkg_dir / "alpha.py").write_text(
+        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "class LazyAlpha(ProcessingTool):\n"
+        "    display_name = 'Lazy Alpha'\n"
+        "    tags = ['lazy']\n"
+        "    class Inputs(IOModel):\n"
+        "        value: int = 0\n"
+        "    class Outputs(IOModel):\n"
+        "        result: str\n"
+        "    def process_row(self, arguments: Arguments):\n"
+        "        return self.Outputs(result='ok')\n"
+    )
+    return store
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_sys_modules():
     yield
-    for k in [k for k in sys.modules if k.startswith("dummy_tools")]:
+    for k in [
+        k for k in sys.modules
+        if k.startswith(("dummy_tools", "lazy_tools"))
+    ]:
         del sys.modules[k]
-    sys.path[:] = [p for p in sys.path if "dummy_tools" not in p]
+    sys.path[:] = [
+        p for p in sys.path
+        if "dummy_tools" not in p and "lazy_tools" not in p
+    ]
 
 
 class TestRegisterPackage:
@@ -128,6 +170,24 @@ class TestRegisterPackage:
         assert alpha_v1.display_name == "Alpha"
         assert alpha_v2.display_name == "Alpha v2"
         assert alpha_cls._bif_package_version == "2.0.0"
+
+    def test_register_discovers_lazy_all_exports(
+        self, tool_store_lazy_exports
+    ) -> None:
+        reg = ToolRegistry(store_path=tool_store_lazy_exports)
+
+        metas = reg.register_package("lazy_tools", "1.0.0")
+
+        assert [meta.class_name for meta in metas] == ["LazyAlpha"]
+        cls = reg.get_class("LazyAlpha")
+        assert cls is not None
+        assert cls._bif_package == "lazy_tools"
+        assert cls._bif_package_version == "1.0.0"
+        assert cls._bif_canonical_module == "lazy_tools.alpha"
+        meta = reg.get_metadata("LazyAlpha")
+        assert meta is not None
+        assert meta.display_name == "Lazy Alpha"
+        assert meta.tags == ("lazy",)
 
 
 class TestForget:

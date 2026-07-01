@@ -287,7 +287,7 @@ class _BadConstraintTool(ProcessingTool):
     display_name = "BadConstraint"
     environment = EnvironmentSpec(
         name="_validateenv",
-        dependencies={"conda": ["numpy"], "python": "3.12"},
+        dependencies={"conda": ["numpy=2.4.2"], "python": "3.12"},
     )
 
     class Inputs(IOModel):

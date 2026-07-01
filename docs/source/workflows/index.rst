@@ -1,8 +1,8 @@
-Workflow Tutorials
-==================
+Workflow Demos
+==============
 
-BioImageFlow's public examples are workflow-level tutorials.
-Each page below introduces a real analysis pattern, shows the data layout expected by the workflow, and points to the files a user should inspect after a run.
+BioImageFlow's example workflows are executable demos.
+Each page below introduces a real analysis pattern, names the data source, shows the default command, and describes the files produced by the run.
 
 The examples are deliberately scoped so the graph can be read and adapted, while the real-data paths point to established microscopy data sources such as the Cell Image Library, BBBC038, and the Cell Tracking Challenge.
 
@@ -17,6 +17,5 @@ The examples are deliberately scoped so the graph can be read and adapted, while
    sairpico_deconvolution
    live_cell_tracking
 
-Start with :doc:`fish_analysis` if you want to learn BioImageFlow sub-workflows.
-Use :doc:`bbbc038_segmentation_benchmark` when you need a segmentation-method comparison, and :doc:`cell_counting_phenotyping` when you need a compact segment-and-measure workflow.
-The remaining tutorials cover spot-detection parameter sweeps, restoration, deconvolution, and migration tracking.
+Start with :doc:`fish_analysis` for the most complete end-to-end example.
+The remaining pages cover spot-detection parameter sweeps, segmentation benchmarking, object measurement, restoration, deconvolution, and migration tracking.

@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 from pathlib import Path
+from typing import Any
 
 import imageio.v3 as iio
 import numpy as np
+import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[4]
-SOURCE_ROOT = Path(os.environ.get("BIOIMAGEFLOW_DOC_ASSET_SOURCE", ROOT))
+SOURCE_ROOT = Path(os.environ.get("BIOIMAGEFLOW_DOC_ASSET_SOURCE", ROOT)).resolve()
+EXAMPLE_WORKFLOWS = SOURCE_ROOT / "example_workflows"
+OUTPUTS_ROOT = Path(
+    os.environ.get("BIOIMAGEFLOW_DOC_WORKFLOW_OUTPUTS", EXAMPLE_WORKFLOWS / "outputs")
+).resolve()
 OUT = Path(__file__).resolve().parent
+
+
+class WorkflowArtifactError(RuntimeError):
+    """Raised when a required real workflow artifact is unavailable."""
 
 
 def _font(size: int = 18) -> ImageFont.ImageFont:
@@ -21,22 +32,23 @@ def _font(size: int = 18) -> ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def _read_image(path: Path) -> np.ndarray | None:
+def _read_image(path: Path) -> np.ndarray:
     if not path.exists():
-        return None
+        raise FileNotFoundError(f"Required image does not exist: {path}")
     return np.asarray(iio.imread(path))
 
 
-def _read_first_match(pattern: str) -> np.ndarray | None:
-    for path in sorted(SOURCE_ROOT.glob(pattern)):
-        return _read_image(path)
-    return None
+def _require_path(path: Path, label: str) -> Path:
+    if not path.exists():
+        raise FileNotFoundError(f"Required {label} does not exist: {path}")
+    return path
 
 
 def _normalize(image: np.ndarray) -> np.ndarray:
     data = np.asarray(image, dtype=float)
+    data = np.squeeze(data)
     if data.ndim > 2:
-        data = data[..., 0]
+        data = data[..., 0] if data.shape[-1] in {3, 4} else data[0]
     low, high = np.percentile(data, [1, 99.8])
     if high <= low:
         high = float(data.max() or 1)
@@ -45,7 +57,22 @@ def _normalize(image: np.ndarray) -> np.ndarray:
     return (scaled * 255).astype(np.uint8)
 
 
+def _as_gray(image: np.ndarray) -> np.ndarray:
+    data = np.asarray(image)
+    data = np.squeeze(data)
+    if data.ndim == 2:
+        return data
+    if data.ndim == 3 and data.shape[-1] in {3, 4}:
+        return data[..., :3].mean(axis=-1)
+    if data.ndim == 3:
+        return data.max(axis=0)
+    raise ValueError(f"Expected a 2D or 3D image, got shape {data.shape}.")
+
+
 def _center_crop(image: np.ndarray, size: int = 360) -> np.ndarray:
+    image = np.asarray(image)
+    if image.ndim == 3 and image.shape[0] not in {3, 4} and image.shape[-1] not in {3, 4}:
+        image = image[0]
     if image.ndim == 3 and image.shape[0] in {3, 4}:
         _, height, width = image.shape
         y0 = max((height - size) // 2, 0)
@@ -58,14 +85,15 @@ def _center_crop(image: np.ndarray, size: int = 360) -> np.ndarray:
 
 
 def _rgb_from_cyx(image: np.ndarray) -> np.ndarray:
-    if image is None or image.ndim != 3:
-        image = _fish_like_image()
+    image = np.asarray(image)
+    if image.ndim != 3:
+        return np.repeat(_normalize(image)[..., None], 3, axis=-1)
     if image.shape[0] >= 3:
         ch0 = _normalize(image[0])
         ch1 = _normalize(image[1])
         ch2 = _normalize(image[2])
         return np.stack([ch1, ch0, ch2], axis=-1)
-    return np.repeat(_normalize(image)[..., None], 3, axis=-1)
+    return np.repeat(_normalize(image[0])[..., None], 3, axis=-1)
 
 
 def _label_edges(labels: np.ndarray) -> np.ndarray:
@@ -163,38 +191,6 @@ def _draw_table(rows: list[tuple[str, str]], size: tuple[int, int] = (760, 420))
     return image
 
 
-def _fish_like_image(size: int = 420) -> np.ndarray:
-    yy, xx = np.mgrid[0:size, 0:size]
-    rng = np.random.default_rng(12)
-    image = np.zeros((3, size, size), dtype=np.uint8)
-    for cy, cx, radius in [(145, 160, 38), (245, 245, 52), (295, 145, 34), (145, 295, 30)]:
-        image[2, (yy - cy) ** 2 + (xx - cx) ** 2 <= radius**2] = 150
-    for channel, count, value in [(0, 90, 210), (1, 75, 230)]:
-        points = rng.integers(35, size - 35, size=(count, 2))
-        for cy, cx in points:
-            image[channel, cy - 1 : cy + 2, cx - 1 : cx + 2] = value
-    image += rng.integers(0, 18, size=image.shape, dtype=np.uint8)
-    return image
-
-
-def _bbbc_like() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    yy, xx = np.mgrid[0:420, 0:420]
-    image = np.zeros((420, 420), dtype=float)
-    reference = np.zeros((420, 420), dtype=np.uint16)
-    centers = [(95, 120, 42), (170, 270, 55), (285, 145, 48), (300, 310, 38)]
-    for label, (cy, cx, radius) in enumerate(centers, start=1):
-        mask = (yy - cy) ** 2 + (xx - cx) ** 2 <= radius**2
-        reference[mask] = label
-        image += mask.astype(float) * (0.55 + label * 0.07)
-    image += np.linspace(0.04, 0.15, image.shape[1])[None, :]
-    rng = np.random.default_rng(8)
-    image += rng.normal(0, 0.025, image.shape)
-    image = np.clip(image, 0, 1)
-    shifted = np.roll(reference, shift=6, axis=1)
-    classical = (image > 0.35).astype(np.uint8)
-    return (image * 255).astype(np.uint8), reference, shifted, classical * 255
-
-
 def _color_labels(labels: np.ndarray) -> np.ndarray:
     labels = np.asarray(labels)
     palette = np.array(
@@ -205,10 +201,12 @@ def _color_labels(labels: np.ndarray) -> np.ndarray:
             [80, 190, 120],
             [220, 170, 70],
             [170, 110, 220],
+            [70, 190, 190],
+            [230, 120, 180],
         ],
         dtype=np.uint8,
     )
-    return palette[labels % len(palette)]
+    return palette[labels.astype(np.uint64) % len(palette)]
 
 
 def _channel_color(channel: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
@@ -229,22 +227,13 @@ def _dilate_mask(mask: np.ndarray, radius: int = 2) -> np.ndarray:
     return result
 
 
-def _label_spot_overlay(
-    labels: np.ndarray | None,
-    fols2_spots: np.ndarray | None,
-    csf1r_spots: np.ndarray | None,
-    fallback_rgb: np.ndarray,
-) -> np.ndarray:
-    if labels is None:
-        overlay = np.clip(fallback_rgb.astype(float) * 0.35, 0, 255).astype(np.uint8)
-    else:
-        colored = _color_labels(labels)
-        background = np.full_like(colored, [14, 16, 22])
-        overlay = np.where((np.asarray(labels) > 0)[..., None], colored, background)
-    if fols2_spots is not None:
-        overlay[_dilate_mask(fols2_spots, radius=2)] = [60, 255, 120]
-    if csf1r_spots is not None:
-        overlay[_dilate_mask(csf1r_spots, radius=2)] = [255, 70, 80]
+def _label_spot_overlay(labels: np.ndarray, fols2_spots: np.ndarray, csf1r_spots: np.ndarray) -> np.ndarray:
+    labels = np.asarray(labels)
+    colored = _color_labels(labels)
+    background = np.full_like(colored, [14, 16, 22])
+    overlay = np.where((labels > 0)[..., None], colored, background)
+    overlay[_dilate_mask(fols2_spots, radius=2)] = [60, 255, 120]
+    overlay[_dilate_mask(csf1r_spots, radius=2)] = [255, 70, 80]
     return overlay
 
 
@@ -261,19 +250,231 @@ def _overlay(base: np.ndarray, labels: np.ndarray | None = None, spots: np.ndarr
     return rgb
 
 
+def _resolve_link(link_path: Path, *, kind: str | None = None) -> Path:
+    payload = json.loads(link_path.read_text())
+    if payload.get("schema") != "bioimageflow.link.v1":
+        raise WorkflowArtifactError(f"Invalid BioImageFlow link schema: {link_path}")
+    if kind is not None and payload.get("kind") != kind:
+        raise WorkflowArtifactError(f"Expected {kind} link at {link_path}, got {payload.get('kind')!r}.")
+    target = payload.get("target")
+    if not isinstance(target, str) or not target:
+        raise WorkflowArtifactError(f"BioImageFlow link has no target: {link_path}")
+    target_path = Path(target)
+    return target_path if target_path.is_absolute() else (link_path.parent / target_path).resolve()
+
+
+class WorkflowArtifacts:
+    def __init__(self, workflow: str) -> None:
+        self.workflow = workflow
+        self.storage_root = self._find_storage_root()
+
+    def _find_storage_root(self) -> Path:
+        candidates = [OUTPUTS_ROOT / self.workflow, OUTPUTS_ROOT / self.workflow / "bif"]
+        for candidate in candidates:
+            if (candidate / "views").exists() or (candidate / "cache" / "v1").exists():
+                return candidate
+        raise WorkflowArtifactError(
+            f"No workflow storage found for {self.workflow!r}. Expected one of: "
+            + ", ".join(str(path) for path in candidates)
+        )
+
+    @property
+    def runs_root(self) -> Path:
+        return self.storage_root / "views" / "runs"
+
+    @property
+    def latest_root(self) -> Path:
+        return self.storage_root / "views" / "latest"
+
+    def latest_run_dir(self) -> Path:
+        latest = self.runs_root / "latest-success.bioimageflow-link.json"
+        if latest.exists():
+            return _resolve_link(latest, kind="directory")
+        runs = [
+            path
+            for path in sorted(self.runs_root.glob("run_*"))
+            if (path / "run.json").exists()
+            and json.loads((path / "run.json").read_text()).get("status") == "succeeded"
+        ]
+        if not runs:
+            raise WorkflowArtifactError(f"No successful run view found for {self.workflow}.")
+        return runs[-1]
+
+    def latest_node_dir(self, node_key: str) -> Path:
+        latest_link = self.latest_root.joinpath(*node_key.split("/")).with_suffix(".bioimageflow-link.json")
+        if latest_link.exists():
+            return _resolve_link(latest_link, kind="directory")
+        node_dir = self.latest_run_dir() / "nodes" / node_key
+        if (node_dir / "result.json").exists():
+            return node_dir
+        raise WorkflowArtifactError(f"No latest run view found for node {self.workflow}/{node_key}.")
+
+    def node_keys(self) -> list[str]:
+        run_nodes = self.latest_run_dir() / "nodes"
+        if not run_nodes.exists():
+            return []
+        return sorted(
+            str(path.relative_to(run_nodes).parent).replace(os.sep, "/")
+            for path in run_nodes.rglob("result.json")
+        )
+
+    def record_dir(self, node_key: str) -> Path:
+        node_dir = self.latest_node_dir(node_key)
+        result_path = node_dir / "result.json"
+        payload = json.loads(result_path.read_text())
+        canonical = payload.get("canonical")
+        if isinstance(canonical, str) and canonical:
+            return (result_path.parent / canonical).resolve()
+        record_link = node_dir / "record.bioimageflow-link.json"
+        if record_link.exists():
+            return _resolve_link(record_link, kind="directory")
+        raise WorkflowArtifactError(f"Node result has no canonical record: {self.workflow}/{node_key}")
+
+    def dataframe(self, node_key: str) -> pd.DataFrame:
+        record_dir = self.record_dir(node_key)
+        manifest_path = record_dir / "manifest.json"
+        dataframe_path = record_dir / "dataframe.parquet"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+            dataframe = manifest.get("dataframe")
+            if isinstance(dataframe, dict) and isinstance(dataframe.get("path"), str):
+                dataframe_path = record_dir / dataframe["path"]
+        if dataframe_path.exists():
+            if dataframe_path.suffix == ".csv":
+                return pd.read_csv(dataframe_path)
+            return pd.read_parquet(dataframe_path)
+        csv_path = record_dir / "dataframe.csv"
+        if csv_path.exists():
+            return pd.read_csv(csv_path)
+        raise WorkflowArtifactError(f"No dataframe found for {self.workflow}/{node_key} in {record_dir}.")
+
+    def node_with_columns(
+        self,
+        node_candidates: list[str],
+        columns: set[str],
+        *,
+        prefixes: tuple[str, ...] = (),
+        name_contains: tuple[str, ...] = (),
+    ) -> str:
+        for node_key in node_candidates:
+            try:
+                df = self.dataframe(node_key)
+            except (FileNotFoundError, WorkflowArtifactError):
+                continue
+            if columns.issubset(df.columns):
+                return node_key
+        for node_key in self.node_keys():
+            if node_key in node_candidates:
+                continue
+            if prefixes and not node_key.startswith(prefixes):
+                continue
+            if name_contains and not any(fragment in node_key for fragment in name_contains):
+                continue
+            try:
+                df = self.dataframe(node_key)
+            except (FileNotFoundError, WorkflowArtifactError):
+                continue
+            if columns.issubset(df.columns):
+                return node_key
+        raise WorkflowArtifactError(
+            f"No node in {self.workflow} exposes dataframe columns {sorted(columns)}."
+        )
+
+    def path_from_column(self, node_key: str, column: str, row: int = 0) -> Path:
+        record_dir = self.record_dir(node_key)
+        df = self.dataframe(node_key)
+        if column not in df.columns:
+            raise WorkflowArtifactError(f"{self.workflow}/{node_key} has no column {column!r}.")
+        if len(df) <= row:
+            raise WorkflowArtifactError(f"{self.workflow}/{node_key} has no row {row}.")
+        value = df[column].iloc[row]
+        if pd.isna(value):
+            raise WorkflowArtifactError(f"{self.workflow}/{node_key}.{column} row {row} is null.")
+        return self._resolve_record_path(record_dir, Path(str(value)))
+
+    def paths_from_column(self, node_key: str, column: str) -> list[Path]:
+        record_dir = self.record_dir(node_key)
+        df = self.dataframe(node_key)
+        if column not in df.columns:
+            raise WorkflowArtifactError(f"{self.workflow}/{node_key} has no column {column!r}.")
+        paths = [self._resolve_record_path(record_dir, Path(str(value))) for value in df[column].dropna()]
+        if not paths:
+            raise WorkflowArtifactError(f"{self.workflow}/{node_key}.{column} has no path values.")
+        return paths
+
+    def _resolve_record_path(self, record_dir: Path, value: Path) -> Path:
+        candidates: list[Path]
+        if value.is_absolute():
+            candidates = [value]
+        else:
+            candidates = [record_dir / value, self.storage_root / value, SOURCE_ROOT / value, ROOT / value]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        raise FileNotFoundError(
+            f"Path-valued workflow output does not exist for {self.workflow}: {value}"
+        )
+
+
+def _real_fish_image() -> Path:
+    return _require_path(
+        EXAMPLE_WORKFLOWS / "fish_analysis" / "data" / "13432.tif",
+        "FISH CIL 13432 input image",
+    )
+
+
+def _bbbc_sample_root() -> Path:
+    stage_dir = EXAMPLE_WORKFLOWS / "bbbc038_segmentation_benchmark" / "data" / "stage1_train"
+    samples = sorted(path for path in stage_dir.glob("*") if path.is_dir())
+    if not samples:
+        raise FileNotFoundError(f"No BBBC038 samples found in {stage_dir}")
+    return samples[0]
+
+
+def _bbbc_input_image() -> Path:
+    sample = _bbbc_sample_root()
+    images = sorted((sample / "images").glob("*"))
+    if not images:
+        raise FileNotFoundError(f"No BBBC038 input image found in {sample / 'images'}")
+    return images[0]
+
+
+def _bbbc_reference_labels() -> np.ndarray:
+    artifacts = WorkflowArtifacts("bbbc038_segmentation_benchmark")
+    return _read_image(artifacts.path_from_column("build_reference_labels", "reference_label_image"))
+
+
+def _format_number(value: Any, digits: int = 3) -> str:
+    if isinstance(value, (float, np.floating)):
+        return f"{float(value):.{digits}g}"
+    return str(value)
+
+
 def fish_assets() -> None:
-    image = _read_image(SOURCE_ROOT / "example_workflows/fish_analysis/data/13432.tif")
-    image = _center_crop(image if image is not None else _fish_like_image(), 420)
+    image = _center_crop(_read_image(_real_fish_image()), 420)
     rgb = _rgb_from_cyx(image)
-    nuclei = _read_first_match("fish_results/data/cellpose_nuclei/*/assets/13432.ome_ch2_mask.tiff")
-    fols2_spots = _read_first_match("fish_results/data/atlas_fols2/*/assets/13432.ome_ch0_detections.tiff")
-    csf1r_spots = _read_first_match("fish_results/data/atlas_csf*/*/assets/13432.ome_ch1_detections.tiff")
-    if nuclei is not None:
-        nuclei = _center_crop(nuclei, 420)
-    if fols2_spots is not None:
-        fols2_spots = _center_crop(fols2_spots, 420)
-    if csf1r_spots is not None:
-        csf1r_spots = _center_crop(csf1r_spots, 420)
+    artifacts = WorkflowArtifacts("fish_analysis")
+    nuclei = _center_crop(_read_image(artifacts.path_from_column("cellpose3_nuclei", "mask")), 420)
+    fols2_node = artifacts.node_with_columns(
+        [
+            "fols2_marker_spot_analysis/AtlasSpotDetection_1",
+            "fols2_marker_spot_analysis/ConnectedComponents_1",
+        ],
+        {"output_image"},
+        prefixes=("fols2_marker_spot_analysis/",),
+        name_contains=("AtlasSpotDetection", "ConnectedComponents"),
+    )
+    csf1r_node = artifacts.node_with_columns(
+        [
+            "csf1r_marker_spot_analysis/AtlasSpotDetection_1",
+            "csf1r_marker_spot_analysis/ConnectedComponents_1",
+        ],
+        {"output_image"},
+        prefixes=("csf1r_marker_spot_analysis/",),
+        name_contains=("AtlasSpotDetection", "ConnectedComponents"),
+    )
+    fols2_spots = _center_crop(_read_image(artifacts.path_from_column(fols2_node, "output_image")), 420)
+    csf1r_spots = _center_crop(_read_image(artifacts.path_from_column(csf1r_node, "output_image")), 420)
     _save_image_grid(
         "fish_analysis",
         "fish_input_channels.png",
@@ -287,88 +488,92 @@ def fish_assets() -> None:
     _save_image_grid(
         "fish_analysis",
         "fish_spot_segmentation_overlay.png",
-        [
-            _label_spot_overlay(nuclei, fols2_spots, csf1r_spots, rgb),
-        ],
+        [_label_spot_overlay(nuclei, fols2_spots, csf1r_spots)],
         columns=1,
         gap=0,
     )
 
 
 def parameter_assets() -> None:
-    image = _read_image(SOURCE_ROOT / "fish_results/data/extract_ch0_fols2/20260506_155935_a13cf5fa056e/assets/13432.ome_ch0.tiff")
-    detection = _read_image(SOURCE_ROOT / "parameter_space_results/data/atlas_detections/20260506_141146_03ca326e4c47/assets/13432_detections.tif")
-    mosaic = _read_image(SOURCE_ROOT / "parameter_space_results/data/results_mosaic/20260506_141216_557fb6fdbbab/assets/results_mosaic_mosaic.png")
-    if image is None:
-        image = _fish_like_image()[0]
-    if detection is None:
-        detection = image > np.percentile(image, 99.2)
-    if mosaic is None:
-        mosaic = np.tile(_normalize(detection), (2, 3))
-    image = _center_crop(image, 420)
-    detection = _center_crop(detection, 420)
-    mosaic = _normalize(mosaic)
-    _save_grid(
+    raw = _center_crop(_read_image(_real_fish_image()), 420)
+    marker = raw[0] if raw.ndim == 3 else raw
+    artifacts = WorkflowArtifacts("parameter_space_exploration")
+    detections_node = artifacts.node_with_columns(["atlas_detections"], {"output_image"}, name_contains=("atlas",))
+    detection_paths = artifacts.paths_from_column(detections_node, "output_image")
+    mosaic_path = artifacts.path_from_column("results_mosaic", "mosaic_path")
+    _save_image_grid(
         "parameter_space_exploration",
         "atlas_input_and_mask.png",
         [
-            _panel("FISH marker-channel crop", _normalize(image)),
-            _panel("One ATLAS detection mask", _normalize(detection)),
+            _rgb_from_cyx(raw),
+            _channel_color(marker, (0, 255, 90)),
         ],
     )
-    table = _draw_table(
-        [
-            ("parameter rows", "image count x sensitivity x size"),
-            ("preserved columns", "path, sensitivity, size"),
-            ("measured columns", "spot count, foreground fraction"),
-            ("preview", "mosaic of ATLAS masks"),
-        ]
-    )
-    _save_grid(
+    detection_images = [_normalize(_center_crop(_read_image(path), 420)) for path in detection_paths]
+    if len(detection_images) < 2:
+        detection_images = [_normalize(_read_image(mosaic_path))]
+        columns = 1
+    else:
+        columns = min(3, len(detection_images))
+    _save_image_grid(
         "parameter_space_exploration",
         "parameter_results.png",
-        [
-            _panel("Mosaic preview from parameter sweep", mosaic),
-            _panel("Parameter-results table", table),
-        ],
+        detection_images,
+        columns=columns,
+        gap=0,
     )
 
 
 def bbbc_assets() -> None:
-    image, reference, cellpose_like, classical = _bbbc_like()
-    _save_grid(
+    image = _center_crop(_as_gray(_read_image(_bbbc_input_image())), 420)
+    reference = _center_crop(_bbbc_reference_labels(), 420)
+    _save_image_grid(
         "bbbc038_segmentation_benchmark",
         "bbbc038_input_reference.png",
         [
-            _panel("BBBC038-style nuclei image", image),
-            _panel("Reference instance masks", _color_labels(reference)),
+            _normalize(image),
+            _color_labels(reference),
         ],
     )
-    _save_grid(
+    artifacts = WorkflowArtifacts("bbbc038_segmentation_benchmark")
+    overlays: list[np.ndarray] = []
+    for node_key in [
+        "benchmark_cellpose3",
+        "benchmark_cellpose_sam",
+        "benchmark_stardist",
+        "benchmark_classical_threshold",
+    ]:
+        overlays.append(_read_image(artifacts.path_from_column(node_key, "overlay_image")))
+    _save_image_grid(
         "bbbc038_segmentation_benchmark",
         "bbbc038_method_overlays.png",
-        [
-            _panel("Cellpose-style prediction overlay", _overlay(image, cellpose_like, None)),
-            _panel("Classical threshold branch", _overlay(image, classical, None)),
-        ],
+        overlays,
+        columns=2,
+        gap=8,
     )
 
 
 def cell_counting_assets() -> None:
-    image, labels, _, _ = _bbbc_like()
+    image = _center_crop(_as_gray(_read_image(_bbbc_input_image())), 420)
+    artifacts = WorkflowArtifacts("cell_counting_phenotyping")
+    labels = _center_crop(_read_image(artifacts.path_from_column("segment_cells", "labels")), 420)
+    summary = artifacts.dataframe("summarize_phenotypes")
+    if summary.empty:
+        raise WorkflowArtifactError("cell_counting_phenotyping/summarize_phenotypes is empty.")
+    row = summary.iloc[0]
     table = _draw_table(
         [
-            ("object_count", "4 cells"),
-            ("mean_area", "measured from labels"),
-            ("mean_intensity", "measured inside each object"),
-            ("shape features", "perimeter and equivalent diameter"),
+            ("object_count", _format_number(row["object_count"], 0)),
+            ("mean_area", _format_number(row["mean_area"])),
+            ("mean_intensity", _format_number(row["mean_intensity"])),
+            ("mean_perimeter", _format_number(row["mean_perimeter"])),
         ]
     )
     _save_grid(
         "cell_counting_phenotyping",
         "cell_counting_input_labels.png",
         [
-            _panel("Microscopy crop for counting", image),
+            _panel("Microscopy crop for counting", _normalize(image)),
             _panel("Segmented object labels", _color_labels(labels)),
         ],
     )
@@ -383,19 +588,21 @@ def cell_counting_assets() -> None:
 
 
 def restoration_assets() -> None:
-    base = _read_image(SOURCE_ROOT / "fish_results/data/extract_ch2_nuclei/20260506_155935_b0162d53a5e9/assets/13432.ome_ch2.tiff")
-    if base is None:
-        base = _fish_like_image()[2]
-    clean = _center_crop(_normalize(base), 420)
-    rng = np.random.default_rng(4)
-    degraded = np.clip(clean.astype(float) * 0.45 + rng.normal(18, 18, clean.shape), 0, 255).astype(np.uint8)
-    restored = np.clip(degraded.astype(float) * 1.55 - 18, 0, 255).astype(np.uint8)
+    artifacts = WorkflowArtifacts("low_snr_restoration")
+    results = artifacts.dataframe("restoration_results")
+    if results.empty:
+        raise WorkflowArtifactError("low_snr_restoration/restoration_results is empty.")
+    row = results.iloc[0]
+    record_dir = artifacts.record_dir("restoration_results")
+    clean = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["clean_image"])))), 420)
+    degraded = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["degraded_image"])))), 420)
+    restored = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["restored_image"])))), 420)
     table = _draw_table(
         [
-            ("comparison", "degraded vs restored"),
-            ("metric", "MSE and PSNR against clean reference"),
-            ("checkpoint", "CAREamics / Noise2Void-style model"),
-            ("preview", "side-by-side validation crop"),
+            ("mse_degraded", _format_number(row["mse_degraded"])),
+            ("mse_restored", _format_number(row["mse_restored"])),
+            ("degraded_psnr", _format_number(row["degraded_psnr"])),
+            ("restored_psnr", _format_number(row["restored_psnr"])),
         ]
     )
     _save_grid(
@@ -417,21 +624,22 @@ def restoration_assets() -> None:
 
 
 def sairpico_assets() -> None:
-    base = _read_image(SOURCE_ROOT / "fish_results/data/extract_ch2_nuclei/20260506_155935_b0162d53a5e9/assets/13432.ome_ch2.tiff")
-    if base is None:
-        base = _fish_like_image()[2]
-    image = _center_crop(_normalize(base), 420)
-    yy, xx = np.mgrid[-80:81, -80:81]
-    psf = np.exp(-((xx**2 + yy**2) / (2 * 18.0**2)))
-    psf = _normalize(psf)
-    denoised = np.clip(image.astype(float) * 0.85 + 18, 0, 255).astype(np.uint8)
-    sharpened = np.clip(image.astype(float) * 1.35 - denoised.astype(float) * 0.25, 0, 255).astype(np.uint8)
+    artifacts = WorkflowArtifacts("sairpico_deconvolution")
+    metrics = artifacts.dataframe("sairpico_deconvolution_metrics")
+    if metrics.empty:
+        raise WorkflowArtifactError("sairpico_deconvolution/sairpico_deconvolution_metrics is empty.")
+    row = metrics.iloc[0]
+    record_dir = artifacts.record_dir("sairpico_deconvolution_metrics")
+    input_image = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["input_image"])))), 420)
+    psf = _normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["psf_image"]))))
+    denoised = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["denoised_image"])))), 420)
+    deconvolved = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["deconvolved_image"])))), 420)
     _save_grid(
         "sairpico_deconvolution",
         "sairpico_input_psf.png",
         [
-            _panel("Microscopy crop supplied to SAIRPICO", image),
-            _panel("Generated Gaussian PSF", psf),
+            _panel("Microscopy crop supplied to SAIRPICO", input_image),
+            _panel("Workflow-generated Gaussian PSF", psf),
         ],
     )
     _save_grid(
@@ -439,43 +647,81 @@ def sairpico_assets() -> None:
         "sairpico_outputs.png",
         [
             _panel("Denoised image", denoised),
-            _panel("Richardson-Lucy deconvolution", sharpened),
+            _panel("Richardson-Lucy deconvolution", deconvolved),
         ],
     )
 
 
+def _tracking_label_movie_path() -> Path:
+    candidates = [
+        EXAMPLE_WORKFLOWS / "live_cell_tracking" / "data" / "ctc_label_movie.tif",
+        EXAMPLE_WORKFLOWS / "live_cell_tracking" / "ctc_label_movie.tif",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "No real live-cell tracking label movie found. Expected ctc_label_movie.tif "
+        "under example_workflows/live_cell_tracking/data/."
+    )
+
+
+def _crop_offsets(shape: tuple[int, int], size: int = 420) -> tuple[int, int]:
+    height, width = shape
+    return max((height - size) // 2, 0), max((width - size) // 2, 0)
+
+
 def tracking_assets() -> None:
-    size = 420
-    yy, xx = np.mgrid[0:size, 0:size]
-    frames = []
-    tracks = Image.new("RGB", (size, size), "white")
+    labels = np.asarray(_read_image(_tracking_label_movie_path()))
+    if labels.ndim == 2:
+        labels = labels[np.newaxis, ...]
+    if labels.ndim != 3:
+        raise ValueError(f"Expected TYX tracking labels, got shape {labels.shape}.")
+    frame_indices = sorted({0, min(2, labels.shape[0] - 1), labels.shape[0] - 1})
+    frames = [_color_labels(_center_crop(labels[index], 420)) for index in frame_indices]
+    artifacts = WorkflowArtifacts("live_cell_tracking")
+    metrics = artifacts.dataframe("migration_metrics")
+    if metrics.empty:
+        raise WorkflowArtifactError("live_cell_tracking/migration_metrics is empty.")
+    tracks_df = artifacts.dataframe("ultrack_tracks")
+    required_track_columns = {"track_id", "frame", "y", "x"}
+    if not required_track_columns.issubset(tracks_df.columns):
+        raise WorkflowArtifactError(
+            "live_cell_tracking/ultrack_tracks is missing real track centroid columns: "
+            + ", ".join(sorted(required_track_columns - set(tracks_df.columns)))
+        )
+    y0, x0 = _crop_offsets(labels.shape[-2:], 420)
+    tracks = Image.new("RGB", (420, 420), "white")
     draw = ImageDraw.Draw(tracks)
-    paths = [[(85 + t * 42, 105 + t * 22) for t in range(5)], [(310 - t * 34, 300 - t * 18) for t in range(5)]]
-    colors = [(230, 80, 80), (55, 130, 220)]
-    for time in [0, 2, 4]:
-        frame = np.zeros((size, size), dtype=np.uint8)
-        for label, path in enumerate(paths, start=1):
-            cy, cx = path[time]
-            frame[(yy - cy) ** 2 + (xx - cx) ** 2 <= 24**2] = label
-        frames.append(_color_labels(frame))
-    for color, path in zip(colors, paths, strict=False):
-        draw.line([(cx, cy) for cy, cx in path], fill=color, width=8)
-        for cy, cx in path:
-            draw.ellipse((cx - 12, cy - 12, cx + 12, cy + 12), fill=color)
+    colors = [(230, 80, 80), (55, 130, 220), (80, 170, 110), (180, 110, 220)]
+    for index, (track_id, table) in enumerate(tracks_df.groupby("track_id")):
+        points = []
+        for _, point in table.sort_values("frame").iterrows():
+            x = int(round(float(point["x"]) - x0))
+            y = int(round(float(point["y"]) - y0))
+            if 0 <= x < 420 and 0 <= y < 420:
+                points.append((x, y))
+        if len(points) >= 2:
+            draw.line(points, fill=colors[index % len(colors)], width=6)
+        for x, y in points:
+            draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=colors[index % len(colors)])
+        if points:
+            draw.text(points[-1], str(track_id), fill=(30, 40, 50), font=_font(14))
+    row = metrics.iloc[0]
     table = _draw_table(
         [
-            ("track_length", "frames linked per cell"),
-            ("displacement", "start-to-end distance"),
-            ("mean_speed", "frame-to-frame movement"),
-            ("scope", "migration only, no lineage calls"),
+            ("track_count", _format_number(row["track_count"], 0)),
+            ("mean_track_length", _format_number(row["mean_track_length"])),
+            ("displacement", _format_number(row["displacement"])),
+            ("mean_speed", _format_number(row["mean_speed"])),
         ]
     )
     _save_grid(
         "live_cell_tracking",
         "tracking_label_movie.png",
         [
-            _panel("Label movie frame 0", frames[0]),
-            _panel("Label movie frame 4", frames[-1]),
+            _panel(f"Label movie frame {frame_indices[0]}", frames[0]),
+            _panel(f"Label movie frame {frame_indices[-1]}", frames[-1]),
         ],
     )
     _save_grid(

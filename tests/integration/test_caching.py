@@ -288,10 +288,10 @@ class TestDependencyNormalization:
     def test_sorted_dependencies_produce_same_hash(self):
         """Dependency list order does not affect the hash."""
         env1 = EnvironmentSpec(
-            name="test", dependencies={"conda": ["numpy", "cellpose"]}
+            name="test", dependencies={"conda": ["numpy=2.4.2", "cellpose==3.0"]}
         )
         env2 = EnvironmentSpec(
-            name="test", dependencies={"conda": ["cellpose", "numpy"]}
+            name="test", dependencies={"conda": ["cellpose==3.0", "numpy=2.4.2"]}
         )
         # Both should normalize to the same hash
         from bioimageflow.cache import compute_env_hash

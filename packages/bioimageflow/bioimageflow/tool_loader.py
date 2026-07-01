@@ -74,8 +74,13 @@ def load_versioned_package(
     hook = _ScopedImporter(scoped_name, pkg_dir)
     sys.meta_path.insert(0, hook)
     try:
-        assert spec.loader is not None
-        spec.loader.exec_module(mod)
+        try:
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            _materialize_public_exports(mod)
+        except Exception:
+            unload_versioned_package(package, version)
+            raise
     finally:
         sys.meta_path.remove(hook)
 
@@ -210,6 +215,23 @@ class _ScopedImporter:
             return importlib.util.spec_from_file_location(fullname, py_file)
 
         return None
+
+
+def _materialize_public_exports(mod: ModuleType) -> None:
+    """Resolve lazy package exports declared in ``__all__``.
+
+    Tool packages may use package-level ``__getattr__`` to lazily import
+    public classes. Versioned package discovery still needs those classes
+    loaded before stamping, so materialize the standard public export list
+    while the scoped import hook is active.
+    """
+    exports = getattr(mod, "__all__", ())
+    if not exports:
+        return
+    for name in exports:
+        if not isinstance(name, str):
+            continue
+        getattr(mod, name)
 
 
 def _stamp_tool_classes(package: str, version: str) -> None:
@@ -450,5 +472,4 @@ def require_tool_packages(
 def _get_tool_store_path() -> Path:
     """Return the tool store path, configurable via environment variable."""
     return get_tool_store_path()
-
 

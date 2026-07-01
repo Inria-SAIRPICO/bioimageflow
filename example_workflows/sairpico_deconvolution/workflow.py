@@ -18,6 +18,9 @@ from bioimageflow_sairpico_tools import (
     RichardsonLucyDeconvolution,
 )
 
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "sairpico_deconvolution"
+
 
 class DeconvolutionMetrics(DataFrameTool):
     """Compute simple sharpness and residual-noise metrics."""
@@ -74,7 +77,7 @@ def _sharpness(image: np.ndarray) -> float:
 
 def build_workflow(
     input_image: str | None = None,
-    storage_path: str = "./sairpico_deconvolution_results",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> tuple[Workflow, Node]:
@@ -83,7 +86,7 @@ def build_workflow(
         raise ValueError("build_workflow requires input_image.")
     storage = Path(storage_path)
     wf = Workflow(
-        storage_path=str(storage / "bif"),
+        storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
@@ -133,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument("--input-image", required=True, help="Microscopy crop to denoise and deconvolve.")
     parser.add_argument(
         "--storage-path",
-        default="./sairpico_deconvolution_results",
+        default=str(DEFAULT_STORAGE_PATH),
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()

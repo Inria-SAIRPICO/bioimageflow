@@ -2,6 +2,10 @@ workflow: parameter_space_exploration
 outputs:
   terminal_node: parameter_results
   required_columns:
+    - path
+    - sensitivity
+    - size
+    - output_image
     - mosaic_path
     - image_count
     - label_count
@@ -17,6 +21,7 @@ outputs:
     - sensitivity_values
     - size_values
     - parameter_grid
+    - extract_marker_channel
     - atlas_detections
     - spot_mask_counts
     - results_mosaic

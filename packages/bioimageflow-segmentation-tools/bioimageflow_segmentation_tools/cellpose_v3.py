@@ -18,10 +18,15 @@ from bioimageflow_core import (
 )
 
 cellpose_v3_env = EnvironmentSpec(
-    name="segmentation-cellpose-v3-3-1-1",
+    name="segmentation-cellpose-v3",
     dependencies={
         "python": "3.12",
-        "pip": ["cellpose==3.1.1.1", "imageio", "numpy", "packaging", "tifffile"],
+        "pip": [
+            "cellpose==3.1.1.1",
+            "imageio==2.37.3",
+            "packaging==26.0",
+            "tifffile==2026.3.3",
+        ],
     },
 )
 

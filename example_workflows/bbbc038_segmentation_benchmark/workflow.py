@@ -2,8 +2,7 @@
 
 The workflow consumes a BBBC038 ``stage1_train``-style subset where each sample
 has one raw image under ``images/`` and one or more instance masks under
-``masks/``. Point ``data_dir`` at a selected local BBBC038 subset to run the
-comparison.
+``masks/``.
 """
 
 import argparse
@@ -32,6 +31,10 @@ from bioimageflow_segmentation_tools import (
     StarDistSegmenter,
     ThresholdSegment,
 )
+
+EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "bbbc038_segmentation_benchmark" / "data"
+DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "bbbc038_segmentation_benchmark"
 
 
 class BBBC038Samples(DataFrameTool):
@@ -250,8 +253,8 @@ def _write_overlay(
 
 
 def build_workflow(
-    storage_path: str = "./bbbc038_segmentation_results",
-    data_dir: str = "./data/bbbc038_stage1_train_subset",
+    storage_path: str | Path = DEFAULT_STORAGE_PATH,
+    data_dir: str | Path = DEFAULT_DATA_DIR,
     sample_glob: str = "*",
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
@@ -259,13 +262,13 @@ def build_workflow(
     """Build the BBBC038 segmentation benchmark workflow."""
     storage = Path(storage_path)
     wf = Workflow(
-        storage_path=str(storage / "bif"),
+        storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
         samples = BBBC038Samples()(
-            data_dir=data_dir,
+            data_dir=str(data_dir),
             sample_glob=sample_glob,
             name="bbbc038_samples",
         )
@@ -345,12 +348,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--data-dir",
-        required=True,
+        default=str(DEFAULT_DATA_DIR),
         help="Directory containing a BBBC038 stage1_train subset.",
     )
     parser.add_argument(
         "--storage-path",
-        default="./bbbc038_segmentation_results",
+        default=str(DEFAULT_STORAGE_PATH),
         help="Directory for workflow outputs.",
     )
     parser.add_argument("--sample-glob", default="*", help="Sample folder glob.")

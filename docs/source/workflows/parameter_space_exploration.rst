@@ -1,40 +1,46 @@
-ATLAS Parameter Space Exploration
-=================================
+Exploring ATLAS Spot Detection Parameters
+=========================================
 
-``parameter_space_exploration`` helps choose ATLAS spot-detection settings before those settings are used in a marker workflow such as FISH analysis.
-It takes FISH marker-channel images, builds a small grid of ATLAS sensitivity and spot-size settings, runs every image-parameter combination, then returns a table and mosaic for review.
+The ``parameter_space_exploration`` workflow runs ATLAS spot detection over a small grid of parameter values.
+It is useful when a FISH marker channel contains real spot signal, but the right detection threshold and spot scale are not obvious from a single run.
 
-Use this tutorial when you have a marker channel where spots are real biological signal but the right p-value or scale is not obvious.
-The documented public-data path starts from a Cell Image Library FISH image, extracts a marker channel crop, and sweeps parameters on that crop.
+This demo is illustrated with fluorescence in situ hybridization images from the Cell Image Library.
+The image contains a green FOLS2 channel, a red CSF1R channel, and a blue nuclear stain; the workflow extracts the FOLS2 channel and runs the parameter sweep on that 2D marker image.
 
 .. figure:: images/parameter_space_exploration/atlas_input_and_mask.png
-   :alt: FISH marker-channel crop and an ATLAS detection mask
+   :alt: Merged CIL FISH crop and extracted FOLS2 marker channel.
 
-   The workflow works on marker-channel crops, not generated dot images.
+   Input preview from a CIL FISH image.
+   The left panel is the merged three-channel crop; the right panel is the extracted FOLS2 marker channel used for ATLAS spot detection.
 
-Run the example on a directory of marker-channel TIFFs:
+Run the workflow from the repository root:
 
 .. code-block:: bash
 
-   python example_workflows/parameter_space_exploration/workflow.py ./data ./parameter_space_results
+   python example_workflows/parameter_space_exploration/workflow.py
 
-For a real FISH tuning session, prepare one or more marker-channel crops and keep the image naming meaningful.
-The workflow preserves the image path and parameter columns so that the final rows can be traced back to both the source crop and the ATLAS settings.
+Workflow Logic
+--------------
 
-Pipeline walkthrough
---------------------
+The graph turns a list of images and a list of ATLAS settings into a concrete set of detection jobs.
+The important step is the ``CrossJoin`` node: it creates one row for every image, p-value, and Gaussian-scale combination, so downstream results keep the parameter values that produced them.
 
 .. raw:: html
 
    <pre class="mermaid">
    flowchart LR
-     images[FISH marker-channel images]:::source --> grid[CrossJoin images with ATLAS settings]:::process
-     sensitivity[Sensitivity values]:::param --> grid
-     size[Spot-size values]:::param --> grid
-     grid --> atlas[AtlasSpotDetection]:::spot
-     atlas --> metrics[Spot-mask metrics]:::metric
-     atlas --> mosaic[Mosaic preview]:::artifact
-     metrics --> results[Parameter-results table]:::metric
+     image[CIL FISH image]:::source --> files[input_images]:::process
+     sensitivity[p_value candidates]:::param --> grid[parameter_grid]:::process
+     size[scale candidates]:::param --> grid
+     files --> grid
+     grid --> channel[extract_marker_channel]:::process
+     channel --> atlas[atlas_detections]:::spot
+     grid --> atlas
+     atlas --> counts[spot_mask_counts]:::metric
+     atlas --> mosaic[results_mosaic]:::artifact
+     grid --> results[parameter_results]:::metric
+     atlas --> results
+     counts --> results
      mosaic --> results
      classDef source fill:#e7f0ff,stroke:#4b73b9,color:#1b2f55
      classDef param fill:#fff4d6,stroke:#a77a18,color:#4a3200
@@ -44,16 +50,44 @@ Pipeline walkthrough
      classDef artifact fill:#eef6f8,stroke:#4d8794,color:#16343b
    </pre>
 
-The key BioImageFlow pattern is the ``CrossJoin`` node.
-It turns a list of images and a list of parameter values into a table of concrete ATLAS runs, then every downstream row keeps the parameter context attached.
+1. ``input_images`` lists the FISH images that will be tested.
+2. ``sensitivity_values`` and ``size_values`` create the ATLAS p-value and Gaussian-scale settings.
+3. ``parameter_grid`` forms every image/parameter combination.
+4. ``extract_marker_channel`` extracts channel 0, the FOLS2 marker channel, from each FISH image.
+5. ``atlas_detections`` runs ATLAS for each row in the grid and writes one binary spot mask per setting.
+6. ``spot_mask_counts`` measures each mask by counting connected foreground components and foreground pixels.
+7. ``results_mosaic`` makes a quick visual grid of the binary masks.
+8. ``parameter_results`` returns the parameter values, mask paths, measurements, and mosaic path in one table.
 
-What you will inspect
----------------------
+Workflow Outputs
+----------------
+
+The image output is a mosaic of binary ATLAS masks.
+Each tile corresponds to one parameter pair; larger or more permissive settings usually produce more foreground, larger components, or merged spots.
 
 .. figure:: images/parameter_space_exploration/parameter_results.png
-   :alt: ATLAS parameter sweep mosaic and parameter-results table preview
+   :alt: Mosaic of ATLAS binary masks from a parameter sweep.
 
-   The mosaic shows whether detections are visually plausible, while the table makes count and foreground-area shifts easy to compare.
+   Output preview for the parameter sweep.
+   Each tile is a binary mask generated from the same FOLS2 marker channel with a different ATLAS setting.
 
-Do not choose parameters from spot count alone.
-Use the mosaic to catch settings that merge nearby spots, create broad foreground regions, or miss dim but credible signal.
+The terminal table has one row per image and parameter combination.
+A typical row looks like this:
+
+.. list-table::
+   :header-rows: 1
+
+   * - path
+     - sensitivity
+     - size
+     - output_image
+     - label_count
+     - foreground_fraction
+   * - ``.../13432.tif``
+     - ``0.001``
+     - ``60``
+     - ``.../13432_ch0_detections.tif``
+     - ``42``
+     - ``0.0031``
+
+The source path and parameter columns identify the run, ``output_image`` points to the ATLAS mask, and the count/fraction columns give a compact numerical summary to compare with the mosaic.

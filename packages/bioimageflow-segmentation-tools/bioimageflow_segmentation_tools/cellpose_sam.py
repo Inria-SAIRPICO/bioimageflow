@@ -22,8 +22,13 @@ cellpose_sam_env = EnvironmentSpec(
     name="segmentation-cellpose-sam",
     dependencies={
         "python": "3.12",
-        "pip": ["cellpose", "imageio", "numpy", "tifffile"],
-    },
+        "pip": [
+            "cellpose==4.2.1.1",
+            "imageio==2.37.3",
+            "numpy==2.4.2",
+            "tifffile==2026.3.3",
+        ],
+    }
 )
 
 
