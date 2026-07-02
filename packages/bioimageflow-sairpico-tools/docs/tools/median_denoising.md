@@ -31,7 +31,7 @@ detection, or deconvolution.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core tool abstractions.
-- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib==0.1.2`.
 - External commands: `simgmedian2d`, `simgmedian3d`, and `simgmedian4d`.
 
 ## Minimal Example

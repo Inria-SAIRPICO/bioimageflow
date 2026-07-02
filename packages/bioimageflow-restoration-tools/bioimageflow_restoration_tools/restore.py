@@ -121,9 +121,9 @@ careamics_env = EnvironmentSpec(
     dependencies={
         "python": "3.12",
         "pip": [
-            "careamics==0.3.1",
+            "careamics==0.3.2",
             "imageio==2.37.3",
-            "numpy==2.4.2",
+            "numpy==2.4.6",
             "tifffile==2026.3.3",
         ],
     }

@@ -22,11 +22,11 @@ stardist_env = EnvironmentSpec(
     dependencies={
         "python": "3.12",
         "pip": [
-            "tensorflow==2.20.0",
+            "tensorflow==2.21.0",
             "stardist==0.9.2",
             "imageio==2.37.3",
-            "numpy==2.4.2",
-            "tifffile==2026.3.3",
+            "numpy==2.4.6",
+            "tifffile==2026.6.1",
         ],
     }
 )

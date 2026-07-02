@@ -27,7 +27,7 @@ simglib_env = EnvironmentSpec(
     name="simglib",
     dependencies={
         "python": "3.9",
-        "conda": ["bioimageit::simglib=0.1.2"],
+        "conda": ["bioimageit::simglib==0.1.2"],
         "channels": ["conda-forge", "bioimageit"],
     },
 )

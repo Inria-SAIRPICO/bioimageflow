@@ -55,9 +55,9 @@ class TestCellpose3:
         tool_cls = Cellpose3
         assert env is not None
         assert tool_cls is not None
-        assert env.name == "segmentation-cellpose-v3-3-1-1"
+        assert env.name == "segmentation-cellpose-v3"
         assert "cellpose==3.1.1.1" in env.dependencies["pip"]
-        assert "packaging==26.0" in env.dependencies["pip"]
+        assert "packaging==26.2" in env.dependencies["pip"]
         assert tool_cls.environment is env
 
     def test_process_row_writes_mask(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

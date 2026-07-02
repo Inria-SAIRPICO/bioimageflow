@@ -48,6 +48,7 @@ bioimageflow-sairpico-tools = { workspace = true }
 bioimageflow-restoration-tools = { workspace = true }
 bioimageflow-spot-tools = { workspace = true }
 bioimageflow-tracking-tools = { workspace = true }
+wetlands = { path = "../wetlands", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]

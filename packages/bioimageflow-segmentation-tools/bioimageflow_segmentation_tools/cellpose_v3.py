@@ -24,7 +24,7 @@ cellpose_v3_env = EnvironmentSpec(
         "pip": [
             "cellpose==3.1.1.1",
             "imageio==2.37.3",
-            "packaging==26.0",
+            "packaging==26.2",
             "tifffile==2026.3.3",
         ],
     },

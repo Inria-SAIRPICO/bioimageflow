@@ -355,13 +355,13 @@ GENERAL_ENV = EnvironmentSpec(
     dependencies={
         "python": "3.12",
         "pip": [
-            "numpy==2.4.2",
-            "scipy==1.17.1",
+            "numpy==2.5.0",
+            "scipy==1.18.0",
             "scikit-image==0.26.0",
             "imageio==2.37.3",
-            "tifffile==2026.3.3",
-            "Pillow==12.1.1",
-            "pandas==3.0.1",
+            "tifffile==2026.6.1",
+            "Pillow==12.3.0",
+            "pandas==3.0.3",
         ]
     }
 )

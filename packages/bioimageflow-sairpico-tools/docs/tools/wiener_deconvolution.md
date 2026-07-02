@@ -30,7 +30,7 @@ sigma-based 2D approximation or a measured/synthetic 3D PSF is available.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core processing classes.
-- SAIRPICO `simglib` environment with `bioimageit::simglib=0.1.2`.
+- SAIRPICO `simglib` environment with `bioimageit::simglib==0.1.2`.
 - External commands: `simgwiener2d`, `simgwiener2dslice`, and `simgwiener3d`.
 
 ## Minimal Example

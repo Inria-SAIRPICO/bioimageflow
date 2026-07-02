@@ -25,8 +25,8 @@ nninteractive_env = EnvironmentSpec(
         "pip": [
             "nninteractive==2.5.0",
             "imageio==2.37.3",
-            "numpy==2.4.2",
-            "tifffile==2026.3.3",
+            "numpy==2.5.0",
+            "tifffile==2026.6.1",
         ],
     }
 )

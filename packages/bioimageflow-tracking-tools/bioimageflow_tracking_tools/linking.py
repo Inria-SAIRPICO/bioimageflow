@@ -95,7 +95,7 @@ ultrack_env = EnvironmentSpec(
     name="tracking-ultrack",
     dependencies={
         "python": "3.12",
-        "pip": ["ultrack==0.7.2", "numpy==2.4.2", "pandas==3.0.1"],
+        "pip": ["ultrack==0.7.2", "numpy==2.4.6", "pandas==3.0.3"],
     }
 )
 

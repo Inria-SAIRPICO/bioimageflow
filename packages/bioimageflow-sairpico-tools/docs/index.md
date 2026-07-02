@@ -26,7 +26,7 @@ The public tools are:
 
 The package declares three environments:
 
-- `simglib`: `bioimageit::simglib=0.1.2` from `conda-forge` and
+- `simglib`: `bioimageit::simglib==0.1.2` from `conda-forge` and
   `bioimageit`; used by PSF, deconvolution, and median-denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0` from `conda-forge` and
   `bioimageit`; used by `CImgDenoising`.

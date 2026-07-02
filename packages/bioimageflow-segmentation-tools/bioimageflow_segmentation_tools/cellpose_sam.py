@@ -25,8 +25,8 @@ cellpose_sam_env = EnvironmentSpec(
         "pip": [
             "cellpose==4.2.1.1",
             "imageio==2.37.3",
-            "numpy==2.4.2",
-            "tifffile==2026.3.3",
+            "numpy==2.5.0",
+            "tifffile==2026.6.1",
         ],
     }
 )
