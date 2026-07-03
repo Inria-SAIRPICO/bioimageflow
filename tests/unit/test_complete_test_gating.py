@@ -25,7 +25,6 @@ DETERMINISTIC_NON_FAST_MARKERS = (
 )
 
 COMPLETE_RESOURCE_TEST_FILES = (
-    "tests/workflow_catalog/test_complete_workflows.py",
     "packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py",
     "packages/bioimageflow-segmentation-tools/tests/test_execution.py",
     "packages/bioimageflow-sairpico-tools/tests/test_sairpico_complete_binary_tools.py",
@@ -202,6 +201,18 @@ def test_param_level_external_marker_skips_by_default(pytester) -> None:
 
     result.assert_outcomes(passed=1, skipped=1)
     result.stdout.fnmatch_lines(["*external tests require --run-complete*"])
+
+
+def test_complete_resource_test_manifest_paths_exist() -> None:
+    root = _repo_root()
+
+    missing = [
+        relative_path
+        for relative_path in COMPLETE_RESOURCE_TEST_FILES
+        if not (root / relative_path).is_file()
+    ]
+
+    assert missing == []
 
 
 def test_complete_resource_tests_do_not_gate_on_host_runtimes() -> None:

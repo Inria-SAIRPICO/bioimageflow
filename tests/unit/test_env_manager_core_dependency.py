@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import threading
 from pathlib import Path
 from typing import Any, cast
@@ -9,6 +10,7 @@ import pytest
 from bioimageflow.env_manager import (
     WetlandsEnvManager,
     _bioimageflow_core_editable_dependency,
+    _bioimageflow_core_pin,
     _local_bioimageflow_core_project,
 )
 from bioimageflow_core import EnvironmentSpec
@@ -69,6 +71,79 @@ def test_editable_core_dependency_uses_wetlands_local_package_shape() -> None:
         "path": str(project_dir),
         "editable": True,
     }
+
+
+def test_manager_defaults_to_pinned_core_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BIOIMAGEFLOW_USE_LOCAL_CORE", raising=False)
+
+    manager = WetlandsEnvManager()
+
+    assert manager._bioimageflow_core_dependency == _bioimageflow_core_pin()
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+def test_manager_uses_pinned_core_when_env_var_is_false_like(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("BIOIMAGEFLOW_USE_LOCAL_CORE", value)
+
+    manager = WetlandsEnvManager()
+
+    assert manager._bioimageflow_core_dependency == _bioimageflow_core_pin()
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_manager_uses_local_core_when_env_var_is_truthy(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("BIOIMAGEFLOW_USE_LOCAL_CORE", value)
+
+    manager = WetlandsEnvManager()
+
+    assert manager._bioimageflow_core_dependency == _bioimageflow_core_editable_dependency(
+        _local_bioimageflow_core_project()
+    )
+
+
+def test_explicit_false_overrides_truthy_local_core_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BIOIMAGEFLOW_USE_LOCAL_CORE", "1")
+
+    manager = WetlandsEnvManager(use_local_bioimageflow_core=False)
+
+    assert manager._bioimageflow_core_dependency == _bioimageflow_core_pin()
+
+
+def test_explicit_true_overrides_false_like_local_core_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BIOIMAGEFLOW_USE_LOCAL_CORE", "0")
+
+    manager = WetlandsEnvManager(use_local_bioimageflow_core=True)
+
+    assert manager._bioimageflow_core_dependency == _bioimageflow_core_editable_dependency(
+        _local_bioimageflow_core_project()
+    )
+
+
+def test_explicit_core_dependency_overrides_local_core_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BIOIMAGEFLOW_USE_LOCAL_CORE", "1")
+    dependency = "bioimageflow-core==9.9.9"
+
+    manager = WetlandsEnvManager(bioimageflow_core_dependency=dependency)
+
+    assert manager._bioimageflow_core_dependency == dependency
+
+
+def test_pinned_core_dependency_uses_installed_distribution_version() -> None:
+    assert _bioimageflow_core_pin() == (
+        f"bioimageflow-core=={importlib.metadata.version('bioimageflow-core')}"
+    )
 
 
 def test_augment_dependencies_injects_configured_local_core_dependency() -> None:

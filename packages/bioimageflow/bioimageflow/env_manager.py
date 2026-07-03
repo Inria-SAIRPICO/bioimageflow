@@ -9,6 +9,7 @@ everything else picks up the same instance automatically.
 import inspect
 import json
 import logging
+import os
 import threading
 from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -81,6 +82,11 @@ def _has_bioimageflow_core_dependency(*dependency_lists: list[Any]) -> bool:
 def _is_local_dependency(dependency: Any) -> bool:
     return isinstance(dependency, dict) and "path" in dependency
 
+
+def _env_var_is_truthy(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 # ── Shared EnvironmentManager singleton ──────────────────────────────
 
 _shared_manager: EnvironmentManager | None = None
@@ -100,6 +106,8 @@ def configure_wetlands(**config: Any) -> None:
         conda_path: Path to the pixi or micromamba installation.
         main_conda_environment_path: Main conda env for dep checking.
         debug: Enable debugpy in worker processes.
+        Use ``BIOIMAGEFLOW_USE_LOCAL_CORE=1`` to inject the local editable
+        ``bioimageflow-core`` checkout into worker environments.
     """
     global _wetlands_config, _shared_manager
     with _shared_manager_lock:
@@ -231,7 +239,7 @@ class WetlandsEnvManager:
         conda_path: str | None = None,
         main_conda_environment_path: str | None = None,
         bioimageflow_core_dependency: Any | None = None,
-        use_local_bioimageflow_core: bool = False,
+        use_local_bioimageflow_core: bool | None = None,
         **kwargs: Any,
     ) -> None:
         if wetlands_instance_path is None:
@@ -250,18 +258,26 @@ class WetlandsEnvManager:
         self._lock = threading.RLock()
         if bioimageflow_core_dependency is not None:
             self._bioimageflow_core_dependency = bioimageflow_core_dependency
-        elif use_local_bioimageflow_core:
+        else:
+            if use_local_bioimageflow_core is None:
+                use_local_bioimageflow_core = _env_var_is_truthy(
+                    "BIOIMAGEFLOW_USE_LOCAL_CORE"
+                )
+            self._bioimageflow_core_dependency = self._default_core_dependency(
+                use_local_bioimageflow_core=use_local_bioimageflow_core
+            )
+
+    @staticmethod
+    def _default_core_dependency(*, use_local_bioimageflow_core: bool) -> Any:
+        if use_local_bioimageflow_core:
             project_dir = _local_bioimageflow_core_project()
             if project_dir is None:
                 raise RuntimeError(
                     "use_local_bioimageflow_core=True requires an editable "
                     "or source checkout of bioimageflow-core."
                 )
-            self._bioimageflow_core_dependency = _bioimageflow_core_editable_dependency(
-                project_dir
-            )
-        else:
-            self._bioimageflow_core_dependency = _bioimageflow_core_pin()
+            return _bioimageflow_core_editable_dependency(project_dir)
+        return _bioimageflow_core_pin()
 
     def _augment_dependencies(self, dependencies: dict) -> Dependencies:
         """Auto-inject bioimageflow-core into the environment deps."""

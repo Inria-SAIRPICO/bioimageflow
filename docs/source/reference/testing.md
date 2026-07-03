@@ -126,7 +126,7 @@ To run one complete Wetlands package or workflow slice:
 
 ```bash
 uv run pytest packages/bioimageflow-sairpico-tools/tests -m "complete and wetlands" --run-complete
-uv run pytest tests/workflow_catalog -m "complete and wetlands" --run-complete
+uv run pytest packages/bioimageflow-common-tools/tests packages/bioimageflow-segmentation-tools/tests -m "complete and wetlands" --run-complete
 ```
 
 GitLab CI also defines manual or scheduled complete-test jobs that are separate from the required deterministic gates:
