@@ -3,6 +3,8 @@
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
 from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent, InvalidatedSelection as InvalidatedSelection, OutputView as OutputView
 from bioimageflow.engine import (
+    DefaultEngine as DefaultEngine,
+    EnvironmentLifetime as EnvironmentLifetime,
     NodeStep as NodeStep,
     NodePlan as NodePlan,
     NodePlanStatus as NodePlanStatus,
@@ -10,6 +12,7 @@ from bioimageflow.engine import (
     CycleInWorkflowError as CycleInWorkflowError,
     WorkerTaskError as WorkerTaskError,
     WorkerTimeoutError as WorkerTimeoutError,
+    SequentialEngine as SequentialEngine,
 )
 from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError, SourceToolUpstreamError as SourceToolUpstreamError
 from bioimageflow.validation import (
@@ -40,7 +43,10 @@ from bioimageflow.registry import (
     ToolMetadata as ToolMetadata,
 )
 from bioimageflow.session import WorkflowSession as WorkflowSession
-from bioimageflow.env_manager import configure_wetlands as configure_wetlands
+from bioimageflow.env_manager import (
+    WetlandsEnvManager as WetlandsEnvManager,
+    configure_wetlands as configure_wetlands,
+)
 from bioimageflow.logging_config import configure_logging as configure_logging
 from bioimageflow.paths import get_home as get_home, get_tool_store_path as get_tool_store_path, get_wetlands_path as get_wetlands_path
 
@@ -50,7 +56,9 @@ __all__ = [
     "ColumnRef",
     "CycleInWorkflowError",
     "DataFrameTool",
+    "DefaultEngine",
     "DisabledNodeError",
+    "EnvironmentLifetime",
     "IndexAlignmentError",
     "InvalidatedSelection",
     "NodePlan",
@@ -60,6 +68,7 @@ __all__ = [
     "Passthrough",
     "ProgressEvent",
     "SchemaSerializationError",
+    "SequentialEngine",
     "SourceToolUpstreamError",
     "SubWorkflow",
     "SubWorkflowNode",
@@ -67,6 +76,7 @@ __all__ = [
     "ToolRegistry",
     "ValidationError",
     "ValidationErrorKind",
+    "WetlandsEnvManager",
     "WorkerTaskError",
     "WorkerTimeoutError",
     "Workflow",

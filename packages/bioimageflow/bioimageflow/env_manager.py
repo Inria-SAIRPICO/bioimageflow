@@ -397,10 +397,36 @@ class WetlandsEnvManager:
 
     def shutdown_all(self) -> None:
         """Shut down all managed Wetlands environments."""
-        for name, env in self._envs.items():
+        with self._lock:
+            for name in list(self._envs):
+                self.stop(name)
+
+    def stop(self, env_name: str) -> bool:
+        """Stop one launched environment.
+
+        Returns ``True`` when an environment was stopped and ``False`` when
+        *env_name* was not running. The manager forgets a failed worker exit so
+        a later execution can launch a fresh environment with the same name.
+        """
+        with self._lock:
+            env = self._envs.pop(env_name, None)
+            self._launch_configs.pop(env_name, None)
+            if env is None:
+                return False
             try:
                 env.exit()
             except Exception:
-                logger.warning("Failed to shut down environment '%s'", name, exc_info=True)
-        self._envs.clear()
-        self._launch_configs.clear()
+                logger.warning(
+                    "Failed to shut down environment '%s'", env_name, exc_info=True
+                )
+            return True
+
+    def is_running(self, env_name: str) -> bool:
+        """Return whether this manager currently tracks *env_name* as launched."""
+        with self._lock:
+            return env_name in self._envs
+
+    def running_environments(self) -> tuple[str, ...]:
+        """Return the sorted names of environments currently tracked as launched."""
+        with self._lock:
+            return tuple(sorted(self._envs))

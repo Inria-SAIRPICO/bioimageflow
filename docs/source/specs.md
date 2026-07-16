@@ -25,7 +25,8 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 
 - **Wetlands** is a lightweight manager that creates Conda environments on demand from a dependency specification (e.g., `{"conda": ["cellpose==3.0"]}`).
 - **BioImageFlow** is the orchestrator: it decides *what* to run and *in which order*. **Wetlands** is the executor: it spins up isolated environments and runs Python code inside them.
-- Wetlands environments are created lazily (on first use) and kept alive for the duration of the workflow execution.
+- Wetlands environments are created lazily on first use.
+- By default they remain alive for one workflow execution, while an explicit engine ownership policy can retain them for an engine session or delegate their lifetime to an external manager.
 - Communication between the main process and worker environments uses Python's `multiprocessing.connection`, so all transferred objects must be picklable.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
 - When `max_workers > 1` is passed to `env.launch()`, Wetlands starts multiple worker processes sharing the same Conda environment on disk. Tasks are dispatched to idle workers automatically; when all workers are busy, tasks queue internally. This enables `process_row` calls within a single node to run in parallel.
@@ -2023,6 +2024,46 @@ Multiple calls with tools sharing the same environment return the same `Workflow
 | `worker_env` | `Callable[[int], dict] \| None` | `None` | Per-worker environment variables. `None` = auto-infer from `ResourceSpec`. |
 | `worker_timeout` | `float \| None` | `None` | Inactivity timeout in seconds. When set, Wetlands' health monitor marks the active task as `FAILED` and replaces the worker if it sends no IPC message within this duration — useful for catching native-code deadlocks or segfaults that don't close the pipe. The engine adds its own safety timeout of `max(worker_timeout * 1.5, worker_timeout + 60)` to `task.wait_for()`; if that fires, `WorkerTimeoutError` is raised. `None` = no timeout. |
 
+#### 4.5.1 Environment Lifetime and Ownership
+
+`DefaultEngine` and `SequentialEngine` accept an `environment_lifetime` policy.
+The public `EnvironmentLifetime` string enum defines the following values:
+
+| Value | Execution completion, failure, or cancellation | `engine.close()` | Ownership |
+|-------|-------------------------------------------------|------------------|-----------|
+| `"execution"` | Calls `WetlandsEnvManager.shutdown_all()` after every `execute()` and completed or closed `execute_steps()` generator. | Also performs an idempotent owned-manager shutdown. | Engine-owned for one execution. |
+| `"engine"` | Retains launched environments. | Shuts all environments down. | Engine-owned until close. |
+| `"external"` | Does not shut the manager down. | Does not shut the manager down. | Caller-owned; requires an injected manager. |
+
+`"execution"` is the default and preserves standalone and existing-caller behavior.
+The policy is an engine/session property rather than a per-`execute()` flag.
+Both engine classes expose idempotent `close()`, `__enter__`, and `__exit__`; executing a closed engine raises `RuntimeError`.
+`environment_manager` returns the engine's manager or `None` for a direct engine.
+
+Both engine constructors accept `env_manager=existing_manager` when `use_wetlands=True`.
+This permits several engines and compiled workflows to reuse the same launched worker processes.
+An injected manager is only externally owned when the explicit `"external"` policy is selected; the other policies retain their shutdown semantics.
+`"external"` without an injected manager is invalid.
+
+`Workflow.create_engine(environment_lifetime=..., env_manager=...)` is the public engine factory.
+It preserves the workflow's `engine` backend, sequential/parallel execution policy, `wetlands_config`, `max_workers`, and per-environment worker settings because the returned engine executes against that configured workflow.
+The former private `_make_engine()` remains a compatibility wrapper that creates the default execution-lifetime engine.
+
+`WetlandsEnvManager` provides these public, thread-safe lifecycle methods:
+
+- `stop(env_name) -> bool` stops one tracked environment and returns whether it was running.
+- `is_running(env_name) -> bool` reports whether the adapter tracks that name as launched.
+- `running_environments() -> tuple[str, ...]` returns sorted tracked environment names.
+- `shutdown_all() -> None` stops every tracked environment and is idempotent.
+
+Manager status is lifecycle introspection, not a worker health probe.
+Applications must not inspect or mutate `_envs` or `_launch_configs`.
+
+A retained worker process preserves imported libraries, CUDA process state, module registries, and the cached `ProcessingTool` instance.
+It does not cache objects that tool code reconstructs inside `process_row` or `process_batch`.
+Cellpose and StarDist currently construct their model objects inside `process_row`, so environment retention alone does not retain their model weights.
+The recommended follow-up is lazy model initialization on the cached worker-side tool instance, keyed by every model-affecting argument and coupled to an explicit invalidation policy; that model-caching work is outside the environment-lifecycle contract.
+
 ### 4.6 Input Binding Logic (Graph Construction)
 
 At graph construction time, the engine builds an **input binding plan** for each tool call. The binding rules differ by tool type, reflecting their different relationships with upstream data.
@@ -2804,7 +2845,7 @@ thread.join()
 2. The engine checks the flag before dispatching each node. If set, it raises `WorkflowCancelledError`.
 3. For in-flight Wetlands tasks (rows currently being processed), the engine calls `task.cancel()` on each. The remote function can check `task.cancel_requested` to exit early.
 4. Cancellation is cooperative: tools that don't check `task.cancel_requested` will finish their current row, but no new rows are dispatched.
-5. After cancellation, `compute()` raises `WorkflowCancelledError`. Environments are still shut down properly.
+5. After cancellation, `compute()` raises `WorkflowCancelledError`. Execution-lifetime environments shut down immediately, engine-lifetime environments shut down on `engine.close()`, and externally owned environments remain under caller control.
 6. `DataFrameTool` nodes run in the main thread and cannot be interrupted mid-execution. The cancel flag is checked before dispatching each node (including DataFrameTool nodes), so a long-running `transform()` will complete but no further nodes are dispatched.
 
 **Tool-side cooperative cancellation:**
@@ -2851,6 +2892,8 @@ from bioimageflow_common_tools import InnerJoin, CrossJoin, JoinOnColumn, Concat
 from bioimageflow import (
     DataFrameTool, Passthrough,
     Workflow, OutputView,
+    DefaultEngine, SequentialEngine,
+    EnvironmentLifetime, WetlandsEnvManager,
     SubWorkflow,
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,

@@ -32,7 +32,8 @@ from bioimageflow.validation import (
 )
 
 if TYPE_CHECKING:
-    from bioimageflow.engine import DefaultEngine, NodeStep, NodePlan
+    from bioimageflow.engine import DefaultEngine, EnvironmentLifetime, NodeStep, NodePlan
+    from bioimageflow.env_manager import WetlandsEnvManager
 
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow_core.tool import ProcessingTool
@@ -478,18 +479,36 @@ class Workflow:
         self._discover_graph(list(self._nodes.values()))
         return DefaultEngine(use_wetlands=False).plan(self)
 
-    def _make_engine(self) -> "DefaultEngine":
-        """Create the configured local execution engine."""
+    def create_engine(
+        self,
+        *,
+        environment_lifetime: "EnvironmentLifetime | str" = "execution",
+        env_manager: "WetlandsEnvManager | None" = None,
+    ) -> "DefaultEngine":
+        """Create an engine preserving this workflow's execution configuration.
+
+        ``environment_lifetime`` controls whether Wetlands workers stop after
+        each execution (``"execution"``), remain warm until ``engine.close()``
+        (``"engine"``), or are owned entirely by the caller
+        (``"external"``). An existing manager can be injected so multiple
+        workflows and engines share the same worker environments.
+        """
         from bioimageflow.engine import DefaultEngine, SequentialEngine
 
         use_wetlands = self.engine_type == "wetlands"
         kwargs: dict[str, Any] = {
             "use_wetlands": use_wetlands,
             "wetlands_config": self.wetlands_config,
+            "environment_lifetime": environment_lifetime,
+            "env_manager": env_manager,
         }
         if self.execution == "sequential":
             return SequentialEngine(**kwargs)
         return DefaultEngine(**kwargs)
+
+    def _make_engine(self) -> "DefaultEngine":
+        """Compatibility wrapper for the former private engine factory."""
+        return self.create_engine()
 
     def validate(self, *, dev_mode: bool = False) -> list[ValidationError]:
         """Return all domain-level problems in this workflow.

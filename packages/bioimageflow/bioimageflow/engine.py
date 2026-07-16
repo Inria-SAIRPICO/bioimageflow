@@ -40,9 +40,25 @@ from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
 if TYPE_CHECKING:
+    from bioimageflow.env_manager import WetlandsEnvManager
     from bioimageflow.sub_workflow import SubWorkflowNode
 
 logger = logging.getLogger("bioimageflow")
+
+
+class EnvironmentLifetime(str, Enum):
+    """Ownership policy for Wetlands environments used by an engine.
+
+    ``EXECUTION`` preserves the historical behavior and stops environments
+    after every :meth:`DefaultEngine.execute` or
+    :meth:`DefaultEngine.execute_steps` call. ``ENGINE`` retains them until
+    :meth:`DefaultEngine.close`. ``EXTERNAL`` leaves cleanup entirely to the
+    owner of the injected environment manager.
+    """
+
+    EXECUTION = "execution"
+    ENGINE = "engine"
+    EXTERNAL = "external"
 
 
 def _accepts_context(method: Any) -> bool:
@@ -672,24 +688,90 @@ class DefaultEngine:
         use_wetlands: bool = False,
         wetlands_config: dict[str, Any] | None = None,
         force_sequential: bool = False,
+        env_manager: "WetlandsEnvManager | None" = None,
+        environment_lifetime: EnvironmentLifetime | str = EnvironmentLifetime.EXECUTION,
     ) -> None:
+        try:
+            self._environment_lifetime = EnvironmentLifetime(environment_lifetime)
+        except ValueError as exc:
+            expected = ", ".join(lifetime.value for lifetime in EnvironmentLifetime)
+            raise ValueError(
+                f"Unknown environment_lifetime '{environment_lifetime}'. Expected {expected}."
+            ) from exc
+        if env_manager is not None and not use_wetlands:
+            raise ValueError("env_manager requires use_wetlands=True.")
+        if self._environment_lifetime is EnvironmentLifetime.EXTERNAL and env_manager is None:
+            raise ValueError(
+                "environment_lifetime='external' requires an injected env_manager."
+            )
+
         self._use_wetlands = use_wetlands
         self._force_sequential = force_sequential
         self._progress_lock = threading.Lock()
         self._cache_hit_lock = threading.Lock()
+        self._lifecycle_lock = threading.RLock()
+        self._closed = False
         self._node_cache_hits: dict[Node, bool] = {}
-        self._env_manager = None
+        self._env_manager = env_manager
         if use_wetlands:
-            from bioimageflow.env_manager import WetlandsEnvManager
-            self._env_manager = WetlandsEnvManager(**(wetlands_config or {}))
+            if self._env_manager is None:
+                from bioimageflow.env_manager import WetlandsEnvManager
+                self._env_manager = WetlandsEnvManager(**(wetlands_config or {}))
+
+    @property
+    def environment_lifetime(self) -> EnvironmentLifetime:
+        """Return the engine's Wetlands environment ownership policy."""
+        return self._environment_lifetime
+
+    @property
+    def environment_manager(self) -> "WetlandsEnvManager | None":
+        """Return the Wetlands manager used by this engine, if any."""
+        return self._env_manager
+
+    def _ensure_open(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("This execution engine is closed.")
+
+    def _cleanup_after_execution(self) -> None:
+        if (
+            self._environment_lifetime is EnvironmentLifetime.EXECUTION
+            and self._env_manager is not None
+        ):
+            self._env_manager.shutdown_all()
+
+    def close(self) -> None:
+        """Close the engine and stop environments it owns.
+
+        The method is idempotent. Externally owned managers are never shut
+        down; their owner must call :meth:`WetlandsEnvManager.shutdown_all`.
+        """
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            if (
+                self._env_manager is not None
+                and self._environment_lifetime is not EnvironmentLifetime.EXTERNAL
+            ):
+                self._env_manager.shutdown_all()
+
+    def __enter__(self) -> "DefaultEngine":
+        """Return an open engine for context-manager use."""
+        self._ensure_open()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        """Close the engine when leaving a context manager."""
+        self.close()
 
     def execute(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Execute the workflow, returning results for target nodes."""
+        self._ensure_open()
         try:
             return self._execute_impl(targets, workflow)
         finally:
-            if self._env_manager is not None:
-                self._env_manager.shutdown_all()
+            self._cleanup_after_execution()
 
     def execute_steps(
         self, targets: list[Node], workflow: Any,
@@ -706,6 +788,7 @@ class DefaultEngine:
 
         Cleanup runs when the generator is exhausted or closed (early ``break``).
         """
+        self._ensure_open()
         try:
             reachable: set[Node] = set()
             for target in targets:
@@ -744,8 +827,7 @@ class DefaultEngine:
                 results[node] = step._df  # type: ignore[assignment]
                 sig_hashes[node] = step._sig_hash  # type: ignore[assignment]
         finally:
-            if self._env_manager is not None:
-                self._env_manager.shutdown_all()
+            self._cleanup_after_execution()
 
     def _execute_sub_workflow_steps(
         self,

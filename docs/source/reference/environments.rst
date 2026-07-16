@@ -168,6 +168,72 @@ taking precedence. After the manager exists, later calls to
 shareable scripts because ``require_tool_packages()`` may initialize
 Wetlands while installing missing tool packages.
 
+Environment lifetime and ownership
+----------------------------------
+
+Workflow-created engines preserve the historical default: Wetlands workers stop after every ``compute()`` or completed/closed ``compute_steps()`` call.
+Applications that execute repeatedly can create and retain an engine explicitly:
+
+.. code-block:: python
+
+   from bioimageflow import Workflow
+
+   wf = Workflow.load("workflow.json")
+   with wf.create_engine(environment_lifetime="engine") as engine:
+       first = wf.compute(engine=engine)
+       second = wf.compute(engine=engine)
+       print(engine.environment_manager.running_environments())
+
+The public :class:`~bioimageflow.engine.EnvironmentLifetime` values define ownership:
+
+- ``"execution"`` stops all environments after every ``execute()`` or ``execute_steps()`` call, including failed and cancelled calls.
+- ``"engine"`` retains environments across calls and stops them when :meth:`~bioimageflow.engine.DefaultEngine.close` is called or the engine context exits.
+- ``"external"`` requires an injected :class:`~bioimageflow.env_manager.WetlandsEnvManager`; neither execution nor engine closure stops that manager.
+
+``DefaultEngine.close()`` and ``SequentialEngine.close()`` are idempotent.
+A closed engine cannot be executed again.
+``execute_steps()`` follows the same ownership policy as ``execute()``: execution-owned workers stop when its generator finishes or is closed, while engine-owned workers remain warm.
+
+An application can share a manager across workflow engines:
+
+.. code-block:: python
+
+   from bioimageflow import EnvironmentLifetime, WetlandsEnvManager
+
+   manager = WetlandsEnvManager()
+   first_engine = first_workflow.create_engine(
+       env_manager=manager,
+       environment_lifetime=EnvironmentLifetime.EXTERNAL,
+   )
+   second_engine = second_workflow.create_engine(
+       env_manager=manager,
+       environment_lifetime=EnvironmentLifetime.EXTERNAL,
+   )
+
+   try:
+       first_workflow.compute(engine=first_engine)
+       second_workflow.compute(engine=second_engine)
+       manager.stop("cellpose")
+   finally:
+       first_engine.close()
+       second_engine.close()
+       manager.shutdown_all()
+
+The manager exposes ``stop(env_name)``, ``is_running(env_name)``, ``running_environments()``, and idempotent ``shutdown_all()`` so hosts do not need to access ``_envs`` or ``_launch_configs``.
+Status means that the adapter tracks an environment as launched; it is not a process-health probe.
+
+GUI migration
+^^^^^^^^^^^^^
+
+GUI sessions should keep one ``WetlandsEnvManager`` for the desired sharing scope and build workflow engines with ``environment_lifetime="external"`` as shown above.
+Use ``manager.stop(name)`` for a per-environment stop action and ``manager.shutdown_all()`` during application shutdown.
+Alternatively, use one ``environment_lifetime="engine"`` engine per session and close it when that session ends.
+No workflow format or standalone caller changes are required.
+
+Retaining an environment preserves imported modules, CUDA process state, and BioImageFlow's cached tool instances.
+It does not automatically cache model weights created inside ``process_row``: the current Cellpose and StarDist tools construct their model objects there on every call.
+A focused follow-up should move model construction to lazily initialized attributes on the already cached worker-side tool instance, keyed by model-affecting arguments and with explicit invalidation; broad model caching is intentionally outside this lifecycle API.
+
 Wetlands
 --------
 
@@ -175,9 +241,9 @@ The actual environment provisioning is handled by `Wetlands
 <https://github.com/wetlands-team/wetlands>`_. BioImageFlow ships an
 adapter that converts ``EnvironmentSpec`` into Wetlands environment
 declarations and dispatches ``ProcessingTool.process_row`` calls into
-worker processes. Hosts that need to inspect environment state at
-runtime should use Wetlands' own APIs; the BioImageFlow adapter is an
-implementation detail.
+worker processes.
+Hosts should use the public :class:`~bioimageflow.env_manager.WetlandsEnvManager` lifecycle surface described above for worker ownership and status.
+Deeper Wetlands provisioning and process-health details remain implementation-level and should use Wetlands' own APIs when necessary.
 
 Specs.md Appendix A is the dedicated Wetlands page; the parallelism
 tutorial (:doc:`/tutorials/parallelism`) covers how the proxy fields
