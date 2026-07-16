@@ -21,6 +21,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     Layout,
+    PathPicker,
     ProcessingTool,
     Semantic,
     Template,
@@ -274,7 +275,7 @@ class TestSerializeInputSchema:
         expected_keys = {
             "type", "required", "nullable", "connectable", "default",
             "display_name", "description", "group",
-            "min", "max", "step", "choices", "image_spec",
+            "min", "max", "step", "path_picker", "choices", "image_spec",
         }
         for field in schema.values():
             assert set(field.keys()) == expected_keys
@@ -291,6 +292,28 @@ class TestSerializeInputSchema:
         assert entry["image_spec"] is not None
         assert "intensity" in entry["image_spec"]["semantics"]
         assert entry["choices"] is None
+        assert entry["path_picker"] is None
+
+    def test_path_picker_modes(self) -> None:
+        class PickerTool(ProcessingTool):
+            environment = _ENV
+
+            class Inputs(IOModel):
+                file_path: Annotated[Path, GUIMeta(path_picker=PathPicker.FILE)]
+                folder_path: Annotated[Path, GUIMeta(path_picker=PathPicker.FOLDER)]
+                either_path: Annotated[Path, GUIMeta(path_picker=PathPicker.BOTH)]
+
+            class Outputs(IOModel):
+                result: int
+
+            def process_row(self, arguments, *, context: object | None = None):
+                return self.Outputs(result=0)
+
+        schema = serialize_input_schema(PickerTool)
+
+        assert schema["file_path"]["path_picker"] == "file"
+        assert schema["folder_path"]["path_picker"] == "folder"
+        assert schema["either_path"]["path_picker"] == "both"
 
     def test_numeric_field_gui_meta(self) -> None:
         schema = serialize_input_schema(_SchemaTool)

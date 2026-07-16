@@ -143,6 +143,14 @@ def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
     assert table.to_dict("list") == {"threshold": [0.1, 0.2, 0.5]}
 
 
+def test_files_declares_folder_picker() -> None:
+    from bioimageflow_common_tools import Files
+
+    inputs = serialize_input_schema(Files)
+
+    assert inputs["path"]["path_picker"] == "folder"
+
+
 def test_connected_components_schema_declares_uint32_labels() -> None:
     from bioimageflow_common_tools import ConnectedComponents
 

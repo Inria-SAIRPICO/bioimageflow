@@ -14,6 +14,7 @@ from bioimageflow_core.types import (
     GUIMeta,
     ImageSpec,
     Layout,
+    PathPicker,
     SCALAR_IMAGE_SEMANTICS,
     Semantic,
     SharedArray,
@@ -165,6 +166,7 @@ class TestGUIMeta:
         assert meta.group is None
         assert meta.display_name is None
         assert meta.description is None
+        assert meta.path_picker is None
 
     def test_custom_values(self):
         meta = GUIMeta(connectable=Connectable.NEVER, min=0.0, max=100.0, step=0.1)
@@ -191,6 +193,10 @@ class TestGUIMeta:
         assert meta.display_name == "Cell diameter"
         assert meta.description == "Approximate cell diameter in pixels."
         assert meta.connectable is Connectable.NOT_BY_DEFAULT
+
+    def test_path_picker(self):
+        meta = GUIMeta(path_picker=PathPicker.BOTH)
+        assert meta.path_picker is PathPicker.BOTH
 
     def test_frozen(self):
         meta = GUIMeta()

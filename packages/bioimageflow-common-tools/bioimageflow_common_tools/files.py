@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated, Any
 
-from bioimageflow_core import Category, Connectable, GUIMeta, IOModel
+from bioimageflow_core import Category, Connectable, GUIMeta, IOModel, PathPicker
 from bioimageflow import DataFrameTool
 
 
@@ -23,6 +23,7 @@ class Files(DataFrameTool):
             display_name="Directory",
             description="Path to the directory to scan for files.",
             connectable=Connectable.NEVER,
+            path_picker=PathPicker.FOLDER,
         )]
         pattern: Annotated[str, GUIMeta(
             display_name="Glob pattern",

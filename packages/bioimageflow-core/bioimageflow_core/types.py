@@ -114,6 +114,14 @@ class Connectable(Enum):
     BY_DEFAULT = "by_default"
 
 
+class PathPicker(Enum):
+    """Which filesystem values a GUI path picker should offer."""
+
+    FILE = "file"
+    FOLDER = "folder"
+    BOTH = "both"
+
+
 @dataclass(frozen=True)
 class GUIMeta:
     """Declarative GUI hints for a tool ``Inputs`` / ``Outputs`` field.
@@ -145,6 +153,10 @@ class GUIMeta:
         Logical group name for organising fields into tabs or sections
         (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).  ``None`` means
         the field belongs to the default / unnamed group.
+    path_picker : PathPicker | None
+        Picker actions offered for path-typed inputs.  ``None`` lets the GUI
+        infer a backward-compatible default from the field type.  This is a
+        rendering hint only and does not validate the filesystem value.
     """
     display_name: Optional[str] = None
     description: Optional[str] = None
@@ -153,6 +165,7 @@ class GUIMeta:
     max: Optional[float] = None
     step: Optional[float] = None
     group: Optional[str] = None
+    path_picker: Optional[PathPicker] = None
 
 
 def extract_gui_meta(annotation: Any) -> Optional[GUIMeta]:

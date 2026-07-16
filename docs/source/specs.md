@@ -260,6 +260,7 @@ For inputs, each field entry has exactly these keys:
     "min": 0.1,                      # GUIMeta.min or None
     "max": 50.0,                     # GUIMeta.max or None
     "step": 0.1,                     # GUIMeta.step or None
+    "path_picker": "file",          # "file" | "folder" | "both" | None
     "choices": ["fast", "accurate"], # from Literal[...] / Enum, or None
     "image_spec": {...},             # serialize_image_spec(...) or None
 }
@@ -268,6 +269,8 @@ For inputs, each field entry has exactly these keys:
 The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImageFile"` and `"ImageShared"` respectively. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
+
+The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offers file selection, `"folder"` offers folder selection, and `"both"` offers both actions. `None` lets the GUI infer a backward-compatible default from the serialized field type. It does not validate whether a runtime value exists or is a file or directory.
 
 `required`, `nullable`, and the type-display rules are three orthogonal concerns:
 
@@ -1059,6 +1062,12 @@ class Connectable(Enum):
     NOT_BY_DEFAULT = "not_by_default"  # Pin hidden by default; checkbox reveals it
     BY_DEFAULT = "by_default"  # Pin visible by default; checkbox can hide it
 
+class PathPicker(Enum):
+    """Which filesystem values a GUI path picker should offer."""
+    FILE = "file"
+    FOLDER = "folder"
+    BOTH = "both"
+
 @dataclass(frozen=True)
 class GUIMeta:
     """
@@ -1072,6 +1081,7 @@ class GUIMeta:
     max: float | int | None = None   # Maximum value (numeric fields)
     step: float | int | None = None  # Step increment (numeric fields)
     group: str | None = None   # Logical group for tab/section display (e.g. "general", "advanced", "gpu")
+    path_picker: PathPicker | None = None  # Path input picker mode; GUI-only
 ```
 
 **Display text and description:**
@@ -1087,7 +1097,14 @@ Both fields are purely cosmetic hints — the runtime never reads them.
 
 For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
 
-**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: Connectable.NOT_BY_DEFAULT` with no numeric constraints, no group, and no display text or description. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable but with the pin hidden by default, uses the field name as a fallback label, and provides no tooltip. Data input fields (image paths) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible.
+**Path picker modes (path Inputs only):**
+- `PathPicker.FILE` — offer file selection only.
+- `PathPicker.FOLDER` — offer folder selection only.
+- `PathPicker.BOTH` — offer both file and folder selection.
+
+`path_picker=None` leaves selection to the GUI's backward-compatible type inference. The hint affects rendering only; it does not add filesystem validation and is ignored for non-path fields and Outputs.
+
+**Defaults:** Fields without a `GUIMeta` annotation default to `connectable: Connectable.NOT_BY_DEFAULT` with no numeric constraints, no group, no path-picker override, and no display text or description. A GUI frontend inspects the `Annotated` metadata for each field; if no `GUIMeta` is found, it assumes the field is connectable but with the pin hidden by default, uses the field name as a fallback label, and provides no tooltip. Data input fields (image paths) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible.
 
 **Usage:**
 
@@ -1176,7 +1193,7 @@ def get_gui_meta(annotation) -> GUIMeta | None:
 
 **Compatibility with image fields and ImageShared:** File-based image fields use `Annotated[Path, ImageSpec(...)]`, optionally with a `GUIMeta(...)` metadata entry. `ImageShared(...)` returns `Annotated[SharedArray, ImageSpec(...), GUIMeta(...)]` when `gui=` is supplied and always includes an implicit `formats={"memory"}` constraint. Data input fields (image paths, required columns) should use explicit `GUIMeta(connectable=Connectable.BY_DEFAULT)` to make their pins visible by default.
 
-**Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets, labels, tooltips, and port visibility.
+**Runtime behavior:** `GUIMeta` is purely declarative metadata — it has no effect on validation, execution, caching, or hashing. The orchestrator and worker environments ignore it entirely. It exists solely for GUI frontends to render appropriate widgets, labels, tooltips, path pickers, and port visibility.
 
 ### 3.6 Arguments and Column References
 

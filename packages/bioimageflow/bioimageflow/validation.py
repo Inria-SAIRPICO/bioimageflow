@@ -144,6 +144,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
       :class:`~bioimageflow_core.GUIMeta`
     - **min**, **max**, **step**: numeric constraints from :class:`~bioimageflow_core.GUIMeta`
     - **group**: tab/section group name from :class:`~bioimageflow_core.GUIMeta`
+    - **path_picker**: file/folder picker mode from :class:`~bioimageflow_core.GUIMeta`
     """
     inputs_cls = tool.Inputs
     annotations = inputs_cls._get_all_annotations()
@@ -182,6 +183,8 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
                 entry["step"] = gui_meta.step
             if gui_meta.group is not None:
                 entry["group"] = gui_meta.group
+            if gui_meta.path_picker is not None:
+                entry["path_picker"] = gui_meta.path_picker
 
         schema[field_name] = entry
 
@@ -575,7 +578,12 @@ def _serialize_connectable(c: Connectable | None) -> str:
     return c.value
 
 
-def _add_gui_meta_fields(entry: dict[str, Any], gui_meta: Any) -> None:
+def _add_gui_meta_fields(
+    entry: dict[str, Any],
+    gui_meta: Any,
+    *,
+    include_path_picker: bool = False,
+) -> None:
     """Add JSON-safe GUIMeta fields to a serialized schema entry."""
     entry["connectable"] = _serialize_connectable(gui_meta.connectable)
     entry["display_name"] = gui_meta.display_name
@@ -584,6 +592,10 @@ def _add_gui_meta_fields(entry: dict[str, Any], gui_meta: Any) -> None:
     entry["min"] = gui_meta.min
     entry["max"] = gui_meta.max
     entry["step"] = gui_meta.step
+    if include_path_picker:
+        entry["path_picker"] = (
+            gui_meta.path_picker.value if gui_meta.path_picker is not None else None
+        )
 
 
 def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, Any]]:
@@ -601,7 +613,8 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
     - ``default``: JSON-safe representation of the class-level default, or
       ``None`` when the field is required.
     - ``display_name``, ``description``, ``group``, ``min``, ``max``,
-      ``step``: values from :class:`GUIMeta` (or ``None`` when absent).
+      ``step``, ``path_picker``: values from :class:`GUIMeta` (or ``None``
+      when absent).
     - ``choices``: list of strings for ``Literal[...]`` / :class:`Enum`
       fields, or ``None``.
     - ``image_spec``: dict produced by :func:`serialize_image_spec`, or
@@ -636,7 +649,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
             "image_spec": serialize_image_spec(image_spec),
         }
         if gui_meta is not None:
-            _add_gui_meta_fields(entry, gui_meta)
+            _add_gui_meta_fields(entry, gui_meta, include_path_picker=True)
         else:
             entry.update({
                 "connectable": _serialize_connectable(None),
@@ -646,6 +659,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
                 "min": None,
                 "max": None,
                 "step": None,
+                "path_picker": None,
             })
         schema[field_name] = entry
 

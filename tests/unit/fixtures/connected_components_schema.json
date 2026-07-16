@@ -16,6 +16,7 @@
       "max": null,
       "min": null,
       "nullable": false,
+      "path_picker": null,
       "required": true,
       "step": null,
       "type": "ImageFile"
