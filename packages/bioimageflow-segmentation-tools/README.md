@@ -16,6 +16,9 @@ Segmentation-focused tool package for BioImageFlow.
 - `PostprocessLabels`: remove small labels and relabel label images sequentially.
 
 Heavy model dependencies are declared in isolated `EnvironmentSpec` objects and imported only inside `process_row`. Importing this package does not require Cellpose, TensorFlow, StarDist, or other model packages to be installed in the main process.
+`Cellpose3`, `CellposeSAM`, and `StarDistSegmenter` lazily keep one model per worker-side tool instance.
+Repeated calls with the same model selection reuse the weights; changing `model_type` or `model_name` replaces the cached model, and `clear_model_cache()` releases it explicitly.
+Applications can invalidate remote worker caches by stopping the corresponding Wetlands environment.
 
 ## Example
 

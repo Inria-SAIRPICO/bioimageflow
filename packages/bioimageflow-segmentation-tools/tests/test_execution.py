@@ -54,10 +54,12 @@ def test_cellpose_sam_executes_with_fake_runtime(
 ) -> None:
     cellpose_module = types.ModuleType("cellpose")
     models_module = types.ModuleType("cellpose.models")
+    created_models: list[str] = []
 
     class FakeCellposeModel:
         def __init__(self, model_type: str) -> None:
             self.model_type = model_type
+            created_models.append(model_type)
 
         def eval(self, image: np.ndarray, **_: object) -> tuple[np.ndarray]:
             labels = np.zeros(image.shape[-2:], dtype=np.uint32)
@@ -72,7 +74,8 @@ def test_cellpose_sam_executes_with_fake_runtime(
 
     image_path = tmp_path / "input.tif"
     iio.imwrite(image_path, np.zeros((10, 10), dtype=np.float32))
-    result = CellposeSAM().process_row(
+    tool = CellposeSAM()
+    result = tool.process_row(
         Arguments(
             input_image=image_path,
             model_type="cpsam",
@@ -82,9 +85,116 @@ def test_cellpose_sam_executes_with_fake_runtime(
             mask=tmp_path / "mask.tif",
         )
     )
+    second_result = tool.process_row(
+        Arguments(
+            input_image=image_path,
+            model_type="cpsam",
+            diameter=12.0,
+            flow_threshold=0.7,
+            cellprob_threshold=-1.0,
+            mask=tmp_path / "second_mask.tif",
+        )
+    )
 
     assert result.cell_count == 2
     assert int(iio.imread(result.mask).max()) == 2
+    assert second_result.cell_count == 2
+    assert created_models == ["cpsam"]
+
+
+def test_cellpose3_model_cache_is_keyed_and_clearable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cellpose_module = types.ModuleType("cellpose")
+    models_module = types.ModuleType("cellpose.models")
+    created_models: list[str] = []
+
+    class FakeCellpose:
+        def __init__(self, model_type: str) -> None:
+            self.model_type = model_type
+            created_models.append(model_type)
+
+    models_module.Cellpose = FakeCellpose
+    cellpose_module.models = models_module
+    monkeypatch.setitem(sys.modules, "cellpose", cellpose_module)
+    monkeypatch.setitem(sys.modules, "cellpose.models", models_module)
+    tool = Cellpose3()
+
+    first = tool._get_model("cyto3")
+    assert tool._get_model("cyto3") is first
+    second = tool._get_model("nuclei")
+
+    assert second is not first
+    assert created_models == ["cyto3", "nuclei"]
+
+    tool.clear_model_cache()
+    assert tool._get_model("nuclei") is not second
+    assert created_models == ["cyto3", "nuclei", "nuclei"]
+
+
+def test_cellpose_sam_model_cache_is_keyed_and_clearable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cellpose_module = types.ModuleType("cellpose")
+    models_module = types.ModuleType("cellpose.models")
+    created_models: list[str] = []
+
+    class FakeCellposeModel:
+        def __init__(self, model_type: str) -> None:
+            self.model_type = model_type
+            created_models.append(model_type)
+
+    models_module.CellposeModel = FakeCellposeModel
+    cellpose_module.models = models_module
+    monkeypatch.setitem(sys.modules, "cellpose", cellpose_module)
+    monkeypatch.setitem(sys.modules, "cellpose.models", models_module)
+    tool = CellposeSAM()
+
+    first = tool._get_model("cpsam")
+    assert tool._get_model("cpsam") is first
+    second = tool._get_model("alternate")
+
+    assert second is not first
+    assert created_models == ["cpsam", "alternate"]
+
+    tool.clear_model_cache()
+    assert tool._get_model("alternate") is not second
+    assert created_models == ["cpsam", "alternate", "alternate"]
+
+
+def test_stardist_model_cache_is_keyed_and_clearable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stardist_module = types.ModuleType("stardist")
+    models_module = types.ModuleType("stardist.models")
+    created_models: list[str] = []
+
+    class FakeStarDist2D:
+        @classmethod
+        def from_pretrained(cls, model_name: str) -> object:
+            created_models.append(model_name)
+            return object()
+
+    models_module.StarDist2D = FakeStarDist2D
+    stardist_module.models = models_module
+    monkeypatch.setitem(sys.modules, "stardist", stardist_module)
+    monkeypatch.setitem(sys.modules, "stardist.models", models_module)
+    tool = StarDistSegmenter()
+
+    first = tool._get_model("2D_versatile_fluo")
+    assert tool._get_model("2D_versatile_fluo") is first
+    second = tool._get_model("2D_versatile_he")
+
+    assert second is not first
+    assert created_models == ["2D_versatile_fluo", "2D_versatile_he"]
+
+    tool.clear_model_cache()
+    assert tool._get_model("2D_versatile_he") is not second
+    assert created_models == [
+        "2D_versatile_fluo",
+        "2D_versatile_he",
+        "2D_versatile_he",
+    ]
 
 
 def test_nninteractive_executes_with_fake_predict_function(

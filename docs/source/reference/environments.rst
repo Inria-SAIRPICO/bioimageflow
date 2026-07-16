@@ -231,8 +231,11 @@ Alternatively, use one ``environment_lifetime="engine"`` engine per session and 
 No workflow format or standalone caller changes are required.
 
 Retaining an environment preserves imported modules, CUDA process state, and BioImageFlow's cached tool instances.
-It does not automatically cache model weights created inside ``process_row``: the current Cellpose and StarDist tools construct their model objects there on every call.
-A focused follow-up should move model construction to lazily initialized attributes on the already cached worker-side tool instance, keyed by model-affecting arguments and with explicit invalidation; broad model caching is intentionally outside this lifecycle API.
+``Cellpose3``, ``CellposeSAM``, and ``StarDistSegmenter`` lazily retain one model on each worker-side tool instance, so repeated rows and retained-engine executions with the same model selection reuse its weights.
+The cache key is ``model_type`` for Cellpose and ``model_name`` for StarDist; inference settings such as diameter, thresholds, channels, and normalization do not reload weights.
+Selecting a different model replaces the cached reference instead of accumulating GPU models, and ``clear_model_cache()`` explicitly invalidates it.
+``clear_model_cache()`` operates on the tool instance in the current process; applications invalidate worker-side caches through ``manager.stop(environment_name)`` or engine shutdown.
+Other tools that construct heavy objects inside ``process_row`` or ``process_batch`` must implement their own worker-instance cache to gain the same benefit.
 
 Wetlands
 --------

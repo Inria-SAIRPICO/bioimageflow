@@ -44,6 +44,27 @@ class StarDistSegmenter(ProcessingTool):
     tags = ["segmentation", "stardist", "nuclei", "deep learning"]
     environment = stardist_env
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._model_cache_key: str | None = None
+        self._cached_model: Any | None = None
+
+    def clear_model_cache(self) -> None:
+        """Release the cached StarDist model held by this tool instance."""
+        self._cached_model = None
+        self._model_cache_key = None
+
+    def _get_model(self, model_name: str) -> Any:
+        """Return the model for *model_name*, replacing a different cached model."""
+        if self._cached_model is None or self._model_cache_key != model_name:
+            from stardist.models import StarDist2D  # type: ignore
+
+            self.clear_model_cache()
+            model = StarDist2D.from_pretrained(model_name)
+            self._cached_model = model
+            self._model_cache_key = model_name
+        return self._cached_model
+
     class Inputs(IOModel):
         input_image: Annotated[
             Path,
@@ -151,7 +172,6 @@ class StarDistSegmenter(ProcessingTool):
         from csbdeep.utils import normalize  # type: ignore
         import imageio.v3 as iio
         import numpy as np
-        from stardist.models import StarDist2D  # type: ignore
 
         image = iio.imread(str(arguments.input_image))
         image = self._prepare_image(image, arguments.model_name, arguments.channel)
@@ -163,7 +183,7 @@ class StarDistSegmenter(ProcessingTool):
         )
 
         print(f"Performing StarDist segmentation (model={arguments.model_name})...")
-        model = StarDist2D.from_pretrained(arguments.model_name)
+        model = self._get_model(arguments.model_name)
         predict_kwargs: dict[str, float] = {}
         if arguments.prob_thresh is not None:
             predict_kwargs["prob_thresh"] = arguments.prob_thresh

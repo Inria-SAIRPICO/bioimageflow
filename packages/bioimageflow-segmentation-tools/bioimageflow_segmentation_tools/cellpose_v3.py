@@ -43,6 +43,27 @@ class Cellpose3(ProcessingTool):
     tags = ["segmentation", "cellpose", "cellpose3", "deep learning"]
     environment = cellpose_v3_env
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._model_cache_key: str | None = None
+        self._cached_model: Any | None = None
+
+    def clear_model_cache(self) -> None:
+        """Release the cached Cellpose model held by this tool instance."""
+        self._cached_model = None
+        self._model_cache_key = None
+
+    def _get_model(self, model_type: str) -> Any:
+        """Return the model for *model_type*, replacing a different cached model."""
+        if self._cached_model is None or self._model_cache_key != model_type:
+            from cellpose import models  # type: ignore
+
+            self.clear_model_cache()
+            model = models.Cellpose(model_type=model_type)
+            self._cached_model = model
+            self._model_cache_key = model_type
+        return self._cached_model
+
     class Inputs(IOModel):
         input_image: Annotated[
             Path,
@@ -156,7 +177,6 @@ class Cellpose3(ProcessingTool):
         ]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        from cellpose import models  # type: ignore
         import imageio.v3 as iio
         import numpy as np
 
@@ -164,7 +184,7 @@ class Cellpose3(ProcessingTool):
         diameter = arguments.diameter if arguments.diameter > 0 else None
 
         print(f"Performing Cellpose v3 segmentation (model={arguments.model_type})...")
-        model = models.Cellpose(model_type=arguments.model_type)
+        model = self._get_model(arguments.model_type)
         masks, _, _, _ = model.eval(
             image,
             diameter=diameter,

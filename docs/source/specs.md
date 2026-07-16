@@ -685,12 +685,23 @@ class SomeOtherTool(ProcessingTool):
 ```python
 class MyTool(ProcessingTool):
     _model = None
+    _model_key = None
 
     def process_row(self, arguments):
-        if self._model is None:
-            self._model = load_model("weights.pth")  # Lazy init in worker
+        key = arguments.model_name
+        if self._model is None or self._model_key != key:
+            self.clear_model_cache()
+            self._model = load_model(key)  # Lazy init in worker
+            self._model_key = key
         result = self._model.predict(...)
+
+    def clear_model_cache(self):
+        self._model = None
+        self._model_key = None
 ```
+
+Model caches should be bounded and keyed by every argument that changes model construction.
+Inference-only arguments should not invalidate weights.
 
 ### 3.5 DataFrameTool
 
@@ -2061,8 +2072,11 @@ Applications must not inspect or mutate `_envs` or `_launch_configs`.
 
 A retained worker process preserves imported libraries, CUDA process state, module registries, and the cached `ProcessingTool` instance.
 It does not cache objects that tool code reconstructs inside `process_row` or `process_batch`.
-Cellpose and StarDist currently construct their model objects inside `process_row`, so environment retention alone does not retain their model weights.
-The recommended follow-up is lazy model initialization on the cached worker-side tool instance, keyed by every model-affecting argument and coupled to an explicit invalidation policy; that model-caching work is outside the environment-lifecycle contract.
+The first-party `Cellpose3`, `CellposeSAM`, and `StarDistSegmenter` tools therefore lazily cache one model on their worker-side tool instance.
+Cellpose caches by `model_type`, StarDist caches by `model_name`, and inference-only arguments do not invalidate the model.
+Changing the model key replaces the single cached reference, while `clear_model_cache()` provides explicit invalidation without accumulating an unbounded set of GPU models.
+`clear_model_cache()` affects the tool instance in the current process; an orchestrator application invalidates remote worker caches by stopping that environment through `WetlandsEnvManager.stop()` or by closing its owning engine.
+Other heavy tools remain responsible for applying the same pattern to objects they construct inside their processing methods.
 
 ### 4.6 Input Binding Logic (Graph Construction)
 

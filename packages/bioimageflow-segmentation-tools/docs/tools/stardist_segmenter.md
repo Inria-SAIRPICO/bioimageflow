@@ -13,6 +13,13 @@ the data. Runtime failures include unavailable TensorFlow/StarDist, invalid
 model names, unsupported image shapes, and channel indexes outside the input
 array.
 
+## Model Reuse
+
+Each worker-side `StarDistSegmenter` instance lazily caches one model by `model_name`.
+Repeated rows and retained-engine executions with the same model reuse its weights even when channel, prediction-threshold, or normalization settings change.
+Changing `model_name` replaces the cached model, and `clear_model_cache()` releases the current-process reference explicitly.
+Applications can invalidate the remote worker cache by stopping the `segmentation-stardist` environment.
+
 ## Dependencies and Core Libraries
 
 BioImageFlow core APIs, TensorFlow, StarDist 0.9.2, csbdeep normalization,

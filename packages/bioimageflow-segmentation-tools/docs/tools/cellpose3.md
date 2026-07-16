@@ -14,6 +14,13 @@ Cellpose during schema and graph construction; runtime failures occur if the
 environment cannot install or import Cellpose, if the model name is invalid, or
 if the input image layout does not match the channel settings.
 
+## Model Reuse
+
+Each worker-side `Cellpose3` instance lazily caches one model by `model_type`.
+Repeated rows and retained-engine executions with the same model reuse its weights even when diameter, channel, or threshold settings change.
+Changing `model_type` replaces the cached model, and `clear_model_cache()` releases the current-process reference explicitly.
+Applications can invalidate the remote worker cache by stopping the `segmentation-cellpose-v3` environment.
+
 ## Dependencies and Core Libraries
 
 BioImageFlow core APIs, Cellpose 3.1.1.1, imageio, NumPy, packaging, and
