@@ -13,7 +13,7 @@ The package is intended for users who need to assemble or inspect workflows with
 
 ## Public Tools
 
-- [Files](tools/files.md): create a source table from files in a directory.
+- [Files](tools/files.md): create a source table from an explicit file list or a directory scan.
 - [TableFromCsv](tools/table_from_csv.md): load CSV or TSV metadata as a source
   table.
 - [Generate](tools/generate.md): create a source table from literal values.

@@ -104,6 +104,94 @@ class TestFiles:
             result = wf.compute(node)
             assert len(result) == 2
 
+    def test_explicit_files_preserve_order_and_ignore_pattern(
+        self, image_dir: Path
+    ) -> None:
+        first = image_dir / "sample_02.tif"
+        second = image_dir / "sample_01.tif"
+
+        result = Files().transform(
+            None,
+            Arguments(
+                path=None,
+                files=[first, second],
+                pattern="*.does-not-match",
+                recursive=True,
+            ),
+        )
+
+        assert result["path"].tolist() == [str(first), str(second)]
+
+    def test_recursive_directory_scan(self, image_dir: Path) -> None:
+        nested = image_dir / "nested"
+        nested.mkdir()
+        nested_file = nested / "sample_03.tif"
+        nested_file.write_bytes(b"nested")
+
+        result = Files().transform(
+            None,
+            Arguments(path=image_dir, files=None, pattern="*.tif", recursive=True),
+        )
+
+        assert nested_file in {Path(path) for path in result["path"]}
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            (
+                Arguments(path="/tmp", files=["/tmp/a.tif"], pattern="*", recursive=False),
+                "Set either Directory or Files, not both.",
+            ),
+            (
+                Arguments(path=None, files=None, pattern="*", recursive=False),
+                "Set a Directory or at least one file.",
+            ),
+            (
+                Arguments(path=None, files=[], pattern="*", recursive=False),
+                "Set a Directory or at least one file.",
+            ),
+        ],
+    )
+    def test_rejects_invalid_source_selection(
+        self, arguments: Arguments, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            Files().transform(None, arguments)
+
+    def test_rejects_missing_and_non_file_entries(self, tmp_path: Path) -> None:
+        directory = tmp_path / "directory"
+        directory.mkdir()
+        missing = tmp_path / "missing.tif"
+
+        with pytest.raises(ValueError) as exc_info:
+            Files().transform(
+                None,
+                Arguments(
+                    path=None,
+                    files=[missing, directory],
+                    pattern="*",
+                    recursive=False,
+                ),
+            )
+
+        assert str(missing) in str(exc_info.value)
+        assert str(directory) in str(exc_info.value)
+
+    def test_rejects_non_directory_source(self, tmp_path: Path) -> None:
+        file_path = tmp_path / "file.tif"
+        file_path.write_bytes(b"x")
+
+        with pytest.raises(ValueError, match="not a directory"):
+            Files().transform(
+                None,
+                Arguments(
+                    path=file_path,
+                    files=None,
+                    pattern="*",
+                    recursive=False,
+                ),
+            )
+
 
 # ---------------------------------------------------------------------------
 # ExtractChannel tool

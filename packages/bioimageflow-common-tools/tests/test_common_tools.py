@@ -149,6 +149,10 @@ def test_files_declares_folder_picker() -> None:
     inputs = serialize_input_schema(Files)
 
     assert inputs["path"]["path_picker"] == "folder"
+    assert inputs["path"]["nullable"] is True
+    assert inputs["files"]["type"] == "list"
+    assert inputs["files"]["nullable"] is True
+    assert inputs["recursive"]["type"] == "bool"
 
 
 def test_connected_components_schema_declares_uint32_labels() -> None:

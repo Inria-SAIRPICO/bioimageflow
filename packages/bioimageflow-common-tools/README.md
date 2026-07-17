@@ -8,7 +8,7 @@ specialized optional packages.
 
 ## Tools
 
-- `Files`: create a source table from files in one directory.
+- `Files`: create a source table from an explicit ordered file list or a directory scan.
 - `TableFromCsv`: load CSV or TSV metadata into a source table.
 - `Generate`: create a source table from literal values.
 - `InnerJoin`, `CrossJoin`, `JoinOnColumn`, `Concat`, `Collect`: combine
