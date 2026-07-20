@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import zipfile
@@ -24,6 +25,25 @@ from scripts.release_support import (
 
 def _run(root: Path, *args: str) -> None:
     subprocess.run(args, cwd=root, check=True, capture_output=True, text=True)
+
+
+def _workflow(root: Path, name: str) -> dict[str, object]:
+    workflow = yaml.load(
+        (root / ".github" / "workflows" / name).read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert isinstance(workflow, dict)
+    return workflow
+
+
+def _job_script(job: dict[str, object]) -> str:
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    return "\n".join(
+        str(step["run"])
+        for step in steps
+        if isinstance(step, dict) and "run" in step
+    )
 
 
 def _create_release_repository(tmp_path: Path) -> tuple[Path, Package]:
@@ -156,19 +176,66 @@ def test_status_distinguishes_unpublished_pending_and_behind(tmp_path: Path) -> 
     assert package_status(package, "1.2.4", root)[0] == "behind"
 
 
-def test_gitlab_release_job_is_manual_tag_scoped_and_token_protected() -> None:
+def test_github_release_workflow_is_tag_scoped_and_uses_trusted_publishing() -> None:
     root = Path(__file__).parents[2]
-    config = yaml.safe_load((root / ".gitlab-ci.yml").read_text())
-    job = config["release:pypi"]
-    script = "\n".join(job["script"])
+    workflow = _workflow(root, "release.yml")
+    trigger = workflow["on"]
+    jobs = workflow["jobs"]
+    assert isinstance(trigger, dict)
+    assert isinstance(jobs, dict)
 
-    assert job["stage"] == "release"
-    assert job["resource_group"] == "pypi"
-    assert job["environment"] == {"name": "pypi"}
-    assert job["rules"][0]["when"] == "manual"
-    assert "CI_COMMIT_TAG" in job["rules"][0]["if"]
-    assert "UV_PUBLISH_TOKEN" in script
-    assert "--package \"$RELEASE_PACKAGE\"" in script
-    assert "--trusted-publishing never" in script
-    assert "dist/release/*" in script
-    assert "id_tokens" not in job
+    build = jobs["build"]
+    publish = jobs["publish"]
+    assert isinstance(build, dict)
+    assert isinstance(publish, dict)
+    build_script = _job_script(build)
+    publish_script = _job_script(publish)
+
+    assert trigger["push"]["tags"] == ["bioimageflow*-v*"]
+    assert publish["needs"] == "build"
+    assert publish["environment"]["name"] == "pypi"
+    assert publish["permissions"]["id-token"] == "write"
+    assert "scripts/check_package_release.py" in build_script
+    assert 'uv build --package "$RELEASE_PACKAGE" --no-sources' in build_script
+    assert "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE" in str(build["steps"])
+    assert "--trusted-publishing always" in publish_script
+    assert "dist/release/*" in publish_script
+    assert "UV_PUBLISH_TOKEN" not in build_script + publish_script
+    assert not (root / ".gitlab-ci.yml").exists()
+
+
+def test_github_workflows_cover_normal_and_complete_validation() -> None:
+    root = Path(__file__).parents[2]
+    ci = _workflow(root, "ci.yml")
+    complete = _workflow(root, "complete.yml")
+
+    assert set(ci["jobs"]) == {
+        "quality",
+        "fast-tests",
+        "deterministic-tests",
+        "packages",
+        "docs",
+    }
+    assert set(complete["jobs"]) == {
+        "release-validation",
+        "wetlands",
+        "public-data",
+        "external-binaries",
+        "model-runtimes",
+    }
+
+
+def test_github_actions_are_pinned_to_commit_shas() -> None:
+    root = Path(__file__).parents[2]
+
+    for path in sorted((root / ".github" / "workflows").glob("*.yml")):
+        workflow = _workflow(root, path.name)
+        jobs = workflow["jobs"]
+        assert isinstance(jobs, dict)
+        for job in jobs.values():
+            assert isinstance(job, dict)
+            steps = job["steps"]
+            assert isinstance(steps, list)
+            for step in steps:
+                if isinstance(step, dict) and "uses" in step:
+                    assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", step["uses"])

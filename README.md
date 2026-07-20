@@ -30,7 +30,7 @@ pip install bioimageflow
 For development:
 
 ```bash
-git clone https://gitlab.inria.fr/sairpico/bioimageflow.git
+git clone https://github.com/bioimageit/bioimageflow.git
 cd bioimageflow
 uv sync
 ```
@@ -190,7 +190,7 @@ uv run pytest tests/integration/
 
 # Verify package build artifacts
 uv run pytest tests/unit/test_package_artifacts.py
-uv build --all-packages --out-dir dist/packages
+uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 
 # Build documentation with warnings treated as failures
@@ -213,7 +213,7 @@ Check local versions against PyPI with:
 uv run python scripts/package_status.py
 ```
 
-Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and a manual GitLab publication job.
+Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and an approval-gated GitHub Actions publication workflow.
 See the [release operator guide](docs/source/reference/releasing.md) for setup and release steps.
 
 ## FAQ

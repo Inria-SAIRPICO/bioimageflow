@@ -28,9 +28,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.inria.fr/sairpico/bioimageflow"
-Repository = "https://gitlab.inria.fr/sairpico/bioimageflow"
-Issues = "https://gitlab.inria.fr/sairpico/bioimageflow/-/issues"
+Homepage = "https://github.com/bioimageit/bioimageflow"
+Repository = "https://github.com/bioimageit/bioimageflow"
+Issues = "https://github.com/bioimageit/bioimageflow/issues"
 
 [tool.uv.sources]
 bioimageflow-core = { workspace = true }

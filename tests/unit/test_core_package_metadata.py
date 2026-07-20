@@ -30,9 +30,9 @@ FIRST_PARTY_DISTRIBUTIONS = {
     "bioimageflow-tracking-tools",
 }
 EXPECTED_PROJECT_URLS = {
-    "Homepage": "https://gitlab.inria.fr/sairpico/bioimageflow",
-    "Repository": "https://gitlab.inria.fr/sairpico/bioimageflow",
-    "Issues": "https://gitlab.inria.fr/sairpico/bioimageflow/-/issues",
+    "Homepage": "https://github.com/bioimageit/bioimageflow",
+    "Repository": "https://github.com/bioimageit/bioimageflow",
+    "Issues": "https://github.com/bioimageit/bioimageflow/issues",
 }
 BASE_CLASSIFIERS = {
     "Development Status :: 3 - Alpha",

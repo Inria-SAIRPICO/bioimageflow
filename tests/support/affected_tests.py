@@ -54,7 +54,10 @@ def _commands_for_path(path: PurePosixPath) -> tuple[str, ...]:
     parts = path.parts
     path_text = path.as_posix()
 
-    if path_text in {".gitlab-ci.yml", "pyproject.toml", "conftest.py"}:
+    if (
+        path_text in {"pyproject.toml", "conftest.py"}
+        or path_text.startswith(".github/workflows/")
+    ):
         return (CI_QUALITY_CONFIG_COMMAND, DOCS_BUILD_COMMAND)
 
     if _is_docs_path(parts):

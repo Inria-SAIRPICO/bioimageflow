@@ -14,7 +14,7 @@ bioimageflow-segmentation-tools-v0.2.0
 ```
 
 The tag must be annotated, point to the release commit, and match the selected package's `[project].version` exactly.
-The GitLab release job rejects a lightweight tag, a dirty checkout, a mismatched version, additional distribution artifacts, or a tag that does not point to the pipeline commit.
+The GitHub release workflow rejects a lightweight tag, a dirty checkout, a mismatched version, additional distribution artifacts, or a tag that does not point to the workflow commit.
 
 ## Versioning Policy
 
@@ -45,23 +45,21 @@ Matching version numbers without a corresponding release tag are reported as unk
 
 Use `--json` for machine-readable output or `--check` to require every package to be up to date.
 
-## One-Time GitLab and PyPI Setup
+## One-Time GitHub and PyPI Setup
 
-PyPI Trusted Publishing supports `gitlab.com`, but not the self-managed `gitlab.inria.fr` instance used by this repository.
-The release job therefore reads a PyPI API token from a protected GitLab variable.
+The release workflow uses PyPI Trusted Publishing through GitHub Actions.
+It does not use a stored PyPI password or API token.
 
 Complete these steps once:
 
 1. Ensure the PyPI account that owns the BioImageFlow projects has a verified email address and two-factor authentication.
-2. Create a PyPI API token named for this GitLab release job.
-3. Select the entire-account scope because one job publishes several independently named PyPI projects and because the first upload creates projects that do not exist yet.
-4. In GitLab, open **Settings > CI/CD > Variables** and add the token as `UV_PUBLISH_TOKEN`.
-5. Mark the variable **Masked** and **Protected**, and scope it to the `pypi` environment.
-6. In GitLab, protect the `pypi` environment and limit deployment access to the maintainers allowed to publish.
-7. Protect release tags matching `bioimageflow*-v*` and limit tag creation to the maintainers allowed to publish.
+2. In the GitHub repository, create an environment named `pypi` and configure the maintainers who must approve deployments to it.
+3. Create a GitHub repository ruleset for tags matching `bioimageflow*-v*` that restricts tag creation, update, and deletion to release maintainers.
+4. For each existing BioImageFlow project on PyPI, add a GitHub Actions Trusted Publisher with owner `bioimageit`, repository `bioimageflow`, workflow `release.yml`, and environment `pypi`.
+5. For each BioImageFlow project that does not yet exist on PyPI, add a pending publisher with the same owner, repository, workflow, and environment plus the exact future PyPI project name.
 
-The account-wide token is a consequence of using one dynamic release job with a self-managed GitLab instance.
-If narrower project-scoped tokens become necessary, replace the dynamic job with one statically named protected environment and one token per distribution.
+The same workflow identity can be registered for every independently versioned distribution in this repository.
+Pending publishers create their PyPI projects during the first matching release and then become normal publishers.
 
 ## Prepare One Release
 
@@ -110,19 +108,18 @@ uv run python scripts/check_package_release.py bioimageflow-segmentation-tools-v
 git push origin bioimageflow-segmentation-tools-v0.2.0
 ```
 
-## Publish from GitLab
+## Publish from GitHub
 
-The pushed tag creates a pipeline.
-All ordinary quality, test, packaging, and documentation stages must pass.
+The pushed tag starts the **Publish package to PyPI** workflow.
+Its build job must complete quality, deterministic test, documentation, package build, and artifact identity checks before publication is eligible for approval.
 
 Then:
 
-1. Open the tag pipeline in GitLab.
-2. Find the manual `release:pypi` job.
-3. Confirm the tag names the intended package and version.
-4. Run the job.
-5. Wait for the job to validate Python 3.11, build the selected package with workspace sources disabled, validate exactly one wheel and one source distribution, and upload them to PyPI.
-6. Run `uv run python scripts/package_status.py` locally after PyPI has indexed the release.
+1. Open the workflow run in the GitHub **Actions** tab.
+2. Confirm that the build job succeeded and that the tag names the intended package and version.
+3. Review and approve the waiting deployment to the `pypi` environment.
+4. Wait for GitHub Actions to obtain a short-lived PyPI credential and publish the validated wheel and source distribution.
+5. Run `uv run python scripts/package_status.py` locally after PyPI has indexed the release.
 
 Publication is retry-safe for identical files because `uv publish` checks PyPI before uploading.
 Never move or reuse a release tag, and never attempt to replace an existing PyPI file.

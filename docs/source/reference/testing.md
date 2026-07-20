@@ -31,7 +31,7 @@ CI runs the required fast matrix with deterministic non-fast and complete/resour
 uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 ```
 
-The GitLab CI regular-test matrix runs that command on Python 3.10 and 3.12.
+The GitHub Actions regular-test matrix runs that command on Python 3.10 and 3.12.
 Python 3.11 runs the `compat` smoke selector on every pipeline, and the full deterministic Python 3.11 validation is scheduled/manual and release-required.
 
 Run the Python-version compatibility smoke selector with:
@@ -83,7 +83,7 @@ uv run pytest tests/unit/test_package_artifacts.py
 To validate an existing package artifact directory instead of building inside the test fixture, point the test at the prebuilt output:
 
 ```bash
-uv build --all-packages --out-dir dist/packages
+uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 ```
 
@@ -93,7 +93,7 @@ Run deterministic package-tool coverage with:
 uv run pytest -m "package_tools and not complete"
 ```
 
-GitLab CI runs deterministic acceptance, package-tool, and packaging commands in explicit jobs, separate from the Python-version fast matrix.
+GitHub Actions runs deterministic acceptance, package-tool, and packaging commands in explicit jobs, separate from the Python-version fast matrix.
 
 ## Complete Tests
 
@@ -129,7 +129,7 @@ uv run pytest packages/bioimageflow-sairpico-tools/tests -m "complete and wetlan
 uv run pytest packages/bioimageflow-common-tools/tests packages/bioimageflow-segmentation-tools/tests -m "complete and wetlands" --run-complete
 ```
 
-GitLab CI also defines manual or scheduled complete-test jobs that are separate from the required deterministic gates:
+GitHub Actions also defines manually dispatched or scheduled complete-test jobs that are separate from the required deterministic gates:
 
 ```bash
 uv run pytest -m "complete and wetlands" --run-complete -rsx
@@ -183,7 +183,7 @@ uv run pytest tests -m "not slow and not acceptance and not packaging and not pa
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
-uv build --all-packages --out-dir dist/packages
+uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```

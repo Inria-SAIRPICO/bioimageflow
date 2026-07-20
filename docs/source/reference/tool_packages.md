@@ -30,7 +30,7 @@ uv run pytest tests -m "not slow and not acceptance and not packaging and not pa
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
-uv build --all-packages --out-dir dist/packages
+uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
@@ -41,7 +41,7 @@ Those jobs are useful release evidence, but deterministic unit, package-artifact
 Wheels exclude package documentation, package tests, generated build outputs, and local caches.
 Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.
 Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
-Publishing is a manual GitLab deployment triggered by a protected package-specific release tag.
+Publishing is an approval-gated GitHub Actions deployment triggered by a protected package-specific release tag.
 The release job reruns deterministic Python 3.11 validation, builds only the tagged distribution with workspace sources disabled, validates the exact artifacts, and uploads them to PyPI.
 
 ## Package-Owned Documentation Contract
