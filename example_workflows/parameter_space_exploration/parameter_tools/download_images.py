@@ -1,4 +1,4 @@
-"""DownloadImages — download images from URLs."""
+"""DownloadImages — download images into workflow-managed storage."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,11 +16,7 @@ from bioimageflow_core import (
 
 
 class DownloadImages(ProcessingTool):
-    """Download images from a list of URLs.
-
-    Takes a list of URLs as a newline-separated string and downloads
-    each one to a local directory. Returns one row per downloaded file.
-    """
+    """Download a newline-separated list of URLs into the run assets directory."""
 
     name = "download_images"
     documentation = (
@@ -48,20 +44,8 @@ class DownloadImages(ProcessingTool):
                 description="Local path of the downloaded file.",
             ),
         ]
-        filename: Annotated[
-            str,
-            GUIMeta(
-                display_name="Filename",
-                description="Base name of the downloaded file.",
-            ),
-        ]
-        url: Annotated[
-            str,
-            GUIMeta(
-                display_name="Source URL",
-                description="URL from which the file was downloaded.",
-            ),
-        ]
+        filename: Annotated[str, GUIMeta(display_name="Filename")]
+        url: Annotated[str, GUIMeta(display_name="Source URL")]
 
     def process_row(
         self,
@@ -77,28 +61,15 @@ class DownloadImages(ProcessingTool):
         output_dir = context.assets_dir
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        urls = [u.strip() for u in arguments.urls.strip().split("\n") if u.strip()]
         results = []
-
-        for url in urls:
-            filename = url.rstrip("/").split("/")[-1]
-            dest = output_dir / filename
-
-            if not dest.exists():
-                print(f"Downloading {url} ...")
+        for url in (line.strip() for line in arguments.urls.splitlines()):
+            if not url:
+                continue
+            destination = output_dir / url.rstrip("/").split("/")[-1]
+            if not destination.exists():
                 with urlopen(url, timeout=120) as response:
-                    content = response.read()
-                dest.write_bytes(content)
-                print(f"  Saved to {dest} ({len(content)} bytes)")
-            else:
-                print(f"Already downloaded: {dest}")
-
+                    destination.write_bytes(response.read())
             results.append(
-                self.Outputs(
-                    path=dest,
-                    filename=filename,
-                    url=url,
-                )
+                self.Outputs(path=destination, filename=destination.name, url=url)
             )
-
         return results

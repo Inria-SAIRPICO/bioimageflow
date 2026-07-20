@@ -50,7 +50,6 @@ https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
 https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
 
 EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "fish_analysis" / "data"
 DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "fish_analysis"
 
 
@@ -70,26 +69,23 @@ def build_workflow(
     """
     wf = Workflow(
         name="fish_analysis",
-        display_name="FISH Analysis",
+        display_name="Fish Analysis",
         storage_path=str(storage_path),
         engine=engine,
         wetlands_config={**(wetlands_config or {}), "debug": debug},
     )
 
     with wf:
-        data_dir = wf.input(
-            "data_dir", str, default=str(DEFAULT_DATA_DIR), id="input-data-dir"
-        )
         # -- 1. Data ingestion --
         download = DownloadImages()(
             urls=CIL_URLS,
-            output_dir=data_dir,
             name="download_cil_images",
         )
 
         # -- 2. Nuclei channel extraction before Cellpose v3 --
         ch_nuclei = ExtractChannel()(
-            input_image=download["path"], channel=2,
+            input_image=download["path"],
+            channel=2,
             name="extract_ch2_nuclei",
         )
         nuclei = Cellpose3()(
@@ -115,18 +111,22 @@ def build_workflow(
 
         # -- 5. Statistical aggregation --
         stats = AverageSpotsPerNucleus()(
-            overlaps_fols2, overlaps_csf1r,
+            overlaps_fols2,
+            overlaps_csf1r,
             name="avg_spots_per_nucleus",
         )
         wf.output("image_index", stats["image_index"], id="output-image-index")
-        wf.output("avg_fols2_per_nucleus", stats["avg_fols2_per_nucleus"], id="output-fols2")
-        wf.output("avg_csf1r_per_nucleus", stats["avg_csf1r_per_nucleus"], id="output-csf1r")
+        wf.output(
+            "avg_fols2_per_nucleus", stats["avg_fols2_per_nucleus"], id="output-fols2"
+        )
+        wf.output(
+            "avg_csf1r_per_nucleus", stats["avg_csf1r_per_nucleus"], id="output-csf1r"
+        )
     return wf
 
 
 def main() -> None:
     storage_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_STORAGE_PATH
-    data_dir = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_DATA_DIR
 
     configure_wetlands(wetlands_instance_path="./wetlands")
 
@@ -139,12 +139,11 @@ def main() -> None:
     )
 
     for step in wf.compute_steps(
-        inputs={"data_dir": str(data_dir)},
         engine=engine,
     ):
         print(f"Next: {step.node_name} (env: {step.environment})")
-        step.prepare()     # launches Wetlands env — attach debugger here
-        df = step.execute() # runs the tool
+        step.prepare()  # launches Wetlands env — attach debugger here
+        df = step.execute()  # runs the tool
         print(df.head())
 
     # After execution, the engine can be inspected for internal state

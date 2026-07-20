@@ -1,4 +1,4 @@
-# Parameter Space Exploration Workflow
+# Parameters Space Exploration Workflow
 
 This demo workflow explores ATLAS spot-detection parameters on FISH marker-channel images using a combinatorial DAG pattern.
 
@@ -10,7 +10,7 @@ Compare ATLAS sensitivity and spot-size settings on a FOLS2 marker channel from 
 
 The workflow:
 
-1. Lists FISH images using the `Files` tool.
+1. Downloads a public FISH image into the workflow run's managed assets directory.
 2. Generates parameter value lists using the `Generate` tool (one for sensitivity, one for size).
 3. Performs a Cartesian product using `CrossJoin`.
 4. Extracts the marker channel for each image/parameter row.
@@ -41,8 +41,7 @@ python example_workflows/parameter_space_exploration/workflow.py
 
 ## Data
 
-The bundled run uses Cell Image Library FISH data so the command above works without extra arguments.
-The workflow can be pointed at another directory of compatible microscopy TIFFs.
+The workflow downloads Cell Image Library record 13432 when it runs, so the command above works without a repository-local dataset or extra arguments.
 
 ## Validation
 
@@ -50,7 +49,7 @@ Use the generated masks, foreground metrics, and mosaic to compare the parameter
 
 ## Customization
 
-You can modify the parameter values, image pattern, mosaic columns, and tile size by editing `workflow.py`.
+You can modify the source URL, parameter values, mosaic columns, and tile size by editing `workflow.py`.
 
 ## GUI editing
 

@@ -5,7 +5,7 @@ This workflow demonstrates combinatorial parameter testing for the AtlasSpotDete
 detection algorithm on a Cell Image Library FISH image.
 
 The workflow:
-1. Lists input FISH images from the shared fish_analysis data directory.
+1. Downloads a public FISH image into workflow-managed storage.
 2. Generates parameter value lists for sensitivity and spot scale using Generate.
 3. Performs a Cartesian product (cross-join) to create a full parameter grid.
 4. Extracts the FOLS2 marker channel for every image-parameter row.
@@ -15,141 +15,17 @@ The workflow:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Annotated, Any
 
-import imageio.v3 as iio
-import numpy as np
-import pandas as pd
-
-from bioimageflow import DataFrameTool, Workflow, configure_wetlands
-from bioimageflow_common_tools import CrossJoin, ExtractChannel, Files, Generate, Mosaic
-from bioimageflow_core import (
-    Arguments,
-    Category,
-    Connectable,
-    GENERAL_ENV,
-    GUIMeta,
-    ImageSpec,
-    IOModel,
-    Layout,
-    ProcessingTool,
-    Semantic,
-)
+from bioimageflow import Workflow, configure_wetlands
+from bioimageflow_common_tools import CrossJoin, ExtractChannel, Generate, Mosaic
 from bioimageflow_spot_tools import AtlasSpotDetection
+from parameter_tools.download_images import DownloadImages
+from parameter_tools.metrics import ParameterSweepResults, SpotMaskMetrics
 
 EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "fish_analysis" / "data"
 DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "parameter_space_exploration"
-
-
-def _neighbor_offsets(ndim: int) -> Iterable[tuple[int, ...]]:
-    for axis in range(ndim):
-        for direction in (-1, 1):
-            offset = [0] * ndim
-            offset[axis] = direction
-            yield tuple(offset)
-
-
-def _count_foreground_components(mask: np.ndarray) -> int:
-    foreground = np.asarray(mask) > 0
-    visited = np.zeros(foreground.shape, dtype=bool)
-    component_count = 0
-    offsets = tuple(_neighbor_offsets(foreground.ndim))
-    for start in zip(*np.nonzero(foreground), strict=False):
-        if visited[start]:
-            continue
-        component_count += 1
-        stack = [start]
-        visited[start] = True
-        while stack:
-            current = stack.pop()
-            for offset in offsets:
-                neighbor = tuple(
-                    index + delta for index, delta in zip(current, offset, strict=False)
-                )
-                if any(
-                    index < 0 or index >= size
-                    for index, size in zip(neighbor, foreground.shape, strict=False)
-                ):
-                    continue
-                if foreground[neighbor] and not visited[neighbor]:
-                    visited[neighbor] = True
-                    stack.append(neighbor)
-    return component_count
-
-
-class SpotMaskMetrics(ProcessingTool):
-    """Compute simple count and foreground metrics for ATLAS spot masks."""
-
-    display_name = "Spot Mask Metrics"
-    category = Category.MEASUREMENT
-    environment = GENERAL_ENV
-
-    class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(semantics={Semantic.BINARY}, layouts={Layout.PLANAR}),
-            GUIMeta(
-                display_name="Spot mask",
-                description="Binary spot mask to count.",
-                connectable=Connectable.BY_DEFAULT,
-            ),
-        ]
-
-    class Outputs(IOModel):
-        label_count: Annotated[int, GUIMeta(display_name="Spot count")]
-        object_pixel_count: Annotated[int, GUIMeta(display_name="Foreground pixels")]
-        foreground_fraction: Annotated[float, GUIMeta(display_name="Foreground fraction")]
-
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        mask = np.asarray(iio.imread(arguments.input_image))
-        foreground_pixels = int((mask > 0).sum())
-        return self.Outputs(
-            label_count=_count_foreground_components(mask),
-            object_pixel_count=foreground_pixels,
-            foreground_fraction=float(foreground_pixels / mask.size) if mask.size else 0.0,
-        )
-
-
-class ParameterSweepResults(DataFrameTool):
-    """Combine parameter rows, mask paths, counts, and the mosaic preview path."""
-
-    display_name = "Parameter Sweep Results"
-    category = Category.MEASUREMENT
-
-    class Inputs(IOModel):
-        pass
-
-    class Outputs(IOModel):
-        sensitivity: float
-        size: int
-        label_count: int
-        mosaic_path: str
-
-    def merge_dataframes(self, dfs: list[Any], arguments: Any) -> pd.DataFrame:
-        if len(dfs) != 4:
-            raise ValueError(
-                "ParameterSweepResults expects parameter, detection, count, and mosaic tables."
-            )
-        parameters = pd.DataFrame(dfs[0]).reset_index(drop=True)
-        detections = pd.DataFrame(dfs[1]).reset_index(drop=True)
-        counts = pd.DataFrame(dfs[2]).reset_index(drop=True)
-        mosaic = pd.DataFrame(dfs[3])
-        results = pd.concat(
-            [
-                parameters,
-                detections[[column for column in detections.columns if column not in parameters.columns]],
-                counts[[column for column in counts.columns if column not in parameters.columns]],
-            ],
-            axis=1,
-        )
-        if "mosaic_path" in mosaic.columns and not mosaic.empty:
-            results["mosaic_path"] = mosaic["mosaic_path"].iloc[0]
-        if "image_count" in mosaic.columns and not mosaic.empty:
-            results["image_count"] = int(mosaic["image_count"].iloc[0])
-        return results
+CIL_URL = "https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif"
 
 
 def build_workflow(
@@ -163,52 +39,38 @@ def build_workflow(
 
     Parameters
     ----------
-    data_dir : str
-        Directory containing input images.
     storage_path : str
         Directory for workflow outputs and cache.
-    pattern : str
-        Glob pattern for image files.
-    marker_channel : int
-        Channel index sent to ATLAS.
 
     """
     wf = Workflow(
         name="parameter_space_exploration",
-        display_name="Parameter Space Exploration",
+        display_name="Parameters Space Exploration",
         storage_path=str(storage_path),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
-        data_dir = wf.input("data_dir", Path, default=Path(DEFAULT_DATA_DIR), id="input-data-dir")
-        pattern = wf.input("pattern", str, default="13432.tif", id="input-pattern")
-        marker_channel = wf.input("marker_channel", int, default=0, id="input-marker-channel")
-        # Step 1: List input images
-        images = Files()(
-            path=data_dir,
-            pattern=pattern,
-            name="input_images"
+        marker_channel = wf.input(
+            "marker_channel", int, default=0, id="input-marker-channel"
+        )
+        # Step 1: Download the public sample into this run's managed assets directory.
+        images = DownloadImages()(
+            urls=CIL_URL,
+            name="download_cil_image",
         )
 
         # Step 2: Generate parameter value lists
         sensitivity_params = Generate()(
-            column_name="sensitivity",
-            values=[0.001, 0.0001],
-            name="sensitivity_values"
+            column_name="sensitivity", values=[0.001, 0.0001], name="sensitivity_values"
         )
         size_params = Generate()(
-            column_name="size",
-            values=[30, 60, 120],
-            name="size_values"
+            column_name="size", values=[30, 60, 120], name="size_values"
         )
 
         # Step 3: Cartesian product of images and parameters
         param_grid = CrossJoin()(
-            images,
-            sensitivity_params,
-            size_params,
-            name="parameter_grid"
+            images, sensitivity_params, size_params, name="parameter_grid"
         )
         # Note: order matters for CrossJoin; we pass images first so that the
         # output includes the source path before sensitivity and size.
@@ -225,7 +87,7 @@ def build_workflow(
             input_image=marker_images["output_image"],
             p_value=param_grid["sensitivity"],
             gaussian_std=param_grid["size"],
-            name="atlas_detections"
+            name="atlas_detections",
         )
 
         # Step 6: Count connected foreground components for each ATLAS mask.
@@ -237,9 +99,7 @@ def build_workflow(
         # Step 7: Mosaic of all detection results. Mosaic accepts scalar image
         # semantics, so AtlasSpotDetection's binary masks can be visualized directly.
         mosaic = Mosaic()(
-            input_image=detections["output_image"],
-            columns=6,
-            name="results_mosaic"
+            input_image=detections["output_image"], columns=6, name="results_mosaic"
         )
 
         results = ParameterSweepResults()(
@@ -258,13 +118,13 @@ def build_workflow(
 
 def main() -> None:
     import sys
-    data_dir = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DATA_DIR
-    storage_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_STORAGE_PATH
+
+    storage_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_STORAGE_PATH
 
     configure_wetlands(wetlands_instance_path="./wetlands")
 
     wf = build_workflow(storage_path=storage_path)
-    result_df = wf.compute(inputs={"data_dir": data_dir})
+    result_df = wf.compute()
     print("Workflow complete.")
     print(f"Mosaic saved to: {result_df['mosaic_path'].iloc[0]}")
     print(f"Total parameter rows processed: {len(result_df)}")

@@ -40,3 +40,35 @@ def test_inventory_covers_every_shipped_example_definition() -> None:
     }
     maintained = set(WORKFLOW_DEFINITION_MODULES)
     assert discovered == maintained
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_display_name", "expected_inputs"),
+    (
+        (
+            "example_workflows/fish_analysis/workflow.py",
+            "Fish Analysis",
+            [],
+        ),
+        (
+            "example_workflows/parameter_space_exploration/workflow.py",
+            "Parameters Space Exploration",
+            ["marker_channel"],
+        ),
+    ),
+)
+def test_platform_demo_factories_are_self_contained(
+    relative_path: str,
+    expected_display_name: str,
+    expected_inputs: list[str],
+) -> None:
+    exported = Workflow.from_python(Path(relative_path)).to_dict(
+        include_custom_tools=True
+    )
+    graph = exported["workflow"]
+
+    assert graph["display_name"] == expected_display_name
+    assert [item["name"] for item in graph["interface"]["inputs"]] == expected_inputs
+    assert any(node["tool_class"] == "DownloadImages" for node in graph["nodes"])
+    assert "data_dir" not in str(graph)
+    assert "output_dir" not in str(graph)
