@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "bioimageflow-core>=0.1.6",
+    "bioimageflow-core>=0.1.6,<0.2",
     "imageio",
     "numpy",
 ]

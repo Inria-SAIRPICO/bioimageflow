@@ -341,6 +341,7 @@ dev = [
     { name = "myst-parser", version = "5.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "packaging" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pyyaml" },
@@ -358,6 +359,7 @@ dev = [
     { name = "sphinx-copybutton" },
     { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "wetlands" },
 ]
 
@@ -380,6 +382,7 @@ dev = [
     { name = "ipython", specifier = ">=8.38.0" },
     { name = "myst-parser", specifier = ">=4.0.0" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pyright", specifier = ">=1.1.410" },
     { name = "pytest" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -390,6 +393,7 @@ dev = [
     { name = "sphinx-autodoc-typehints", specifier = ">=3.0.1" },
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "wetlands", editable = "../wetlands" },
 ]
 

@@ -19,6 +19,7 @@ pytestmark = pytest.mark.packaging
 
 ROOT = Path(__file__).parents[2]
 PREBUILT_ARTIFACTS_ENV = "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR"
+SELECTED_PACKAGE_ENV = "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE"
 TOOL_PACKAGE_NAMES = {
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
@@ -53,8 +54,14 @@ FORBIDDEN_ARTIFACT_PARTS = {
 }
 
 
-def _distribution_names() -> list[str]:
-    return sorted(path.parent.name for path in (ROOT / "packages").glob("*/pyproject.toml"))
+def _distribution_names(environ: Mapping[str, str] = os.environ) -> list[str]:
+    names = sorted(path.parent.name for path in (ROOT / "packages").glob("*/pyproject.toml"))
+    selected = environ.get(SELECTED_PACKAGE_ENV)
+    if selected is None:
+        return names
+    if selected not in names:
+        raise ValueError(f"Unknown package selected through {SELECTED_PACKAGE_ENV}: {selected}")
+    return [selected]
 
 
 def _normalized_name(name: str) -> str:
@@ -91,8 +98,14 @@ def built_artifacts(tmp_path_factory: pytest.TempPathFactory) -> Path:
         return prebuilt_artifacts_dir
 
     out_dir = tmp_path_factory.mktemp("package-artifacts")
+    distribution_names = _distribution_names()
+    package_arguments = (
+        ["--package", distribution_names[0]]
+        if len(distribution_names) == 1
+        else ["--all-packages"]
+    )
     result = subprocess.run(
-        ["uv", "build", "--all-packages", "--out-dir", str(out_dir)],
+        ["uv", "build", *package_arguments, "--out-dir", str(out_dir)],
         cwd=ROOT,
         check=False,
         text=True,
@@ -142,6 +155,12 @@ def test_missing_prebuilt_artifact_dir_env_keeps_local_build_fallback() -> None:
     assert _artifact_dir_from_env({}) is None
 
 
+def test_selected_package_limits_artifact_contract() -> None:
+    assert _distribution_names({SELECTED_PACKAGE_ENV: "bioimageflow-core"}) == [
+        "bioimageflow-core"
+    ]
+
+
 def test_wheels_exclude_docs_tests_and_generated_artifacts(built_artifacts: Path) -> None:
     offenders: dict[str, list[str]] = {}
 
@@ -182,9 +201,13 @@ def test_sdists_exclude_generated_artifacts_and_keep_tool_docs_tests(
 
 
 def test_spot_tools_atlas_data_file_is_in_wheel_and_sdist(
-    built_artifacts: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
     distribution_name = "bioimageflow-spot-tools"
+    if distribution_name not in _distribution_names():
+        pytest.skip(f"{distribution_name} is not the selected release package")
+    built_artifacts = request.getfixturevalue("built_artifacts")
+    assert isinstance(built_artifacts, Path)
     data_path = "bioimageflow_spot_tools/data/blobs.txt"
 
     assert data_path in _wheel_members(_wheel_path(built_artifacts, distribution_name))
@@ -195,9 +218,15 @@ def test_built_wheels_import_public_modules(
     built_artifacts: Path,
     tmp_path: Path,
 ) -> None:
+    distribution_names = _distribution_names()
     wheel_paths = {
         distribution_name: _wheel_path(built_artifacts, distribution_name)
-        for distribution_name in _distribution_names()
+        for distribution_name in distribution_names
+    }
+    public_import_modules = {
+        name: module
+        for name, module in PUBLIC_IMPORT_MODULES.items()
+        if name in distribution_names
     }
     code = """
 from pathlib import Path
@@ -226,7 +255,7 @@ if failures:
             sys.executable,
             "-c",
             code,
-            json.dumps(PUBLIC_IMPORT_MODULES, sort_keys=True),
+            json.dumps(public_import_modules, sort_keys=True),
             json.dumps(
                 {name: str(path) for name, path in wheel_paths.items()},
                 sort_keys=True,

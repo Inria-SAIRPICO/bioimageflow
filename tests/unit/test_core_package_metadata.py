@@ -7,6 +7,9 @@ import re
 from pathlib import Path
 import sys
 
+from packaging.requirements import Requirement
+from packaging.version import Version
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - Python < 3.11
@@ -146,16 +149,20 @@ def test_workspace_core_pin_matches_local_core_version() -> None:
     assert f"bioimageflow-core=={core['project']['version']}" in workspace["project"]["dependencies"]
 
 
-def test_first_party_package_versions_are_lockstep() -> None:
-    orchestrator = _project(ROOT / "packages" / "bioimageflow" / "pyproject.toml")
-    expected = orchestrator["version"]
+def test_first_party_package_versions_are_valid_stable_release_versions() -> None:
+    offenders = {}
 
-    versions = {
-        str(path.relative_to(ROOT)): _project(path)["version"]
-        for path in _package_pyprojects()
-    }
+    for path in _package_pyprojects():
+        version = Version(_project(path)["version"])
+        if (
+            len(version.release) != 3
+            or version.is_prerelease
+            or version.is_devrelease
+            or version.is_postrelease
+        ):
+            offenders[str(path.relative_to(ROOT))] = str(version)
 
-    assert versions == {path: expected for path in versions}
+    assert offenders == {}
 
 
 def test_first_party_packages_target_supported_python_floors() -> None:
@@ -176,9 +183,16 @@ def test_core_declares_python39_worker_runtime_classifier() -> None:
     assert "Programming Language :: Python :: 3.9" in core["classifiers"]
 
 
-def test_first_party_packages_require_numpy_declaring_core_version() -> None:
+def _assert_bounded_local_dependency(dependency: str, package_name: str, version: str) -> None:
+    requirement = Requirement(dependency)
+
+    assert requirement.name == package_name
+    assert Version(version) in requirement.specifier
+    assert any(specifier.operator in {"<", "<="} for specifier in requirement.specifier)
+
+
+def test_first_party_packages_declare_bounded_compatible_core_versions() -> None:
     core = _pyproject(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
-    expected = f"bioimageflow-core>={core['project']['version']}"
     offenders: dict[str, list[str]] = {}
 
     for path in sorted((ROOT / "packages").glob("*/pyproject.toml")):
@@ -188,26 +202,41 @@ def test_first_party_packages_require_numpy_declaring_core_version() -> None:
             dependency for dependency in dependencies
             if dependency.startswith("bioimageflow-core")
         ]
-        if project["name"] != "bioimageflow-core" and core_dependencies != [expected]:
+        if project["name"] == "bioimageflow-core":
+            continue
+        try:
+            [dependency] = core_dependencies
+            _assert_bounded_local_dependency(
+                dependency,
+                "bioimageflow-core",
+                core["project"]["version"],
+            )
+        except (AssertionError, ValueError):
             offenders[str(path.relative_to(ROOT))] = core_dependencies
 
     assert offenders == {}
 
 
-def test_tool_packages_require_current_orchestrator_version() -> None:
+def test_tool_packages_declare_bounded_compatible_orchestrator_versions() -> None:
     orchestrator = _project(ROOT / "packages" / "bioimageflow" / "pyproject.toml")
-    expected = f"bioimageflow>={orchestrator['version']}"
     offenders: dict[str, list[str]] = {}
 
     for path in _package_pyprojects():
         project = _project(path)
         dependencies = project.get("dependencies", [])
         orchestrator_dependencies = _dependency_entries(dependencies, "bioimageflow")
-        if (
-            project["name"] not in {"bioimageflow", "bioimageflow-core"}
-            and _runtime_imports_package(path.parent, "bioimageflow")
-            and orchestrator_dependencies != [expected]
-        ):
+        if project["name"] in {"bioimageflow", "bioimageflow-core"}:
+            continue
+        if not _runtime_imports_package(path.parent, "bioimageflow"):
+            continue
+        try:
+            [dependency] = orchestrator_dependencies
+            _assert_bounded_local_dependency(
+                dependency,
+                "bioimageflow",
+                orchestrator["version"],
+            )
+        except (AssertionError, ValueError):
             offenders[str(path.relative_to(ROOT))] = orchestrator_dependencies
 
     assert offenders == {}

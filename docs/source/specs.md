@@ -14,7 +14,7 @@ BioImageFlow addresses three challenges in bioimage analysis:
 
 BioImageFlow targets Python `>=3.10` for the orchestrator and first-party tool packages.
 `bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
-All first-party packages are released in lockstep, so a BioImageFlow workspace should use matching package versions for `bioimageflow`, `bioimageflow-core`, and the first-party tool packages.
+First-party packages are versioned independently and declare bounded compatibility requirements for other first-party distributions they use.
 The repository root project is workspace-only: it exists to coordinate local package development and documentation, not as a runtime package imported by users.
 Package-local documentation is source-only and is not part of the installed runtime API.
 Public package exports are explicit through each package's `__all__`; names not exported there are internal unless documented otherwise.
@@ -1365,7 +1365,7 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 *Module: `bioimageflow.tool_loader`*
 
 Tools are distributed as standard Python packages. The package version participates in result-key material for caching (see [Section 6.1](#61-result-key)). When a tool's package version changes, cached results for that tool are automatically invalidated.
-First-party BioImageFlow packages are released and documented in lockstep, so first-party package references should use matching versions unless a compatibility note explicitly says otherwise.
+First-party BioImageFlow packages are released independently, so package references must use versions allowed by each distribution's declared compatibility requirements.
 
 #### Package Structure Requirements
 
@@ -2269,7 +2269,7 @@ Downstream execution must consume the selected current record, not a non-current
 
 In development mode (`workflow.compute(dev_mode=True)`), result-key material additionally includes a source hash of the tool class.
 This auto-invalidates reusable records when tool code changes without requiring a version bump.
-Development mode is intended for iteration; production workflows should rely on lockstep package versions and explicit tool package versions for reproducibility.
+Development mode is intended for iteration; production workflows should rely on compatible declared dependencies and explicit tool package versions for reproducibility.
 
 ### 6.4 Limitations
 

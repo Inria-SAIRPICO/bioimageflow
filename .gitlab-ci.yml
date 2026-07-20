@@ -7,6 +7,7 @@ stages:
   - package
   - docs
   - complete
+  - release
 
 variables:
   UV_CACHE_DIR: .uv-cache
@@ -130,3 +131,26 @@ complete-model-runtimes:
   extends: .complete-test-job
   script:
     - uv run pytest -m "complete and model_runtime" --run-complete -rsx
+
+release:pypi:
+  stage: release
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm
+  resource_group: pypi
+  variables:
+    GIT_DEPTH: "0"
+  environment:
+    name: pypi
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^bioimageflow(?:-[a-z0-9]+)*-v\d+\.\d+\.\d+$/'
+      when: manual
+    - when: never
+  script:
+    - test -n "${UV_PUBLISH_TOKEN:-}"
+    - RELEASE_PACKAGE="$(uv run python scripts/check_package_release.py "$CI_COMMIT_TAG" --field package)"
+    - uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+    - uv run pytest -m "acceptance and not complete"
+    - uv run pytest -m "package_tools and not complete"
+    - uv build --package "$RELEASE_PACKAGE" --no-sources --clear --out-dir dist/release
+    - BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/release BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE="$RELEASE_PACKAGE" uv run pytest tests/unit/test_package_artifacts.py
+    - uv run python scripts/check_package_release.py "$CI_COMMIT_TAG" --artifacts-dir dist/release
+    - uv publish --trusted-publishing never --check-url https://pypi.org/simple dist/release/*

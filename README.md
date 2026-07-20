@@ -206,6 +206,16 @@ uv run pytest -m complete --run-complete -rsx
 uv run pytest -m wetlands tests/integration/test_wetlands_smoke.py
 ```
 
+Package versions and releases are independent.
+Check local versions against PyPI with:
+
+```bash
+uv run python scripts/package_status.py
+```
+
+Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and a manual GitLab publication job.
+See the [release operator guide](docs/source/reference/releasing.md) for setup and release steps.
+
 ## FAQ
 
 ### Why tools should be instantiated before being executed? `download = DownloadImages()(urls=CIL_URLS)` instead of `download = DownloadImages(urls=CIL_URLS)`?

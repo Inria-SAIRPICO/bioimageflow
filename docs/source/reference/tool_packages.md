@@ -7,7 +7,9 @@ This reference page keeps the release, packaging, and CI contract shared by firs
 
 ## Release and CI Contract
 
-The orchestrator, core package, and companion tool packages are released with lockstep versions so workflow examples and package docs describe one coherent BioImageFlow distribution.
+The orchestrator, core package, and each companion tool package own independent versions.
+The repository is tested as one workspace, while package-specific annotated tags select one distribution for publication.
+See [Releasing Python Packages](releasing.md) for the release tag contract, status tool, CI workflow, and operator procedure.
 The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
 The deterministic CI matrix validates the main development/runtime surface with full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
 Full deterministic Python 3.11 validation is scheduled/manual and release-required, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
@@ -16,6 +18,8 @@ Package metadata separates distribution dependencies from isolated runtime depen
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
 Heavy or tool-specific runtimes belong in the tool's `EnvironmentSpec`, not in the package import path.
 Package-local `uv.sources` entries mirror first-party runtime dependencies so editable workspace runs and built artifacts use the same package graph.
+Published first-party dependency requirements declare the oldest tested compatible version and an upper compatibility boundary.
+Downstream packages are released only when their code, packaged content, or compatibility requirements change.
 
 The regular CI gate for package and documentation changes includes:
 
@@ -37,8 +41,8 @@ Those jobs are useful release evidence, but deterministic unit, package-artifact
 Wheels exclude package documentation, package tests, generated build outputs, and local caches.
 Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.
 Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
-Publishing is currently manual and outside CI deployment.
-Release operators must publish only artifacts produced after the deterministic gates above pass; CI intentionally builds and stores artifacts but does not upload them to an index.
+Publishing is a manual GitLab deployment triggered by a protected package-specific release tag.
+The release job reruns deterministic Python 3.11 validation, builds only the tagged distribution with workspace sources disabled, validates the exact artifacts, and uploads them to PyPI.
 
 ## Package-Owned Documentation Contract
 
