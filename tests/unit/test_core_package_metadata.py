@@ -374,7 +374,8 @@ def test_readme_quick_start_declares_imported_processing_dependencies() -> None:
 
     for text in docs.values():
         assert "environment = GENERAL_ENV" in text
-        assert 'Workflow(storage_path="./bif_data")' in text
+        assert "Workflow(" in text
+        assert "storage_path=" in text
         assert "from skimage.io import imread, imsave" not in text
         assert re.search(r"import imageio\.v3 as iio", text) is not None
 

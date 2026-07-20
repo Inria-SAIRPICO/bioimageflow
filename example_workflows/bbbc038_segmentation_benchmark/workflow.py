@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
-from bioimageflow.node import Node
 from bioimageflow_core import (
     Arguments,
     Category,
@@ -253,22 +252,25 @@ def _write_overlay(
 
 
 def build_workflow(
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
-    data_dir: str | Path = DEFAULT_DATA_DIR,
-    sample_glob: str = "*",
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """Build the BBBC038 segmentation benchmark workflow."""
     storage = Path(storage_path)
     wf = Workflow(
+        name="bbbc038_segmentation_benchmark",
+        display_name="BBBC038 Segmentation Benchmark",
         storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        data_dir = wf.input("data_dir", Path, default=Path(DEFAULT_DATA_DIR), id="input-data-dir")
+        sample_glob = wf.input("sample_glob", str, default="*", id="input-sample-glob")
         samples = BBBC038Samples()(
-            data_dir=str(data_dir),
+            data_dir=data_dir,
             sample_glob=sample_glob,
             name="bbbc038_samples",
         )
@@ -341,7 +343,10 @@ def build_workflow(
             classical_metrics,
             name="bbbc038_benchmark_metrics",
         )
-    return wf, benchmark
+        wf.output("method", benchmark["method"], id="output-method")
+        wf.output("foreground_iou", benchmark["foreground_iou"], id="output-iou")
+        wf.output("foreground_dice", benchmark["foreground_dice"], id="output-dice")
+    return wf
 
 
 if __name__ == "__main__":
@@ -358,9 +363,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--sample-glob", default="*", help="Sample folder glob.")
     args = parser.parse_args()
-    workflow, terminal = build_workflow(
+    workflow = build_workflow(
         storage_path=args.storage_path,
-        data_dir=args.data_dir,
-        sample_glob=args.sample_glob,
     )
-    print(workflow.compute(terminal).to_string(index=False))
+    print(workflow.compute(inputs={
+        "data_dir": args.data_dir,
+        "sample_glob": args.sample_glob,
+    }).to_string(index=False))

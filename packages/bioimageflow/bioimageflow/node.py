@@ -1,6 +1,7 @@
 """Node and ColumnRef — graph construction primitives."""
 
 import contextvars
+from contextlib import contextmanager
 import threading
 from dataclasses import dataclass
 from difflib import get_close_matches
@@ -108,6 +109,22 @@ _active_workflow: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "_bif_active_workflow",
     default=None,
 )
+_runtime_node_names: contextvars.ContextVar[dict[int, str]] = contextvars.ContextVar(
+    "_bif_runtime_node_names",
+    default={},
+)
+
+
+@contextmanager
+def scoped_node_names(names: dict["Node", str]):
+    """Expose immutable execution paths without changing structural names."""
+    merged = dict(_runtime_node_names.get())
+    merged.update({id(node): name for node, name in names.items()})
+    token = _runtime_node_names.set(merged)
+    try:
+        yield
+    finally:
+        _runtime_node_names.reset(token)
 
 
 def _reset_name_counters() -> None:
@@ -156,9 +173,14 @@ class Node:
         # construction. See plan-platform-boundary-refactor.md Task 1.
         self._column_binding_edge_ids: dict[str, str | None] = {}
         self._arg_edge_ids: list[str | None] = [None] * len(self._args)
+        self._workflow_input_bindings: dict[str, Any] = {}
+        self._workflow_dataframe_bindings: dict[int, Any] = {}
+        self._workflow_input_fallback_constants: set[str] = set()
 
         # Determine name
         if name is not None:
+            if not name or "/" in name:
+                raise ValueError("Node names must be non-empty and may not contain '/'.")
             self._name = name
         else:
             self._name = _get_next_name(type(tool).__name__)
@@ -186,7 +208,19 @@ class Node:
             wf._register_node(self)
 
         # Track upstream from positional args (DataFrameTool)
-        for arg in self._args:
+        for index, arg in enumerate(self._args):
+            from bioimageflow.workflow import WorkflowInputRef
+            if isinstance(arg, WorkflowInputRef):
+                if arg.kind != "dataframe":
+                    raise BindingError(
+                        f"Field workflow input '{arg.name}' cannot be used as a positional DataFrame input."
+                    )
+                arg.workflow._bind_input_target(
+                    arg, self, index, kind="dataframe",
+                )
+                self._workflow_dataframe_bindings[index] = arg
+                self._args[index] = None
+                continue
             if isinstance(arg, Node):
                 self._upstream_nodes.add(arg)
 
@@ -219,7 +253,17 @@ class Node:
         for key, value in self._kwargs.items():
             try:
                 if key in input_annotations:
-                    if isinstance(value, ColumnRef):
+                    from bioimageflow.workflow import WorkflowInputRef
+                    if isinstance(value, WorkflowInputRef):
+                        if value.kind != "field":
+                            raise BindingError(
+                                f"DataFrame workflow input '{value.name}' cannot target named field '{key}'."
+                            )
+                        value.workflow._bind_input_target(
+                            value, self, key, kind="field",
+                        )
+                        self._workflow_input_bindings[key] = value
+                    elif isinstance(value, ColumnRef):
                         self._column_bindings[key] = value
                         self._upstream_nodes.add(value.node)
                         # Type compatibility check
@@ -261,6 +305,8 @@ class Node:
             if field_name in self._column_bindings:
                 continue
             if field_name in self._constant_bindings:
+                continue
+            if field_name in self._workflow_input_bindings:
                 continue
             if hasattr(self.tool.Inputs, field_name):
                 continue  # Has default
@@ -352,7 +398,7 @@ class Node:
 
     @property
     def name(self) -> str:
-        return self._name
+        return _runtime_node_names.get().get(id(self), self._name)
 
     def get_output_schema(self) -> dict[str, dict[str, Any]] | None:
         """Resolve this node's output column schema as currently configured.

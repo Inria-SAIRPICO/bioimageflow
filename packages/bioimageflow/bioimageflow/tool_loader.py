@@ -31,7 +31,7 @@ def load_versioned_package(
     in ``sys.modules``, so multiple versions coexist without conflict.
     Relative imports within the package resolve correctly.
 
-    All BaseTool and SubWorkflow subclasses found in the package are stamped
+    All BaseTool subclasses found in the package are stamped
     with metadata: ``_bif_package``, ``_bif_package_version``,
     ``_bif_canonical_module``.
     """
@@ -235,12 +235,10 @@ def _materialize_public_exports(mod: ModuleType) -> None:
 
 
 def _stamp_tool_classes(package: str, version: str) -> None:
-    """Stamp all BaseTool and SubWorkflow subclasses with version metadata."""
+    """Stamp all BaseTool subclasses with version metadata."""
     from bioimageflow_core.tool import BaseTool
-    from bioimageflow.sub_workflow import SubWorkflow
 
     scoped_prefix = _scoped_name(package, version)
-    base_classes = (BaseTool, SubWorkflow)
 
     # Iterate all modules loaded under the scoped prefix
     scoped_modules = [
@@ -257,9 +255,9 @@ def _stamp_tool_classes(package: str, version: str) -> None:
                 continue
             if not isinstance(obj, type):
                 continue
-            if not issubclass(obj, base_classes):
+            if not issubclass(obj, BaseTool):
                 continue
-            if obj in base_classes:
+            if obj is BaseTool:
                 continue
             # Skip classes from the orchestrator's own env (not from this package)
             obj_module = getattr(obj, "__module__", "")
@@ -472,4 +470,3 @@ def require_tool_packages(
 def _get_tool_store_path() -> Path:
     """Return the tool store path, configurable via environment variable."""
     return get_tool_store_path()
-

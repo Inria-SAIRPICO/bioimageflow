@@ -41,7 +41,7 @@ from bioimageflow_common_tools import ExtractChannel
 from bioimageflow_segmentation_tools import Cellpose3
 from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
 from tools.download_images import DownloadImages
-from tools.marker_spot_analysis import MarkerSpotAnalysis
+from tools.marker_spot_analysis import build_workflow as build_marker_workflow
 
 CIL_URLS = """\
 https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif
@@ -54,38 +54,36 @@ DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "fish_analysis" / "data"
 DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "fish_analysis"
 
 
-def build_fish_workflow(
+def build_workflow(
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
-    data_dir: str | Path = DEFAULT_DATA_DIR,
     debug: bool = False,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple:
-    """Build and return the FISH analysis workflow and its terminal node.
+) -> Workflow:
+    """Build and return a fresh FISH analysis workflow.
 
     Parameters
     ----------
     storage_path : str
         Where to store intermediate and cached results.
-    data_dir : str
-        Where to download/store the raw CIL images.
-
-    Returns
-    -------
-    tuple of (Workflow, Node)
-        The workflow and the terminal stats node.
     """
     wf = Workflow(
+        name="fish_analysis",
+        display_name="FISH Analysis",
         storage_path=str(storage_path),
         engine=engine,
         wetlands_config={**(wetlands_config or {}), "debug": debug},
     )
 
     with wf:
+        data_dir = wf.input(
+            "data_dir", str, default=str(DEFAULT_DATA_DIR), id="input-data-dir"
+        )
         # -- 1. Data ingestion --
         download = DownloadImages()(
             urls=CIL_URLS,
-            output_dir=str(data_dir),
+            output_dir=data_dir,
             name="download_cil_images",
         )
 
@@ -101,17 +99,16 @@ def build_fish_workflow(
         )
 
         # -- 4. Marker spot analysis branches --
-        overlaps_fols2 = MarkerSpotAnalysis()(
+        marker_workflow = build_marker_workflow()
+        overlaps_fols2 = marker_workflow(
             input_image=download["path"],
             nuclei_labels=nuclei["mask"],
-            marker_name="FOLS2",
             channel=0,
             name="fols2_marker_spot_analysis",
         )
-        overlaps_csf1r = MarkerSpotAnalysis()(
+        overlaps_csf1r = marker_workflow(
             input_image=download["path"],
             nuclei_labels=nuclei["mask"],
-            marker_name="CSF1R",
             channel=1,
             name="csf1r_marker_spot_analysis",
         )
@@ -121,8 +118,10 @@ def build_fish_workflow(
             overlaps_fols2, overlaps_csf1r,
             name="avg_spots_per_nucleus",
         )
-
-    return wf, stats  # type: ignore[possibly-undefined]  # always defined in with-block
+        wf.output("image_index", stats["image_index"], id="output-image-index")
+        wf.output("avg_fols2_per_nucleus", stats["avg_fols2_per_nucleus"], id="output-fols2")
+        wf.output("avg_csf1r_per_nucleus", stats["avg_csf1r_per_nucleus"], id="output-csf1r")
+    return wf
 
 
 def main() -> None:
@@ -131,7 +130,7 @@ def main() -> None:
 
     configure_wetlands(wetlands_instance_path="./wetlands")
 
-    wf, stats = build_fish_workflow(storage_path, data_dir, debug=True)
+    wf = build_workflow(storage_path=storage_path, debug=True)
 
     # Create an explicit engine for debugging and inspection
     engine = SequentialEngine(
@@ -139,7 +138,10 @@ def main() -> None:
         wetlands_config=wf.wetlands_config,
     )
 
-    for step in wf.compute_steps(engine=engine):
+    for step in wf.compute_steps(
+        inputs={"data_dir": str(data_dir)},
+        engine=engine,
+    ):
         print(f"Next: {step.node_name} (env: {step.environment})")
         step.prepare()     # launches Wetlands env — attach debugger here
         df = step.execute() # runs the tool
@@ -147,7 +149,7 @@ def main() -> None:
 
     # After execution, the engine can be inspected for internal state
     # For example: print(engine._env_manager) if wetlands were used
-    # result = wf.compute(stats)
+    # result = wf.compute()
 
     # print("\n=== FISH Analysis Results ===")
     # print(result.to_string(index=False))

@@ -1,0 +1,63 @@
+{
+  "archive_version": 1,
+  "workflow": {
+    "schema_version": 1,
+    "name": "collision_parent",
+    "display_name": "Collision Parent",
+    "interface": {
+      "inputs": [],
+      "outputs": [
+        {"id": "output-one", "name": "one", "schema": {"type": "int", "image_spec": null}, "source": {"node": "first", "column": "output-value"}},
+        {"id": "output-two", "name": "two", "schema": {"type": "int", "image_spec": null}, "source": {"node": "second", "column": "output-value"}}
+      ]
+    },
+    "nodes": [
+      {
+        "name": "first",
+        "type": "workflow",
+        "workflow": {
+          "schema_version": 1,
+          "name": "first_child",
+          "display_name": "First Child",
+          "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},
+          "nodes": [{"name": "collision", "type": "tool", "tool_module": "custom.first", "tool_class": "CollisionTool", "tool_package": null, "tool_package_version": null, "source_module": "m_272191d99b8f8fe5", "constants": {}}],
+          "edges": [],
+          "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+        },
+        "bindings": {}
+      },
+      {
+        "name": "second",
+        "type": "workflow",
+        "workflow": {
+          "schema_version": 1,
+          "name": "second_child",
+          "display_name": "Second Child",
+          "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},
+          "nodes": [{"name": "collision", "type": "tool", "tool_module": "custom.second", "tool_class": "CollisionTool", "tool_package": null, "tool_package_version": null, "source_module": "m_ca4fead0130de3b3", "constants": {}}],
+          "edges": [],
+          "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+        },
+        "bindings": {}
+      }
+    ],
+    "edges": [],
+    "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+  },
+  "custom_sources": [
+    {
+      "id": "m_272191d99b8f8fe5",
+      "module": "custom.first",
+      "filename": "first.py",
+      "source_hash": "2935690b5fd8de532e246ef9fd38f3713016dc9465fbe846ac0eb08aba17c531",
+      "source": "from bioimageflow import DataFrameTool\nfrom bioimageflow_core import IOModel\nclass CollisionTool(DataFrameTool):\n    accepts_upstream = False\n    class Inputs(IOModel): pass\n    class Outputs(IOModel): value: int\n    def transform(self, df, arguments):\n        import pandas as pd\n        return pd.DataFrame({\"value\": [1]})\n"
+    },
+    {
+      "id": "m_ca4fead0130de3b3",
+      "module": "custom.second",
+      "filename": "second.py",
+      "source_hash": "f51dd38fd5faafb8ea298e9b2f1d00bea955590cd2e68884117e5e0534e43abc",
+      "source": "from bioimageflow import DataFrameTool\nfrom bioimageflow_core import IOModel\nclass CollisionTool(DataFrameTool):\n    accepts_upstream = False\n    class Inputs(IOModel): pass\n    class Outputs(IOModel): value: int\n    def transform(self, df, arguments):\n        import pandas as pd\n        return pd.DataFrame({\"value\": [2]})\n"
+    }
+  ]
+}

@@ -41,9 +41,9 @@ either raises one of the domain exceptions (see below) or appends a
        primary disambiguator for positional edges and the field a host
        matches when highlighting an arrow.
    * - ``path``
-     - Tuple of parent node names for sub-workflow scoping. Empty
+     - Tuple of parent workflow-node names for recursive scoping. Empty
        tuple ``()`` for top-level errors;
-       ``("outer",)`` for errors inside a sub-workflow ``outer``;
+       ``("outer",)`` for errors inside a workflow node ``outer``;
        ``("outer", "inner")`` for errors nested two levels deep.
 
 ValidationErrorKind

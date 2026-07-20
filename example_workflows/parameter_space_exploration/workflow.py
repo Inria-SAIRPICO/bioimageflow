@@ -24,7 +24,6 @@ import numpy as np
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow, configure_wetlands
-from bioimageflow.node import Node
 from bioimageflow_common_tools import CrossJoin, ExtractChannel, Files, Generate, Mosaic
 from bioimageflow_core import (
     Arguments,
@@ -124,7 +123,10 @@ class ParameterSweepResults(DataFrameTool):
         pass
 
     class Outputs(IOModel):
-        pass
+        sensitivity: float
+        size: int
+        label_count: int
+        mosaic_path: str
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> pd.DataFrame:
         if len(dfs) != 4:
@@ -150,14 +152,12 @@ class ParameterSweepResults(DataFrameTool):
         return results
 
 
-def build_parameter_space_workflow(
-    data_dir: str | Path = DEFAULT_DATA_DIR,
+def build_workflow(
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
-    pattern: str = "13432.tif",
-    marker_channel: int = 0,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """
     Build the parameter space exploration workflow.
 
@@ -172,20 +172,21 @@ def build_parameter_space_workflow(
     marker_channel : int
         Channel index sent to ATLAS.
 
-    Returns
-    -------
-    Tuple[Workflow, Node]
-        The workflow object and the terminal mosaic node.
     """
     wf = Workflow(
+        name="parameter_space_exploration",
+        display_name="Parameter Space Exploration",
         storage_path=str(storage_path),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        data_dir = wf.input("data_dir", Path, default=Path(DEFAULT_DATA_DIR), id="input-data-dir")
+        pattern = wf.input("pattern", str, default="13432.tif", id="input-pattern")
+        marker_channel = wf.input("marker_channel", int, default=0, id="input-marker-channel")
         # Step 1: List input images
         images = Files()(
-            path=str(data_dir),
+            path=data_dir,
             pattern=pattern,
             name="input_images"
         )
@@ -248,8 +249,11 @@ def build_parameter_space_workflow(
             mosaic,
             name="parameter_results",
         )
-
-    return wf, results
+        wf.output("sensitivity", results["sensitivity"], id="output-sensitivity")
+        wf.output("size", results["size"], id="output-size")
+        wf.output("label_count", results["label_count"], id="output-label-count")
+        wf.output("mosaic_path", results["mosaic_path"], id="output-mosaic-path")
+    return wf
 
 
 def main() -> None:
@@ -259,9 +263,8 @@ def main() -> None:
 
     configure_wetlands(wetlands_instance_path="./wetlands")
 
-    wf, mosaic = build_parameter_space_workflow(data_dir, storage_path)
-    # Compute just the mosaic (which triggers all upstream)
-    result_df = wf.compute(mosaic)
+    wf = build_workflow(storage_path=storage_path)
+    result_df = wf.compute(inputs={"data_dir": data_dir})
     print("Workflow complete.")
     print(f"Mosaic saved to: {result_df['mosaic_path'].iloc[0]}")
     print(f"Total parameter rows processed: {len(result_df)}")

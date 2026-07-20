@@ -21,7 +21,7 @@ def test_io_and_measurement_packages_are_not_exported_as_custom_sources(
         wf.export(tmp_path / "workflow.json")
 
     data = json.loads((tmp_path / "workflow.json").read_text())
-    assert "custom_tool_modules" not in data
+    assert "custom_sources" not in data
     assert {node["tool_module"] for node in data["nodes"]} == {
         "bioimageflow_io_tools.image_io",
         "bioimageflow_measurement_tools.measurements",

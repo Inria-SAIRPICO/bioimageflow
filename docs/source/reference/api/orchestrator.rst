@@ -77,10 +77,10 @@ Workflow session
    :undoc-members:
    :show-inheritance:
 
-Sub-workflows
--------------
+Workflow nodes
+--------------
 
-.. automodule:: bioimageflow.sub_workflow
+.. automodule:: bioimageflow.workflow_node
    :members:
    :undoc-members:
    :show-inheritance:

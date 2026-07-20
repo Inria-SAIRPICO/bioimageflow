@@ -82,6 +82,7 @@ class Files(DataFrameTool):
                 paths = ", ".join(str(path) for path in invalid)
                 raise ValueError(f"Files contains missing or non-file paths: {paths}")
         else:
+            assert directory_value is not None
             directory = Path(directory_value)
             if not directory.is_dir():
                 raise ValueError(f"Directory is missing or not a directory: {directory}")

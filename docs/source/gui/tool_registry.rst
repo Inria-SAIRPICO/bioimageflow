@@ -33,7 +33,7 @@ performance:
    * - ``register_package(name, version)``
      - **Fast, in-process.** Loads an already-installed package via
        :func:`load_versioned_package` and indexes every BaseTool /
-       SubWorkflow subclass it discovers. Raises
+       executable tool subclass it discovers. Raises
        :class:`FileNotFoundError` if the package is not present in the
        store.
 

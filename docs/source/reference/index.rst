@@ -15,6 +15,7 @@ Integrators trees.
    tool_package_strategy
    output_cache_storage
    agent_tool_workflow_playbook
+   unified_workflow_contract
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.

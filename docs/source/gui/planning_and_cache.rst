@@ -35,7 +35,7 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
    * - Field
      - Description
    * - ``node_name``
-     - Scoped name (``"outer/inner"`` for sub-workflow internals; plain
+     - Scoped name (``"outer/inner"`` for nested workflow tools; plain
        name otherwise).
    * - ``final_result_key``
      - V1 result key when it can be computed from known selected upstream
@@ -87,12 +87,11 @@ NodePlanStatus → UI mapping
        upstream executes, so the final result key cannot be determined yet.
      - Grey / "pending upstream"
 
-Sub-workflow aggregation
-------------------------
+Workflow-node aggregation
+-------------------------
 
-A sub-workflow node aggregates its internals: the parent reports
-``CACHED`` only when *every* internal entry is cached, and
-``UNEXECUTED`` otherwise. Internal entries are still present in the
+A workflow node aggregates its internals: it reports ``SKIPPED`` when disabled, ``CACHED`` only when every executable internal entry is cached, ``PENDING_UPSTREAM`` when an internal final selection still depends on an unresolved upstream, and ``UNEXECUTED`` otherwise.
+Internal entries are still present in the
 plan dict under their scoped names, so a host can show drill-down
 ("3/5 internals cached") on a "needs rebuild" parent.
 

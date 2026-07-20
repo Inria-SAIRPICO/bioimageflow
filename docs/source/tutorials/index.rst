@@ -10,7 +10,7 @@ Step-by-step guides covering common BioImageFlow patterns.
    custom_tool
    output_templating
    merge_strategies
-   sub_workflows
+   unified_workflows
    parallelism
    cancellation
    shared_memory

@@ -3,6 +3,7 @@
 import concurrent.futures
 import hashlib
 import inspect
+import json
 import logging
 import re
 import threading
@@ -34,14 +35,14 @@ from bioimageflow.cache import (
     processing_publish,
     processing_result_key,
 )
-from bioimageflow.node import IndexAlignmentError, Node
+from bioimageflow.node import IndexAlignmentError, Node, scoped_node_names
 from bioimageflow.storage import CacheCorruptionError, Storage, validate_relative_posix_path
 from bioimageflow.template import get_output_templates, resolve_template
 from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
 
 if TYPE_CHECKING:
     from bioimageflow.env_manager import WetlandsEnvManager
-    from bioimageflow.sub_workflow import SubWorkflowNode
+    from bioimageflow.workflow_node import WorkflowNode
 
 logger = logging.getLogger("bioimageflow")
 
@@ -393,7 +394,7 @@ class NodePlan:
     Attributes
     ----------
     node_name
-        Scoped node name (``"subworkflow/internal"`` for sub-workflow
+        Scoped node name (``"workflow-node/internal"`` for nested workflow
         internals, plain name otherwise).
     final_result_key
         V1 result key for this node when it can be computed from known
@@ -733,6 +734,15 @@ class DefaultEngine:
             if self._closed:
                 raise RuntimeError("This execution engine is closed.")
 
+    @staticmethod
+    def _column_label(col_ref: Any) -> str:
+        """Resolve stable workflow output IDs to boundary DataFrame labels."""
+        from bioimageflow.workflow_node import WorkflowNode
+
+        if isinstance(col_ref.node, WorkflowNode):
+            return col_ref.node.output_name_for_id(col_ref.column)
+        return col_ref.column
+
     def _cleanup_after_execution(self) -> None:
         if (
             self._environment_lifetime is EnvironmentLifetime.EXECUTION
@@ -783,117 +793,73 @@ class DefaultEngine:
         If ``execute()`` is not called before advancing, the step auto-executes
         to keep the results chain consistent for downstream nodes.
 
-        SubWorkflowNodes are expanded: their internal nodes are yielded
-        individually with scoped names (``subworkflow_name/internal_name``).
+        WorkflowNodes are expanded: their internal nodes are yielded
+        individually with scoped names (``workflow_node/internal_name``).
 
         Cleanup runs when the generator is exhausted or closed (early ``break``).
         """
         self._ensure_open()
         try:
-            reachable: set[Node] = set()
-            for target in targets:
-                self._collect_reachable(target, reachable)
+            reachable, completion_dependencies, scoped_names = (
+                self._compile_execution_graph(targets)
+            )
 
             self._check_env_mismatches(reachable)
-            order = self._topological_sort(reachable)
-            _executable, skipped = self._filter_executable(order)
+            with scoped_node_names(scoped_names):
+                order = self._topological_sort(
+                    reachable,
+                    completion_dependencies,
+                )
+                _executable, skipped = self._filter_executable(
+                    order,
+                    completion_dependencies,
+                )
 
-            results: dict[Node, pd.DataFrame] = {}
-            sig_hashes: dict[Node, str] = {}
+                results: dict[Node, pd.DataFrame] = {}
+                sig_hashes: dict[Node, str] = {}
 
-            for node in order:
-                if workflow.cancel_requested:
-                    raise WorkflowCancelledError("Workflow cancelled by user")
+                for node in order:
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
 
-                if node in skipped:
-                    logger.info(
-                        "Skipping node '%s' (disabled or upstream disabled)", node.name
-                    )
-                    yield NodeStep(node, self, results, sig_hashes, workflow, skipped=True)
-                    continue
+                    if node in skipped:
+                        logger.info(
+                            "Skipping node '%s' (disabled or upstream disabled)",
+                            node.name,
+                        )
+                        from bioimageflow.workflow_node import WorkflowNode
 
-                from bioimageflow.sub_workflow import SubWorkflowNode
-                if isinstance(node, SubWorkflowNode):
-                    yield from self._execute_sub_workflow_steps(
-                        node, results, sig_hashes, workflow,
-                    )
-                    continue
+                        if not isinstance(node, WorkflowNode):
+                            yield NodeStep(
+                                node,
+                                self,
+                                results,
+                                sig_hashes,
+                                workflow,
+                                skipped=True,
+                            )
+                        continue
 
-                step = NodeStep(node, self, results, sig_hashes, workflow)
-                yield step
-                # Auto-execute if the user didn't call step.execute()
-                if not step._executed:
-                    step.execute()
-                results[node] = step._df  # type: ignore[assignment]
-                sig_hashes[node] = step._sig_hash  # type: ignore[assignment]
+                    from bioimageflow.workflow_node import WorkflowNode
+                    if isinstance(node, WorkflowNode):
+                        df, sig_hash = self._execute_workflow_node(
+                            node,
+                            results,
+                            sig_hashes,
+                            workflow,
+                        )
+                        results[node] = df
+                        sig_hashes[node] = sig_hash
+                        continue
+
+                    step = NodeStep(node, self, results, sig_hashes, workflow)
+                    yield step
+                    if not step._executed:
+                        step.execute()
+                    results[node] = step._df  # type: ignore[assignment]
+                    sig_hashes[node] = step._sig_hash  # type: ignore[assignment]
         finally:
             self._cleanup_after_execution()
-
-    def _execute_sub_workflow_steps(
-        self,
-        node: "SubWorkflowNode",
-        results: dict[Node, pd.DataFrame],
-        sig_hashes: dict[Node, str],
-        workflow: Any,
-    ) -> Generator[NodeStep, None, None]:
-        """Yield individual steps for a SubWorkflowNode's internal nodes."""
-        from bioimageflow.sub_workflow import SubWorkflowNode
-
-        # Build proxy DataFrame
-        proxy_df = self._build_proxy_dataframe(node, results)
-        proxy_node = node._proxy_node
-        results[proxy_node] = proxy_df
-        sig_hashes[proxy_node] = "proxy"
-
-        # Sort internal nodes
-        internal_nodes = set(node.internal_nodes)
-        internal_nodes.add(proxy_node)
-        internal_order = self._topological_sort(internal_nodes)
-
-        # Scope names — only direct children, not recursively.
-        # Nested sub-workflows get scoped when they are recursively expanded.
-        original_names: dict[Node, str] = {}
-        for inode in node.internal_nodes:
-            original_names[inode] = inode._name
-            inode._name = f"{node.name}/{inode._name}"
-
-        try:
-            for inode in internal_order:
-                if inode is proxy_node:
-                    continue
-
-                if workflow.cancel_requested:
-                    raise WorkflowCancelledError("Workflow cancelled by user")
-
-                if isinstance(inode, SubWorkflowNode):
-                    yield from self._execute_sub_workflow_steps(
-                        inode, results, sig_hashes, workflow,
-                    )
-                    continue
-
-                step = NodeStep(inode, self, results, sig_hashes, workflow)
-                yield step
-                if not step._executed:
-                    step.execute()
-                results[inode] = step._df  # type: ignore[assignment]
-                sig_hashes[inode] = step._sig_hash  # type: ignore[assignment]
-
-            # Assemble output
-            output_df = self._assemble_sub_workflow_output(node, results)
-            import hashlib
-            import json
-            terminal_hashes = {}
-            for field, col_ref in node._output_mapping.items():
-                if col_ref.node in sig_hashes:
-                    terminal_hashes[field] = sig_hashes[col_ref.node]
-            combined = hashlib.sha256(
-                json.dumps(terminal_hashes, sort_keys=True).encode()
-            ).hexdigest()
-            results[node] = output_df
-            sig_hashes[node] = combined
-        finally:
-            for inode, orig_name in original_names.items():
-                inode._name = orig_name
 
     def _execute_impl(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Internal execution logic.
@@ -904,15 +870,33 @@ class DefaultEngine:
         ``ThreadPoolExecutor``.  ``DataFrameTool`` nodes always run on
         the main thread.
         """
+        reachable, completion_dependencies, scoped_names = (
+            self._compile_execution_graph(targets)
+        )
+        self._check_env_mismatches(reachable)
+        with scoped_node_names(scoped_names):
+            return self._execute_compiled_impl(
+                targets,
+                workflow,
+                reachable,
+                completion_dependencies,
+            )
+
+    def _execute_compiled_impl(
+        self,
+        targets: list[Node],
+        workflow: Any,
+        reachable: set[Node],
+        completion_dependencies: dict[Node, set[Node]],
+    ) -> dict[str, pd.DataFrame]:
+        """Execute one flattened recursive graph."""
         from bioimageflow.dataframe_tool import DataFrameTool
 
-        reachable: set[Node] = set()
-        for target in targets:
-            self._collect_reachable(target, reachable)
-
-        self._check_env_mismatches(reachable)
-        order = self._topological_sort(reachable)
-        executable, skipped = self._filter_executable(order)
+        order = self._topological_sort(reachable, completion_dependencies)
+        executable, skipped = self._filter_executable(
+            order,
+            completion_dependencies,
+        )
 
         # Check that at least one target is executable
         executable_targets = [t for t in targets if t not in skipped]
@@ -923,7 +907,10 @@ class DefaultEngine:
                 f"upstream dependencies: {disabled_names}"
             )
 
-        dep_graph = self._build_dep_graph(executable)
+        dep_graph = self._build_dep_graph_from_set(
+            set(executable),
+            completion_dependencies,
+        )
         ts = TopologicalSorter(dep_graph)
         ts.prepare()
 
@@ -1072,8 +1059,82 @@ class DefaultEngine:
             if isinstance(arg, Node):
                 self._collect_reachable(arg, visited)
 
+    def _compile_execution_graph(
+        self,
+        targets: list[Node],
+    ) -> tuple[set[Node], dict[Node, set[Node]], dict[Node, str]]:
+        """Flatten recursive workflow invocations into one execution graph."""
+        from bioimageflow.workflow_node import WorkflowNode
+
+        nodes: set[Node] = set()
+        extra_dependencies: dict[Node, set[Node]] = {}
+        scoped_names: dict[Node, str] = {}
+        expanded: set[WorkflowNode] = set()
+
+        def visit(node: Node) -> None:
+            if node not in nodes:
+                nodes.add(node)
+                for upstream in node._upstream_nodes:
+                    visit(upstream)
+                for argument in node._args:
+                    if isinstance(argument, Node):
+                        visit(argument)
+            if isinstance(node, WorkflowNode) and node not in expanded:
+                prefix = "" if node._is_root_boundary else node.name
+                expand(node, prefix)
+
+        def expand(boundary: WorkflowNode, prefix: str) -> None:
+            expanded.add(boundary)
+            if not boundary.enabled:
+                return
+            immediate = list(boundary.internal_nodes)
+            immediate_set = set(immediate)
+            gates = set(boundary._upstream_nodes)
+            gates.update(
+                argument
+                for argument in boundary._args
+                if isinstance(argument, Node)
+            )
+            used: set[Node] = set()
+            for internal in immediate:
+                path = f"{prefix}/{internal._name}" if prefix else internal._name
+                scoped_names[internal] = path
+                nodes.add(internal)
+                extra_dependencies.setdefault(internal, set()).update(gates)
+                for upstream in internal._upstream_nodes:
+                    if upstream in immediate_set:
+                        used.add(upstream)
+                    else:
+                        visit(upstream)
+                for argument in internal._args:
+                    if isinstance(argument, Node):
+                        if argument in immediate_set:
+                            used.add(argument)
+                        else:
+                            visit(argument)
+            for internal in immediate:
+                if isinstance(internal, WorkflowNode) and internal not in expanded:
+                    expand(internal, scoped_names[internal])
+            terminals = {
+                internal
+                for internal in immediate
+                if internal.enabled and internal not in used
+            }
+            published_sources = {
+                reference.node for reference in boundary._published_outputs.values()
+            }
+            extra_dependencies.setdefault(boundary, set()).update(
+                terminals | published_sources
+            )
+
+        for target in targets:
+            visit(target)
+        return nodes, extra_dependencies, scoped_names
+
     def _filter_executable(
-        self, order: list[Node]
+        self,
+        order: list[Node],
+        extra_dependencies: dict[Node, set[Node]] | None = None,
     ) -> tuple[list[Node], set[Node]]:
         """Remove disabled nodes and nodes with disabled upstreams.
 
@@ -1093,6 +1154,11 @@ class DefaultEngine:
                 for arg in node._args
                 if isinstance(arg, Node)
             )
+            if extra_dependencies is not None:
+                upstream_skipped = upstream_skipped or any(
+                    dependency in skipped
+                    for dependency in extra_dependencies.get(node, ())
+                )
             if upstream_skipped:
                 skipped.add(node)
                 continue
@@ -1101,8 +1167,21 @@ class DefaultEngine:
 
     def _check_env_mismatches(self, nodes: set[Node]) -> None:
         """Check for environment name conflicts with different dependencies."""
+        from bioimageflow.workflow_node import WorkflowNode
+
+        expanded: set[Node] = set()
+
+        def collect(candidates: set[Node]) -> None:
+            for candidate in candidates:
+                if candidate in expanded:
+                    continue
+                expanded.add(candidate)
+                if isinstance(candidate, WorkflowNode) and candidate.enabled:
+                    collect(set(candidate.internal_nodes))
+
+        collect(nodes)
         env_specs: dict[str, tuple[Any, str]] = {}  # name -> (env, tool_name)
-        for node in nodes:
+        for node in expanded:
             if isinstance(node.tool, ProcessingTool) and hasattr(node.tool, 'environment'):
                 env = node.tool.environment
                 if env.name in env_specs:
@@ -1116,9 +1195,13 @@ class DefaultEngine:
                 else:
                     env_specs[env.name] = (env, type(node.tool).__name__)
 
-    def _topological_sort(self, nodes: set[Node]) -> list[Node]:
+    def _topological_sort(
+        self,
+        nodes: set[Node],
+        extra_dependencies: dict[Node, set[Node]] | None = None,
+    ) -> list[Node]:
         """Topological sort of reachable nodes using graphlib.TopologicalSorter."""
-        dep_graph = self._build_dep_graph_from_set(nodes)
+        dep_graph = self._build_dep_graph_from_set(nodes, extra_dependencies)
         try:
             return list(TopologicalSorter(dep_graph).static_order())
         except CycleError as exc:
@@ -1127,7 +1210,11 @@ class DefaultEngine:
                 f"Cycle info: {exc.args[1]}"
             ) from exc
 
-    def _build_dep_graph_from_set(self, nodes: set[Node]) -> dict[Node, set[Node]]:
+    def _build_dep_graph_from_set(
+        self,
+        nodes: set[Node],
+        extra_dependencies: dict[Node, set[Node]] | None = None,
+    ) -> dict[Node, set[Node]]:
         """Build dependency graph from a set of nodes (for topological sort)."""
         dep_graph: dict[Node, set[Node]] = {}
         for node in nodes:
@@ -1135,22 +1222,9 @@ class DefaultEngine:
             for arg in node._args:
                 if isinstance(arg, Node):
                     all_upstream.add(arg)
+            if extra_dependencies is not None:
+                all_upstream.update(extra_dependencies.get(node, ()))
             dep_graph[node] = {up for up in all_upstream if up in nodes}
-        return dep_graph
-
-    def _build_dep_graph(self, executable: list[Node]) -> dict[Node, set[Node]]:
-        """Build dependency graph for TopologicalSorter from executable nodes."""
-        executable_set = set(executable)
-        dep_graph: dict[Node, set[Node]] = {}
-        for node in executable:
-            deps: set[Node] = set()
-            for up in node._upstream_nodes:
-                if up in executable_set:
-                    deps.add(up)
-            for arg in node._args:
-                if isinstance(arg, Node) and arg in executable_set:
-                    deps.add(arg)
-            dep_graph[node] = deps
         return dep_graph
 
     # ── Cache pre-check ─────────────────────────────────────────────────
@@ -1168,12 +1242,12 @@ class DefaultEngine:
 
         Returns ``(cached_df, sig_hash)`` if a cache hit is found, or
         ``(None, sig_hash)`` if computable but not cached.  Returns
-        ``(None, None)`` for SubWorkflowNodes (not cacheable at this level).
+        ``(None, None)`` for WorkflowNodes (boundaries do not own cache entries).
         """
         from bioimageflow.dataframe_tool import DataFrameTool
-        from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.workflow_node import WorkflowNode
 
-        if isinstance(node, SubWorkflowNode):
+        if isinstance(node, WorkflowNode):
             return None, None
 
         # ── Compute signature hash ──
@@ -1240,11 +1314,11 @@ class DefaultEngine:
     ) -> tuple[pd.DataFrame, str]:
         """Execute a single node, returning its DataFrame and logical digest."""
         from bioimageflow.dataframe_tool import DataFrameTool
-        from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.workflow_node import WorkflowNode
 
         try:
-            if isinstance(node, SubWorkflowNode):
-                return self._execute_sub_workflow(node, results, sig_hashes, workflow)
+            if isinstance(node, WorkflowNode):
+                return self._execute_workflow_node(node, results, sig_hashes, workflow)
             elif isinstance(node.tool, DataFrameTool):
                 return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
             elif isinstance(node.tool, ProcessingTool):
@@ -1257,8 +1331,10 @@ class DefaultEngine:
         except WorkflowCancelledError:
             self._emit_progress(workflow, node.name, "cancelled")
             raise
-        except Exception:
+        except Exception as exc:
             self._emit_progress(workflow, node.name, "failed")
+            if "/" in node.name and node.name not in str(exc):
+                exc.args = (f"Node '{node.name}' failed: {exc}", *exc.args[1:])
             raise
 
     # ── DataFrameTool execution ────────────────────────────────────────
@@ -1274,9 +1350,25 @@ class DefaultEngine:
         from bioimageflow.dataframe_tool import DataFrameTool
         assert isinstance(node.tool, DataFrameTool)
 
-        dfs = [results[arg] for arg in node._args
-               if isinstance(arg, Node) and arg in results]
+        dfs = [
+            results[arg] if isinstance(arg, Node) else arg
+            for arg in node._args
+            if (isinstance(arg, Node) and arg in results)
+            or isinstance(arg, pd.DataFrame)
+        ]
         arguments, args_dict = self._resolve_constant_arguments(node)
+        for index, arg in enumerate(node._args):
+            if isinstance(arg, pd.DataFrame):
+                digest = hashlib.sha256()
+                frame_json = arg.to_json(
+                    orient="split",
+                    date_format="iso",
+                    default_handler=str,
+                )
+                digest.update((frame_json or "").encode())
+                digest.update(repr(list(arg.columns)).encode())
+                digest.update(repr([str(dtype) for dtype in arg.dtypes]).encode())
+                args_dict[f"workflow_dataframe_input_{index}"] = digest.hexdigest()
 
         upstream_identities = self._upstream_identity_map(
             workflow,
@@ -1707,7 +1799,9 @@ class DefaultEngine:
                 resolved_idx = idx if str(idx) in idx_set else self._find_parent_index(idx, idx_set)
                 if resolved_idx is None:
                     continue
-                row_args[field] = _to_python(up_df.at[resolved_idx, col_ref.column])
+                row_args[field] = _to_python(
+                    up_df.at[resolved_idx, self._column_label(col_ref)]
+                )
             self._normalize_path_arguments(row_args, input_annotations)
             context = self._build_template_context(
                 node.name,
@@ -1747,11 +1841,15 @@ class DefaultEngine:
             up_df = results[col_ref.node]
             idx_set = (index_sets or {}).get(col_ref.node.name) or set(up_df.index)
             if idx in idx_set:
-                row_args[field] = _to_python(up_df.at[idx, col_ref.column])
+                row_args[field] = _to_python(
+                    up_df.at[idx, self._column_label(col_ref)]
+                )
             else:
                 parent_idx = self._find_parent_index(idx, idx_set)
                 if parent_idx is not None:
-                    row_args[field] = _to_python(up_df.at[parent_idx, col_ref.column])
+                    row_args[field] = _to_python(
+                        up_df.at[parent_idx, self._column_label(col_ref)]
+                    )
                 else:
                     raise KeyError(
                         f"Column '{col_ref.column}' not found for index '{idx}' "
@@ -1820,10 +1918,11 @@ class DefaultEngine:
         """Check that all referenced columns exist in upstream DataFrames."""
         for field, col_ref in node._column_bindings.items():
             up_df = results[col_ref.node]
-            if col_ref.column not in up_df.columns:
+            column_label = self._column_label(col_ref)
+            if column_label not in up_df.columns:
                 from bioimageflow.node import ColumnNotFoundError
                 raise ColumnNotFoundError(
-                    f"Column '{col_ref.column}' not found in output of node "
+                    f"Column '{column_label}' not found in output of node "
                     f"'{col_ref.node.name}'. Available columns: "
                     f"{list(up_df.columns)}"
                 )
@@ -2227,144 +2326,58 @@ class DefaultEngine:
         df.index = df.index.astype(str)
         return df
 
-    # ── Sub-workflow execution ─────────────────────────────────────────
+    # ── Recursive workflow execution ───────────────────────────────────
 
-    def _execute_sub_workflow(
+    def _execute_workflow_node(
         self,
-        node: "SubWorkflowNode",
+        node: "WorkflowNode",
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str],
         workflow: Any,
     ) -> tuple[pd.DataFrame, str]:
-        """Execute a SubWorkflowNode by running its internal nodes."""
-
-        # Build a proxy DataFrame from the parent's upstream data.
-        # The proxy node should expose columns matching SubWorkflow.Inputs.
-        proxy_df = self._build_proxy_dataframe(node, results)
-        proxy_node = node._proxy_node
-        results[proxy_node] = proxy_df
-        sig_hashes[proxy_node] = "proxy"
-
-        # Collect and sort internal nodes
-        internal_nodes = set(node.internal_nodes)
-        internal_nodes.add(proxy_node)
-        order = self._topological_sort(internal_nodes)
-
-        # Execute internal nodes with scoped names for caching/progress.
-        # Only scope direct children — nested sub-workflows get scoped
-        # when _execute_sub_workflow is called recursively for them.
-        original_names: dict[Node, str] = {}
-        for inode in node.internal_nodes:
-            original_names[inode] = inode._name
-            inode._name = f"{node.name}/{inode._name}"
-
-        try:
-            for inode in order:
-                if inode is proxy_node:
-                    continue  # Already have proxy data
-                if workflow.cancel_requested:
-                    raise WorkflowCancelledError("Workflow cancelled by user")
-                df, sig_hash = self._execute_node(inode, results, sig_hashes, workflow)
-                cache_hit = self._pop_node_cache_hit(inode)
-                self._write_run_node_view(workflow, inode, sig_hash, cache_hit=cache_hit)
-                results[inode] = df
-                sig_hashes[inode] = sig_hash
-        finally:
-            # Restore original names
-            for inode, orig_name in original_names.items():
-                inode._name = orig_name
-
-        # Assemble output DataFrame from output mapping
-        output_df = self._assemble_sub_workflow_output(node, results)
-
-        # Compute a combined sig hash from internal terminal hashes
-        terminal_hashes = {}
-        for field, col_ref in node._output_mapping.items():
-            if col_ref.node in sig_hashes:
-                terminal_hashes[field] = sig_hashes[col_ref.node]
-        import hashlib
-        import json
+        """Assemble a compiled workflow boundary after its tools complete."""
+        del workflow
+        output_df = self._assemble_workflow_output(node, results)
+        terminal_hashes = {
+            field: sig_hashes[col_ref.node]
+            for field, col_ref in node._published_outputs.items()
+            if col_ref.node in sig_hashes
+        }
         combined = hashlib.sha256(
             json.dumps(terminal_hashes, sort_keys=True).encode()
         ).hexdigest()
 
         return output_df, combined
 
-    def _build_proxy_dataframe(
+    def _assemble_workflow_output(
         self,
-        node: "SubWorkflowNode",
+        node: "WorkflowNode",
         results: dict[Node, pd.DataFrame],
     ) -> pd.DataFrame:
-        """Build a proxy DataFrame containing only column-bound fields.
+        """Assemble the workflow boundary's published output columns."""
+        output_frames: list[pd.DataFrame] = []
 
-        Constants and defaults are NOT included — they flow through the
-        internal nodes' ``_constant_bindings`` instead, which keeps them
-        as native Python types and avoids numpy coercion by pandas.
-        """
-        if not node._input_column_bindings:
-            # No column bindings at all — return an empty single-row DataFrame
-            # so internal nodes still have an index to iterate over.
-            return pd.DataFrame(index=pd.Index(["0"]))
-
-        # Collect upstream DataFrames
-        upstream_dfs: dict[Node, pd.DataFrame] = {}
-        for field, col_ref in node._input_column_bindings.items():
-            if col_ref.node in results:
-                upstream_dfs[col_ref.node] = results[col_ref.node]
-
-        # Use the finest-grained index from upstream
-        all_indices = [set(df.index) for df in upstream_dfs.values()]
-
-        def _max_depth(idx_set: set) -> int:
-            return max((str(i).count('::') for i in idx_set), default=0)
-
-        finest_index = sorted(
-            max(all_indices, key=lambda s: (_max_depth(s), len(s))),
-            key=str,
-        )
-
-        # Build proxy DataFrame: only column-bound fields
-        rows = []
-        for idx in finest_index:
-            row: dict[str, Any] = {}
-            for field, col_ref in node._input_column_bindings.items():
-                up_df = results[col_ref.node]
-                idx_set = set(str(i) for i in up_df.index)
-                if idx in idx_set:
-                    row[field] = up_df.at[idx, col_ref.column]
-                else:
-                    parent = self._find_parent_index(idx, idx_set)
-                    if parent is not None:
-                        row[field] = up_df.at[parent, col_ref.column]
-            rows.append(row)
-
-        return pd.DataFrame(rows, index=pd.Index([str(i) for i in finest_index]))
-
-    def _assemble_sub_workflow_output(
-        self,
-        node: "SubWorkflowNode",
-        results: dict[Node, pd.DataFrame],
-    ) -> pd.DataFrame:
-        """Assemble the sub-workflow output from its output mapping."""
-        # Collect columns from internal nodes
-        output_data: dict[str, pd.Series] = {}
-        reference_index = None
-
-        for field, col_ref in node._output_mapping.items():
+        for field, col_ref in node._published_outputs.items():
             if col_ref.node not in results:
                 raise RuntimeError(
                     f"Internal node '{col_ref.node.name}' not executed — "
-                    f"cannot assemble SubWorkflow output."
+                    f"cannot assemble Workflow output."
                 )
             df = results[col_ref.node]
-            output_data[field] = cast(pd.Series, df[col_ref.column])
-            if reference_index is None:
-                reference_index = df.index
+            series = cast(pd.Series, df[self._column_label(col_ref)])
+            output_frames.append(series.rename(field).to_frame())
 
-        if not output_data:
+        if not output_frames:
             return pd.DataFrame()
 
-        output_df = pd.DataFrame(output_data, index=reference_index)
+        aligned = self._align_dataframes_for_merge(output_frames)
+        reference_index = aligned[0].index
+        if any(not frame.index.equals(reference_index) for frame in aligned[1:]):
+            indexes = [list(frame.index) for frame in aligned]
+            raise IndexAlignmentError(
+                f"Published workflow outputs have incompatible indexes: {indexes}."
+            )
+        output_df = pd.concat(aligned, axis=1)
         output_df.index = output_df.index.astype(str)
         return output_df
 
@@ -2564,8 +2577,8 @@ class DefaultEngine:
         result-key/current-record state when enough upstream cache selections
         are known. No tool code runs, and no Wetlands environment is launched.
 
-        Sub-workflow internal nodes appear under scoped names
-        (``"subworkflow_name/internal_name"``), matching
+        Nested workflow tools appear under scoped names
+        (``"workflow_node/internal_name"``), matching
         :meth:`execute_steps`.
 
         Disabled nodes and nodes downstream of disabled nodes are
@@ -2577,28 +2590,39 @@ class DefaultEngine:
             If the graph contains a cycle. Use :meth:`Workflow.validate`
             for non-fatal cycle reporting.
         """
-        reachable = set(workflow._nodes.values())
-        dep_graph = self._build_dep_graph_from_set(reachable)
+        reachable, completion_dependencies, scoped_names = (
+            self._compile_execution_graph(list(workflow._nodes.values()))
+        )
+        dep_graph = self._build_dep_graph_from_set(
+            reachable,
+            completion_dependencies,
+        )
         try:
             order = list(TopologicalSorter(dep_graph).static_order())
         except CycleError as exc:
             cycle_nodes = exc.args[1] if len(exc.args) > 1 else []
             names = [getattr(n, "name", str(n)) for n in cycle_nodes]
             raise CycleInWorkflowError(names) from exc
-        _executable, skipped = self._filter_executable(order)
+        _executable, skipped = self._filter_executable(
+            order,
+            completion_dependencies,
+        )
 
         plan: dict[str, NodePlan] = {}
         results: dict[Node, Any] = {}
         sig_hashes: dict[Node, str] = {}
 
-        for node in order:
-            if node in skipped:
-                plan[node.name] = NodePlan(
-                    node.name, "", NodePlanStatus.SKIPPED,
-                    tuple(self._plan_upstream_names(node)),
-                )
-                continue
-            self._plan_node(node, results, sig_hashes, workflow, plan)
+        with scoped_node_names(scoped_names):
+            for node in order:
+                if node in skipped:
+                    plan[node.name] = NodePlan(
+                        node.name,
+                        "",
+                        NodePlanStatus.SKIPPED,
+                        tuple(self._plan_upstream_names(node)),
+                    )
+                    continue
+                self._plan_node(node, results, sig_hashes, workflow, plan)
 
         # Include any nodes not reachable from terminals (shouldn't happen
         # in practice, but plan is expected to cover every registered node).
@@ -2616,19 +2640,19 @@ class DefaultEngine:
         workflow: Any,
         plan: dict[str, NodePlan],
     ) -> None:
-        """Compute a NodePlan for a single node, recursing into sub-workflows."""
+        """Compute a NodePlan for a single node, recursing into workflows."""
         from bioimageflow.dataframe_tool import DataFrameTool
-        from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.workflow_node import WorkflowNode
 
-        if isinstance(node, SubWorkflowNode):
-            self._plan_sub_workflow(node, results, sig_hashes, workflow, plan)
+        if isinstance(node, WorkflowNode):
+            self._plan_compiled_workflow_node(node, sig_hashes, plan)
             return
 
         cached_df, sig_hash = self._check_node_cache(
             node, results, sig_hashes, workflow, hydrate_assets=False,
         )
         if sig_hash is None:
-            # Non-cacheable top-level node (shouldn't happen outside SubWorkflowNode)
+            # Workflow boundaries are handled above; executable tools are cacheable.
             plan[node.name] = NodePlan(
                 node.name, "", NodePlanStatus.UNEXECUTED,
                 tuple(self._plan_upstream_names(node)),
@@ -2693,75 +2717,57 @@ class DefaultEngine:
         pointer = Storage(workflow.storage_path).load_current(final_result_key)
         return pointer.record_id if pointer is not None else None
 
-    def _plan_sub_workflow(
+    def _plan_compiled_workflow_node(
         self,
-        node: Any,
-        results: dict[Node, Any],
+        node: "WorkflowNode",
         sig_hashes: dict[Node, str],
-        workflow: Any,
         plan: dict[str, NodePlan],
     ) -> None:
-        """Recursively plan a SubWorkflowNode's internal nodes."""
-        from bioimageflow.sub_workflow import SubWorkflowNode
-
-        # Proxy node stands in for the sub-workflow's external inputs.
-        proxy_node = node._proxy_node
-        sig_hashes[proxy_node] = "proxy"
-
-        internal_nodes = set(node.internal_nodes)
-        internal_nodes.add(proxy_node)
-        internal_order = self._topological_sort(internal_nodes)
-
-        # Scope names during planning so cache lookups match execute().
-        original_names: dict[Node, str] = {}
-        for inode in node.internal_nodes:
-            original_names[inode] = inode._name
-            inode._name = f"{node.name}/{inode._name}"
-
-        try:
-            for inode in internal_order:
-                if inode is proxy_node:
-                    continue
-                if isinstance(inode, SubWorkflowNode):
-                    self._plan_sub_workflow(inode, results, sig_hashes, workflow, plan)
-                    continue
-                self._plan_node(inode, results, sig_hashes, workflow, plan)
-
-            # Combined hash — same shape as _execute_sub_workflow.
-            import hashlib
-            import json
-            terminal_hashes = {}
-            for field, col_ref in node._output_mapping.items():
-                if col_ref.node in sig_hashes:
-                    terminal_hashes[field] = sig_hashes[col_ref.node]
-            combined = hashlib.sha256(
-                json.dumps(terminal_hashes, sort_keys=True).encode()
-            ).hexdigest()
-            sig_hashes[node] = combined
-            # SubWorkflowNode itself isn't cached at this level — its
-            # status mirrors the aggregate of internal-node statuses.
-            # We surface it as UNEXECUTED unless every internal entry
-            # already has a cache hit.
-            internal_statuses = [
-                plan[inode._name].status
-                for inode in node.internal_nodes
-                if inode._name in plan
-            ]
-            if internal_statuses and all(
-                s is NodePlanStatus.CACHED for s in internal_statuses
-            ):
-                sw_status = NodePlanStatus.CACHED
-            else:
-                sw_status = NodePlanStatus.UNEXECUTED
-            plan[node.name] = NodePlan(
-                node.name,
-                combined,
-                sw_status,
-                tuple(self._plan_upstream_names(node)),
-            )
-        finally:
-            for inode, orig_name in original_names.items():
-                inode._name = orig_name
+        """Reduce already-planned compiled internals to one boundary entry."""
+        terminal_hashes = {
+            field: sig_hashes[col_ref.node]
+            for field, col_ref in node._published_outputs.items()
+            if col_ref.node in sig_hashes
+        }
+        combined = hashlib.sha256(
+            json.dumps(terminal_hashes, sort_keys=True).encode()
+        ).hexdigest()
+        sig_hashes[node] = combined
+        internal_statuses = [
+            plan[internal.name].status
+            for internal in node.internal_nodes
+            if internal.name in plan
+        ]
+        if any(
+            status is NodePlanStatus.PENDING_UPSTREAM
+            for status in internal_statuses
+        ):
+            status = NodePlanStatus.PENDING_UPSTREAM
+        elif internal_statuses and all(
+            status in {NodePlanStatus.CACHED, NodePlanStatus.SKIPPED}
+            for status in internal_statuses
+        ):
+            status = NodePlanStatus.CACHED
+        else:
+            status = NodePlanStatus.UNEXECUTED
+        plan[node.name] = NodePlan(
+            node.name,
+            combined,
+            status,
+            tuple(dict.fromkeys([
+                *self._plan_upstream_names(node),
+                *(
+                    reference.node.name
+                    for reference in node._published_outputs.values()
+                ),
+            ])),
+            pending_upstreams=tuple(dict.fromkeys(
+                pending
+                for internal in node.internal_nodes
+                if (entry := plan.get(internal.name)) is not None
+                for pending in entry.pending_upstreams
+            )),
+        )
 
     def _plan_upstream_names(self, node: Node) -> list[str]:
         names: list[str] = []

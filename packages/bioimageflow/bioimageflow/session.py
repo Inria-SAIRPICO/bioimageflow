@@ -43,7 +43,15 @@ class WorkflowSession:
         storage_path: str | None = None,
     ) -> None:
         if data is None:
-            data = {"nodes": [], "edges": [], "config": {}}
+            data = {
+                "schema_version": 1,
+                "name": "workflow",
+                "display_name": "workflow",
+                "interface": {"inputs": [], "outputs": []},
+                "nodes": [],
+                "edges": [],
+                "config": {},
+            }
         else:
             data = deepcopy(data)
         if storage_path is not None:
@@ -95,8 +103,7 @@ class WorkflowSession:
         """Append a node entry to the session.
 
         ``node`` is a wire-format dict with at least ``name`` and tool
-        identification keys (``tool_module`` + ``tool_class``, or the
-        sub-workflow equivalents).
+        identification keys for either a tool or recursive workflow node.
         """
         if any(nd["name"] == node["name"] for nd in self._nodes_list):
             raise ValueError(f"Node '{node['name']}' already exists.")
@@ -110,15 +117,17 @@ class WorkflowSession:
         ]
         self._data["edges"] = [
             e for e in self._edges_list
-            if e.get("from") != name and e.get("to") != name
+            if e.get("source_node") != name and e.get("target_node") != name
         ]
         self._invalidate_structural()
 
     def add_edge(self, edge: dict[str, Any]) -> None:
-        """Append an edge entry. Must include ``from``, ``to``, ``column``, ``field``."""
-        for key in ("from", "to", "column", "field"):
+        """Append one strict column or DataFrame edge record."""
+        for key in ("type", "id", "source_node", "target_node"):
             if key not in edge:
                 raise ValueError(f"Edge missing required key '{key}'.")
+        if edge["type"] not in {"column", "dataframe"}:
+            raise ValueError("Unknown edge type.")
         self._edges_list.append(deepcopy(edge))
         self._invalidate_structural()
 
@@ -141,12 +150,19 @@ class WorkflowSession:
         not re-resolve any tool class.
         """
         node_dict = self._get_node_dict(node)
-        node_dict.setdefault("constants", {})[field] = serialize_constant(value)
+        key = "bindings" if node_dict.get("type") == "workflow" else "constants"
+        node_dict.setdefault(key, {})[field] = serialize_constant(value)
 
         if self._workflow_cache is not None:
             built = self._workflow_cache._nodes.get(node)
             if built is not None:
-                built._constant_bindings[field] = value
+                from bioimageflow.workflow_node import WorkflowNode
+
+                if isinstance(built, WorkflowNode):
+                    built._input_constant_bindings[field] = value
+                    built.workflow._apply_interface_binding(field, value)
+                else:
+                    built._constant_bindings[field] = value
         self._invalidate_compute_caches()
 
     def set_enabled(self, node: str, enabled: bool) -> None:

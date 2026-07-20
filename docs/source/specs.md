@@ -1383,7 +1383,7 @@ from simpleitk_tools.utils.filters import apply_filter
 
 **Why:** When multiple versions are loaded, each lives under a scoped namespace (e.g., `simpleitk_tools__1_0_0`). Relative imports resolve within the correct scoped namespace. Absolute imports bypass the scoping and resolve to whichever version was loaded first (or to the canonical name if registered), silently mixing code from different versions.
 
-This applies everywhere: `__init__.py`, tool modules, SubWorkflow `build()` methods, and utility modules.
+This applies everywhere: `__init__.py`, tool modules, workflow factories, and utility modules.
 
 #### Tool Store
 
@@ -1439,13 +1439,13 @@ The loading mechanism:
 2. Installs a temporary meta-path import hook so that relative imports within the package (e.g., `from .gaussian import GaussianSmooth`) resolve to the versioned directory under the scoped namespace.
 3. Executes the package's `__init__.py`, which triggers all `from .xxx import ...` chains.
 4. Materializes public exports declared in `__all__` by resolving each name with `getattr(package_module, name)`. This supports package-level lazy exports implemented with `__getattr__`, as long as each public export can be imported in the orchestrator process.
-5. Stamps every `BaseTool` and `SubWorkflow` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
+5. Stamps every `BaseTool` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
 
 This works transparently for all tool types:
 
 - **ProcessingTools**: Loaded as real subclasses with real `process_row`/`process_batch`. `inspect.getfile()` returns the versioned path. Wetlands dispatch works unchanged.
 - **DataFrameTools**: Loaded as real subclasses with real `transform()`/`merge_dataframes()`. They execute in the main process as usual.
-- **SubWorkflows**: `build()` instantiates tools via relative imports (`from .gaussian import GaussianSmooth`). Since the entire package is loaded under the scoped namespace, relative imports resolve within that version's directory. Internal tools are automatically from the correct version.
+- **Workflow factories**: reusable workflow modules import versioned tools normally and return a fresh `Workflow`; workflows are not tool classes.
 
 #### Version Metadata
 
@@ -1552,7 +1552,7 @@ metas = reg.register_workflow(workflow_data) # exported workflow dict
 `register_workflow` discovers only custom tools carried by that workflow export
 or project context. It does not install or register package tools; call
 `register_package` for package references. For exported dicts, discovery uses
-the `custom_tool_modules` bundle written by `Workflow.export()`.
+the `custom_sources` archive table written by `Workflow.export()`.
 
 `ToolMetadata` is a frozen dataclass:
 
@@ -1567,12 +1567,12 @@ the `custom_tool_modules` bundle written by `Workflow.export()`.
 | `display_name` | `str` | The class's `display_name` attribute, or `class_name`. |
 | `tags` | `tuple[str, ...]` | The class's `tags` attribute (empty tuple if none). |
 
-The registry indexes `BaseTool` and `SubWorkflow` subclasses; abstract base classes themselves are excluded. Multiple versions of the same package can be registered — they coexist as distinct entries because `resolve_tool_class` keys on the scoped module, not the class name alone.
+The registry indexes `BaseTool` subclasses only; abstract base classes are excluded. Multiple versions of the same package can be registered because `resolve_tool_class` keys on the scoped module, not the class name alone.
 
 ### 3.12 Project-Local Custom Tools
 
-A project may define custom `ProcessingTool`, `DataFrameTool`, or class-based
-`SubWorkflow` classes in a project-local `tools/` package. In the BioImageFlow
+A project may define custom `ProcessingTool` or `DataFrameTool` classes in a
+project-local `tools/` package and reusable workflow factories alongside them. In the BioImageFlow
 platform, the project root is the user's workspace, so workspace-owned custom
 tools live under `workspace/tools/` and can be reused by any workflow in
 `workspace/workflows/`. These tools do **not** need to be promoted to a
@@ -1604,7 +1604,7 @@ Rules:
   If a workflow adds `tools/__init__.py` as a regular package marker, it must be empty or limited to a docstring.
   Do not use eager barrel exports such as `from .some_tool import SomeTool` in `tools/__init__.py`, because a worker importing one tool module executes the package initializer first and should not need dependencies for unrelated tools.
 - Helper modules, package constants, and small runtime assets needed by custom tools may also live under `tools/`. Use relative imports inside `tools/` so both the main process and workers can import the bundled package.
-- Custom tools must have tests. Minimum coverage is schema serialization / validation plus one small execution test per custom tool behavior. Add integration coverage for tools that touch the workflow graph, output templates, environments, or sub-workflow boundaries.
+- Custom tools must have tests. Minimum coverage is schema serialization / validation plus one small execution test per custom tool behavior. Add integration coverage for tools that touch the workflow graph, output templates, environments, or workflow boundaries.
 - Committed test fixtures live under `tests/data/` and must be small. Generated
   outputs, caches, and downloaded files live under pytest temporary directories
   or the workflow `storage_path`. Platform-created workflows set that
@@ -1615,10 +1615,10 @@ Rules:
 Export behavior:
 
 - `Workflow.export(path)` calls `to_dict(include_custom_tools=True)` and writes
-  a top-level `custom_tool_modules` list containing a bundle for each used
+  a top-level `custom_sources` list containing a bundle for each used
   project-local `tools/` directory.
 - The bundle preserves relative paths under `tools/` and includes file hashes plus an overall bundle hash. Generated/cache files such as `__pycache__`, `.pyc`, `.pytest_cache`, and hidden temp files are excluded. Export fails for unexpectedly large files.
-- Regular tool nodes reference an embedded `tools/` bundle with `tool_source_module`; class-based sub-workflow nodes use `sub_workflow_source_module`.
+- Tool nodes reference an embedded `tools/` bundle with `source_module`; nested graphs share the same archive-level source table.
 - `Workflow.load(path)` validates the embedded bundle hash, materializes the `tools/` tree into a scoped temporary Python package, and resolves the class from that package before attempting package or normal import resolution.
 - `ToolRegistry.register_workflow(workflow_or_data)` discovers project-local
   custom tools from either a live `Workflow` or an exported workflow dict, so GUI
@@ -1751,229 +1751,32 @@ registered = register(
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
   - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, the engine uses a single-row index (`["0"]`), builds arguments from constants and defaults only, and dispatches to `process_row`/`process_batch` as usual. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
 
-**Wire-format edge entries.** In `Workflow.to_dict() / from_dict()` the `edges` list contains one dict per edge with the keys `from`, `to`, `column`, `field`, plus an optional opaque `id`:
+**Wire-format edge entries.** In `Workflow.to_dict() / from_dict()` every edge has an opaque stable `id` and one explicit variant.
+A `column` edge carries `source_node`, `source_output`, `target_node`, and `target_input`.
+A `dataframe` edge carries `source_node`, `target_node`, and exactly one of `target_position` or `target_input`.
+The `id` round-trips unchanged and is copied onto matching `ValidationError` records; DataFrame positions are represented directly and require no sentinel field value.
 
-```json
-{"id": "e_42", "from": "loader_1", "to": "segmenter_1",
- "column": "path", "field": "input_image"}
-```
+### 4.3 The \`Workflow\` Object
 
-`id` is opaque to the library: GUIs assign whatever stable identifier they want (e.g., to drive selection / hover state in the editor canvas). The library round-trips it through `to_dict` / `from_dict` and copies it onto every `ValidationError` raised against that edge (see [§6.6](#66-validation-error-reference)). For positional arguments (`column = field = "__positional__"`), `id` is the only way to disambiguate multiple edges between the same pair of nodes — `validate()`'s deduplication includes `edge_id` in the key.
+\`Workflow(name="workflow", display_name=None, ...)\` owns definition metadata, its immediate node map, one public interface, and root execution configuration.
+\`display_name\` defaults to \`name\`.
+Structural workflow and node names are non-empty and cannot contain \`/\`, which separates scoped execution paths.
 
-### 4.3 The `Workflow` Object
+Ordinary ad hoc graphs still register tools through the workflow context manager.
+Reusable definitions additionally declare symbolic inputs and published outputs:
 
-The `Workflow` class holds the DAG graph object and provides configuration for storage, caching, execution engine, and progress monitoring.
+\`\`\`python
+workflow = Workflow(name="segment", display_name="Segment")
+with workflow:
+    image = workflow.input("image", ImagePath, id="input-image")
+    masks = Segment()(input_image=image, name="segment")
+    workflow.output("mask", masks["mask"], id="output-mask")
+\`\`\`
 
-**Creating a Workflow:**
-
-```python
-from bioimageflow import Workflow
-
-# Option 1: Context manager (recommended). Nodes created inside are
-# automatically registered with the workflow.
-with Workflow(storage_path="./results", execution="sequential") as wf:
-    raw = load_images(path="./data")
-    masks = segment(input_image=raw["path"])
-    results = analyze(image=raw["path"], mask=masks["mask"])
-    final_df = wf.compute(results)
-
-# Option 2: Explicit workflow. Pass the workflow to compute().
-wf = Workflow(storage_path="./results")
-raw = load_images(path="./data")
-masks = segment(input_image=raw["path"])
-final_df = wf.compute(masks)
-
-# Option 3: Node.compute() creates an implicit default Workflow
-# with default settings. Convenient for quick experiments.
-raw = load_images(path="./data")
-masks = segment(input_image=raw["path"])
-final_df = masks.compute()  # Uses a default Workflow
-```
-
-Node registration is automatic: calling a tool (e.g., `segment(...)`) appends the resulting Node to the active Workflow (set by the context manager) or to a module-level default. `Node.compute()` is a shorthand that either uses the node's associated Workflow or creates a default one.
-
-**Workflow constructor parameters:**
-
-| Parameter       | Type          | Default         | Description                                      |
-|----------------|---------------|-----------------|--------------------------------------------------|
-| `storage_path`  | `str \| Path` | `"./bif_data"`  | Root directory for output files and cache. Relative values are interpreted against the orchestrator process working directory and stored internally as absolute runtime paths. |
-| `engine`        | `str`         | `"wetlands"`    | Execution backend. `"direct"` runs in the orchestrator process. `"wetlands"` runs `ProcessingTool` work in Wetlands worker environments. |
-| `execution`     | `str`         | `"parallel"`    | Local scheduling policy: `"parallel"` may execute ready independent nodes concurrently; `"sequential"` executes one node at a time for debugging and deterministic reproduction. |
-| `max_workers`   | `int`         | `1`             | Default number of Wetlands workers per environment when `engine="wetlands"`. Ignored by `engine="direct"`. |
-| `on_progress`   | `Callable \| None` | `None`     | Progress callback (see [Section 4.4](#44-progress-monitoring)) |
-
-Cache records are not deleted by automatic retention policy; pruning published records is an explicit storage maintenance operation.
-
-**`compute()` return type and terminal detection:**
-
-```python
-# No arguments: auto-detect all terminal nodes (nodes with no downstream dependents)
-out = wf.compute()                  # -> dict[str, DataFrame] if multiple terminals, DataFrame if single
-
-# Single terminal: returns DataFrame directly
-df = wf.compute(results)            # -> DataFrame
-
-# Multiple terminals: returns dict keyed by node name
-out = wf.compute(results, masks)    # -> {"MeasureStats_1": DataFrame, "CellposeSegmenter_1": DataFrame}
-
-# Node.compute() always targets one node
-df = results.compute()              # -> DataFrame
-```
-
-Shared upstream nodes are not re-executed — their cached results are reused.
-
-**Workflow serialization:** Workflows can be exported and imported for reproducibility and sharing. The serialized form captures the full DAG structure, tool references, and parameter bindings:
-
-```python
-# Export
-workflow.export("my_workflow.json")
-
-# Import and re-execute
-loaded = Workflow.load("my_workflow.json")
-loaded.compute(loaded.nodes["measure_stats_1"])
-```
-
-The serialized format includes:
-- Tool references (module path + class name for each node).
-- Tool package info (package name + package version, when loaded from the tool store). This allows `Workflow.load()` to call `load_versioned_package()` and resolve the correct tool class.
-- Project-local custom tool bundles, when a node uses a custom tool from the
-  project's `tools/` package.
-- Parameter bindings (constants, column references with upstream node names).
-- Node enabled/disabled state (see [Section 4.6](#46-enabling-and-disabling-nodes)).
-- Graph edges (upstream-downstream relationships).
-- Workflow-level configuration (storage path, engine backend, and local scheduling policy).
-
-Versioned package tool code is **not** serialized — the same tool packages (at
-the referenced versions) must be available in the tool store to re-execute a
-loaded workflow. Project-local custom tools are serialized into a top-level
-`custom_tool_modules` bundle by `Workflow.export()`, and nodes reference that
-bundle with `tool_source_module` or `sub_workflow_source_module`.
-`Workflow.load()` uses the embedded `tools/` tree before falling back to package
-or import resolution, so exported workflows carry their custom tools, helpers,
-and small runtime assets across machines.
-
-**In-memory serialization helpers** — for callers that work with dicts rather than files (GUI servers, test harnesses):
-
-```python
-# Produce the editable wire format without touching the filesystem
-data: dict = workflow.to_dict()
-
-# Include the project-local custom-tool bundle in memory.
-export_data: dict = workflow.to_dict(include_custom_tools=True)
-
-# Reconstruct from a dict (strict mode: raises on first error)
-wf = Workflow.from_dict(data)
-
-# Reconstruct as a non-raising diagnostic: returns (wf, errors).
-# `partial=True` keeps building past failures; `validate_only=True`
-# changes the return type to a tuple. Together they yield the
-# original GUI "build everything you can" mode.
-wf, errors = Workflow.from_dict(
-    data,
-    validate_only=True,         # return (wf, list[ValidationError]) instead of raising
-    partial=True,               # keep building after per-node failures
-    auto_install=True,          # default; False produces unknown_tool errors on missing packages
-    storage_path_override=None, # override data["config"]["storage_path"] without mutating dict
-)
-```
-
-`from_dict` accepts the same options as the `Workflow` constructor via keyword arguments (`on_progress`, `engine`, `execution`, `wetlands_config`). When any of those is `None`, values from `data["config"]` or constructor defaults are used. `Workflow.load(path)` is preserved as a thin wrapper over `from_dict`.
-
-The two flags compose orthogonally:
-
-| `validate_only` | `partial` | Behavior |
-|-----------------|-----------|----------|
-| `False` (default) | `False` (default) | Strict: returns `Workflow`; raises on first failure. |
-| `False` | `True` | Builds best-effort; raises an aggregated `ValueError` if any failure occurred. |
-| `True` | `False` | Fail-fast diagnostic: returns `(wf, errors)` where `errors` has at most one entry. |
-| `True` | `True` | GUI mode: returns `(wf, errors)` with all failures captured; `wf.is_partial` may be `True`. |
-
-In partial mode the library maps construction failures to `ValidationError` entries (see the Validation Error Reference section) and produces a best-effort workflow with as much of the graph as could be wired. Subsequent calls to `workflow.validate()` and `workflow.plan()` remain meaningful on a partially-wired workflow.
-
-**Build-time inspection.** After `from_dict`, callers can inspect what survived without a separate `validate()` call:
-
-```python
-wf, errors = Workflow.from_dict(data, validate_only=True, partial=True)
-wf.errors          # list[ValidationError] — same list returned alongside wf
-wf.failed_nodes    # dict[str, ValidationError] — nodes whose tool resolution / __init__ failed
-wf.is_partial      # bool — True if any node from data["nodes"] is missing from wf.nodes
-```
-
-These properties are populated only by `from_dict`; for programmatic graph construction they are empty / `False`.
-
-**Introspection helpers:**
-
-```python
-names: list[str] = workflow.topological_order()        # raises on cycle
-deps: set[str] = workflow.downstream_of("loader_1")    # transitive downstream names, excluding argument
-```
-
-`topological_order` is a thin wrapper over `bioimageflow.engine.topological_order(workflow)`. If the graph may contain a cycle, call `workflow.validate()` first — the latter reports cycles via a `ValidationError` (`kind="cycle"`) instead of raising. `workflow.plan()` raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes`) when the graph is cyclic, so a typical GUI flow runs `validate()` first and only calls `plan()` when no `cycle` error was reported.
-
-**Cache invalidation:**
-
-```python
-from bioimageflow import InvalidatedSelection
-
-affected: set[InvalidatedSelection] = workflow.invalidate(["segmenter_1"])      # cascades to downstream
-affected = workflow.invalidate(["segmenter_1"], cascade=False)                  # only this node
-```
-
-`invalidate` removes or tombstones the `current.json` cache selections for each affected node/result key; with `cascade=True` (default) it also invalidates every transitively downstream node selection so a subsequent `compute()` recomputes or reselects everything that depended on the changed node.
-It returns `InvalidatedSelection` entries for actual selections whose `current.json` pointers were removed.
-Each entry contains `node_name`, `result_key`, `selected_record_id`, and `status` (`"removed"` or `"corrupt_removed"`).
-It never deletes immutable `records/<record-id>/` directories.
-It raises `KeyError` for unknown node names.
-It is not safe to call concurrently with `compute()` on the same workflow storage path unless both operations use the same guarded metadata protocol or callers coordinate externally.
-
-**Workflow validation:**
-
-```python
-errors: list[ValidationError] = workflow.validate()
-```
-
-`validate()` runs, in order:
-
-1. Cycle detection (one error per detected cycle).
-2. Type compatibility on every column binding (`check_compatibility` between upstream output and downstream input).
-3. Missing-required-input check (fields with no binding, no constant, and no `Inputs` default).
-4. Pydantic validation of every node's supplied constants (`parameter_invalid` for each violation — this step is opt-in; constants are not Pydantic-validated during `Node.__init__`).
-5. Recursive validation of sub-workflows (internal errors carry a `path` prefixed with the parent's name).
-
-Steps 1–3 are already enforced by `Node.__init__` during ordinary graph construction; `validate()` exists so GUIs that built the workflow via `capture_errors()` / `from_dict(validate_only=True, partial=True)` can re-check after the fact. Step 4 only runs here — it is intentionally not performed at construction time, so a GUI editing one field at a time does not need every other field to be valid yet. Callers that previously relied on the engine's best-effort constant coercion at execution time should add explicit defaults or broaden their `Inputs` type annotations.
-
-The module-level helper `bioimageflow.validate_parameters(tool_class, parameters)` validates a single node's constants in isolation (no Workflow needed) — useful for inline GUI form validation.
-
-**Error capture:**
-
-```python
-wf = Workflow()
-with wf, wf.capture_errors() as errors:
-    BadTool()(input=upstream["nonexistent"])
-# errors: list[ValidationError]; wf is partially wired.
-```
-
-`capture_errors()` is a context manager that redirects node-construction failures (`BindingError`, `ColumnNotFoundError`, unknown kwargs, missing required inputs) into a `ValidationError` list instead of raising. Node registration is best-effort: failed nodes remain registered so that downstream references can still be inspected. Nested blocks push independent buffers.
-
-**Pre-execution planning:**
-
-```python
-from bioimageflow import NodePlan, NodePlanStatus
-plan: dict[str, NodePlan] = workflow.plan()
-for name, entry in plan.items():
-    print(name, entry.final_result_key, entry.selected_record_id, entry.status)
-    # entry.status is one of: CACHED, PRIOR_SELECTION_MISS, UNEXECUTED, SKIPPED, PENDING_UPSTREAM
-    # entry.cached and entry.skipped are kept as boolean shortcuts
-```
-
-`plan()` returns every node's cache status without executing anything.
-When all consumed upstream selected records are known, it also returns the final result key that `compute()` would derive if it consumes the same upstream record references.
-When an upstream node must execute before its selected record is known, the downstream plan entry reports `PENDING_UPSTREAM` instead of a fake final cache key.
-`plan()` never launches a Wetlands environment and is safe to call before compute.
-It raises `CycleInWorkflowError` if the graph is cyclic.
-
-Sub-workflow internal nodes appear under scoped names (`"subworkflow_name/internal_name"`), matching `compute_steps()`.
-A sub-workflow's outer entry aggregates: `CACHED` only when every internal node is `CACHED`; otherwise it reports `PENDING_UPSTREAM` or `UNEXECUTED` according to the internal selected-record state.
+Calling this object in another active workflow returns \`WorkflowNode\`; root callers use \`compute(inputs={...})\`.
+\`to_dict()\` emits the recursive graph.
+\`to_dict(include_custom_tools=True)\` emits the portable archive envelope when custom sources exist.
+\`from_dict(validate_only=True, partial=True)\` retains its diagnostic tuple form but parses only schema version 1.
 
 ### 4.4 Progress Monitoring
 
@@ -2168,6 +1971,7 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 ```json
 {
   "name": "segmenter_1",
+  "type": "tool",
   "tool_module": "my_tools.segmenter",
   "tool_class": "Segmenter",
   "tool_package": "my_tools",
@@ -2194,11 +1998,13 @@ s = WorkflowSession(data)             # `data` is the wire format from Workflow.
 s = WorkflowSession.from_dict(data)   # equivalent classmethod
 
 # Mutations
-s.add_node({"name": "load", "tool_module": "...", "tool_class": "...",
-            "constants": {...}, "args": []})
+s.add_node({"name": "load", "type": "tool", "tool_module": "...",
+            "tool_class": "...", "tool_package": None,
+            "tool_package_version": None, "constants": {...}})
 s.remove_node("load")                  # also strips edges that touch it
-s.add_edge({"id": "e1", "from": "load", "to": "seg",
-            "column": "path", "field": "input_image"})
+s.add_edge({"type": "column", "id": "e1", "source_node": "load",
+            "source_output": "path", "target_node": "seg",
+            "target_input": "input_image"})
 s.remove_edge("e1")                    # by edge id
 s.set_constant("seg", "diameter", 30.0)
 s.set_enabled("seg", False)
@@ -2496,8 +2302,8 @@ The `cached` and `skipped` booleans are read-only shortcuts (`cached == status i
 | `SKIPPED` | Node is disabled, or its upstream chain contains a disabled node. `final_result_key` and `selected_record_id` are `None`. |
 | `PENDING_UPSTREAM` | At least one consumed upstream selected record is not known until that upstream executes. `final_result_key` is `None`. |
 
-Sub-workflow internal nodes appear under scoped names `"subworkflow_name/internal_name"`.
-The outer sub-workflow entry's status is `CACHED` only when every internal node is `CACHED`, otherwise `PENDING_UPSTREAM` or `UNEXECUTED` according to the internal state.
+Nested workflow tools appear under scoped names `"workflow_node/internal_name"`.
+The outer workflow-node entry's status is `CACHED` only when every internal node is `CACHED`, otherwise `PENDING_UPSTREAM` or `UNEXECUTED` according to the internal state.
 `plan()` never launches a Wetlands environment.
 It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list[str]`) on a cyclic graph; call `workflow.validate()` first if a cycle is possible.
 
@@ -2523,7 +2329,7 @@ class ValidationError:
     field: str | None = None
     edge: tuple[str, str, str] | None = None        # (from_node, to_node, field)
     edge_id: str | None = None                      # opaque GUI-supplied id (see §4.2)
-    path: tuple[str, ...] = ()                      # sub-workflow scope, root → leaf
+    path: tuple[str, ...] = ()                      # nested workflow scope, root → leaf
 ```
 
 `edge_id` carries the optional `id` value that GUIs attach to edges in the wire format (see [§4.2 / Wire format](#42-nodes-and-edges)). When an error is raised against an edge that has an `id`, the library copies that id onto the `ValidationError`. This is the disambiguator for cases like positional args, where multiple edges share the same `(from, to, field)` triple by construction. `edge_id` is also part of the deduplication key inside `validate()` — two errors that differ only by their `edge_id` are reported as distinct.
@@ -2908,7 +2714,7 @@ from bioimageflow import (
     Workflow, OutputView,
     DefaultEngine, SequentialEngine,
     EnvironmentLifetime, WetlandsEnvManager,
-    SubWorkflow,
+    WorkflowNode,
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,
     require_tool_packages,
@@ -2931,333 +2737,70 @@ from bioimageflow.tool_loader import resolve_tool_class
 
 ---
 
-## 14. Sub-Workflows
+## 14. Unified Recursive Workflows
 
-Sub-workflows allow users to package an entire workflow DAG as a reusable node. A `SubWorkflow` encapsulates an internal DAG with declared inputs and outputs, and behaves like a single node in the parent workflow.
+There is one workflow definition type at every nesting level: \`Workflow\`.
+Calling a workflow inside an active, distinct parent captures an independent structural snapshot and returns a public \`WorkflowNode\`.
+Factories in reusable Python modules export the exact no-argument symbol \`build_workflow\` and return a fresh \`Workflow\`.
 
-### 14.1 SubWorkflow Definition
+### 14.1 Interface construction
 
-*Module: `bioimageflow.sub_workflow`*
+\`Workflow.input(name, annotation=None, *, kind="field", default=MISSING, id=None)\` declares a stable input port and returns a symbolic reference owned by that workflow.
+Field inputs target named tool fields or child-workflow field ports.
+DataFrame inputs target positional \`DataFrameTool\` inputs or child-workflow DataFrame ports.
+A symbolic input can fan out to multiple compatible targets, but cannot be used outside its active owner.
 
-`SubWorkflow` is a new base class in the `bioimageflow` package (orchestrator-only — not in `bioimageflow-core`). It is **not** a subclass of `BaseTool`; it is a standalone callable that produces a `SubWorkflowNode`.
+\`Workflow.output(name, source, *, id=None)\` publishes an internal \`ColumnRef\`.
+Interface names are unique across inputs and outputs, while IDs are immutable wire identities.
+The name \`name\` is reserved for invocation node naming and cannot be an input name.
 
-```python
-from bioimageflow.sub_workflow import SubWorkflow
-from pathlib import Path
-from typing import Annotated
+### 14.2 Invocation and execution
 
-from bioimageflow_core import IOModel, ImageSpec, Semantic, Arguments
+\`workflow(name=None, **bindings)\` validates names and kinds, snapshots the definition, registers one \`WorkflowNode\` in the parent, and never executes a factory.
+\`workflow_node.workflow\` is the editable definition for that invocation; editing it does not affect its source or siblings.
+\`workflow_node["output_name"]\` resolves the name to the stable output-port ID.
 
-class SegmentAndMeasure(SubWorkflow):
-    display_name = "Segment and Measure"
+Root values use \`workflow.compute(inputs={...})\`.
+Field inputs receive ordinary values at root and constants or \`ColumnRef\` values when nested.
+DataFrame inputs receive complete DataFrames at root and upstream nodes when nested.
+Explicit values override interface defaults, which override local tool defaults.
 
-    class Inputs(IOModel):
-        image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        diameter: float = 30.0
+The compiler recursively expands workflow nodes into scoped executable paths such as \`outer/inner/tool\`.
+Every enabled internal terminal is a completion dependency, including detached branches.
+Published output dependencies contribute values and cache signatures; completion-only dependencies do not change unrelated downstream signatures.
+A zero-output workflow executes its terminals and returns a zero-row, zero-column DataFrame.
+\`compute_steps()\` yields real tool steps only; \`plan()\` additionally reports aggregate workflow-node entries.
 
-    class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        cell_count: int
-        mean_intensity: float
+### 14.3 Strict recursive graph and archive formats
 
-    def build(self, inputs):
-        """Build the internal DAG.
+\`Workflow.to_dict()\`, \`Workflow.from_dict()\`, \`Workflow.load()\`, and \`Workflow.export()\` accept only \`schema_version: 1\`.
+A recursive node has \`"type": "workflow"\`, an inline \`workflow\` graph, and constant \`bindings\` keyed by stable child-input IDs.
+Tool nodes use \`"type": "tool"\`.
+Edges have explicit \`"column"\` or \`"dataframe"\` variants and stable IDs.
+Unknown variants, extra fields, malformed endpoints, duplicate IDs, and unversioned graphs are errors.
 
-        Args:
-            inputs: A SubWorkflowInputProxy providing ColumnRef-like handles
-                    for each declared input field.
+The portable archive envelope is separate from the graph:
 
-        Returns:
-            A dict mapping output field names to ColumnRefs from internal nodes.
-        """
-        segment = CellposeSegmenter()
-        measure = MeasureStats()
-
-        masks = segment(input_image=inputs.image, diameter=inputs.diameter)
-        stats = measure(image=inputs.image, mask=masks["mask"])
-
-        return {
-            "mask": masks["mask"],
-            "cell_count": masks["cell_count"],
-            "mean_intensity": stats["mean_intensity"],
-        }
-```
-
-**SubWorkflow class attributes:**
-
-| Attribute  | Type               | Description                                   |
-|-----------|-------------------|-----------------------------------------------|
-| `display_name` | `str`          | Human-readable sub-workflow label; falls back to class name when empty |
-| `Inputs`   | `IOModel subclass` | Declared inputs (exposed to parent workflow)   |
-| `Outputs`  | `IOModel subclass` | Declared outputs (exposed to parent workflow)  |
-
-**Concrete `SubWorkflow` subclasses must:**
-- Declare `display_name`, `Inputs`, and `Outputs` as class attributes.
-- Override `build(self, inputs)` → `dict[str, ColumnRef]` mapping each `Outputs` field to an internal node column.
-
-### 14.2 Using a Sub-Workflow
-
-From the parent workflow's perspective, a `SubWorkflow` is called like any other tool — keyword arguments bind to `Inputs`, and the returned node exposes `Outputs` columns:
-
-```python
-seg_measure = SegmentAndMeasure()
-
-with Workflow(storage_path="./results") as wf:
-    raw = load_images(path="./data")
-    results = seg_measure(image=raw["path"], diameter=25.0)
-
-    # Access outputs like any other node
-    export = save(mask=results["mask"], stats=results["mean_intensity"])
-    wf.compute(export)
-```
-
-### 14.3 SubWorkflowInputProxy
-
-When `SubWorkflow.__call__()` is invoked, it creates a `SubWorkflowInputProxy` — a lightweight proxy that acts as a virtual source node for the internal DAG. Internal nodes can reference proxy fields via attribute access (`inputs.image`) or subscript (`inputs["image"]`), both of which return `ColumnRef` objects.
-
-The proxy is backed by a real `Node` (with no tool) that the engine replaces with the actual parent-workflow upstream data at execution time.
-
-### 14.4 SubWorkflowNode
-
-`SubWorkflowNode` is a `Node` subclass that represents a sub-workflow in the parent DAG. It holds:
-
-- The `SubWorkflow` definition
-- The internal nodes (encapsulated — not registered with the parent workflow)
-- Input mappings: parent ColumnRefs/constants → internal proxy fields
-- Output mappings: internal node columns → declared `Outputs` fields
-
-`SubWorkflowNode` supports `__getitem__` for output column access: `results["mask"]` returns a `ColumnRef` pointing to the sub-workflow node.
-
-**Internal nodes are not directly accessible from the parent workflow's `nodes` dict.** They are accessible via `sub_workflow_node.internal_nodes` for debugging.
-
-### 14.5 Execution Strategy: Flattening
-
-At execution time, the engine **flattens** the sub-workflow into its constituent internal nodes:
-
-1. When the engine encounters a `SubWorkflowNode`, it expands it into its internal nodes.
-2. Input proxy nodes are replaced with direct references to the parent's upstream data.
-3. Internal nodes execute normally in topological order, using existing execution paths.
-4. After all internal nodes execute, the engine assembles the sub-workflow's output DataFrame by collecting columns from the output mapping.
-
-**Consequences of flattening:**
-- **Caching:** Each internal node caches independently using the same result-key/current-record semantics as a top-level node.
-- **Environment reuse:** Internal `ProcessingTool`s with the same `EnvironmentSpec` as parent-level tools share the same Wetlands environment.
-- **Name scoping:** Internal node names are prefixed with the sub-workflow node name: `"SegmentAndMeasure_1/CellposeSegmenter_1"`. Node keys and result-key material preserve the same scoping.
-
-### 14.6 Debugging with `compute_steps`
-
-Internal nodes are visible during step-by-step execution via `compute_steps()`. Each internal node is yielded as its own `NodeStep` with a scoped name:
-`compute_steps()` uses the same cache lookup, publication, and run-view update semantics as `compute()`.
-
-```python
-for step in wf.compute_steps(results):
-    print(f"Next: {step.node_name} (env: {step.environment})")
-    step.prepare()     # launches Wetlands env — attach debugger here
-    df = step.execute()
-```
-
-This yields steps like:
-```
-Next: FileLoader_1 (env: None)
-Next: SegmentAndMeasure_1/CellposeSegmenter_1 (env: cellpose)
-Next: SegmentAndMeasure_1/MeasureStats_1 (env: imageio)
-```
-
-### 14.7 Cache Scope
-
-Internal nodes use scoped node keys in result-key material and in human-facing run views:
-
-```text
-SegmentAndMeasure_1/CellposeSegmenter_1
-SegmentAndMeasure_1/MeasureStats_1
-FileLoader_1
-```
-
-The canonical cache remains under `storage_path/cache/v1/`.
-Sub-workflow scoping affects node keys and result-key material; sub-workflow results use the same `cache/v1` storage layout as top-level nodes.
-
-### 14.8 Serialization
-
-`Workflow.export()` serializes `SubWorkflowNode` with its internal structure:
-
-```text
+\`\`\`json
 {
-  "name": "SegmentAndMeasure_1",
-  "type": "sub_workflow",
-  "sub_workflow_module": "my_tools.pipelines",
-  "sub_workflow_class": "SegmentAndMeasure",
-  "sub_workflow_package": "my_tools",
-  "sub_workflow_package_version": "1.0.0",
-  "constants": {"diameter": {"__type__": "float", "value": 25.0}},
-  "input_mapping": {...},
-  "output_mapping": {...},
-  "internal_nodes": [...],
-  "internal_edges": [...]
+  "archive_version": 1,
+  "workflow": {"schema_version": 1, "...": "..."},
+  "custom_sources": []
 }
-```
+\`\`\`
 
-`sub_workflow_module` stores the canonical module path. When `sub_workflow_package` and `sub_workflow_package_version` are present, `Workflow.load()` uses `load_versioned_package()` and `resolve_tool_class()` to find the `SubWorkflow` class. When absent, it falls back to `importlib.import_module()`.
+The source table is collected once across the recursive graph.
+Tool records refer to it through \`source_module\`, so equal class names from different source IDs cannot shadow one another.
+Export serializes the already-materialized graph and never calls a factory again.
 
-`Workflow.load()` reconstructs `SubWorkflowNode` from the serialized form by re-importing and re-calling the `SubWorkflow` class. Because `build()` uses relative imports that resolve within the scoped namespace, the internal tools are automatically from the correct package version.
+### 14.4 Trusted Python loading
 
-`Workflow.from_dict` / `Workflow.to_dict` handle `SubWorkflowNode` identically to `Workflow.load` / `Workflow.export` — the dict shape and the file shape are the same.
+\`Workflow.from_python(path_or_module)\` loads the exact \`build_workflow\` symbol and calls it once.
+The return value must be a standalone \`Workflow\`.
+File-based loading captures local Python sources before import, materializes them in a fresh import context, and captures custom-source records before that context is released.
+Repeated calls therefore observe changes to the entry module or local helpers without stale \`sys.modules\` state.
 
-### 14.9 Nesting
-
-Sub-workflows may contain other sub-workflows. The engine flattens recursively — all internal nodes at every nesting level are expanded into the parent execution graph. Name scoping nests: `"outer_1/inner_1/tool_1"`.
-
-### 14.10 Error Handling
-
-- **Missing output mapping:** If `build()` returns a dict missing a declared `Outputs` field, a `ValueError` is raised at graph construction time.
-- **Extra output mapping:** If `build()` returns keys not in `Outputs`, they are ignored with a warning.
-- **Input binding errors:** The same `BindingError` rules as `ProcessingTool` apply — missing required inputs with no default raise `BindingError`.
-- **Cycle detection:** Cycles involving sub-workflow internals are detected during flattening.
-
-### 14.11 Config-Driven Sub-Workflows
-
-*Module: `bioimageflow.sub_workflow`*
-
-Sub-workflows can be defined declaratively from a JSON-serializable config dict, without writing a Python class. This enables GUI servers and external tools to define sub-workflows at runtime.
-
-#### Factory Method
-
-```python
-config = {
-    "name": "spot_detection",
-    "inputs": {
-        "input_image": {"type": "Path", "image_spec": {"semantics": ["intensity"]}},
-        "channel": {"type": "int", "default": 0},
-    },
-    "outputs": {
-        "labeled_spots": {"type": "Path", "image_spec": {"semantics": ["label"]}},
-        "num_spots": {"type": "int"},
-    },
-    "nodes": [
-        {
-            "name": "extract",
-            "tool_class": "ExtractChannel",
-            "tool_module": "bioimageflow_common_tools",
-            "tool_package": "bioimageflow-common-tools",
-            "tool_package_version": "0.1.0",
-            "inputs": {
-                "input_image": {"from_input": "input_image"},
-                "channel": {"from_input": "channel"},
-            },
-        },
-        {
-            "name": "cc",
-            "tool_class": "ConnectedComponents",
-            "tool_module": "bioimageflow_common_tools",
-            "inputs": {
-                "input_image": {"from_node": "extract", "column": "output_image"},
-            },
-        },
-    ],
-    "output_mapping": {
-        "labeled_spots": {"from_node": "cc", "column": "output_image"},
-        "num_spots": {"from_node": "cc", "column": "num_labels"},
-    },
-}
-
-sw = SubWorkflow.from_config(config)
-```
-
-`SubWorkflow.from_config(config)` returns a `_ConfigDrivenSubWorkflow` instance — a `SubWorkflow` subclass that stores the config and implements `build()` by interpreting it declaratively. All existing `SubWorkflow` machinery (`__call__`, `SubWorkflowNode`, flattening, caching, scoped names) is reused without modification.
-
-The config's `inputs` and `outputs` are the published interface of the
-sub-workflow. In GUI-created workflows, publishing a parameter adds an entry to
-`inputs` and rewrites the internal node field to `{"from_input": ...}`.
-Unpublishing removes that entry and restores the internal field to a local
-constant or connection. Publishing an output adds an entry to `outputs` and
-`output_mapping`; unpublishing removes both entries. Parent workflows only see
-these published fields on the outer `SubWorkflowNode`.
-
-#### Config Schema
-
-**Top-level keys:**
-
-| Key              | Type   | Required | Description                                    |
-|-----------------|--------|----------|------------------------------------------------|
-| `name`           | `str`  | Yes      | Sub-workflow identifier (used for node naming)  |
-| `inputs`         | `dict` | Yes      | Input field definitions (may be empty `{}`)     |
-| `outputs`        | `dict` | Yes      | Output field definitions                        |
-| `nodes`          | `list` | Yes      | Internal node definitions, in dependency order  |
-| `output_mapping` | `dict` | Yes      | Maps output fields to internal node columns     |
-
-**Field definition** (in `inputs`/`outputs`):
-
-| Key          | Type   | Required | Description                                       |
-|-------------|--------|----------|---------------------------------------------------|
-| `type`       | `str`  | Yes      | One of: `"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`, `"ImageFile"` |
-| `image_spec` | `dict` or `null` | No | For `"Path"`, a dict wraps the type with `Annotated[Path, ImageSpec(...)]`; missing or `null` leaves it as plain `Path`. For `"ImageFile"`, missing or `null` uses an empty `ImageSpec` and produces `Annotated[Path, ImageSpec()]`. |
-| `default`    | any    | No       | Default value for the field                       |
-
-**`ImageFile` alias:** accepted for GUI schema round-trips. It is equivalent to a `Path` field carrying an `ImageSpec` annotation. If `image_spec` is missing or `null`, the annotation uses an empty `ImageSpec`.
-
-**`image_spec` dict:** `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}`. Values are lists of enum value strings (e.g., `"intensity"`, `"label"`, `"YX"`). All keys are optional; missing keys mean "any" (empty set). For a `"Path"` field, `image_spec: null` is treated the same as a missing `image_spec` key and does not create an image annotation.
-
-**Node definition:**
-
-| Key                    | Type   | Required | Description                                  |
-|-----------------------|--------|----------|----------------------------------------------|
-| `name`                 | `str`  | Yes      | Internal node name (unique within config)    |
-| `tool_class`           | `str`  | Yes*     | Tool class name                              |
-| `tool_module`          | `str`  | Yes*     | Python module containing the tool            |
-| `tool_package`         | `str`  | No       | Versioned package name (for `resolve_tool_class`) |
-| `tool_package_version` | `str`  | No       | Package version                              |
-| `type`                 | `str`  | No       | `"sub_workflow"` for nested sub-workflow nodes |
-| `config`               | `dict` | No       | Inline config for nested config sub-workflow |
-| `sub_workflow_class`   | `str`  | No       | Class name for nested class-based sub-workflow |
-| `sub_workflow_module`  | `str`  | No       | Module for nested class-based sub-workflow   |
-| `inputs`               | `dict` | Yes      | Input bindings for this node                 |
-
-*Required for tool nodes (when `type` is not `"sub_workflow"`).
-
-**Input reference types** (values in a node's `inputs` dict):
-
-- `{"from_input": "field_name"}` — references a sub-workflow input. Resolves to a `ColumnRef` (if the parent bound a column) or a constant (if default/constant).
-- `{"from_node": "node_name", "column": "col_name"}` — references an output column from a previously defined internal node.
-- Raw value (`int`, `float`, `str`, `bool`, `list`) — constant binding passed directly to the tool.
-
-**Output mapping** values use only `{"from_node": ..., "column": ...}`.
-
-`SubWorkflow.from_config()` validates the published interface before building
-the DAG:
-
-- every `from_input` reference must name a declared config input;
-- every declared output must have an `output_mapping` entry;
-- `output_mapping` must not contain undeclared outputs;
-- each output mapping entry must contain string `from_node` and `column` values;
-- inline nested config sub-workflows are validated recursively.
-
-#### Nested Sub-Workflows
-
-A node with `"type": "sub_workflow"` is treated as a nested sub-workflow rather than a regular tool. Two forms are supported:
-
-- **Inline config:** `"config": {...}` — a nested config dict, recursively interpreted via `SubWorkflow.from_config()`.
-- **Class-based reference:** `"sub_workflow_class"` + `"sub_workflow_module"` (and optionally `"sub_workflow_package"` / `"sub_workflow_package_version"`) — imports and instantiates an existing Python `SubWorkflow` subclass.
-
-#### Serialization
-
-When `Workflow.export()` encounters a config-driven sub-workflow, it serializes the config dict directly:
-
-```text
-{
-  "name": "spot_detection_1",
-  "type": "sub_workflow",
-  "sub_workflow_type": "config",
-  "config": { ... },
-  "constants": { ... }
-}
-```
-
-`Workflow.load()` checks `"sub_workflow_type"`: when `"config"`, it calls `SubWorkflow.from_config(node_data["config"])` to reconstruct the sub-workflow.
-
-#### Equivalence
-
-A config-driven sub-workflow is functionally equivalent to a class-based sub-workflow that performs the same wiring. It produces the same `SubWorkflowNode` type, participates in the same flattening/caching/scoping mechanisms, and is indistinguishable to the execution engine.
-
----
+The normative host-facing grammar, identifiers, status rules, and golden fixtures are specified in [Unified workflow contract](reference/unified_workflow_contract.md).
 
 ## Appendix A: Wetlands API
 

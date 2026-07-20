@@ -30,7 +30,7 @@ Fields:
    * - Field
      - Description
    * - ``node_name``
-     - Scoped node name (sub-workflow scope included).
+     - Scoped node name (nested workflow scope included).
    * - ``status``
      - One of ``"started"``, ``"row_progress"``, ``"row_complete"``,
        ``"completed"``, ``"cached"``, ``"failed"``, ``"cancelled"``.

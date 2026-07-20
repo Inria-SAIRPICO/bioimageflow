@@ -87,7 +87,7 @@ for scripts that need to see what ``compute()`` would do:
 
 Each :class:`~bioimageflow.engine.NodePlan` carries:
 
-- ``node_name`` — scoped name (``"outer/inner_1"`` for sub-workflow internals)
+- ``node_name`` — scoped name (``"outer/inner_1"`` for nested workflow tools)
 - ``final_result_key`` — result key when all required upstream selected records are known
 - ``selected_record_id`` — selected immutable record ID when the node is cached
 - ``status`` — one of the five
@@ -120,7 +120,7 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
        execution.
      - Struck-through / muted
 
-A sub-workflow node aggregates its internals: it reports ``CACHED`` only when every internal entry is cached.
+A workflow node aggregates its internals: it reports ``CACHED`` only when every internal entry is cached.
 
 ``plan()`` does **not** start Wetlands worker pools.
 It uses the direct planning path and does not run tool code.

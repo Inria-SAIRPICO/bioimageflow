@@ -40,16 +40,19 @@ the input so callers can keep their own references.
 
 .. code-block:: python
 
-   sess.add_node({"name": "files", "tool_module": "...", "tool_class": "Files", ...})
-   sess.add_edge({"from": "files", "to": "threshold",
-                  "column": "path", "field": "image", "id": "e1"})
+   sess.add_node({"name": "files", "type": "tool", "tool_module": "...",
+                  "tool_class": "Files", "tool_package": None,
+                  "tool_package_version": None, "constants": {}})
+   sess.add_edge({"type": "column", "id": "e1",
+                  "source_node": "files", "source_output": "path",
+                  "target_node": "threshold", "target_input": "image"})
    sess.set_constant("threshold", "cutoff", 100.0)
    sess.set_enabled("filter", False)
    sess.remove_edge("e1")
    sess.remove_node("filter")
 
 - ``add_node`` raises ``ValueError`` if the name already exists.
-- ``add_edge`` requires ``from``, ``to``, ``column``, ``field``.
+- ``add_edge`` requires ``type``, ``id``, ``source_node``, and ``target_node``, plus the endpoint fields required by its explicit edge variant.
 - ``remove_edge`` raises ``KeyError`` if ``id`` is unknown.
 - ``set_constant`` runs the value through
   :func:`~bioimageflow.validation.serialize_constant` and stores the

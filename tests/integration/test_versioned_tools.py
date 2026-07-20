@@ -2,7 +2,7 @@
 Integration tests for versioned tool package loading.
 
 Covers:
-- Node creation with versioned ProcessingTool, DataFrameTool, SubWorkflow
+- Node creation with versioned ProcessingTool and DataFrameTool
 - Execution produces correct version-specific results
 - Two versions in the same workflow produce different outputs
 - Serialization round-trip preserves version info
@@ -26,7 +26,7 @@ from bioimageflow import Workflow
 def tool_store(tmp_path):
     """Build a tool store with v1.0.0 and v2.0.0 of dummy_tools.
 
-    v1: AlphaTool.process_row → result="v1", LoaderTool, AlphaPipeline (SubWorkflow)
+    v1: AlphaTool.process_row → result="v1", LoaderTool
     v2: AlphaTool.process_row → result="v2" (extra field), LoaderTool adds version col
     """
     store = tmp_path / "tool_packages"
@@ -42,7 +42,6 @@ def tool_store(tmp_path):
         (pkg_dir / "__init__.py").write_text(
             "from .alpha import AlphaTool\n"
             "from .loader import LoaderTool\n"
-            "from .pipeline import AlphaPipeline\n"
         )
 
         (pkg_dir / "base.py").write_text(
@@ -84,26 +83,6 @@ def tool_store(tmp_path):
             "        df = pd.DataFrame({'filepath': [str(f) for f in files]})\n"
             f"{loader_extra}\n"
             "        return df\n"
-        )
-
-        (pkg_dir / "pipeline.py").write_text(
-            "from bioimageflow.sub_workflow import SubWorkflow\n"
-            "from bioimageflow_core import IOModel\n"
-            "from bioimageflow.node import ColumnRef\n"
-            "from .alpha import AlphaTool\n"
-            "from .loader import LoaderTool\n\n"
-            "class AlphaPipeline(SubWorkflow):\n"
-            "    display_name = 'Alpha Pipeline'\n"
-            "    class Inputs(IOModel):\n"
-            "        path: str\n"
-            "    class Outputs(IOModel):\n"
-            "        result: str\n"
-            "    def build(self, inputs):\n"
-            "        loader = LoaderTool()\n"
-            "        alpha = AlphaTool()\n"
-            "        raw = loader(path=inputs.path)\n"
-            "        processed = alpha(value=0)\n"
-            "        return {'result': processed['result']}\n"
         )
 
     return store
@@ -241,50 +220,6 @@ class TestVersionedExecution:
 
 
 # ---------------------------------------------------------------------------
-# SubWorkflow
-# ---------------------------------------------------------------------------
-
-class TestVersionedSubWorkflow:
-
-    def test_sub_workflow_creates_node(self, tool_store, data_dir):
-        from bioimageflow.sub_workflow import SubWorkflowNode
-        v1 = _load_v1(tool_store)
-        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
-            _raw = v1.LoaderTool()(path=str(data_dir))
-            node = v1.AlphaPipeline()(path=str(data_dir))
-            assert isinstance(node, SubWorkflowNode)
-
-    def test_sub_workflow_uses_correct_version_tools(self, tool_store, data_dir):
-        """Internal nodes of v1 sub-workflow should carry v1 metadata."""
-        v1 = _load_v1(tool_store)
-        with Workflow(engine="direct", storage_path=data_dir.parent / "results"):
-            node = v1.AlphaPipeline()(path=str(data_dir))
-            for internal in node.internal_nodes:
-                version = getattr(type(internal.tool), "_bif_package_version", None)
-                if version is not None:
-                    assert version == "1.0.0"
-
-    def test_sub_workflow_executes(self, tool_store, data_dir):
-        v1 = _load_v1(tool_store)
-        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
-            node = v1.AlphaPipeline()(path=str(data_dir))
-            df = wf.compute(node)
-        assert "result" in df.columns
-        assert df["result"].iloc[0] == "v1"
-
-    def test_two_sub_workflow_versions_differ(self, tool_store, data_dir):
-        v1 = _load_v1(tool_store)
-        v2 = _load_v2(tool_store)
-        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
-            n1 = v1.AlphaPipeline()(path=str(data_dir))
-            n2 = v2.AlphaPipeline()(path=str(data_dir))
-            results = wf.compute(n1, n2)
-
-        assert results["AlphaPipeline_1"]["result"].iloc[0] == "v1"
-        assert results["AlphaPipeline_2"]["result"].iloc[0] == "v2"
-
-
-# ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
@@ -302,18 +237,6 @@ class TestVersionedSerialization:
         assert alpha_node["tool_package"] == "dummy_tools"
         assert alpha_node["tool_package_version"] == "1.0.0"
         assert alpha_node["tool_module"] == "dummy_tools.alpha"
-
-    def test_export_sub_workflow_includes_version_info(self, tool_store, data_dir):
-        v1 = _load_v1(tool_store)
-        with Workflow(engine="direct", storage_path=data_dir.parent / "results") as wf:
-            node = v1.AlphaPipeline()(path=str(data_dir))
-            wf.compute(node)
-            wf.export(data_dir.parent / "workflow.json")
-
-        data = json.loads((data_dir.parent / "workflow.json").read_text())
-        sw_node = next(n for n in data["nodes"] if n.get("type") == "sub_workflow")
-        assert sw_node["sub_workflow_package"] == "dummy_tools"
-        assert sw_node["sub_workflow_package_version"] == "1.0.0"
 
     def test_export_mixed_versions(self, tool_store, data_dir):
         v1 = _load_v1(tool_store)

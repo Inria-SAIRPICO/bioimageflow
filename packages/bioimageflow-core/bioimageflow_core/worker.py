@@ -24,8 +24,8 @@ _CORE_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _CORE_PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _CORE_PROJECT_ROOT)
 
-from bioimageflow_core.arguments import Arguments, ExecutionContext
-from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
+from bioimageflow_core.arguments import Arguments, ExecutionContext  # noqa: E402
+from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel  # noqa: E402
 
 
 # Per-file registries: file_path -> {class_name -> class}

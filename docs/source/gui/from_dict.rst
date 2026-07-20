@@ -103,7 +103,7 @@ crash:
 
    for e in errors:
        # render with .edge_id for arrow highlighting, .field for the
-       # input pin, .path for sub-workflow scoping
+       # input pin, .path for recursive workflow scoping
        ...
 
 The workflow returned has every loadable node wired correctly; the

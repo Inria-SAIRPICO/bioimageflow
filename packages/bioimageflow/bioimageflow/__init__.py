@@ -2,6 +2,7 @@
 
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
 from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent, InvalidatedSelection as InvalidatedSelection, OutputView as OutputView
+from bioimageflow.workflow_node import WorkflowNode as WorkflowNode
 from bioimageflow.engine import (
     DefaultEngine as DefaultEngine,
     EnvironmentLifetime as EnvironmentLifetime,
@@ -31,7 +32,6 @@ from bioimageflow.validation import (
     validate_parameters as validate_parameters,
 )
 from bioimageflow.engine import topological_order as topological_order
-from bioimageflow.sub_workflow import SubWorkflow as SubWorkflow, SubWorkflowNode as SubWorkflowNode
 from bioimageflow.tool_loader import (
     load_versioned_package as load_versioned_package,
     unload_versioned_package as unload_versioned_package,
@@ -70,8 +70,6 @@ __all__ = [
     "SchemaSerializationError",
     "SequentialEngine",
     "SourceToolUpstreamError",
-    "SubWorkflow",
-    "SubWorkflowNode",
     "ToolMetadata",
     "ToolRegistry",
     "ValidationError",
@@ -80,6 +78,7 @@ __all__ = [
     "WorkerTaskError",
     "WorkerTimeoutError",
     "Workflow",
+    "WorkflowNode",
     "WorkflowSession",
     "check_type_compat",
     "configure_logging",

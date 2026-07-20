@@ -39,6 +39,35 @@ from .conftest import (
 )
 
 
+def _graph(
+    tmp_path: Path,
+    *,
+    nodes: list[dict[str, Any]] | None = None,
+    edges: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "name": "gui-test",
+        "display_name": "GUI Test",
+        "interface": {"inputs": [], "outputs": []},
+        "nodes": nodes or [],
+        "edges": edges or [],
+        "config": {"storage_path": str(tmp_path), "engine": "direct", "execution": "parallel"},
+    }
+
+
+def _tool_node(name: str, module: str, class_name: str, *, constants: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "name": name,
+        "type": "tool",
+        "tool_module": module,
+        "tool_class": class_name,
+        "tool_package": None,
+        "tool_package_version": None,
+        "constants": constants or {},
+    }
+
+
 # ---------------------------------------------------------------------------
 # A1 — ValidationError dataclass
 # ---------------------------------------------------------------------------
@@ -171,63 +200,41 @@ class TestFromDictToDict:
         assert set(wf_loaded._nodes) == set(wf_from_dict._nodes)
 
     def test_partial_unknown_tool(self, tmp_path: Path) -> None:
-        data = {
-            "nodes": [
-                {
-                    "name": "x",
-                    "tool_module": "no.such.module",
-                    "tool_class": "Foo",
-                    "constants": {},
-                    "args": [],
-                },
-            ],
-            "edges": [],
-            "config": {"storage_path": str(tmp_path)},
-        }
+        data = _graph(tmp_path, nodes=[_tool_node("x", "no.such.module", "Foo")])
         wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert isinstance(wf, Workflow)
         assert any(e.kind == "unknown_tool" for e in errs)
 
     def test_partial_three_broken_nodes(self, tmp_path: Path) -> None:
-        data = {
-            "nodes": [
-                {"name": "a", "tool_module": "no.mod.a", "tool_class": "A", "constants": {}, "args": []},
-                {"name": "b", "tool_module": "no.mod.b", "tool_class": "B", "constants": {}, "args": []},
-                {"name": "c", "tool_module": "no.mod.c", "tool_class": "C", "constants": {}, "args": []},
-            ],
-            "edges": [],
-            "config": {"storage_path": str(tmp_path)},
-        }
+        data = _graph(tmp_path, nodes=[
+            _tool_node("a", "no.mod.a", "A"),
+            _tool_node("b", "no.mod.b", "B"),
+            _tool_node("c", "no.mod.c", "C"),
+        ])
         wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert sum(1 for e in errs if e.kind == "unknown_tool") == 3
 
     def test_edge_referencing_unknown_from_node_partial(self, tmp_path: Path) -> None:
-        data = {
-            "nodes": [
-                {
-                    "name": "downstream",
-                    "tool_module": "tests.integration.conftest",
-                    "tool_class": "StubSegmenter",
-                    "constants": {},
-                    "args": [],
-                },
-            ],
-            "edges": [
-                {"from": "does_not_exist", "to": "downstream",
-                 "column": "path", "field": "input_image"},
-            ],
-            "config": {"storage_path": str(tmp_path)},
-        }
+        data = _graph(
+            tmp_path,
+            nodes=[_tool_node(
+                "downstream", "tests.integration.conftest", "StubSegmenter",
+            )],
+            edges=[{
+                "type": "column",
+                "id": "missing-source",
+                "source_node": "does_not_exist",
+                "source_output": "path",
+                "target_node": "downstream",
+                "target_input": "input_image",
+            }],
+        )
         wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert any(e.kind == "missing_input" for e in errs)
 
     def test_storage_path_override(self, tmp_path: Path) -> None:
         override = tmp_path / "override"
-        data = {
-            "nodes": [],
-            "edges": [],
-            "config": {"storage_path": "/ignored"},
-        }
+        data = _graph(Path("/ignored"))
         wf = Workflow.from_dict(data, storage_path_override=override)
         assert isinstance(wf, Workflow)
         assert str(wf.storage_path) == str(override)
@@ -235,16 +242,10 @@ class TestFromDictToDict:
     # --- validate_only / partial flag matrix ---
 
     def _bad_data(self, tmp_path: Path) -> dict:
-        return {
-            "nodes": [
-                {"name": "a", "tool_module": "no.mod.a", "tool_class": "A",
-                 "constants": {}, "args": []},
-                {"name": "b", "tool_module": "no.mod.b", "tool_class": "B",
-                 "constants": {}, "args": []},
-            ],
-            "edges": [],
-            "config": {"storage_path": str(tmp_path)},
-        }
+        return _graph(tmp_path, nodes=[
+            _tool_node("a", "no.mod.a", "A"),
+            _tool_node("b", "no.mod.b", "B"),
+        ])
 
     def test_default_strict_raises(self, tmp_path: Path) -> None:
         with pytest.raises(Exception):  # ImportError / ModuleNotFoundError etc.
@@ -656,38 +657,28 @@ class TestIntegration:
 
     def test_I2_broken_graph_survey(self, tmp_path: Path) -> None:
         # Build a dict with: unknown_tool + missing edge + bad constant + type-mismatch
-        data = {
-            "nodes": [
-                {
-                    "name": "load",
-                    "tool_module": "tests.integration.conftest",
-                    "tool_class": "FileLoader",
-                    "constants": {"path": {"__type__": "str", "value": str(tmp_path)}},
-                    "args": [],
-                },
-                {
-                    "name": "seg",
-                    "tool_module": "tests.integration.conftest",
-                    "tool_class": "StubSegmenter",
-                    # diameter will be validated by Pydantic in validate() — but conftest's
-                    # StubSegmenter has no gt=0 constraint, so use an unusual-type value.
-                    "constants": {"diameter": {"__type__": "str", "value": "not-a-number"}},
-                    "args": [],
-                },
-                {
-                    "name": "missing_tool_node",
-                    "tool_module": "no.such.module",
-                    "tool_class": "NoSuchClass",
-                    "constants": {},
-                    "args": [],
-                },
+        data = _graph(
+            tmp_path,
+            nodes=[
+                _tool_node(
+                    "load", "tests.integration.conftest", "FileLoader",
+                    constants={"path": {"__type__": "str", "value": str(tmp_path)}},
+                ),
+                _tool_node(
+                    "seg", "tests.integration.conftest", "StubSegmenter",
+                    constants={"diameter": {"__type__": "str", "value": "not-a-number"}},
+                ),
+                _tool_node("missing_tool_node", "no.such.module", "NoSuchClass"),
             ],
-            "edges": [
-                {"from": "load", "to": "seg",
-                 "column": "path", "field": "input_image"},
-            ],
-            "config": {"storage_path": str(tmp_path)},
-        }
+            edges=[{
+                "type": "column",
+                "id": "load-seg",
+                "source_node": "load",
+                "source_output": "path",
+                "target_node": "seg",
+                "target_input": "input_image",
+            }],
+        )
         wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
         assert any(e.kind == "unknown_tool" for e in errs)
 

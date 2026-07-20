@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "name": "parent",
+  "display_name": "Parent",
+  "interface": {
+    "inputs": [],
+    "outputs": [
+      {
+        "id": "output-answer",
+        "name": "answer",
+        "schema": {"type": "int", "image_spec": null},
+        "source": {"node": "child", "column": "output-value"}
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "name": "child",
+      "type": "workflow",
+      "workflow": {
+        "schema_version": 1,
+        "name": "generate_value",
+        "display_name": "Generate Value",
+        "interface": {
+          "inputs": [
+            {
+              "id": "input-values",
+              "name": "values",
+              "kind": "field",
+              "schema": {"type": "list", "image_spec": null},
+              "targets": [
+                {"node": "generate", "port": {"kind": "field", "name": "values"}}
+              ]
+            }
+          ],
+          "outputs": [
+            {
+              "id": "output-value",
+              "name": "value",
+              "schema": {"type": "int", "image_spec": null},
+              "source": {"node": "generate", "column": "value"}
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "name": "generate",
+            "type": "tool",
+            "tool_module": "bioimageflow_common_tools.generate",
+            "tool_class": "Generate",
+            "tool_package": null,
+            "tool_package_version": null,
+            "constants": {
+              "column_name": {"__type__": "str", "value": "value"}
+            }
+          }
+        ],
+        "edges": [],
+        "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+      },
+      "bindings": {
+        "input-values": {"__type__": "list", "value": [7]}
+      }
+    }
+  ],
+  "edges": [],
+  "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+}

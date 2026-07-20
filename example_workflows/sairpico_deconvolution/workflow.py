@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
-from bioimageflow.node import Node
 from bioimageflow_common_tools import CrossJoin
 from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_sairpico_tools import (
@@ -76,21 +75,22 @@ def _sharpness(image: np.ndarray) -> float:
 
 
 def build_workflow(
-    input_image: str | None = None,
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """Build a SAIRPICO deconvolution workflow with metrics."""
-    if input_image is None:
-        raise ValueError("build_workflow requires input_image.")
     storage = Path(storage_path)
     wf = Workflow(
+        name="sairpico_deconvolution",
+        display_name="SAIRPICO Deconvolution",
         storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        input_image = wf.input("input_image", Path, id="input-image")
         psf = GaussianPSF()(
             width=16,
             height=16,
@@ -128,7 +128,9 @@ def build_workflow(
             input_image=input_image,
             name="sairpico_deconvolution_metrics",
         )
-    return wf, metrics
+        wf.output("deconvolved_image", metrics["deconvolved_image"], id="output-deconvolved-image")
+        wf.output("deconvolved_sharpness", metrics["deconvolved_sharpness"], id="output-sharpness")
+    return wf
 
 
 if __name__ == "__main__":
@@ -140,8 +142,5 @@ if __name__ == "__main__":
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()
-    workflow, terminal = build_workflow(
-        input_image=args.input_image,
-        storage_path=args.storage_path,
-    )
-    print(workflow.compute(terminal).to_string(index=False))
+    workflow = build_workflow(storage_path=args.storage_path)
+    print(workflow.compute(inputs={"input_image": args.input_image}).to_string(index=False))

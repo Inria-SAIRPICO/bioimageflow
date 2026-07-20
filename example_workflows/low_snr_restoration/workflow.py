@@ -8,7 +8,6 @@ import imageio.v3 as iio
 import numpy as np
 
 from bioimageflow import Workflow
-from bioimageflow.node import Node
 from bioimageflow_common_tools import JoinOnColumn
 from bioimageflow_core import (
     Arguments,
@@ -68,26 +67,27 @@ def _normalize(image: np.ndarray) -> np.ndarray:
 
 
 def build_workflow(
-    clean_image: str | None = None,
-    degraded_image: str | None = None,
-    checkpoint: str | None = None,
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """Build a low-SNR restoration evaluation workflow."""
-    if clean_image is None or degraded_image is None or checkpoint is None:
-        raise ValueError("build_workflow requires clean_image, degraded_image, and checkpoint.")
     storage = Path(storage_path)
     wf = Workflow(
+        name="low_snr_restoration",
+        display_name="Low-SNR Restoration",
         storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        clean_image = wf.input("clean_image", Path, id="input-clean-image")
+        degraded_image = wf.input("degraded_image", Path, id="input-degraded-image")
+        checkpoint = wf.input("checkpoint", Path, id="input-checkpoint")
         restored = CAREamicsPredict()(
             input_image=degraded_image,
-            checkpoint=Path(checkpoint),
+            checkpoint=checkpoint,
             name="careamics_n2v_restoration",
         )
         metrics = RestorationMetrics()(
@@ -108,7 +108,9 @@ def build_workflow(
             join_column="restored_image",
             name="restoration_results",
         )
-    return wf, results
+        wf.output("restored_image", results["restored_image"], id="output-restored-image")
+        wf.output("preview_image", results["preview_image"], id="output-preview-image")
+    return wf
 
 
 if __name__ == "__main__":
@@ -122,10 +124,9 @@ if __name__ == "__main__":
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()
-    workflow, terminal = build_workflow(
-        clean_image=args.clean_image,
-        degraded_image=args.degraded_image,
-        checkpoint=args.checkpoint,
-        storage_path=args.storage_path,
-    )
-    print(workflow.compute(terminal).to_string(index=False))
+    workflow = build_workflow(storage_path=args.storage_path)
+    print(workflow.compute(inputs={
+        "clean_image": args.clean_image,
+        "degraded_image": args.degraded_image,
+        "checkpoint": args.checkpoint,
+    }).to_string(index=False))

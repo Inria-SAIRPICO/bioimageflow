@@ -6,7 +6,7 @@ from typing import Annotated, Any
 import pandas as pd
 import pytest
 
-from bioimageflow import NodePlanStatus, SubWorkflow, Workflow
+from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
@@ -240,57 +240,3 @@ class TestFailureAndCancellation:
         assert plan["FileLoader_1"].status is NodePlanStatus.CACHED
         assert plan["CancellingSegmenter_1"].status is NodePlanStatus.UNEXECUTED
         assert not any(Storage(storage).cache_root.rglob("CancellingSegmenter_1"))
-
-
-class TestSubWorkflowPlanCache:
-    def test_sub_workflow_plan_uses_scoped_internal_cache_entries(
-        self, tmp_workspace: Path,
-    ) -> None:
-        class SegmentOnly(SubWorkflow):
-            display_name = "Segment Only"
-
-            class Inputs(IOModel):
-                image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-
-            class Outputs(IOModel):
-                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-                cell_count: int
-
-            def build(self, inputs: Any) -> dict[str, Any]:
-                masks = StubSegmenter()(input_image=inputs.image)
-                return {
-                    "mask": masks["mask"],
-                    "cell_count": masks["cell_count"],
-                }
-
-        storage = tmp_workspace / "results"
-
-        with Workflow(engine="direct", storage_path=storage) as wf:
-            raw = FileLoader()(path=str(tmp_workspace / "data"))
-            results = SegmentOnly()(image=raw["path"])
-            wf.compute(results)
-
-        events = []
-        with Workflow(
-            engine="direct",
-            storage_path=storage,
-            on_progress=lambda e: events.append(e),
-        ) as wf:
-            raw = FileLoader()(path=str(tmp_workspace / "data"))
-            results = SegmentOnly()(image=raw["path"])
-            plan = wf.plan()
-            df = wf.compute(results)
-
-        internal_name = "SegmentOnly_1/StubSegmenter_1"
-        assert len(df) == 3
-        assert internal_name in plan
-        assert plan[internal_name].status is NodePlanStatus.CACHED
-        assert plan["SegmentOnly_1"].status is NodePlanStatus.CACHED
-        assert _processing_current_exists(
-            storage,
-            plan[internal_name].final_result_key,
-        )
-        assert any(
-            e.node_name == internal_name and e.status == "cached"
-            for e in events
-        )

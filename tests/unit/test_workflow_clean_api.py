@@ -5,10 +5,33 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+import bioimageflow
 
 from bioimageflow import OutputView, Workflow
 from bioimageflow.engine import DefaultEngine, SequentialEngine
 from bioimageflow.node import get_active_workflow
+
+
+PUBLIC_EXPORTS = {
+    "BindingError", "ColumnNotFoundError", "ColumnRef", "CycleInWorkflowError",
+    "DataFrameTool", "DefaultEngine", "DisabledNodeError", "EnvironmentLifetime",
+    "IndexAlignmentError", "InvalidatedSelection", "NodePlan", "NodePlanStatus",
+    "NodeStep", "OutputView", "Passthrough", "ProgressEvent",
+    "SchemaSerializationError", "SequentialEngine", "SourceToolUpstreamError",
+    "ToolMetadata", "ToolRegistry", "ValidationError", "ValidationErrorKind",
+    "WetlandsEnvManager", "WorkerTaskError", "WorkerTimeoutError", "Workflow",
+    "WorkflowNode", "WorkflowSession", "check_type_compat", "configure_logging",
+    "configure_wetlands", "deserialize_constant", "get_home", "get_inputs_schema",
+    "get_tool_package_info", "get_tool_store_path", "get_wetlands_path",
+    "load_versioned_package", "require_tool_packages", "serialize_constant",
+    "serialize_image_spec", "serialize_input_schema", "serialize_output_schema",
+    "serialize_resolved_outputs", "serialize_tool_metadata", "topological_order",
+    "unload_versioned_package", "validate_parameters",
+}
+
+
+def test_public_exports_match_explicit_allowlist() -> None:
+    assert set(bioimageflow.__all__) == PUBLIC_EXPORTS
 
 
 def test_workflow_defaults_to_wetlands_parallel_engine() -> None:
@@ -90,7 +113,9 @@ def test_workflow_output_view_normalizes_and_round_trips(tmp_path) -> None:
     config = wf.to_dict()["config"]
     assert config["output_view"] == {"mode": "copy", "scope": "both"}
 
-    loaded = Workflow.from_dict({"nodes": [], "edges": [], "config": config})
+    graph = Workflow(output_view={"mode": "copy", "scope": "both"}).to_dict()
+    graph["config"] = config
+    loaded = Workflow.from_dict(graph)
 
     assert loaded.output_view == OutputView(mode="copy", scope="both")
 
@@ -114,7 +139,9 @@ def test_workflow_rejects_invalid_output_view(output_view: dict[str, str]) -> No
 
 
 def test_workflow_from_dict_defaults_to_wetlands_engine() -> None:
-    wf = Workflow.from_dict({"nodes": [], "edges": [], "config": {}})
+    graph = Workflow().to_dict()
+    graph["config"] = {}
+    wf = Workflow.from_dict(graph)
 
     assert wf.engine_type == "wetlands"
     assert wf.execution == "parallel"

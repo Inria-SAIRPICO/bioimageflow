@@ -26,7 +26,7 @@ Workflow Logic
 
 The pipeline demonstrates a branching topology.
 One branch extracts the nuclei channel and segments nuclei once with Cellpose3.
-Two parallel marker branches then reuse the same ``MarkerSpotAnalysis`` sub-workflow with different marker names and channel indices before the overlap tables converge in a final statistical aggregation step.
+Two parallel marker branches reuse the same marker-analysis ``Workflow`` with different channel indices before the overlap tables converge in a final statistical aggregation step.
 
 .. raw:: html
 
@@ -50,17 +50,17 @@ Two parallel marker branches then reuse the same ``MarkerSpotAnalysis`` sub-work
 1. **Data ingestion and preprocessing:** ``DownloadImages`` creates a table of CIL image paths.
    ``ExtractChannel`` isolates channel 2, producing the nuclear image used by Cellpose3.
 2. **Nuclei segmentation:** ``Cellpose3`` segments the nuclear channel and produces a label image in which each nucleus receives a distinct integer identifier.
-3. **Spot detection for channels 0 and 1:** The FOLS2 and CSF1R channels are processed independently by two instances of ``MarkerSpotAnalysis``.
+3. **Spot detection for channels 0 and 1:** The FOLS2 and CSF1R channels are processed independently by two invocations of the reusable marker-analysis ``Workflow``.
    Each instance extracts one marker channel, runs ``AtlasSpotDetection``, converts the detection mask into connected-component spot labels, and measures spot-to-nucleus overlaps.
-4. **Spatial correlation:** The marker branches converge through ``LabelOverlaps`` inside ``MarkerSpotAnalysis``.
+4. **Spatial correlation:** The marker branches converge through ``LabelOverlaps`` inside the marker-analysis workflow.
    These nodes output tables describing which spot labels overlap which nuclear labels rather than producing another image.
 5. **Statistical aggregation:** ``AverageSpotsPerNucleus`` filters background labels, groups spots by parent nucleus, and reports per-image averages and marker-specific totals.
 
-MarkerSpotAnalysis Sub-Workflow
+Marker-analysis workflow
 -------------------------------
 
-``MarkerSpotAnalysis`` is the reusable branch that keeps the FOLS2 and CSF1R logic identical.
-Only ``marker_name`` and ``channel`` change between the two instances in the parent graph.
+The marker module's ``build_workflow`` factory creates the reusable branch that keeps the FOLS2 and CSF1R logic identical.
+The parent invokes one fresh definition twice with different ``channel`` bindings.
 
 .. raw:: html
 

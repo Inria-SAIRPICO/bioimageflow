@@ -8,11 +8,11 @@ single process, enabling reproducible workflows.
 Package boundary rules
 ----------------------
 
-Use a package when a tool or sub-workflow is reused across projects,
+Use a package when a tool is reused across projects,
 distributed independently, versioned, or carries non-trivial dependencies or
 runtime assets. Keep package boundaries explicit:
 
-- A package owns its tools, sub-workflows, tests, fixtures, documentation,
+- A package owns its tools, reusable workflow factories, tests, fixtures, documentation,
   examples, and small runtime assets.
 - Package examples must import from that package.
 - Each public tool and workflow exported by the package must have tests.
@@ -39,7 +39,7 @@ see :doc:`custom_tool_package`.
        __init__.py
        segmenter.py
        loader.py
-       pipeline.py       # optional SubWorkflow
+       pipeline.py       # optional build_workflow factory
        utils/
          __init__.py
          filters.py
@@ -92,7 +92,7 @@ This applies everywhere in the package:
 
 - ``__init__.py``
 - Tool modules importing from sibling modules
-- SubWorkflow ``build()`` methods importing tool classes
+- ``build_workflow`` factories importing tool classes
 - Utility modules importing from other utility modules
 
 Example tool package
@@ -128,34 +128,26 @@ Tool-specific imports such as ``skimage`` or ``torch`` belong inside
 ``process_row`` / ``process_batch`` so the package can be imported for schema
 inspection without the worker environment installed.
 
-SubWorkflow
-^^^^^^^^^^^
+Workflow factory
+^^^^^^^^^^^^^^^^
 
-SubWorkflows compose tools into reusable sub-pipelines. They must also use
-relative imports to reference tools from the same package:
+Workflow modules compose tools through an exact ``build_workflow`` factory.
+They use relative imports for tools owned by the same package:
 
 .. code-block:: python
 
    # my_tools/pipeline.py
-   from bioimageflow.sub_workflow import SubWorkflow
-   from bioimageflow_core.tool import IOModel
+   from bioimageflow import Workflow
    from .segmenter import MySegmenter       # relative import
-   from .loader import ImageLoader          # relative import
 
-   class SegmentPipeline(SubWorkflow):
-       display_name = "Segment Pipeline"
-
-       class Inputs(IOModel):
-           image: str
-           threshold: float = 0.5
-
-       class Outputs(IOModel):
-           mask: str
-
-       def build(self, inputs):
-           seg = MySegmenter()
-           result = seg(image=inputs.image, threshold=inputs.threshold)
-           return {"mask": result["mask"]}
+   def build_workflow() -> Workflow:
+       workflow = Workflow(name="segment_pipeline", display_name="Segment Pipeline")
+       with workflow:
+           image = workflow.input("image", str, id="input-image")
+           threshold = workflow.input("threshold", float, default=0.5, id="input-threshold")
+           result = MySegmenter()(image=image, threshold=threshold, name="segment")
+           workflow.output("mask", result["mask"], id="output-mask")
+       return workflow
 
 __init__.py
 ^^^^^^^^^^^
@@ -167,7 +159,7 @@ Re-export tools for convenient access:
    # my_tools/__init__.py
    from .segmenter import MySegmenter
    from .loader import ImageLoader
-   from .pipeline import SegmentPipeline
+   from .pipeline import build_workflow
 
 Testing requirements
 --------------------
@@ -183,7 +175,7 @@ cover:
 - expected failures for invalid parameters, missing files, or unsupported
   data.
 
-For each public sub-workflow, cover graph construction, output schema,
+For each public workflow factory, cover graph construction, public interface,
 ``Workflow.to_dict`` / ``Workflow.from_dict`` round-trip when supported, and
 one end-to-end execution on public or synthetic data. Tests should run
 without network access unless the package explicitly tests a downloader, in

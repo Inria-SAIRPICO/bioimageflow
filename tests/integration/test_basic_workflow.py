@@ -146,8 +146,8 @@ class TestMultipleTerminals:
             assert len(out) == 2
             assert all(isinstance(v, pd.DataFrame) for v in out.values())
 
-    def test_compute_no_args_auto_detects_terminals(self, tmp_workspace):
-        """compute() with no arguments finds all terminal nodes."""
+    def test_compute_no_args_runs_root_boundary_and_returns_empty_frame_without_outputs(self, tmp_workspace):
+        """Root boundary execution runs all branches and publishes no implicit result."""
         load = FileLoader()
         segment = StubSegmenter()
         measure = StubStats()
@@ -156,11 +156,9 @@ class TestMultipleTerminals:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
             _results = measure(image=raw["path"], mask=masks["mask"])
-            # masks is not terminal (_results depends on it via mask=masks["mask"])
-            # _results IS terminal
             df = wf.compute()
-            # Only one terminal: should return DataFrame directly
             assert isinstance(df, pd.DataFrame)
+            assert df.shape == (0, 0)
 
     def test_shared_upstream_not_reexecuted(self, tmp_workspace):
         """When two terminals share an upstream node, it runs only once."""

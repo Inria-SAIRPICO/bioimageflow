@@ -50,7 +50,7 @@ class ToolMetadata:
     """Public, serialized description of a tool class.
 
     Produced by :meth:`ToolRegistry.register_package` for every
-    BaseTool / SubWorkflow subclass found in the loaded package.
+    BaseTool subclass found in the loaded package.
 
     Attributes
     ----------
@@ -111,14 +111,13 @@ class ToolRegistry:
     def register_package(self, name: str, version: str) -> list[ToolMetadata]:
         """Load an *already installed* package and index its tools.
 
-        Returns the metadata for every BaseTool / SubWorkflow subclass
+        Returns the metadata for every BaseTool subclass
         discovered in the package. Raises :class:`FileNotFoundError`
         if the package is not present in the store — the caller must
         install it first via :meth:`install_package` (or skip
         registration on the hot path).
         """
         from bioimageflow_core.tool import BaseTool
-        from bioimageflow.sub_workflow import SubWorkflow
 
         # load_versioned_package raises FileNotFoundError if the package
         # is not installed — we deliberately propagate that error rather
@@ -150,9 +149,9 @@ class ToolRegistry:
                     continue
                 if obj in seen:
                     continue
-                if not issubclass(obj, (BaseTool, SubWorkflow)):
+                if not issubclass(obj, BaseTool):
                     continue
-                if obj is BaseTool or obj is SubWorkflow:
+                if obj is BaseTool:
                     continue
                 if getattr(obj, "_bif_package", None) != name:
                     # A tool-like class that wasn't stamped for this
@@ -195,49 +194,54 @@ class ToolRegistry:
 
         ``workflow`` may be either a live :class:`bioimageflow.Workflow`
         instance or an exported workflow dict. Live workflows are
-        inspected directly; exported dicts must contain the
-        ``custom_tool_modules`` bundle written by ``Workflow.export``.
+        inspected recursively; exported archives carry one deduplicated
+        ``custom_sources`` table.
         Package tools referenced by the workflow are not loaded or
         installed here; use :meth:`register_package` for those.
         """
-        from bioimageflow.sub_workflow import SubWorkflowNode
+        from bioimageflow.workflow_node import WorkflowNode
         from bioimageflow.workflow import (
             Workflow,
             _is_workflow_custom_class,
-            _load_custom_tool_modules,
+            _load_custom_sources,
             _resolve_custom_tool_class,
         )
 
         classes: list[type] = []
         if isinstance(workflow, Workflow):
-            for node in workflow.nodes.values():
-                if isinstance(node, SubWorkflowNode):
-                    cls = type(node.sub_workflow)
-                else:
+            def visit_live(definition: Workflow) -> None:
+                for node in definition.nodes.values():
+                    if isinstance(node, WorkflowNode):
+                        visit_live(node.workflow)
+                        continue
                     cls = type(node.tool)
-                if _is_workflow_custom_class(cls):
-                    classes.append(cls)
+                    if _is_workflow_custom_class(cls):
+                        classes.append(cls)
+
+            visit_live(workflow)
         elif isinstance(workflow, dict):
-            modules = _load_custom_tool_modules(
-                workflow.get("custom_tool_modules", [])
-            )
-            for node_data in workflow.get("nodes", []):
-                if node_data.get("type") == "sub_workflow":
-                    source_id = node_data.get("sub_workflow_source_module")
-                    class_name = node_data.get("sub_workflow_class")
-                else:
-                    source_id = node_data.get("tool_source_module")
-                    class_name = node_data.get("tool_class")
-                if not source_id or not class_name:
-                    continue
-                module_name = (
-                    node_data.get("sub_workflow_module")
-                    if node_data.get("type") == "sub_workflow"
-                    else node_data.get("tool_module")
-                )
-                classes.append(_resolve_custom_tool_class(
-                    modules, source_id, module_name, class_name
-                ))
+            if set(workflow) == {"archive_version", "workflow", "custom_sources"}:
+                modules = _load_custom_sources(workflow["custom_sources"])
+                graph = workflow["workflow"]
+            else:
+                modules = {}
+                graph = workflow
+
+            def visit_graph(definition: dict[str, Any]) -> None:
+                for node_data in definition.get("nodes", []):
+                    if node_data.get("type") == "workflow":
+                        visit_graph(node_data["workflow"])
+                        continue
+                    source_id = node_data.get("source_module")
+                    if source_id:
+                        classes.append(_resolve_custom_tool_class(
+                            modules,
+                            source_id,
+                            node_data["tool_module"],
+                            node_data["tool_class"],
+                        ))
+
+            visit_graph(graph)
         else:
             raise TypeError(
                 "register_workflow expects a Workflow instance or workflow dict"

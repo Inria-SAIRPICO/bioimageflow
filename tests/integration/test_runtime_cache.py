@@ -10,7 +10,6 @@ import pytest
 
 from bioimageflow import NodePlanStatus, ProgressEvent, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
-from bioimageflow.sub_workflow import SubWorkflow
 from bioimageflow.cache import (
     dataframe_result_key,
     processing_prepare_attempt,
@@ -389,18 +388,6 @@ class ColumnBoundSharedMemoryWriter(ProcessingTool):
         value = len(arguments.label)
         with create_shared_output(np.full((2, 2), value, dtype=np.uint8)) as ref:
             return self.Outputs(result=ref)
-
-
-class ConstantTableSubWorkflow(SubWorkflow):
-    display_name = "Constant Table SubWorkflow"
-
-    class Outputs(IOModel):
-        value: int
-        label: str
-
-    def build(self, inputs):
-        table = CountingTable()(value=16)
-        return {"value": table["value"], "label": table["label"]}
 
 
 def _current_pointer_files(storage_path: Path) -> list[Path]:
@@ -812,23 +799,6 @@ def test_failed_parallel_compute_keeps_successful_sibling_run_view(tmp_path: Pat
     assert not (storage_path / "views" / "runs" / "latest-success.bioimageflow-link.json").exists()
     latest_node = json.loads((storage_path / "views" / "latest" / f"{success_name}.bioimageflow-link.json").read_text())
     assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{success_name}"
-
-
-def test_compute_writes_run_view_for_subworkflow_internal_nodes(tmp_path: Path) -> None:
-    storage_path = tmp_path / "results"
-    CountingTable.executions = 0
-
-    with Workflow(engine="direct", storage_path=storage_path) as wf:
-        node = ConstantTableSubWorkflow()()
-        wf.compute(node)
-        subworkflow_name = node.name
-
-    [run_dir] = _run_dirs(storage_path)
-    internal_result = run_dir / "nodes" / subworkflow_name / "CountingTable_1" / "result.json"
-    assert internal_result.exists()
-    result = json.loads(internal_result.read_text())
-    assert result["node_key"] == f"{subworkflow_name}/CountingTable_1"
-    assert result["cache_hit"] is False
 
 
 def test_dataframe_tool_parameter_change_creates_distinct_result_record(tmp_path: Path) -> None:

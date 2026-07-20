@@ -7,7 +7,7 @@ import json
 import pytest
 
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
-from bioimageflow_core import BaseTool, GENERAL_ENV
+from bioimageflow_core import BaseTool
 from bioimageflow_segmentation_tools import (
     Cellpose3,
     CellposeSAM,
@@ -22,12 +22,6 @@ from bioimageflow_segmentation_tools import (
     ThresholdSegment,
     WatershedSegment,
 )
-from bioimageflow_segmentation_tools.cellpose_v3 import cellpose_v3_env
-from bioimageflow_segmentation_tools.cellpose_sam import cellpose_sam_env
-from bioimageflow_segmentation_tools.nninteractive import nninteractive_env
-from bioimageflow_segmentation_tools.stardist_segmenter import stardist_env
-
-
 SEGMENTATION_TOOLS = [
     Cellpose3,
     CellposeSAM,

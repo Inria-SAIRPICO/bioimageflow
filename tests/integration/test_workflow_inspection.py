@@ -10,20 +10,26 @@ from bioimageflow import Workflow
 
 def _bad_data(tmp_path: Path, *, valid_count: int = 0) -> dict:
     nodes: list[dict] = [
-        {"name": "broken_a", "tool_module": "no.mod.a", "tool_class": "A",
-         "constants": {}, "args": []},
-        {"name": "broken_b", "tool_module": "no.mod.b", "tool_class": "B",
-         "constants": {}, "args": []},
+        {"name": "broken_a", "type": "tool", "tool_module": "no.mod.a", "tool_class": "A",
+         "tool_package": None, "tool_package_version": None, "constants": {}},
+        {"name": "broken_b", "type": "tool", "tool_module": "no.mod.b", "tool_class": "B",
+         "tool_package": None, "tool_package_version": None, "constants": {}},
     ]
     for i in range(valid_count):
         nodes.append({
             "name": f"valid_{i}",
+            "type": "tool",
             "tool_module": "tests.integration.conftest",
             "tool_class": "FileLoader",
+            "tool_package": None,
+            "tool_package_version": None,
             "constants": {"path": {"__type__": "str", "value": "/tmp/x"}},
-            "args": [],
         })
     return {
+        "schema_version": 1,
+        "name": "inspection",
+        "display_name": "Inspection",
+        "interface": {"inputs": [], "outputs": []},
         "nodes": nodes,
         "edges": [],
         "config": {"storage_path": str(tmp_path)},
@@ -44,13 +50,19 @@ class TestFailedNodes:
         data = {
             "nodes": [{
                 "name": "load",
+                "type": "tool",
                 "tool_module": "tests.integration.conftest",
                 "tool_class": "FileLoader",
+                "tool_package": None,
+                "tool_package_version": None,
                 "constants": {"path": {"__type__": "str", "value": "/tmp/x"}},
-                "args": [],
             }],
             "edges": [],
             "config": {"storage_path": str(tmp_path)},
+            "schema_version": 1,
+            "name": "inspection",
+            "display_name": "Inspection",
+            "interface": {"inputs": [], "outputs": []},
         }
         wf = Workflow.from_dict(data)
         assert wf.failed_nodes == {}
@@ -87,11 +99,7 @@ class TestErrorsProperty:
         assert len(wf.errors) == 2
 
     def test_errors_empty_for_clean_strict_build(self, tmp_path: Path) -> None:
-        data = {
-            "nodes": [],
-            "edges": [],
-            "config": {"storage_path": str(tmp_path)},
-        }
+        data = Workflow(storage_path=tmp_path).to_dict()
         wf = Workflow.from_dict(data)
         assert wf.errors == []
 

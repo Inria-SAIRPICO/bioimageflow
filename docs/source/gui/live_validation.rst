@@ -15,7 +15,7 @@ checks**, in order, on a fully-constructed workflow:
 2. Type compatibility on every column binding.
 3. Missing-required-input check for every node.
 4. Pydantic validation of every node's supplied constants.
-5. Recursive validation of sub-workflows; ``ValidationError.path`` is
+5. Recursive validation of workflow nodes; ``ValidationError.path`` is
    prefixed with the parent's node name.
 
 The method is **non-raising** — it always returns

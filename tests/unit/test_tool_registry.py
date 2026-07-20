@@ -24,6 +24,9 @@ def tool_store(tmp_path):
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "__init__.py").write_text(
         "from .alpha import AlphaTool\n"
+        "from bioimageflow import Workflow\n"
+        "def build_workflow():\n"
+        "    return Workflow(name='packaged_definition')\n"
     )
     (pkg_dir / "alpha.py").write_text(
         "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
@@ -112,7 +115,8 @@ class TestRegisterPackage:
         reg = ToolRegistry(store_path=tool_store)
         metas = reg.register_package("dummy_tools", "1.0.0")
         names = {m.class_name for m in metas}
-        assert "AlphaTool" in names
+        assert names == {"AlphaTool"}
+        assert all(metadata.class_name != "build_workflow" for metadata in metas)
 
         cls = reg.get_class("AlphaTool")
         assert cls is not None

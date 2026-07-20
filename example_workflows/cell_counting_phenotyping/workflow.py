@@ -7,7 +7,6 @@ from typing import Annotated, Any
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
-from bioimageflow.node import Node
 from bioimageflow_common_tools import JoinOnColumn
 from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_measurement_tools import (
@@ -77,23 +76,24 @@ class PhenotypeSummary(DataFrameTool):
 
 
 def build_workflow(
-    input_image: str | None = None,
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """Build segmentation -> regionprops -> per-image phenotype summary."""
-    if input_image is None:
-        raise ValueError("build_workflow requires input_image.")
     storage = Path(storage_path)
-    image_path = Path(input_image)
 
     wf = Workflow(
+        name="cell_counting_phenotyping",
+        display_name="Cell Counting and Phenotyping",
         storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        image_path = wf.input("input_image", Path, id="input-image")
+        image_name = wf.input("image_name", str, default="input", id="input-image-name")
         labels = ThresholdSegment()(
             input_image=image_path,
             threshold=0.5,
@@ -126,10 +126,12 @@ def build_workflow(
         )
         summary = PhenotypeSummary()(
             features,
-            image_name=image_path.stem,
+            image_name=image_name,
             name="summarize_phenotypes",
         )
-    return wf, summary
+        wf.output("image", summary["image"], id="output-image")
+        wf.output("object_count", summary["object_count"], id="output-object-count")
+    return wf
 
 
 if __name__ == "__main__":
@@ -141,8 +143,8 @@ if __name__ == "__main__":
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()
-    workflow, terminal = build_workflow(
-        input_image=args.input_image,
-        storage_path=args.storage_path,
-    )
-    print(workflow.compute(terminal).to_string(index=False))
+    workflow = build_workflow(storage_path=args.storage_path)
+    print(workflow.compute(inputs={
+        "input_image": args.input_image,
+        "image_name": Path(args.input_image).stem,
+    }).to_string(index=False))

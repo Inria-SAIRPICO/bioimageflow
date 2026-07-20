@@ -85,19 +85,31 @@ class Threshold(ProcessingTool):
         return self.Outputs(mask=arguments.mask)
 
 
-# 3. Build and run the workflow
+# 3. Define and run a reusable workflow
 from bioimageflow import configure_wetlands
-
-threshold = Threshold()
-loader = FileLoader()
 
 configure_wetlands(wetlands_instance_path="./wetlands")
 
-with Workflow(storage_path="./bif_data") as wf:
-    raw = loader(folder="/data/images")
-    masks = threshold(image=raw["path"], cutoff=100.0, name="threshold")
-    result = wf.compute(masks)
+def build_workflow(*, storage_path="./bif_data") -> Workflow:
+    workflow = Workflow(
+        name="threshold_images",
+        display_name="Threshold Images",
+        storage_path=storage_path,
+    )
+    with workflow:
+        folder = workflow.input("folder", str, id="input-folder")
+        cutoff = workflow.input(
+            "cutoff", float, default=100.0, id="input-cutoff"
+        )
+        raw = FileLoader()(folder=folder, name="load_files")
+        masks = Threshold()(
+            image=raw["path"], cutoff=cutoff, name="threshold"
+        )
+        workflow.output("mask", masks["mask"], id="output-mask")
+    return workflow
 
+workflow = build_workflow()
+result = workflow.compute(inputs={"folder": "/data/images"})
 print(result)  # DataFrame with a 'mask' column of output paths
 ```
 

@@ -7,7 +7,6 @@ from typing import Annotated, Any
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
-from bioimageflow.node import Node
 from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_common_tools import Concat
 from bioimageflow_tracking_tools import BTrackLink, LabelsToObjects, TrackMetrics, UltrackLink
@@ -26,7 +25,7 @@ class AddTrackerName(DataFrameTool):
         tracker: Annotated[str, GUIMeta(display_name="Tracker")]
 
     class Outputs(IOModel):
-        pass
+        tracker: str
 
     def transform(self, df: Any, arguments: Any) -> pd.DataFrame:
         table = pd.DataFrame(df).copy()
@@ -35,21 +34,22 @@ class AddTrackerName(DataFrameTool):
 
 
 def build_workflow(
-    label_image: str | None = None,
+    *,
     storage_path: str | Path = DEFAULT_STORAGE_PATH,
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
-) -> tuple[Workflow, Node]:
+) -> Workflow:
     """Build an Ultrack/btrack migration metrics workflow without lineage outputs."""
-    if label_image is None:
-        raise ValueError("build_workflow requires label_image.")
     storage = Path(storage_path)
     wf = Workflow(
+        name="live_cell_tracking",
+        display_name="Live Cell Tracking",
         storage_path=str(storage),
         engine=engine,
         wetlands_config=wetlands_config,
     )
     with wf:
+        label_image = wf.input("label_image", Path, id="input-label-image")
         objects = LabelsToObjects()(label_image=label_image, name="objects")
         ultrack_tracks = UltrackLink()(objects, name="ultrack_tracks")
         btrack_tracks = BTrackLink()(objects, name="btrack_tracks")
@@ -66,7 +66,8 @@ def build_workflow(
             name="tag_btrack_metrics",
         )
         summary = Concat()(tagged_ultrack, tagged_btrack, name="migration_metrics")
-    return wf, summary
+        wf.output("tracker", summary["tracker"], id="output-tracker")
+    return wf
 
 
 if __name__ == "__main__":
@@ -78,8 +79,5 @@ if __name__ == "__main__":
         help="Directory for workflow outputs.",
     )
     args = parser.parse_args()
-    workflow, terminal = build_workflow(
-        label_image=args.label_image,
-        storage_path=args.storage_path,
-    )
-    print(workflow.compute(terminal).to_string(index=False))
+    workflow = build_workflow(storage_path=args.storage_path)
+    print(workflow.compute(inputs={"label_image": args.label_image}).to_string(index=False))

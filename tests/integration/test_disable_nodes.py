@@ -270,11 +270,12 @@ class TestSerializationRoundTrip:
             wf.export(tmp_workspace / "workflow.json")
 
         data = json.loads((tmp_workspace / "workflow.json").read_text())
-        seg_node = next(n for n in data["nodes"] if n["name"] == "seg")
+        graph = data.get("workflow", data)
+        seg_node = next(n for n in graph["nodes"] if n["name"] == "seg")
         assert seg_node["enabled"] is False
 
         # Enabled nodes should not have the key (or have it True)
-        loader_node = next(n for n in data["nodes"] if n["name"] == "FileLoader_1")
+        loader_node = next(n for n in graph["nodes"] if n["name"] == "FileLoader_1")
         assert loader_node.get("enabled", True) is True
 
     def test_disabled_flag_restored_on_load(self, tmp_workspace):

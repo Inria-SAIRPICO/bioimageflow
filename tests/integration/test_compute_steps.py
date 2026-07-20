@@ -8,7 +8,7 @@ Covers:
 - Topological order and reachability
 - Partial iteration (early break) cleans up properly
 - Cached nodes are still yielded
-- Auto-detection of terminal nodes
+- Root boundary execution of every enabled branch
 - Progress callbacks fire during stepped execution
 - dev_mode parameter forwarded correctly
 """
@@ -274,8 +274,8 @@ class TestComputeStepsCaching:
 
 class TestComputeStepsTerminals:
 
-    def test_auto_detect_terminals(self, tmp_workspace):
-        """compute_steps() with no target auto-detects terminal nodes."""
+    def test_root_boundary_yields_all_executable_tools(self, tmp_workspace):
+        """compute_steps() with no target expands every root completion branch."""
         load = FileLoader()
         segment = StubSegmenter()
 
