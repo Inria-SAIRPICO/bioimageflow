@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+_CORE_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _CORE_PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _CORE_PROJECT_ROOT)
+
 from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel
 

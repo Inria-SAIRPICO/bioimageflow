@@ -19,3 +19,5 @@ docs/build/
 docs/_build/
 wetlands/
 wetlands-lib/
+docs/parsl_phase1a_implementation_spec.md
+example_workflows/fish_analysis/data/*.tif
