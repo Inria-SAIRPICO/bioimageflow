@@ -12,7 +12,7 @@ The repository is tested as one workspace, while package-specific annotated tags
 See [Releasing Python Packages](releasing.md) for the release tag contract, status tool, CI workflow, and operator procedure.
 The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
 The deterministic CI matrix validates the main development/runtime surface with full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
-Full deterministic Python 3.11 validation is scheduled/manual and release-required, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
+Full deterministic Python 3.11 validation is manually available before tagging and rerun as a required release gate, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
 
 Package metadata separates distribution dependencies from isolated runtime dependencies.
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
@@ -35,8 +35,8 @@ BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_p
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
 
-The complete-test jobs are manual or scheduled because they may require optional model runtimes, Wetlands environment creation, or heavier package fixtures.
-Those jobs are useful release evidence, but deterministic unit, package-artifact, and documentation checks remain the required proof for ordinary package changes.
+The resource-dependent complete-test jobs run weekly to detect external drift and can also be selected manually before a relevant release.
+They are useful release evidence, but deterministic unit, package-artifact, and documentation checks remain the required proof for ordinary package changes.
 
 Wheels exclude package documentation, package tests, generated build outputs, and local caches.
 Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.

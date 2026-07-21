@@ -7,7 +7,7 @@ Requirements
 - Python >= 3.10
 
 BioImageFlow's deterministic CI test matrix runs full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
-Full deterministic Python 3.11 validation is scheduled/manual and release-required.
+Full deterministic Python 3.11 validation is manually available before tagging and rerun as a required release gate.
 The worker-safe ``bioimageflow-core`` package supports Python >= 3.9 because it is installed into isolated Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
 
 Install from PyPI

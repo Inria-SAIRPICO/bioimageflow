@@ -225,6 +225,28 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
     }
 
 
+def test_complete_workflow_schedules_only_resource_dependent_suites() -> None:
+    root = Path(__file__).parents[2]
+    complete = _workflow(root, "complete.yml")
+    trigger = complete["on"]
+    jobs = complete["jobs"]
+    assert isinstance(trigger, dict)
+    assert isinstance(jobs, dict)
+
+    assert trigger["schedule"] == [{"cron": "0 3 * * 1"}]
+
+    release_validation = jobs["release-validation"]
+    assert isinstance(release_validation, dict)
+    assert "workflow_dispatch" in release_validation["if"]
+    assert "schedule" not in release_validation["if"]
+
+    for name in ("wetlands", "public-data", "external-binaries", "model-runtimes"):
+        job = jobs[name]
+        assert isinstance(job, dict)
+        assert "github.event_name == 'schedule'" in job["if"]
+        assert job["continue-on-error"] == "${{ github.event_name == 'schedule' }}"
+
+
 def test_github_actions_are_pinned_to_commit_shas() -> None:
     root = Path(__file__).parents[2]
 

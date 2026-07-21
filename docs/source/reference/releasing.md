@@ -100,7 +100,31 @@ BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/release-check BIOIMAGEFLOW_PACKAGE_ARTIF
 ```
 
 Commit the version, dependency, and lockfile changes through the normal review process.
-After that commit is on the branch intended for release, create the annotated tag at that exact commit:
+Push the reviewed release commit to the branch intended for release.
+
+```bash
+git push origin main
+```
+
+Before creating the tag, open **Actions > Complete validation**, run the workflow on that branch, and select `release-validation`.
+Wait for the full deterministic Python 3.11 job to pass.
+The tag-triggered release workflow reruns the same deterministic gates, but the manual run catches problems before an immutable release tag is created.
+
+Run additional resource-dependent suites when the release changes the corresponding runtime surface:
+
+| Release surface | Additional suite |
+| --- | --- |
+| Wetlands execution, environment management, worker integration, or a tool's `EnvironmentSpec` | `wetlands` |
+| Public dataset downloads, URLs, parsing, or data-dependent workflows | `public-data` |
+| SAIRPICO wrappers or another non-Python executable integration | `external-binaries` |
+| Model-backed tools or model environment declarations, currently including segmentation runtimes | `model-runtimes` |
+| Ordinary deterministic package code, metadata, or documentation | None beyond `release-validation` |
+
+Select only the suites relevant to the package and changes being released.
+Resource-dependent failures are non-blocking during weekly monitoring, but a manually selected suite is blocking and must pass before release.
+Do not make every package release wait for unrelated datasets, binaries, or models.
+
+After the relevant validation has passed, create the annotated tag at the exact validated commit:
 
 ```bash
 git tag -a bioimageflow-segmentation-tools-v0.2.0 -m "Release bioimageflow-segmentation-tools 0.2.0"

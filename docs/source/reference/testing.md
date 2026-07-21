@@ -32,7 +32,7 @@ uv run pytest tests -m "not slow and not acceptance and not packaging and not pa
 ```
 
 The GitHub Actions regular-test matrix runs that command on Python 3.10 and 3.12.
-Python 3.11 runs the `compat` smoke selector on every pipeline, and the full deterministic Python 3.11 validation is scheduled/manual and release-required.
+Python 3.11 runs the `compat` smoke selector on every pipeline, while full deterministic Python 3.11 validation is manually available before tagging and rerun by the release workflow as a required publication gate.
 
 Run the Python-version compatibility smoke selector with:
 
@@ -129,7 +129,14 @@ uv run pytest packages/bioimageflow-sairpico-tools/tests -m "complete and wetlan
 uv run pytest packages/bioimageflow-common-tools/tests packages/bioimageflow-segmentation-tools/tests -m "complete and wetlands" --run-complete
 ```
 
-GitHub Actions also defines manually dispatched or scheduled complete-test jobs that are separate from the required deterministic gates:
+The **Complete validation** GitHub Actions workflow separates deterministic release validation from resource-dependent complete tests:
+
+- `release-validation` is manual-only and provides full deterministic Python 3.11 evidence before a release tag is created;
+- `wetlands`, `public-data`, `external-binaries`, and `model-runtimes` can be selected individually through a manual workflow dispatch;
+- the four resource-dependent suites run every Monday at 03:00 UTC to detect environment, download, binary, service, and model drift even when the repository has not changed;
+- the weekly schedule does not repeat `release-validation`, because equivalent deterministic coverage already runs for repository changes and is rerun by the release workflow.
+
+The corresponding local commands are:
 
 ```bash
 uv run pytest -m "complete and wetlands" --run-complete -rsx
@@ -139,10 +146,11 @@ uv run pytest -m "complete and model_runtime" --run-complete -rsx
 ```
 
 The Wetlands job is an umbrella portability selector.
-Resource-specific jobs are focused reruns for triage, so scheduled complete pipelines may intentionally select some tests more than once.
+Resource-specific jobs are focused reruns for triage, so weekly complete workflows may intentionally select some tests more than once.
 Public-data cases selected by the umbrella Wetlands job still require `BIOIMAGEFLOW_ALLOW_PUBLIC_DOWNLOADS=1`; otherwise they skip with the same actionable reason as a local run.
 
-Those jobs are allowed to fail in CI because they depend on service availability, downloads, optional model runtimes, or external binaries rather than only on deterministic product behavior.
+Resource-dependent jobs use `continue-on-error` only during scheduled monitoring because they depend on service availability, downloads, optional model runtimes, or external binaries rather than only on deterministic product behavior.
+A manually selected resource suite is blocking and must pass when used as pre-release evidence.
 
 The remaining valid complete-test gates are:
 

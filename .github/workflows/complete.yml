@@ -33,7 +33,7 @@ env:
 jobs:
   release-validation:
     name: Full deterministic Python 3.11 validation
-    if: github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'release-validation'
+    if: github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'release-validation')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -58,8 +58,8 @@ jobs:
 
   wetlands:
     name: Complete Wetlands validation
-    if: github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'wetlands'
-    continue-on-error: true
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'wetlands'))
+    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -78,8 +78,8 @@ jobs:
 
   public-data:
     name: Complete public-data validation
-    if: github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'public-data'
-    continue-on-error: true
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'public-data'))
+    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -100,8 +100,8 @@ jobs:
 
   external-binaries:
     name: Complete external-binary validation
-    if: github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'external-binaries'
-    continue-on-error: true
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'external-binaries'))
+    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -120,8 +120,8 @@ jobs:
 
   model-runtimes:
     name: Complete model-runtime validation
-    if: github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'model-runtimes'
-    continue-on-error: true
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'model-runtimes'))
+    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
