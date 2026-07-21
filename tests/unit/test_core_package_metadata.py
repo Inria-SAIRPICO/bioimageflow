@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+import runpy
 from pathlib import Path
 import sys
 
@@ -31,6 +32,7 @@ FIRST_PARTY_DISTRIBUTIONS = {
 }
 EXPECTED_PROJECT_URLS = {
     "Homepage": "https://github.com/Inria-SAIRPICO/bioimageflow",
+    "Documentation": "https://bioimageflow.readthedocs.io/latest/",
     "Repository": "https://github.com/Inria-SAIRPICO/bioimageflow",
     "Issues": "https://github.com/Inria-SAIRPICO/bioimageflow/issues",
 }
@@ -436,7 +438,7 @@ def test_docs_release_matches_orchestrator_version() -> None:
     orchestrator = _project(ROOT / "packages" / "bioimageflow" / "pyproject.toml")
     conf = ROOT / "docs" / "source" / "conf.py"
 
-    assert f'release = "{orchestrator["version"]}"' in conf.read_text()
+    assert runpy.run_path(str(conf))["release"] == orchestrator["version"]
 
 
 def test_primary_docs_do_not_describe_core_as_zero_dependency() -> None:
