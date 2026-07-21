@@ -30,6 +30,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/bioimageit/bioimageflow"
+Documentation = "https://bioimageflow.readthedocs.io/latest/"
 Repository = "https://github.com/bioimageit/bioimageflow"
 Issues = "https://github.com/bioimageit/bioimageflow/issues"
 

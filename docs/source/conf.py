@@ -1,7 +1,8 @@
 # Configuration file for the Sphinx documentation builder.
 
-import sys
+from importlib.metadata import version as distribution_version
 from pathlib import Path
+import sys
 
 # Add both packages to sys.path for autodoc
 root = Path(__file__).resolve().parents[2]
@@ -13,7 +14,7 @@ sys.path.insert(0, str(root / "packages" / "bioimageflow"))
 project = "BioImageFlow"
 copyright = "2026, BioImageFlow Contributors"
 author = "BioImageFlow Contributors"
-release = "0.1.6"
+release = distribution_version("bioimageflow")
 
 # -- General configuration ---------------------------------------------------
 

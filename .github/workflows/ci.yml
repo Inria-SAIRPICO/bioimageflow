@@ -145,6 +145,8 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
+      - name: Check generated documentation
+        run: uv run python docs/generate_tool_package_docs.py --check
       - name: Build documentation
         run: uv run sphinx-build -W --keep-going docs/source docs/_build/html
       - name: Upload documentation

@@ -144,7 +144,8 @@ Runs in the main process. Transforms entire DataFrames. Useful for loading data,
 
 ## Documentation
 
-Full documentation is available at `docs/`:
+Published documentation is available at <https://bioimageflow.readthedocs.io/latest/>.
+The documentation source is available in `docs/`:
 
 ```bash
 uv run python docs/generate_tool_package_docs.py
