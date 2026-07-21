@@ -30,7 +30,7 @@ pip install bioimageflow
 For development:
 
 ```bash
-git clone https://github.com/bioimageit/bioimageflow.git
+git clone git@github.com:Inria-SAIRPICO/bioimageflow.git
 cd bioimageflow
 uv sync
 ```

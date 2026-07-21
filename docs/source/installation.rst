@@ -71,7 +71,7 @@ workspace:
 
 .. code-block:: bash
 
-   git clone https://github.com/bioimageit/bioimageflow.git
+   git clone git@github.com:Inria-SAIRPICO/bioimageflow.git
    cd bioimageflow
    uv sync
 
