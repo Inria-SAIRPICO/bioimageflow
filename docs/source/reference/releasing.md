@@ -56,10 +56,62 @@ Complete these steps once:
 2. In the GitHub repository, create an environment named `pypi` and configure the maintainers who must approve deployments to it.
 3. Create a GitHub repository ruleset for tags matching `bioimageflow*-v*` that restricts tag creation, update, and deletion to release maintainers.
 4. For each existing BioImageFlow project on PyPI, add a GitHub Actions Trusted Publisher with owner `bioimageit`, repository `bioimageflow`, workflow `release.yml`, and environment `pypi`.
-5. For each BioImageFlow project that does not yet exist on PyPI, add a pending publisher with the same owner, repository, workflow, and environment plus the exact future PyPI project name.
+5. Bootstrap projects that do not yet exist using one of the procedures below, then add the same normal GitHub Actions Trusted Publisher to every new project.
 
 The same workflow identity can be registered for every independently versioned distribution in this repository.
-Pending publishers create their PyPI projects during the first matching release and then become normal publishers.
+Normal publishers support this one-repository-to-many-projects relationship.
+
+PyPI currently prevents two pending GitHub publishers from using the same owner, repository, workflow, and environment for different future project names.
+It also limits an account to three simultaneous pending publishers.
+These restrictions are enforced by the [current Warehouse implementation](https://github.com/pypi/warehouse/blob/e77bccb0a64a585007c5f90b5ca7ac041f9a8d71/warehouse/accounts/views.py#L1838-L1911), although the general Trusted Publishing documentation does not emphasize the distinction between pending and normal publishers.
+
+For a token-free bootstrap, register one pending publisher, publish that project through GitHub Actions, and repeat after the pending publisher becomes normal.
+For a one-time batch bootstrap, publish locally as described next.
+
+## Bootstrap Unpublished Projects Locally
+
+The local batch publisher queries PyPI before building anything.
+It skips a selected distribution when PyPI already has the requested version or a newer version, and it stops before uploading when a remaining local package does not declare the requested version.
+It never edits package versions, commits, tags, or Git remotes.
+
+Preview the batch first:
+
+```bash
+uv run --no-sync python scripts/publish_packages.py plan 0.1.6
+```
+
+Use repeated `--package` options to publish a same-version subset when the workspace contains independently versioned packages:
+
+```bash
+uv run --no-sync python scripts/publish_packages.py plan 0.1.6 \
+  --package bioimageflow-io-tools \
+  --package bioimageflow-measurement-tools
+```
+
+Before publishing, ensure every selected package declares the target version, review first-party dependency bounds, regenerate `uv.lock`, run the normal validation, commit the result, and require a clean working tree.
+The script deliberately does not infer dependency floors or upper bounds because a coordinated API change still requires a compatibility decision.
+
+Create a temporary account-scoped PyPI API token.
+A project-scoped token cannot create projects that do not exist yet.
+Expose it only through `UV_PUBLISH_TOKEN`, then run the explicit publish command:
+
+```bash
+export UV_PUBLISH_TOKEN
+read -s UV_PUBLISH_TOKEN
+uv run --no-sync python scripts/publish_packages.py publish 0.1.6
+unset UV_PUBLISH_TOKEN
+```
+
+The script builds each selected distribution separately with workspace sources disabled, validates exactly one matching wheel and source distribution, and publishes sequentially with trusted publishing disabled.
+It removes `UV_PUBLISH_TOKEN` from the build subprocess environment and exposes the credential only to `uv publish`.
+If publication stops partway through, rerun the same command: the PyPI plan will skip packages that already reached the target version.
+
+Immediately revoke the temporary token after the batch.
+For every newly created PyPI project, add the normal `release.yml` Trusted Publisher before the next release.
+The bootstrap upload has no package-specific release tag, so `package_status.py` will report that version as `unknown`; do not create a retrospective tag unless the published artifacts can be proven to match the tagged commit.
+
+Use this local path only for initial project creation.
+For later coordinated changes, such as a tool API compatibility boundary, update the affected packages in one reviewed commit and push one package-specific tag per affected distribution so the normal GitHub release workflow remains the publication authority.
 
 ## Prepare One Release
 
