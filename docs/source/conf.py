@@ -47,11 +47,11 @@ html_static_path = ["_static"]
 html_title = "BioImageFlow"
 
 html_theme_options = {
-    "source_repository": "https://github.com/bioimageit/bioimageflow",
+    "source_repository": "https://github.com/Inria-SAIRPICO/bioimageflow",
     "source_branch": "main",
     "source_directory": "docs/source/",
-    "source_view_link": "https://github.com/bioimageit/bioimageflow/blob/main/docs/source/{filename}",
-    "source_edit_link": "https://github.com/bioimageit/bioimageflow/edit/main/docs/source/{filename}",
+    "source_view_link": "https://github.com/Inria-SAIRPICO/bioimageflow/blob/main/docs/source/{filename}",
+    "source_edit_link": "https://github.com/Inria-SAIRPICO/bioimageflow/edit/main/docs/source/{filename}",
 }
 
 # -- Autodoc options ---------------------------------------------------------
