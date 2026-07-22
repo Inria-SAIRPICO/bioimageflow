@@ -113,16 +113,17 @@ The bootstrap upload has no package-specific release tag, so `package_status.py`
 Use this local path only for initial project creation.
 For later coordinated changes, such as a tool API compatibility boundary, update the affected packages in one reviewed commit and push one package-specific tag per affected distribution so the normal GitHub release workflow remains the publication authority.
 
-## Prepare One Release
+## Prepare a Coordinated Release Set
 
-The release operator must decide four inputs:
+A release set contains every package that must change together.
+It can contain one package for an independent release or several packages for a coordinated API or dependency change.
+Packages that remain compatible and unchanged do not belong in the set.
 
-1. Package name, such as `bioimageflow-segmentation-tools`.
-2. New version, such as `0.2.0`.
-3. Whether the package now requires newer `bioimageflow-core` or `bioimageflow` APIs.
-4. Whether its current upper compatibility boundaries remain valid.
+For every selected package, decide its new version and whether its first-party dependency bounds still describe the supported versions.
+Raise a dependency floor only when the package uses an API introduced by that version.
+Keep the existing upper compatibility boundary unless compatibility has intentionally changed.
 
-Start from an updated branch and inspect status:
+Start from an updated branch and inspect the workspace:
 
 ```bash
 git switch main
@@ -130,72 +131,82 @@ git pull --ff-only
 uv run python scripts/package_status.py
 ```
 
-Set only the selected distribution's version:
+Update the versions of only the selected packages, for example:
 
 ```bash
+uv version --package bioimageflow-core 0.1.8 --no-sync
 uv version --package bioimageflow-segmentation-tools 0.2.0 --no-sync
 ```
 
 When releasing `bioimageflow-core`, also update the root workspace dependency `bioimageflow-core==<version>` to the new local core version.
-If the package uses a newly introduced first-party API, update its dependency floor in the same `pyproject.toml`.
-Do not raise dependency floors merely because another package published a compatible release.
+Update affected first-party dependency ranges in the same change, then regenerate `uv.lock`.
 
-Regenerate the lockfile and run the normal validation:
+During development, run only tests focused on the changed code and package metadata.
+Before review, run Ruff, Pyright, and the relevant focused tests locally.
+The normal **CI** workflow is the authoritative shared validation and already runs the supported Python matrix, deterministic acceptance and package-tool tests, builds every distribution without workspace sources, and builds the documentation.
+Do not rerun that complete set in a separate release-validation job.
+
+Commit the versions, dependency ranges, code, and lockfile as one release commit and merge or push it through the normal review process:
 
 ```bash
 uv lock
 uv run ruff check .
 uv run pyright
-uv run pytest
-uv build --package bioimageflow-segmentation-tools --no-sources --clear --out-dir dist/release-check
-BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/release-check BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE=bioimageflow-segmentation-tools uv run pytest tests/unit/test_package_artifacts.py
-```
-
-Commit the version, dependency, and lockfile changes through the normal review process.
-Push the reviewed release commit to the branch intended for release.
-
-```bash
+uv run pytest tests/unit/test_release_tooling.py tests/unit/test_package_artifacts.py
 git push origin main
 ```
 
-Before creating the tag, open **Actions > Complete validation**, run the workflow on that branch, and select `release-validation`.
-Wait for the full deterministic Python 3.11 job to pass.
-The tag-triggered release workflow reruns the same deterministic gates, but the manual run catches problems before an immutable release tag is created.
+Wait for the normal **CI** workflow to succeed on the exact release commit.
+The coordinated release workflow refuses to publish a commit without a successful `ci.yml` run for that SHA.
 
-Run additional resource-dependent suites when the release changes the corresponding runtime surface:
+Run an additional resource-dependent suite only when the release changes that runtime surface:
 
-| Release surface | Additional suite |
+| Release surface | Additional suite in **Complete validation** |
 | --- | --- |
 | Wetlands execution, environment management, worker integration, or a tool's `EnvironmentSpec` | `wetlands` |
 | Public dataset downloads, URLs, parsing, or data-dependent workflows | `public-data` |
 | SAIRPICO wrappers or another non-Python executable integration | `external-binaries` |
 | Model-backed tools or model environment declarations, currently including segmentation runtimes | `model-runtimes` |
-| Ordinary deterministic package code, metadata, or documentation | None beyond `release-validation` |
+| Ordinary deterministic package code, metadata, or documentation | None |
 
-Select only the suites relevant to the package and changes being released.
 Resource-dependent failures are non-blocking during weekly monitoring, but a manually selected suite is blocking and must pass before release.
 Do not make every package release wait for unrelated datasets, binaries, or models.
 
-After the relevant validation has passed, create the annotated tag at the exact validated commit:
+Create one annotated tag per selected package at the same validated commit:
 
 ```bash
+git tag -a bioimageflow-core-v0.1.8 -m "Release bioimageflow-core 0.1.8"
 git tag -a bioimageflow-segmentation-tools-v0.2.0 -m "Release bioimageflow-segmentation-tools 0.2.0"
-uv run python scripts/check_package_release.py bioimageflow-segmentation-tools-v0.2.0
-git push origin bioimageflow-segmentation-tools-v0.2.0
+uv run --no-project --with packaging python scripts/release_set.py plan \
+  bioimageflow-core-v0.1.8 \
+  bioimageflow-segmentation-tools-v0.2.0
+git push origin bioimageflow-core-v0.1.8 bioimageflow-segmentation-tools-v0.2.0
 ```
 
-## Publish from GitHub
+The plan rejects lightweight tags, version mismatches, tags at different commits, an incompatible dependency range within the selected set, or a dirty working tree.
+Pushing tags does not publish anything.
 
-The pushed tag starts the **Publish package to PyPI** workflow.
-Its build job must complete quality, deterministic test, documentation, package build, and artifact identity checks before publication is eligible for approval.
+## Publish the Release Set from GitHub
 
-Then:
+Open **Actions > Publish coordinated package release** and run the workflow from `main`.
+Enter every tag in the `release_tags` input, separated by spaces.
+Normally select `publish`: the PyPI environment approval is the final publication gate.
+Use `validate` only for an optional dry run; a later publish run must rebuild its artifacts, so running both modes routinely wastes time.
 
-1. Open the workflow run in the GitHub **Actions** tab.
-2. Confirm that the build job succeeded and that the tag names the intended package and version.
-3. Review and approve the waiting deployment to the `pypi` environment.
-4. Wait for GitHub Actions to obtain a short-lived PyPI credential and publish the validated wheel and source distribution.
-5. Run `uv run python scripts/package_status.py` locally after PyPI has indexed the release.
+The workflow performs only release-specific work:
 
-Publication is retry-safe for identical files because `uv publish` checks PyPI before uploading.
+1. It resolves the tags to one commit and validates all versions, selected dependency ranges, and current PyPI versions.
+2. It requires a successful normal CI workflow for the exact tagged commit instead of rerunning the workspace tests.
+3. It builds and validates only the selected distributions, in parallel.
+4. After approval of the `pypi` environment, it publishes dependencies before their selected dependants with short-lived trusted-publishing credentials.
+5. It waits until every requested version is visible on PyPI.
+
+If publication stops partway through, rerun the same workflow with the same release set.
+The publisher checks PyPI before uploading, so already published identical files are skipped and remaining packages continue in dependency order.
 Never move or reuse a release tag, and never attempt to replace an existing PyPI file.
+
+After PyPI has indexed the release, verify the workspace status locally:
+
+```bash
+uv run python scripts/package_status.py
+```

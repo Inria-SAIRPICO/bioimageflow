@@ -1,15 +1,27 @@
-name: Publish package to PyPI
+name: Publish coordinated package release
 
 on:
-  push:
-    tags:
-      - "bioimageflow*-v*"
+  workflow_dispatch:
+    inputs:
+      release_tags:
+        description: Space-separated annotated package tags at one validated commit
+        required: true
+        type: string
+      mode:
+        description: Validate artifacts only or publish them to PyPI
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - publish
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -18,14 +30,15 @@ env:
   UV_PYTHON: "3.11"
 
 jobs:
-  build:
-    name: Validate and build release
+  prepare:
+    name: Validate coordinated release set
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 15
     outputs:
-      package: ${{ steps.release.outputs.package }}
+      matrix: ${{ steps.release.outputs.matrix }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
-      - name: Check out release tag
+      - name: Check out the selected release commit and tags
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
@@ -36,43 +49,77 @@ jobs:
           version: "0.10.9"
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Install workspace
-        run: uv sync --locked --all-packages --group dev
-      - name: Validate release tag
+      - name: Validate release tags, versions, and dependencies
         id: release
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAGS: ${{ inputs.release_tags }}
         run: |
-          package="$(uv run python scripts/check_package_release.py "$RELEASE_TAG" --field package)"
-          echo "package=$package" >> "$GITHUB_OUTPUT"
-          echo "RELEASE_PACKAGE=$package" >> "$GITHUB_ENV"
-      - name: Ruff
-        run: uv run ruff check .
-      - name: Pyright
-        run: uv run pyright
-      - name: Run fast deterministic tests
-        run: uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
-      - name: Run acceptance tests
-        run: uv run pytest -m "acceptance and not complete"
-      - name: Run package-tool tests
-        run: uv run pytest -m "package_tools and not complete"
-      - name: Build documentation
-        run: uv run sphinx-build -W --keep-going docs/source docs/_build/html
-      - name: Build selected package without workspace sources
+          read -r -a release_tags <<< "$RELEASE_TAGS"
+          release_sha=""
+          for release_tag in "${release_tags[@]}"; do
+            tag_sha="$(git rev-list -n 1 "$release_tag")"
+            if [[ -n "$release_sha" && "$tag_sha" != "$release_sha" ]]; then
+              printf 'Release tags do not point to one commit\n' >&2
+              exit 1
+            fi
+            release_sha="$tag_sha"
+          done
+          git checkout --detach "$release_sha"
+          plan="$(uv run --no-project --with packaging python scripts/release_set.py plan --check-pypi "${release_tags[@]}")"
+          echo "matrix=$(jq -c '{include: .items}' <<< "$plan")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r '.sha' <<< "$plan")" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_SHA=$(jq -r '.sha' <<< "$plan")" >> "$GITHUB_ENV"
+      - name: Require successful CI for the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          successful_runs="$(
+            gh api --method GET \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f head_sha="$RELEASE_SHA" \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+          )"
+          if [[ "$successful_runs" -lt 1 ]]; then
+            printf 'No successful CI workflow found for release commit %s\n' "$RELEASE_SHA" >&2
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.package }} ${{ matrix.version }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Check out the validated release commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.10.9"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build package without workspace sources
+        env:
+          RELEASE_PACKAGE: ${{ matrix.package }}
         run: uv build --package "$RELEASE_PACKAGE" --no-sources --clear --out-dir dist/release
-      - name: Validate selected package artifacts
+      - name: Validate package artifact identity
         env:
-          BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR: dist/release
-          BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE: ${{ steps.release.outputs.package }}
-        run: uv run pytest tests/unit/test_package_artifacts.py
-      - name: Validate release artifact identity
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: uv run python scripts/check_package_release.py "$RELEASE_TAG" --artifacts-dir dist/release
-      - name: Upload release artifacts
+          RELEASE_TAG: ${{ matrix.tag }}
+        run: >-
+          uv run --no-project --with packaging python
+          scripts/check_package_release.py "$RELEASE_TAG"
+          --artifacts-dir dist/release
+      - name: Upload package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-distributions
+          name: release-${{ matrix.package }}-${{ matrix.version }}
           path: |
             dist/release/*.whl
             dist/release/*.tar.gz
@@ -80,26 +127,62 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish ${{ needs.build.outputs.package }}
-    needs: build
+    name: Publish coordinated release set
+    if: inputs.mode == 'publish'
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
       name: pypi
-      url: https://pypi.org/project/${{ needs.build.outputs.package }}/
+      url: https://pypi.org/
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Check out the validated release commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: true
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.9"
           enable-cache: false
-      - name: Download release artifacts
+      - name: Download every validated package artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-distributions
+          pattern: release-*
           path: dist/release
-      - name: Publish with PyPI Trusted Publishing
-        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple dist/release/*
+          merge-multiple: false
+      - name: Publish packages in dependency order
+        env:
+          RELEASE_TAGS: ${{ inputs.release_tags }}
+        run: |
+          read -r -a release_tags <<< "$RELEASE_TAGS"
+          uv run --no-project --with packaging python \
+            scripts/release_set.py publish \
+            --check-pypi \
+            --artifacts-dir dist/release \
+            "${release_tags[@]}"
+      - name: Wait for every version to become visible on PyPI
+        env:
+          RELEASE_TAGS: ${{ inputs.release_tags }}
+        run: |
+          read -r -a release_tags <<< "$RELEASE_TAGS"
+          uv run --no-project --with packaging python \
+            scripts/release_set.py verify \
+            "${release_tags[@]}"
+      - name: Write release summary
+        env:
+          RELEASE_TAGS: ${{ inputs.release_tags }}
+        run: |
+          {
+            echo '## Published coordinated release'
+            for release_tag in $RELEASE_TAGS; do
+              echo "- \`$release_tag\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -214,7 +214,7 @@ Check local versions against PyPI with:
 uv run python scripts/package_status.py
 ```
 
-Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and an approval-gated GitHub Actions publication workflow.
+Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and an approval-gated coordinated GitHub Actions publication workflow.
 See the [release operator guide](docs/source/reference/releasing.md) for setup and release steps.
 
 ## FAQ

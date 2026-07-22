@@ -14,6 +14,7 @@ import yaml
 
 from scripts.check_package_release import validate_release
 from scripts.package_status import package_status
+from scripts.release_set import publish_release_set, validate_release_set
 from scripts.release_support import (
     Package,
     ReleaseError,
@@ -61,6 +62,33 @@ def _create_release_repository(tmp_path: Path) -> tuple[Path, Package]:
     _run(root, "git", "tag", "-a", "demo-tools-v1.2.3", "-m", "Release 1.2.3")
     [package] = discover_packages(root)
     return root, package
+
+
+def _create_release_set_repository(
+    tmp_path: Path,
+    *,
+    application_dependency: str = "demo-core>=1.2.3,<2",
+) -> Path:
+    root = tmp_path / "release-set-repository"
+    projects = {
+        "demo-core": '[project]\nname = "demo-core"\nversion = "1.2.3"\n',
+        "demo-app": (
+            '[project]\nname = "demo-app"\nversion = "2.0.0"\n'
+            f'dependencies = ["{application_dependency}"]\n'
+        ),
+    }
+    for name, content in projects.items():
+        package_dir = root / "packages" / name
+        package_dir.mkdir(parents=True)
+        (package_dir / "pyproject.toml").write_text(content)
+    _run(root, "git", "init")
+    _run(root, "git", "config", "user.email", "release@example.invalid")
+    _run(root, "git", "config", "user.name", "Release Test")
+    _run(root, "git", "add", "packages")
+    _run(root, "git", "commit", "-m", "release package set")
+    _run(root, "git", "tag", "-a", "demo-core-v1.2.3", "-m", "Release core")
+    _run(root, "git", "tag", "-a", "demo-app-v2.0.0", "-m", "Release app")
+    return root
 
 
 def _write_artifacts(artifact_dir: Path, package: Package) -> None:
@@ -159,6 +187,79 @@ def test_release_artifacts_reject_another_distribution(tmp_path: Path) -> None:
         validate_release_artifacts(artifact_dir, package, package.version)
 
 
+def test_release_set_validates_one_commit_and_dependency_order(tmp_path: Path) -> None:
+    root = _create_release_set_repository(tmp_path)
+
+    plan = validate_release_set(
+        ["demo-app-v2.0.0", "demo-core-v1.2.3"],
+        root=root,
+    )
+
+    assert [item.package.name for item in plan.items] == ["demo-app", "demo-core"]
+    assert plan.publish_order == ("demo-core", "demo-app")
+
+
+def test_release_set_rejects_duplicate_package(tmp_path: Path) -> None:
+    root = _create_release_set_repository(tmp_path)
+
+    with pytest.raises(ReleaseError, match="selected more than once"):
+        validate_release_set(
+            ["demo-core-v1.2.3", "demo-core-v1.2.3"],
+            root=root,
+        )
+
+
+def test_release_set_rejects_incompatible_selected_dependency(tmp_path: Path) -> None:
+    root = _create_release_set_repository(
+        tmp_path,
+        application_dependency="demo-core>=1.3.0,<2",
+    )
+
+    with pytest.raises(ReleaseError, match="does not accept"):
+        validate_release_set(
+            ["demo-core-v1.2.3", "demo-app-v2.0.0"],
+            root=root,
+        )
+
+
+def test_release_set_rejects_newer_remote_version(tmp_path: Path) -> None:
+    root = _create_release_set_repository(tmp_path)
+
+    with pytest.raises(ReleaseError, match="already has newer"):
+        validate_release_set(
+            ["demo-core-v1.2.3", "demo-app-v2.0.0"],
+            root=root,
+            remote_versions={"demo-core": "1.2.4", "demo-app": "1.9.0"},
+        )
+
+
+def test_release_set_publishes_validated_artifacts_in_dependency_order(
+    tmp_path: Path,
+) -> None:
+    root = _create_release_set_repository(tmp_path)
+    plan = validate_release_set(
+        ["demo-core-v1.2.3", "demo-app-v2.0.0"],
+        root=root,
+    )
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    for item in plan.items:
+        artifact_dir = artifact_root / f"release-{item.package.name}-{item.version}"
+        _write_artifacts(artifact_dir, item.package)
+    commands: list[list[str]] = []
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    published = publish_release_set(plan, artifact_root, runner=runner)
+
+    assert published == ["demo-core", "demo-app"]
+    assert "demo_core-1.2.3" in " ".join(commands[0])
+    assert "demo_app-2.0.0" in " ".join(commands[1])
+    assert all("--trusted-publishing" in command for command in commands)
+
+
 def test_status_uses_package_specific_tag_to_detect_changes(tmp_path: Path) -> None:
     root, package = _create_release_repository(tmp_path)
 
@@ -176,7 +277,7 @@ def test_status_distinguishes_unpublished_pending_and_behind(tmp_path: Path) -> 
     assert package_status(package, "1.2.4", root)[0] == "behind"
 
 
-def test_github_release_workflow_is_tag_scoped_and_uses_trusted_publishing() -> None:
+def test_github_release_workflow_coordinates_validated_package_sets() -> None:
     root = Path(__file__).parents[2]
     workflow = _workflow(root, "release.yml")
     trigger = workflow["on"]
@@ -184,23 +285,38 @@ def test_github_release_workflow_is_tag_scoped_and_uses_trusted_publishing() -> 
     assert isinstance(trigger, dict)
     assert isinstance(jobs, dict)
 
+    prepare = jobs["prepare"]
     build = jobs["build"]
     publish = jobs["publish"]
+    assert isinstance(prepare, dict)
     assert isinstance(build, dict)
     assert isinstance(publish, dict)
+    prepare_script = _job_script(prepare)
     build_script = _job_script(build)
     publish_script = _job_script(publish)
 
-    assert trigger["push"]["tags"] == ["bioimageflow*-v*"]
-    assert publish["needs"] == "build"
+    assert set(trigger) == {"workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["mode"]["options"] == [
+        "validate",
+        "publish",
+    ]
+    assert 'git checkout --detach "$release_sha"' in prepare_script
+    assert "scripts/release_set.py plan --check-pypi" in prepare_script
+    assert "actions/workflows/ci.yml/runs" in prepare_script
+    assert 'head_sha="$RELEASE_SHA"' in prepare_script
+    assert "select(.conclusion == \"success\")" in prepare_script
+    assert build["needs"] == "prepare"
+    assert publish["needs"] == ["prepare", "build"]
     assert publish["environment"]["name"] == "pypi"
     assert publish["permissions"]["id-token"] == "write"
     assert "scripts/check_package_release.py" in build_script
     assert 'uv build --package "$RELEASE_PACKAGE" --no-sources' in build_script
-    assert "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE" in str(build["steps"])
-    assert "--trusted-publishing always" in publish_script
-    assert "dist/release/*" in publish_script
-    assert "UV_PUBLISH_TOKEN" not in build_script + publish_script
+    assert "scripts/release_set.py publish" in publish_script
+    assert "scripts/release_set.py verify" in publish_script
+    assert "UV_PUBLISH_TOKEN" not in prepare_script + build_script + publish_script
+    release_set_source = (root / "scripts" / "release_set.py").read_text()
+    assert '"--trusted-publishing"' in release_set_source
+    assert '"always"' in release_set_source
     assert not (root / ".gitlab-ci.yml").exists()
 
 
@@ -217,7 +333,6 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "docs",
     }
     assert set(complete["jobs"]) == {
-        "release-validation",
         "wetlands",
         "public-data",
         "external-binaries",
@@ -234,11 +349,6 @@ def test_complete_workflow_schedules_only_resource_dependent_suites() -> None:
     assert isinstance(jobs, dict)
 
     assert trigger["schedule"] == [{"cron": "0 3 * * 1"}]
-
-    release_validation = jobs["release-validation"]
-    assert isinstance(release_validation, dict)
-    assert "workflow_dispatch" in release_validation["if"]
-    assert "schedule" not in release_validation["if"]
 
     for name in ("wetlands", "public-data", "external-binaries", "model-runtimes"):
         job = jobs[name]

@@ -12,7 +12,6 @@ on:
         type: choice
         options:
           - all
-          - release-validation
           - wetlands
           - public-data
           - external-binaries
@@ -31,31 +30,6 @@ env:
   UV_PYTHON: "3.11"
 
 jobs:
-  release-validation:
-    name: Full deterministic Python 3.11 validation
-    if: github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'release-validation')
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.10.9"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install workspace
-        run: uv sync --locked --all-packages --group dev
-      - name: Run fast deterministic tests
-        run: uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
-      - name: Run acceptance tests
-        run: uv run pytest -m "acceptance and not complete"
-      - name: Run package-tool tests
-        run: uv run pytest -m "package_tools and not complete"
-      - name: Run package artifact tests
-        run: uv run pytest tests/unit/test_package_artifacts.py
-
   wetlands:
     name: Complete Wetlands validation
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'wetlands'))
