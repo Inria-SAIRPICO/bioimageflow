@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -12,6 +13,7 @@ import pytest
 from bioimageflow.storage import (
     CacheCorruptionError,
     CurrentPointer,
+    OutputViewCapability,
     RecordManifest,
     Storage,
     canonical_dataframe_digest,
@@ -744,10 +746,216 @@ def test_materialize_latest_outputs_copies_owned_assets(tmp_path: Path) -> None:
 
     materialized = storage.materialize_latest_outputs("copy")
 
-    output_path = tmp_path / "outputs" / "latest" / "Segment_1" / "outputs" / "assets" / "mask.tif"
+    output_path = tmp_path / "outputs" / "latest" / "Segment_1" / "mask.tif"
     assert materialized == [output_path]
     assert output_path.read_bytes() == b"mask"
     assert not output_path.is_symlink()
+
+
+def test_latest_output_mapping_preserves_nested_legacy_and_scoped_paths(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "nested"})
+    outputs = [
+        {
+            "path": path,
+            "kind": "owned_asset",
+            "size": 4,
+            "digest": _file_digest(b"mask"),
+            "asset_type": "file",
+        }
+        for path in ["assets/masks/nuclei/t051.tiff", "legacy/results/table.csv"]
+    ]
+    record_id = _write_record(storage, result_key, outputs=outputs)
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_nested",
+    )
+    storage.write_run_metadata(
+        "run_nested",
+        workflow_identity="workflow-nested",
+        engine="local",
+        status="succeeded",
+        target_nodes=["parent/segment"],
+    )
+    storage.write_run_node_result(
+        "run_nested",
+        "parent/segment",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("parent/segment", "run_nested")
+
+    materialized = storage.materialize_latest_outputs("copy")
+
+    latest_node = tmp_path / "outputs" / "latest" / "parent" / "segment"
+    assert materialized == [
+        latest_node / "masks" / "nuclei" / "t051.tiff",
+        latest_node / "legacy" / "results" / "table.csv",
+    ]
+    assert all(path.read_bytes() == b"mask" for path in materialized)
+
+
+def test_latest_output_mapping_rejects_collisions_before_replacement(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "collision"})
+    outputs = [
+        {
+            "path": path,
+            "kind": "owned_asset",
+            "size": 4,
+            "digest": _file_digest(b"mask"),
+            "asset_type": "file",
+        }
+        for path in ["assets/file.tiff", "file.tiff"]
+    ]
+    record_id = _write_record(storage, result_key, outputs=outputs)
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_collision",
+    )
+    storage.write_run_metadata(
+        "run_collision",
+        workflow_identity="workflow-collision",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_collision",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("Segment_1", "run_collision")
+    previous = tmp_path / "outputs" / "latest" / "Segment_1" / "previous.txt"
+    previous.parent.mkdir(parents=True)
+    previous.write_text("previous")
+
+    with pytest.raises(CacheCorruptionError, match="collide"):
+        storage.materialize_latest_outputs("copy")
+
+    assert previous.read_text() == "previous"
+
+
+def test_pointer_mode_uses_simplified_latest_and_unchanged_run_paths(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "pointer"})
+    output = {
+        "path": "assets/masks/t051.tiff",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id="run_pointer",
+    )
+    storage.write_run_metadata(
+        "run_pointer",
+        workflow_identity="workflow-pointer",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        "run_pointer",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("Segment_1", "run_pointer")
+
+    latest = storage.materialize_latest_outputs("pointer")
+    runs = storage.materialize_run_outputs("run_pointer", "pointer")
+
+    latest_path = (
+        tmp_path
+        / "outputs"
+        / "latest"
+        / "Segment_1"
+        / "masks"
+        / "t051.tiff.bioimageflow-link.json"
+    )
+    run_path = (
+        tmp_path
+        / "outputs"
+        / "runs"
+        / "run_pointer"
+        / "nodes"
+        / "Segment_1"
+        / "outputs"
+        / "assets"
+        / "masks"
+        / "t051.tiff.bioimageflow-link.json"
+    )
+    assert latest == [latest_path]
+    assert runs == [run_path]
+    for pointer_path in [latest_path, run_path]:
+        pointer = json.loads(pointer_path.read_text())
+        assert pointer["schema"] == "bioimageflow.link.v1"
+        assert pointer["kind"] == "file"
+        assert not Path(pointer["target"]).is_absolute()
+        resolved = (pointer_path.parent / pointer["target"]).resolve()
+        assert resolved.read_bytes() == b"mask"
+        resolved.relative_to(tmp_path.resolve())
+
+
+@pytest.mark.parametrize("mode", ["symlink", "copy", "hardlink"])
+def test_latest_link_and_copy_modes_use_simplified_path(tmp_path: Path, mode: str) -> None:
+    storage = Storage(tmp_path)
+    capability = storage.probe_output_view_mode(mode)
+    if not capability.supported:
+        pytest.skip(f"{mode} is unavailable: {capability.code}")
+    result_key = make_result_key({"node": mode})
+    output = {
+        "path": "assets/nested/mask.tif",
+        "kind": "owned_asset",
+        "size": 4,
+        "digest": _file_digest(b"mask"),
+        "asset_type": "file",
+    }
+    record_id = _write_record(storage, result_key, outputs=[output])
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_id,
+        attempt_id="attempt",
+        run_id=f"run_{mode}",
+    )
+    storage.write_run_metadata(
+        f"run_{mode}",
+        workflow_identity=f"workflow-{mode}",
+        engine="local",
+        status="succeeded",
+        target_nodes=["Segment_1"],
+    )
+    storage.write_run_node_result(
+        f"run_{mode}",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("Segment_1", f"run_{mode}")
+
+    [output_path] = storage.materialize_latest_outputs(mode)
+
+    assert output_path == tmp_path / "outputs" / "latest" / "Segment_1" / "nested" / "mask.tif"
+    assert output_path.read_bytes() == b"mask"
+    assert output_path.is_symlink() is (mode == "symlink")
+    if mode == "hardlink":
+        source = storage.result_dir(result_key) / "records" / record_id / "assets" / "nested" / "mask.tif"
+        assert output_path.stat().st_ino == source.stat().st_ino
 
 
 def test_materialize_run_outputs_symlinks_owned_assets(tmp_path: Path) -> None:
@@ -893,6 +1101,190 @@ def test_materialize_run_outputs_validates_requested_run_id(tmp_path: Path) -> N
 
     with pytest.raises(CacheCorruptionError, match="run ID"):
         storage.materialize_run_outputs("run_requested", "copy")
+
+
+def test_latest_replacement_failure_preserves_previous_view(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = Storage(tmp_path)
+
+    def publish_latest(result_key: str, run_id: str, path: str) -> None:
+        output = {
+            "path": path,
+            "kind": "owned_asset",
+            "size": 4,
+            "digest": _file_digest(b"mask"),
+            "asset_type": "file",
+        }
+        record_id = _write_record(storage, result_key, outputs=[output])
+        storage.select_current_record(
+            result_key,
+            candidate_record_id=record_id,
+            attempt_id="attempt",
+            run_id=run_id,
+        )
+        storage.write_run_metadata(
+            run_id,
+            workflow_identity=f"workflow-{run_id}",
+            engine="local",
+            status="succeeded",
+            target_nodes=["Segment_1"],
+        )
+        storage.write_run_node_result(
+            run_id,
+            "Segment_1",
+            result_key=result_key,
+            record_id=record_id,
+            cache_hit=False,
+        )
+        storage.update_latest_node("Segment_1", run_id)
+
+    publish_latest(make_result_key({"version": "old"}), "run_old", "assets/old.tif")
+    storage.materialize_latest_outputs("copy")
+    old_output = tmp_path / "outputs" / "latest" / "Segment_1" / "old.tif"
+    assert old_output.read_bytes() == b"mask"
+
+    publish_latest(make_result_key({"version": "new"}), "run_new", "assets/new.tif")
+
+    def fail_materialization(*args, **kwargs) -> None:
+        raise OSError("simulated materialization failure")
+
+    monkeypatch.setattr(storage, "_materialize_path", fail_materialization)
+    with pytest.raises(OSError, match="simulated materialization failure"):
+        storage.materialize_latest_outputs("copy")
+
+    assert old_output.read_bytes() == b"mask"
+    assert not (old_output.parent / "new.tif").exists()
+    assert not list(old_output.parent.parent.glob(".Segment_1.*.tmp"))
+
+    monkeypatch.undo()
+    real_replace = os.replace
+    latest_node = old_output.parent
+
+    def fail_install(source, destination) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if destination_path == latest_node and source_path.name.endswith(".tmp"):
+            raise OSError("simulated replacement failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_install)
+    with pytest.raises(OSError, match="simulated replacement failure"):
+        storage.materialize_latest_outputs("copy")
+
+    assert old_output.read_bytes() == b"mask"
+    assert not (old_output.parent / "new.tif").exists()
+    assert not list(old_output.parent.parent.glob(".Segment_1.*"))
+
+
+def test_successful_latest_replacement_removes_stale_files(tmp_path: Path) -> None:
+    storage = Storage(tmp_path)
+
+    def publish_latest(version: str, path: str) -> None:
+        result_key = make_result_key({"version": version})
+        output = {
+            "path": path,
+            "kind": "owned_asset",
+            "size": 4,
+            "digest": _file_digest(b"mask"),
+            "asset_type": "file",
+        }
+        record_id = _write_record(storage, result_key, outputs=[output])
+        run_id = f"run_{version}"
+        storage.select_current_record(
+            result_key,
+            candidate_record_id=record_id,
+            attempt_id="attempt",
+            run_id=run_id,
+        )
+        storage.write_run_metadata(
+            run_id,
+            workflow_identity=f"workflow-{version}",
+            engine="local",
+            status="succeeded",
+            target_nodes=["Segment_1"],
+        )
+        storage.write_run_node_result(
+            run_id,
+            "Segment_1",
+            result_key=result_key,
+            record_id=record_id,
+            cache_hit=False,
+        )
+        storage.update_latest_node("Segment_1", run_id)
+
+    publish_latest("old", "assets/stale.tif")
+    storage.materialize_latest_outputs("copy")
+    publish_latest("new", "assets/current.tif")
+    storage.materialize_latest_outputs("copy")
+
+    latest = tmp_path / "outputs" / "latest" / "Segment_1"
+    assert not (latest / "stale.tif").exists()
+    assert (latest / "current.tif").read_bytes() == b"mask"
+
+
+@pytest.mark.parametrize("mode", ["pointer", "copy", "hardlink"])
+def test_probe_output_view_mode_uses_storage_and_cleans_artifacts(tmp_path: Path, mode: str) -> None:
+    storage_path = tmp_path / "storage"
+    capability = Storage(storage_path).probe_output_view_mode(mode)
+
+    assert capability == OutputViewCapability(mode=mode, supported=True, code="ok")
+    assert not list(storage_path.glob(".output-view-probe-*"))
+
+
+def test_probe_symlink_mode_checks_file_and_directory_links(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+    real_symlink = os.symlink
+
+    def recording_symlink(src, dst, target_is_directory=False):
+        calls.append(target_is_directory)
+        return real_symlink(src, dst, target_is_directory=target_is_directory)
+
+    monkeypatch.setattr(os, "symlink", recording_symlink)
+    storage_path = tmp_path / "storage"
+    capability = Storage(storage_path).probe_output_view_mode("symlink")
+
+    if not capability.supported:
+        pytest.skip(f"symlinks are unavailable: {capability.code}")
+    assert calls == [False, True]
+    assert not list(storage_path.glob(".output-view-probe-*"))
+
+
+def test_probe_symlink_reports_windows_permission_denial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def deny_symlink(*args, **kwargs) -> None:
+        error = OSError("privilege not held")
+        error.winerror = 1314  # type: ignore[attr-defined]
+        raise error
+
+    monkeypatch.setattr(os, "symlink", deny_symlink)
+    storage_path = tmp_path / "storage"
+
+    capability = Storage(storage_path).probe_output_view_mode("symlink")
+
+    assert capability == OutputViewCapability(
+        mode="symlink",
+        supported=False,
+        code="permission_denied",
+        detail="Could not create and read file symlink.",
+    )
+    assert not list(storage_path.glob(".output-view-probe-*"))
+
+
+def test_probe_rejects_invalid_mode_without_creating_storage(tmp_path: Path) -> None:
+    storage_path = tmp_path / "storage"
+
+    capability = Storage(storage_path).probe_output_view_mode("automatic")
+
+    assert capability.code == "invalid_mode"
+    assert capability.supported is False
+    assert not storage_path.exists()
 
 
 def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> None:

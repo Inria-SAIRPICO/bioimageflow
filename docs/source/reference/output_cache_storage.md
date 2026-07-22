@@ -628,11 +628,50 @@ views/runs/<run-id>/nodes/<node-key>/outputs/mask.tif.bioimageflow-link.json
 Pointer files must be written by temp-file plus atomic rename.
 Pointer targets should use normalized relative paths when possible.
 Output pointer targets resolve to the selected canonical record's owned assets, not to attempt staging directories or a separate run-local record copy.
-The path below `outputs/` preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json`.
+The canonical run view preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json` beneath `views/runs/<run-id>/nodes/<node-key>/`.
 
 `Workflow(output_view=...)` and `Workflow.export_outputs(...)` may materialize owned assets under `outputs/runs/` and `outputs/latest/`.
-Supported materialization modes are `symlink`, `copy`, and `hardlink`; `none` leaves only the portable JSON views.
+`OutputView.mode` supports `none`, `pointer`, `symlink`, `copy`, and `hardlink`.
+`none` creates no disposable `outputs/` projection and leaves only the canonical portable JSON pointers under `views/`.
+`pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; their relative targets are validated and confined to the workflow storage root.
+`symlink`, `copy`, and `hardlink` retain their filesystem meanings.
+`OutputView.scope` remains `latest`, `runs`, or `both`.
+
+The `outputs/runs/<run-id>/nodes/<node-key>/outputs/` hierarchy remains record-relative and unchanged for every materialization mode.
+For example, `assets/mask.tif` is materialized there as `outputs/assets/mask.tif` or, in pointer mode, `outputs/assets/mask.tif.bioimageflow-link.json`.
+
+Only `outputs/latest/` uses a simplified human-facing mapping beneath the retained node layer:
+
+```text
+records/<record-id>/assets/t051.tiff
+  -> outputs/latest/<node-key>/t051.tiff
+
+records/<record-id>/assets/masks/nuclei/t051.tiff
+  -> outputs/latest/<node-key>/masks/nuclei/t051.tiff
+```
+
+Exactly one leading `assets/` is stripped.
+Everything after it is preserved, while a safe legacy manifest path that does not begin with `assets/` is preserved in full.
+Scoped node paths used by recursive workflows remain scoped beneath `outputs/latest/`.
+The complete mapped path set is validated before materialization, including collision and file/directory-prefix checks.
+
+Each latest node view is built in a temporary sibling directory and fully materialized before the prior node view is moved aside and replaced.
+If materialization or replacement fails, the previous latest node view remains usable or is restored, and temporary directories are cleaned.
+A successful replacement removes stale files from the prior version of that node.
+This is a failure-safe replacement guarantee, not a promise of filesystem-level atomic directory replacement on every host filesystem.
+
+> outputs/latest contains the latest successful output independently for each node. Nodes may refer to different workflow executions after selected, failed, cancelled, or overlapping runs.
+
+Linked outputs refer to canonical cached files and should be treated as read-only.
+Copied outputs are independent but require additional storage.
 Materialized files are disposable human-facing outputs and are not canonical cache records.
+
+`Storage.probe_output_view_mode(mode: str) -> OutputViewCapability` probes beneath the actual `Storage.storage_path` and returns one of the stable diagnostic codes `ok`, `permission_denied`, `filesystem_unsupported`, `invalid_mode`, or `io_error`.
+The probe verifies both file and directory symlinks are readable, tests hardlinks only with files, exercises copy and pointer creation, and cleans its artifacts without changing cache or output selection state.
+The library does not define an automatic fallback mode; platform callers choose fallback policy.
+
+`Workflow.export_outputs(...)` is an explicit operation and raises if the requested materialization cannot be produced.
+Automatic disposable output-view materialization logs a warning and does not turn a successfully computed workflow into a failed computation.
 
 ## Invalidation, Retention, and Transient Cleanup
 

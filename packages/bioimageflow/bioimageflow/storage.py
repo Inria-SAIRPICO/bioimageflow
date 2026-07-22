@@ -7,6 +7,7 @@ implementation used by the current runtime.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import math
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pandas as pd
 
@@ -46,11 +47,27 @@ _SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _INTEGER_RE = re.compile(r"^-?[0-9]+$")
 _UNSIGNED_INTEGER_RE = re.compile(r"^[0-9]+$")
 _RECORD_MANIFEST_FIELDS = frozenset({"schema", "result_key", "record_id", "dataframe", "outputs"})
-_OUTPUT_VIEW_MODES = frozenset({"none", "symlink", "copy", "hardlink"})
+_OUTPUT_VIEW_MODES = frozenset({"none", "pointer", "symlink", "copy", "hardlink"})
 
 
 class CacheCorruptionError(RuntimeError):
     """Raised when cache metadata points to corrupt or unsafe state."""
+
+
+@dataclass(frozen=True)
+class OutputViewCapability:
+    """Structured result from probing one output-view materialization mode."""
+
+    mode: str
+    supported: bool
+    code: Literal[
+        "ok",
+        "permission_denied",
+        "filesystem_unsupported",
+        "invalid_mode",
+        "io_error",
+    ]
+    detail: str | None = None
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -670,6 +687,102 @@ class Storage:
     def outputs_root(self) -> Path:
         return self.storage_path / "outputs"
 
+    def probe_output_view_mode(self, mode: str) -> OutputViewCapability:
+        """Probe an output-view mode on the workflow storage filesystem."""
+        value = str(mode)
+        if value not in _OUTPUT_VIEW_MODES:
+            return OutputViewCapability(
+                mode=value,
+                supported=False,
+                code="invalid_mode",
+                detail="The requested output-view mode is not recognized.",
+            )
+        if value == "none":
+            return OutputViewCapability(mode=value, supported=True, code="ok")
+
+        probe_root = self.storage_path / f".output-view-probe-{uuid.uuid4().hex}"
+        operation = "create probe directory"
+        try:
+            probe_root.mkdir(parents=True)
+            source_file = probe_root / "source.txt"
+            source_file.write_text("bioimageflow-output-view-probe")
+            source_dir = probe_root / "source-directory"
+            source_dir.mkdir()
+            (source_dir / "content.txt").write_text("bioimageflow-output-view-probe")
+
+            if value == "pointer":
+                operation = "create portable pointer"
+                pointer_path = probe_root / "output.txt.bioimageflow-link.json"
+                self._write_link(pointer_path, kind="file", target=source_file)
+                target = self._read_link_target(pointer_path, kind="file")
+                if target.read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "pointer verification failed")
+            elif value == "symlink":
+                operation = "create and read file symlink"
+                file_link = probe_root / "file-link"
+                os.symlink("source.txt", file_link, target_is_directory=False)
+                if file_link.read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "file symlink verification failed")
+                operation = "create and read directory symlink"
+                directory_link = probe_root / "directory-link"
+                os.symlink("source-directory", directory_link, target_is_directory=True)
+                if (directory_link / "content.txt").read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "directory symlink verification failed")
+            elif value == "copy":
+                operation = "copy and read file"
+                copied_file = probe_root / "copied.txt"
+                shutil.copy2(source_file, copied_file)
+                if copied_file.read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "file copy verification failed")
+                operation = "copy and read directory"
+                copied_dir = probe_root / "copied-directory"
+                shutil.copytree(source_dir, copied_dir)
+                if (copied_dir / "content.txt").read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "directory copy verification failed")
+            elif value == "hardlink":
+                operation = "create and read file hardlink"
+                hardlink = probe_root / "hardlink.txt"
+                os.link(source_file, hardlink)
+                if hardlink.read_text() != "bioimageflow-output-view-probe":
+                    raise OSError(errno.EIO, "hardlink verification failed")
+                if hardlink.stat().st_ino != source_file.stat().st_ino:
+                    raise OSError(errno.EIO, "hardlink identity verification failed")
+            return OutputViewCapability(mode=value, supported=True, code="ok")
+        except OSError as exc:
+            code = self._output_view_probe_error_code(exc)
+            return OutputViewCapability(
+                mode=value,
+                supported=False,
+                code=code,
+                detail=f"Could not {operation}.",
+            )
+        except Exception:
+            return OutputViewCapability(
+                mode=value,
+                supported=False,
+                code="io_error",
+                detail=f"Could not {operation}.",
+            )
+        finally:
+            shutil.rmtree(probe_root, ignore_errors=True)
+
+    @staticmethod
+    def _output_view_probe_error_code(
+        exc: OSError,
+    ) -> Literal["permission_denied", "filesystem_unsupported", "io_error"]:
+        if isinstance(exc, PermissionError) or exc.errno in {errno.EACCES, errno.EPERM}:
+            return "permission_denied"
+        if getattr(exc, "winerror", None) in {5, 1314}:
+            return "permission_denied"
+        unsupported_errors = {errno.ENOSYS, errno.EINVAL}
+        if hasattr(errno, "ENOTSUP"):
+            unsupported_errors.add(errno.ENOTSUP)
+        if hasattr(errno, "EOPNOTSUPP"):
+            unsupported_errors.add(errno.EOPNOTSUPP)
+        if exc.errno in unsupported_errors:
+            return "filesystem_unsupported"
+        return "io_error"
+
     def result_dir(self, result_key: str) -> Path:
         first, second = result_shard_parts(result_key)
         return self.cache_root / "results" / first / second / result_key
@@ -798,7 +911,7 @@ class Storage:
         payload = self._latest_node_payload(latest_path)
         safe_node_key = _validate_node_key(str(payload["node_key"]))
         destination = self.outputs_root / "latest" / safe_node_key
-        return self._materialize_node_outputs(payload, destination, mode)
+        return self._replace_latest_node_outputs(payload, destination, mode)
 
     def materialize_latest_outputs(self, mode: str) -> list[Path]:
         """Materialize owned assets for all latest node pointers under ``outputs/latest``."""
@@ -812,7 +925,7 @@ class Storage:
             payload = self._latest_node_payload(latest_path)
             node_key = str(payload["node_key"])
             destination = self.outputs_root / "latest" / _validate_node_key(node_key)
-            materialized.extend(self._materialize_node_outputs(payload, destination, mode))
+            materialized.extend(self._replace_latest_node_outputs(payload, destination, mode))
         return materialized
 
     def latest_success_run_id(self) -> str | None:
@@ -1018,35 +1131,140 @@ class Storage:
         node_destination: Path,
         mode: str,
     ) -> list[Path]:
+        planned = self._plan_node_outputs(payload, simplify_latest=False)
         outputs_destination = node_destination / "outputs"
-        if outputs_destination.exists() or outputs_destination.is_symlink():
-            if outputs_destination.is_dir() and not outputs_destination.is_symlink():
-                shutil.rmtree(outputs_destination)
-            else:
-                outputs_destination.unlink()
+        self._remove_output_view_path(outputs_destination)
+        materialized: list[Path] = []
+        for asset_path, relative, output in planned:
+            destination = self._materialized_destination(outputs_destination / relative, mode)
+            self._materialize_path(asset_path, destination, mode, output=output)
+            materialized.append(destination)
+        return materialized
+
+    def _replace_latest_node_outputs(
+        self,
+        payload: dict[str, Any],
+        node_destination: Path,
+        mode: str,
+    ) -> list[Path]:
+        planned = self._plan_node_outputs(payload, simplify_latest=True)
+        node_destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = node_destination.parent / f".{node_destination.name}.{uuid.uuid4().hex}.tmp"
+        backup = node_destination.parent / f".{node_destination.name}.{uuid.uuid4().hex}.backup"
+        moved_previous = False
+        installed = False
+        try:
+            temporary.mkdir()
+            relative_destinations: list[Path] = []
+            for asset_path, relative, output in planned:
+                destination = self._materialized_destination(temporary / relative, mode)
+                self._materialize_path(asset_path, destination, mode, output=output)
+                relative_destinations.append(destination.relative_to(temporary))
+
+            if node_destination.exists() or node_destination.is_symlink():
+                os.replace(node_destination, backup)
+                moved_previous = True
+            try:
+                os.replace(temporary, node_destination)
+                installed = True
+            except BaseException:
+                if moved_previous:
+                    os.replace(backup, node_destination)
+                    moved_previous = False
+                raise
+            if moved_previous:
+                self._remove_output_view_path(backup)
+                moved_previous = False
+            return [node_destination / relative for relative in relative_destinations]
+        finally:
+            self._remove_output_view_path(temporary)
+            if moved_previous and not installed and not (
+                node_destination.exists() or node_destination.is_symlink()
+            ):
+                os.replace(backup, node_destination)
+                moved_previous = False
+            if not moved_previous:
+                self._remove_output_view_path(backup)
+
+    def _plan_node_outputs(
+        self,
+        payload: dict[str, Any],
+        *,
+        simplify_latest: bool,
+    ) -> list[tuple[Path, str, dict[str, Any]]]:
         result_key = str(payload["result_key"])
         record_id = _validate_record_id(str(payload["record_id"]))
         record_dir = self.result_dir(result_key) / "records" / record_id
         manifest = self._load_record_manifest(result_key, record_id)
-        materialized: list[Path] = []
+        planned: list[tuple[Path, str, dict[str, Any]]] = []
+        portable_paths: dict[str, str] = {}
         for output in manifest.outputs:
             if output.get("kind") != "owned_asset":
                 continue
-            relative = validate_relative_posix_path(str(output["path"]))
-            asset_path = record_dir / relative
+            source_relative = validate_relative_posix_path(str(output["path"]))
+            mapped_relative = source_relative
+            if simplify_latest and source_relative.startswith("assets/"):
+                mapped_relative = source_relative.removeprefix("assets/")
+            mapped_relative = validate_relative_posix_path(mapped_relative)
+            if simplify_latest:
+                portable = unicodedata.normalize("NFC", mapped_relative).casefold()
+                for existing_portable, existing_path in portable_paths.items():
+                    if (
+                        portable == existing_portable
+                        or portable.startswith(f"{existing_portable}/")
+                        or existing_portable.startswith(f"{portable}/")
+                    ):
+                        raise CacheCorruptionError(
+                            "Output view paths collide after latest mapping: "
+                            f"{existing_path!r} and {mapped_relative!r}."
+                        )
+                portable_paths[portable] = mapped_relative
+            asset_path = record_dir / source_relative
             try:
                 asset_path.resolve().relative_to(record_dir.resolve())
             except ValueError as exc:
-                raise CacheCorruptionError(f"Output view asset escapes record directory: {relative}") from exc
+                raise CacheCorruptionError(
+                    f"Output view asset escapes record directory: {source_relative}"
+                ) from exc
             if not asset_path.exists():
-                raise CacheCorruptionError(f"Output view target is missing: {relative}")
-            destination = outputs_destination / relative
-            self._materialize_path(asset_path, destination, mode)
-            materialized.append(destination)
-        return materialized
+                raise CacheCorruptionError(f"Output view target is missing: {source_relative}")
+            asset_type = str(output.get("asset_type", "file"))
+            if asset_type not in {"file", "directory"}:
+                raise CacheCorruptionError(f"Output view asset type is invalid: {source_relative}")
+            planned.append((asset_path, mapped_relative, output))
+        return planned
 
-    def _materialize_path(self, source: Path, destination: Path, mode: str) -> None:
+    @staticmethod
+    def _materialized_destination(destination: Path, mode: str) -> Path:
+        if mode == "pointer":
+            return destination.with_name(f"{destination.name}.bioimageflow-link.json")
+        return destination
+
+    @staticmethod
+    def _remove_output_view_path(path: Path) -> None:
+        if not path.exists() and not path.is_symlink():
+            return
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+    def _materialize_path(
+        self,
+        source: Path,
+        destination: Path,
+        mode: str,
+        *,
+        output: dict[str, Any],
+    ) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if mode == "pointer":
+            kind = "directory" if source.is_dir() else "file"
+            digest = str(output["digest"]) if kind == "file" and output.get("digest") else None
+            self._write_link(destination, kind=kind, target=source, digest=digest)
+            if self._read_link_target(destination, kind=kind) != source.resolve():
+                raise CacheCorruptionError("Output pointer target mismatch.")
+            return
         if mode == "symlink":
             target = os.path.relpath(source, start=destination.parent)
             os.symlink(target, destination, target_is_directory=source.is_dir())

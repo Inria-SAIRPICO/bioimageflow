@@ -6,6 +6,7 @@ import base64
 import hashlib
 import inspect
 import json
+import logging
 import sys
 import tempfile
 import threading
@@ -40,6 +41,9 @@ if TYPE_CHECKING:
 
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow_core.tool import ProcessingTool
+
+
+logger = logging.getLogger("bioimageflow")
 
 
 class _Missing:
@@ -186,13 +190,13 @@ class ProgressEvent:
 class OutputView:
     """Human-facing output materialization policy."""
 
-    mode: Literal["none", "symlink", "copy", "hardlink"] = "none"
+    mode: Literal["none", "pointer", "symlink", "copy", "hardlink"] = "none"
     scope: Literal["latest", "runs", "both"] = "latest"
 
     def __post_init__(self) -> None:
-        if self.mode not in {"none", "symlink", "copy", "hardlink"}:
+        if self.mode not in {"none", "pointer", "symlink", "copy", "hardlink"}:
             raise ValueError(
-                "Invalid output_view mode. Expected 'none', 'symlink', 'copy', or 'hardlink'."
+                "Invalid output_view mode. Expected 'none', 'pointer', 'symlink', 'copy', or 'hardlink'."
             )
         if self.scope not in {"latest", "runs", "both"}:
             raise ValueError(
@@ -203,12 +207,14 @@ class OutputView:
         return {"mode": self.mode, "scope": self.scope}
 
 
-def _coerce_output_view_mode(value: str) -> Literal["none", "symlink", "copy", "hardlink"]:
-    if value not in {"none", "symlink", "copy", "hardlink"}:
+def _coerce_output_view_mode(
+    value: str,
+) -> Literal["none", "pointer", "symlink", "copy", "hardlink"]:
+    if value not in {"none", "pointer", "symlink", "copy", "hardlink"}:
         raise ValueError(
-            "Invalid output_view mode. Expected 'none', 'symlink', 'copy', or 'hardlink'."
+            "Invalid output_view mode. Expected 'none', 'pointer', 'symlink', 'copy', or 'hardlink'."
         )
-    return cast(Literal["none", "symlink", "copy", "hardlink"], value)
+    return cast(Literal["none", "pointer", "symlink", "copy", "hardlink"], value)
 
 
 def _coerce_output_view_scope(value: str) -> Literal["latest", "runs", "both"]:
@@ -1368,7 +1374,7 @@ class Workflow:
     def export_outputs(
         self,
         *,
-        mode: Literal["symlink", "copy", "hardlink"] = "symlink",
+        mode: Literal["pointer", "symlink", "copy", "hardlink"] = "symlink",
         scope: Literal["latest", "runs", "both"] = "latest",
         run_id: str | None = None,
     ) -> list[Path]:
@@ -1401,10 +1407,19 @@ class Workflow:
         from bioimageflow.storage import Storage
 
         storage = Storage(self.storage_path)
-        if latest_node is not None and output_view.scope in {"latest", "both"}:
-            storage.materialize_latest_node_outputs(latest_node, output_view.mode)
-        if runs and output_view.scope in {"runs", "both"}:
-            storage.materialize_run_outputs(run_id, output_view.mode)
+        try:
+            if latest_node is not None and output_view.scope in {"latest", "both"}:
+                storage.materialize_latest_node_outputs(latest_node, output_view.mode)
+            if runs and output_view.scope in {"runs", "both"}:
+                storage.materialize_run_outputs(run_id, output_view.mode)
+        except Exception:
+            logger.warning(
+                "Automatic output-view materialization failed (mode=%s, scope=%s, run_id=%s).",
+                output_view.mode,
+                output_view.scope,
+                run_id,
+                exc_info=True,
+            )
 
     def _start_run_view(self, targets: list[Node]) -> None:
         from bioimageflow.storage import Storage

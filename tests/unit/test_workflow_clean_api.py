@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import bioimageflow
 
-from bioimageflow import OutputView, Workflow
+from bioimageflow import OutputView, OutputViewCapability, Workflow
 from bioimageflow.engine import DefaultEngine, SequentialEngine
 from bioimageflow.node import get_active_workflow
 
@@ -16,7 +16,7 @@ PUBLIC_EXPORTS = {
     "BindingError", "ColumnNotFoundError", "ColumnRef", "CycleInWorkflowError",
     "DataFrameTool", "DefaultEngine", "DisabledNodeError", "EnvironmentLifetime",
     "IndexAlignmentError", "InvalidatedSelection", "NodePlan", "NodePlanStatus",
-    "NodeStep", "OutputView", "Passthrough", "ProgressEvent",
+    "NodeStep", "OutputView", "OutputViewCapability", "Passthrough", "ProgressEvent",
     "SchemaSerializationError", "SequentialEngine", "SourceToolUpstreamError",
     "ToolMetadata", "ToolRegistry", "ValidationError", "ValidationErrorKind",
     "WetlandsEnvManager", "WorkerTaskError", "WorkerTimeoutError", "Workflow",
@@ -124,6 +124,21 @@ def test_workflow_output_view_string_shorthand() -> None:
     wf = Workflow(output_view="symlink")
 
     assert wf.output_view == OutputView(mode="symlink", scope="latest")
+
+
+def test_workflow_pointer_output_view_round_trips(tmp_path) -> None:
+    wf = Workflow(
+        storage_path=tmp_path,
+        engine="direct",
+        output_view={"mode": "pointer", "scope": "both"},
+    )
+
+    graph = wf.to_dict()
+    loaded = Workflow.from_dict(graph)
+
+    assert loaded.output_view == OutputView(mode="pointer", scope="both")
+    assert graph["config"]["output_view"] == {"mode": "pointer", "scope": "both"}
+    assert OutputViewCapability(mode="pointer", supported=True, code="ok").supported is True
 
 
 @pytest.mark.parametrize(

@@ -2466,7 +2466,20 @@ Reusable records are immutable once published.
 `views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
 `outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)` or `Workflow.export_outputs(...)`.
-Supported materialization modes are `symlink`, `copy`, and `hardlink`; materialized files are disposable and are not canonical cache records.
+Supported materialization modes are `pointer`, `symlink`, `copy`, and `hardlink`; `none` creates no `outputs/` projection and leaves only the canonical portable pointers under `views/`.
+`pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`, while `symlink`, `copy`, and `hardlink` retain their filesystem meanings.
+The canonical `cache/v1/`, `views/runs/`, and `views/latest/` layouts and the run-output hierarchy under `outputs/runs/<run-id>/nodes/<node-key>/outputs/` preserve record-relative paths unchanged.
+Only `outputs/latest/` uses the simplified mapping: `assets/file.tiff` becomes `<node-key>/file.tiff`, `assets/masks/nuclei/file.tiff` becomes `<node-key>/masks/nuclei/file.tiff`, and a safe legacy path without a leading `assets/` is preserved in full.
+Latest mapping retains scoped node paths and rejects collisions before replacing a node view.
+Each replacement is built and validated in a temporary sibling and restores the prior latest node view if materialization or replacement fails; this is a failure-safety guarantee rather than a promise of filesystem-level atomic directory replacement.
+Linked outputs refer to canonical cached files and should be treated as read-only, while copied outputs require additional storage.
+Materialized files are disposable and are not canonical cache records.
+
+> outputs/latest contains the latest successful output independently for each node. Nodes may refer to different workflow executions after selected, failed, cancelled, or overlapping runs.
+
+`Storage.probe_output_view_mode(mode)` tests a requested mode beneath the actual workflow storage root without changing cache selection or output state and returns an `OutputViewCapability` structured diagnostic.
+The probe verifies readable file and directory symlinks, file hardlinks, copies, and portable pointers as appropriate.
+Automatic disposable materialization failures are warnings and do not fail successful computation; explicit `Workflow.export_outputs(...)` calls remain strict.
 
 `assets/` contains files that are part of a tool's declared `Outputs`.
 `work/` is reserved for files that exist only to execute the tool: temporary images, implicit files created by external CLIs, unpacked models, and similar intermediates.

@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -596,7 +597,7 @@ def test_compute_with_output_view_materializes_latest_outputs(tmp_path: Path) ->
     [run_dir] = _run_dirs(storage_path)
     result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
     asset_path = result["outputs"][0]["path"]
-    latest_output = storage_path / "outputs" / "latest" / node_name / "outputs" / asset_path
+    latest_output = storage_path / "outputs" / "latest" / node_name / Path(asset_path).relative_to("assets")
 
     assert latest_output.read_text() == "visible"
     assert not latest_output.is_symlink()
@@ -633,7 +634,7 @@ def test_export_outputs_materializes_after_compute(tmp_path: Path) -> None:
         node_name = node.name
         materialized = wf.export_outputs(mode="copy", scope="latest")
 
-    output_path = storage_path / "outputs" / "latest" / node_name / "outputs" / "assets" / "mask_0.txt"
+    output_path = storage_path / "outputs" / "latest" / node_name / "mask_0.txt"
     assert materialized == [output_path]
     assert output_path.read_text() == "manual"
 
@@ -666,7 +667,7 @@ def test_latest_output_view_ignores_stale_latest_pointers_after_invalidation(tmp
         wf.compute(fresh)
         fresh_name = fresh.name
 
-    fresh_output = storage_path / "outputs" / "latest" / fresh_name / "outputs" / "assets" / "mask_0.txt"
+    fresh_output = storage_path / "outputs" / "latest" / fresh_name / "mask_0.txt"
     assert fresh_output.read_text() == "fresh"
 
 
@@ -684,6 +685,43 @@ def test_failed_run_scope_output_view_preserves_original_error(tmp_path: Path) -
             wf.compute(failing)
 
     assert not (storage_path / "outputs" / "runs").exists()
+
+
+def test_automatic_output_view_failure_warns_without_failing_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def fail_latest(self, node_key: str, mode: str) -> list[Path]:
+        raise OSError("simulated automatic export failure")
+
+    monkeypatch.setattr(Storage, "materialize_latest_node_outputs", fail_latest)
+    storage_path = tmp_path / "results"
+
+    with caplog.at_level(logging.WARNING, logger="bioimageflow"):
+        with Workflow(engine="direct", storage_path=storage_path, output_view="copy") as wf:
+            node = SourceAssetWriter()(text="computed")
+            result = wf.compute(node)
+
+    assert Path(result.iloc[0]["mask"]).read_text() == "computed"
+    assert "Automatic output-view materialization failed" in caplog.text
+
+
+def test_manual_output_export_failure_remains_strict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_path = tmp_path / "results"
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="computed")
+        wf.compute(node)
+
+        def fail_latest(self, mode: str) -> list[Path]:
+            raise OSError("simulated explicit export failure")
+
+        monkeypatch.setattr(Storage, "materialize_latest_outputs", fail_latest)
+        with pytest.raises(OSError, match="simulated explicit export failure"):
+            wf.export_outputs(mode="copy", scope="latest")
 
 
 def test_compute_steps_writes_run_view_for_cached_step(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
 from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent, InvalidatedSelection as InvalidatedSelection, OutputView as OutputView
+from bioimageflow.storage import OutputViewCapability as OutputViewCapability
 from bioimageflow.workflow_node import WorkflowNode as WorkflowNode
 from bioimageflow.engine import (
     DefaultEngine as DefaultEngine,
@@ -65,6 +66,7 @@ __all__ = [
     "NodePlanStatus",
     "NodeStep",
     "OutputView",
+    "OutputViewCapability",
     "Passthrough",
     "ProgressEvent",
     "SchemaSerializationError",
