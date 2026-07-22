@@ -2467,11 +2467,13 @@ Reusable records are immutable once published.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
 `outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)` or `Workflow.export_outputs(...)`.
 Supported materialization modes are `pointer`, `symlink`, `copy`, and `hardlink`; `none` creates no `outputs/` projection and leaves only the canonical portable pointers under `views/`.
-`pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`, while `symlink`, `copy`, and `hardlink` retain their filesystem meanings.
-The canonical `cache/v1/`, `views/runs/`, and `views/latest/` layouts and the run-output hierarchy under `outputs/runs/<run-id>/nodes/<node-key>/outputs/` preserve record-relative paths unchanged.
-Only `outputs/latest/` uses the simplified mapping: `assets/file.tiff` becomes `<node-key>/file.tiff`, `assets/masks/nuclei/file.tiff` becomes `<node-key>/masks/nuclei/file.tiff`, and a safe legacy path without a leading `assets/` is preserved in full.
-Latest mapping retains scoped node paths and rejects collisions before replacing a node view.
-Each replacement is built and validated in a temporary sibling and restores the prior latest node view if materialization or replacement fails; this is a failure-safety guarantee rather than a promise of filesystem-level atomic directory replacement.
+`pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; `symlink`, `copy`, and `hardlink` use the corresponding filesystem operations.
+The canonical `cache/v1/`, `views/runs/`, and `views/latest/` layouts use record-relative paths.
+The run-output hierarchy at `outputs/runs/<run-id>/nodes/<node-key>/outputs/` also uses record-relative paths.
+The human-facing latest hierarchy uses node-relative paths: `assets/file.tiff` maps to `outputs/latest/<node-key>/file.tiff`, `assets/masks/nuclei/file.tiff` maps to `outputs/latest/<node-key>/masks/nuclei/file.tiff`, and a safe manifest path without a leading `assets/` maps in full beneath the node directory.
+Scoped node paths form part of the node layer, and the complete mapped path set must be collision-free.
+A latest node tree is fully built and validated in a temporary sibling before it is installed.
+If materialization or installation fails, the currently published node tree stays usable or is restored; this is a failure-safety guarantee rather than a promise of filesystem-level atomic directory replacement.
 Linked outputs refer to canonical cached files and should be treated as read-only, while copied outputs require additional storage.
 Materialized files are disposable and are not canonical cache records.
 

@@ -634,13 +634,13 @@ The canonical run view preserves the record-relative asset path from the selecte
 `OutputView.mode` supports `none`, `pointer`, `symlink`, `copy`, and `hardlink`.
 `none` creates no disposable `outputs/` projection and leaves only the canonical portable JSON pointers under `views/`.
 `pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; their relative targets are validated and confined to the workflow storage root.
-`symlink`, `copy`, and `hardlink` retain their filesystem meanings.
-`OutputView.scope` remains `latest`, `runs`, or `both`.
+`symlink`, `copy`, and `hardlink` use the corresponding filesystem operations.
+`OutputView.scope` accepts `latest`, `runs`, or `both`.
 
-The `outputs/runs/<run-id>/nodes/<node-key>/outputs/` hierarchy remains record-relative and unchanged for every materialization mode.
+The `outputs/runs/<run-id>/nodes/<node-key>/outputs/` hierarchy is record-relative for every materialization mode.
 For example, `assets/mask.tif` is materialized there as `outputs/assets/mask.tif` or, in pointer mode, `outputs/assets/mask.tif.bioimageflow-link.json`.
 
-Only `outputs/latest/` uses a simplified human-facing mapping beneath the retained node layer:
+The `outputs/latest/` hierarchy uses a human-facing mapping beneath the node layer:
 
 ```text
 records/<record-id>/assets/t051.tiff
@@ -651,14 +651,14 @@ records/<record-id>/assets/masks/nuclei/t051.tiff
 ```
 
 Exactly one leading `assets/` is stripped.
-Everything after it is preserved, while a safe legacy manifest path that does not begin with `assets/` is preserved in full.
-Scoped node paths used by recursive workflows remain scoped beneath `outputs/latest/`.
+Everything after it is preserved, while a safe manifest path that does not begin with `assets/` is mapped in full beneath the node directory.
+Scoped node paths used by recursive workflows form part of the node layer beneath `outputs/latest/`.
 The complete mapped path set is validated before materialization, including collision and file/directory-prefix checks.
 
-Each latest node view is built in a temporary sibling directory and fully materialized before the prior node view is moved aside and replaced.
-If materialization or replacement fails, the previous latest node view remains usable or is restored, and temporary directories are cleaned.
-A successful replacement removes stale files from the prior version of that node.
-This is a failure-safe replacement guarantee, not a promise of filesystem-level atomic directory replacement on every host filesystem.
+Each latest node tree is built and fully materialized in a temporary sibling directory before installation.
+Installation publishes exactly the complete mapped output set for that node.
+If materialization or installation fails, the currently published node tree stays usable or is restored, and temporary directories are cleaned.
+This is a failure-safe installation guarantee, not a promise of filesystem-level atomic directory replacement on every host filesystem.
 
 > outputs/latest contains the latest successful output independently for each node. Nodes may refer to different workflow executions after selected, failed, cancelled, or overlapping runs.
 
