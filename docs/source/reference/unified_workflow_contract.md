@@ -221,7 +221,7 @@ Renaming an output therefore preserves stable-ID column connectivity but changes
 A workflow with no outputs returns a canonical zero-row, zero-column DataFrame after all enabled terminal branches complete.
 
 Disabling a workflow node disables its complete subtree.
-`compute_steps()` yields only executable tool steps.
+`compute_steps()` yields only real tool steps, including disabled ordinary tools as skipped steps; it never yields workflow-node aggregate steps, and a disabled workflow node is not expanded.
 `plan()` reports executable tool entries and one aggregate entry per workflow node.
 The aggregate is `SKIPPED` when disabled, `CACHED` only when every executable internal is cached, `PENDING_UPSTREAM` when an internal final selection depends on unknown upstream records, and otherwise `UNEXECUTED`.
 
