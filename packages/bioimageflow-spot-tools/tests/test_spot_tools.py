@@ -251,8 +251,9 @@ def test_detect_spots_zero_rows_publish_blank_label_artifact(tmp_path: Path) -> 
     record_dir = current_path.parent / "records" / current["record_id"]
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
-        {
-            "digest": manifest["outputs"][0]["digest"],
+            {
+                "asset_type": "file",
+                "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "output_column": "output_labels",
             "path": "assets/blank_spots.tif",
