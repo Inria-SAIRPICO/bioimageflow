@@ -109,6 +109,10 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
         storage_path,
         node_name,
         sig_hash,
+        run_id="run_0123456789abcdef0123456789abcdef",
+        invocation_id="inv_0123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:SourceAssetWriter",
     )
     source = assets_dir / "mask.txt"
     source.write_text("first")
@@ -162,6 +166,10 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
         storage_path,
         node_name,
         sig_hash,
+        run_id="run_0123456789abcdef0123456789abcdef",
+        invocation_id="inv_2123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:SourceAssetWriter",
     )
     source = assets_dir / "mask_0.txt"
     source.write_text("blank")
@@ -218,6 +226,10 @@ def test_processing_tool_publish_rejects_work_paths_as_external_outputs(
         storage_path,
         node_name,
         sig_hash,
+        run_id="run_0123456789abcdef0123456789abcdef",
+        invocation_id="inv_1123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:WorkPathWriter",
     )
     work_output = staging_dir / relative
     work_output.parent.mkdir(parents=True, exist_ok=True)
@@ -252,6 +264,10 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
         storage_path,
         node_name,
         sig_hash,
+        run_id="run_0123456789abcdef0123456789abcdef",
+        invocation_id="inv_3123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:DirectoryTool",
     )
     directory = assets_dir / "dataset.zarr"
     directory.mkdir()

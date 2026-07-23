@@ -22,6 +22,11 @@ def processing_prepare_attempt(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
+    *,
+    run_id: str,
+    invocation_id: str,
+    engine: str,
+    tool_identity: str,
 ) -> tuple[str, str, Path, Path]:
     """Create an attempt staging tree for a ProcessingTool node."""
     storage = Storage(storage_path)
@@ -43,6 +48,15 @@ def processing_prepare_attempt(
         staging_dir, "assets", "Attempt assets directory"
     )
     _ensure_record_child_dir(staging_dir, "work", "Attempt work directory")
+    storage.start_cache_attempt(
+        result_key,
+        attempt_id,
+        run_id=run_id,
+        node_key=node_name,
+        invocation_id=invocation_id,
+        tool_identity=tool_identity,
+        engine=engine,
+    )
     return result_key, attempt_id, staging_dir, assets_dir
 
 
@@ -69,17 +83,15 @@ def _ensure_record_child_dir(parent: Path, name: str, label: str) -> Path:
 
 def _ensure_records_dir(result_dir: Path) -> Path:
     records_dir = result_dir / "records"
-    if records_dir.exists() or records_dir.is_symlink():
-        try:
-            records_dir.resolve().relative_to(result_dir.resolve())
-        except ValueError as exc:
-            raise CacheCorruptionError(
-                "Records directory escapes result directory."
-            ) from exc
-        if records_dir.is_symlink():
-            raise CacheCorruptionError("Records directory must not be a symlink.")
-    else:
-        records_dir.mkdir(parents=True)
+    records_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        records_dir.resolve().relative_to(result_dir.resolve())
+    except ValueError as exc:
+        raise CacheCorruptionError(
+            "Records directory escapes result directory."
+        ) from exc
+    if records_dir.is_symlink():
+        raise CacheCorruptionError("Records directory must not be a symlink.")
     return records_dir
 
 

@@ -2,8 +2,10 @@
 
 import json
 
+from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
+from threading import Barrier
 
 
 import pandas as pd
@@ -324,6 +326,8 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
             sig_hash,
             df,
             run_id="run_0123456789abcdef0123456789abcdef",
+            engine="direct:parallel",
+            tool_identity="tests:CountingTable",
         )
     assert (outside / "dataframe.parquet").read_bytes() == parquet_content
 
@@ -350,5 +354,91 @@ def test_dataframe_tool_publish_rejects_symlinked_records_directory_before_writi
             sig_hash,
             pd.DataFrame({"value": [1]}),
             run_id="run_0123456789abcdef0123456789abcdef",
+            engine="direct:parallel",
+            tool_identity="tests:CountingTable",
         )
     assert list(outside.iterdir()) == []
+
+
+def test_concurrent_identical_dataframe_publishers_install_one_record(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow.cache import dataframe_publish
+
+    storage_path = tmp_path / "results"
+    node_name = "ConcurrentTable_1"
+    sig_hash = "same-computation"
+    frame = pd.DataFrame({"value": [1]}, index=["row"])
+    barrier = Barrier(2)
+
+    def publish(run_suffix: str) -> pd.DataFrame:
+        barrier.wait(timeout=5)
+        return dataframe_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+                frame,
+                run_id=f"run_{run_suffix * 32}",
+                engine="direct:parallel",
+                tool_identity="tests:ConcurrentTable",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            future.result(timeout=10)
+            for future in (
+                pool.submit(publish, "a"),
+                pool.submit(publish, "b"),
+            )
+        ]
+
+    for result in results:
+        pd.testing.assert_frame_equal(result, frame)
+    result_key = dataframe_result_key(node_name, sig_hash)
+    records_dir = Storage(storage_path).result_dir(result_key) / "records"
+    records = [path for path in records_dir.iterdir() if not path.name.startswith(".")]
+    assert len(records) == 1
+    assert not list(records_dir.glob(".candidate.*"))
+
+
+def test_concurrent_different_dataframe_publishers_use_selected_winner(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow.cache import dataframe_publish
+
+    storage_path = tmp_path / "results"
+    node_name = "ConcurrentTable_1"
+    sig_hash = "same-key"
+    barrier = Barrier(2)
+
+    def publish(value: int, run_suffix: str) -> pd.DataFrame:
+        barrier.wait(timeout=5)
+        return dataframe_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+                pd.DataFrame({"value": [value]}, index=["row"]),
+                run_id=f"run_{run_suffix * 32}",
+                engine="direct:parallel",
+                tool_identity="tests:ConcurrentTable",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            future.result(timeout=10)
+            for future in (
+                pool.submit(publish, 1, "c"),
+                pool.submit(publish, 2, "d"),
+            )
+        ]
+
+    pd.testing.assert_frame_equal(results[0], results[1])
+    result_key = dataframe_result_key(node_name, sig_hash)
+    result_dir = Storage(storage_path).result_dir(result_key)
+    records = [
+        path
+        for path in (result_dir / "records").iterdir()
+        if not path.name.startswith(".")
+    ]
+    assert len(records) == 2
+    assert len(list((result_dir / "conflicts").glob("*.json"))) == 1

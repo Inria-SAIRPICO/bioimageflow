@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import threading
 from typing import Any
 
 from bioimageflow.backends import ProcessingDispatch
 from bioimageflow.engine.output_validation import validate_processing_result_rows
 from bioimageflow.parsl.routing import RoutingPlan
+from bioimageflow.storage import Storage
 from bioimageflow_core import (
     ProcessingTaskV1,
     RowInvocationV1,
     encode_processing_task,
+    encode_worker_tool_origin,
 )
 from bioimageflow_core.worker import execute_processing_task
 
@@ -23,6 +26,31 @@ from .submission import (
     make_batch_task,
 )
 from .types import ParslTaskPolicy
+
+
+class PlannedCacheBackend:
+    """Fail closed if a planned ProcessingTool cache hit disappears."""
+
+    def prepare_node(self, engine: Any, node: Any, workflow: Any) -> None:
+        del engine, node, workflow
+
+    def dispatch(
+        self,
+        engine: Any,
+        request: ProcessingDispatch,
+    ) -> list[list[Any]]:
+        del engine
+        raise RuntimeError(
+            f"Planned Parsl cache selection for node {request.node_name!r} "
+            "changed before execution; retry the workflow to build a new "
+            "attached execution plan."
+        )
+
+    def cleanup_execution(self, engine: Any) -> None:
+        del engine
+
+    def close(self, engine: Any) -> None:
+        del engine
 
 
 class ParslBackend:
@@ -45,20 +73,22 @@ class ParslBackend:
         self._sequential = sequential
         self._app_factory = app_factory
         self._apps: dict[str, Callable[..., Any]] = {}
+        self._apps_lock = threading.Lock()
 
     def _app(self, executor_label: str) -> Callable[..., Any]:
-        app = self._apps.get(executor_label)
-        if app is not None:
+        with self._apps_lock:
+            app = self._apps.get(executor_label)
+            if app is not None:
+                return app
+            factory = self._app_factory or require_parsl().python_app
+            app = factory(
+                function=execute_processing_task,
+                data_flow_kernel=self._dfk,
+                cache=False,
+                executors=[executor_label],
+            )
+            self._apps[executor_label] = app
             return app
-        factory = self._app_factory or require_parsl().python_app
-        app = factory(
-            function=execute_processing_task,
-            data_flow_kernel=self._dfk,
-            cache=False,
-            executors=[executor_label],
-        )
-        self._apps[executor_label] = app
-        return app
 
     def prepare_node(self, engine: Any, node: Any, workflow: Any) -> None:
         del engine, workflow
@@ -116,19 +146,51 @@ class ParslBackend:
             sequential=self._sequential,
         )
         app = self._app(route.executor_label)
+        storage = Storage(request.workflow.storage_path)
+
+        def task_submitted(task: ProcessingTaskV1) -> None:
+            storage.start_backend_task_diagnostic(
+                request.run_id,
+                request.node_name,
+                request.invocation_id,
+                task.task_id,
+                backend="parsl",
+                executor_label=route.executor_label,
+                cache_attempt_id=task.cache_attempt_id,
+                task_retry=task.task_retry,
+                mode=task.mode,
+                row_positions=[row.position for row in task.rows],
+                tool_origin=encode_worker_tool_origin(task.tool),
+            )
+
+        def task_terminal(
+            task: ProcessingTaskV1,
+            status: str,
+            error: BaseException | None,
+        ) -> None:
+            storage.finish_backend_task_diagnostic(
+                request.run_id,
+                request.node_name,
+                request.invocation_id,
+                task.task_id,
+                status=status,
+                error_type=None if error is None else type(error).__name__,
+            )
+
         collector = BoundedParslCollector(
-            submit=lambda task: app(encode_processing_task(task)),
+            submit=lambda task: self._owner._submit_future(
+                lambda: app(encode_processing_task(task))
+            ),
             max_in_flight=limit,
             node_ordinal=request.compiled_node_ordinal,
             executor_label=route.executor_label,
             cancel_requested=lambda: (
                 request.workflow.cancel_requested
                 or self._owner.cancel_requested
-                or self._owner.stop_requested
             ),
-            register_future=lambda future, _task: self._owner._register_future(
-                future
-            ),
+            stop_requested=lambda: self._owner.stop_requested,
+            task_submitted=task_submitted,
+            task_terminal=task_terminal,
             release_future=lambda future, _task: self._owner._release_future(
                 future
             ),
@@ -140,7 +202,7 @@ class ParslBackend:
                 total_rows=len(request.arguments),
             ),
             failure_observed=self._owner._report_task_failure,
-            cancellation_error=self._owner._submitted_failure_error,
+            stopped_error=self._owner._submitted_failure_error,
         )
         rows_result = collector.run(tasks)
         assert request.tool.Outputs is not None
@@ -157,4 +219,4 @@ class ParslBackend:
         del engine
 
 
-__all__ = ["ParslBackend"]
+__all__ = ["ParslBackend", "PlannedCacheBackend"]

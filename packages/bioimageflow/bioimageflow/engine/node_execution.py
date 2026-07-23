@@ -46,21 +46,28 @@ class _NodeExecutionMixin:
         from bioimageflow.workflow_node import WorkflowNode
 
         try:
+            self._raise_if_cancelled(workflow)
             if isinstance(node, WorkflowNode):
-                return self._execute_workflow_node(node, results, sig_hashes, workflow)
+                outcome = self._execute_workflow_node(
+                    node, results, sig_hashes, workflow
+                )
             elif isinstance(node.tool, DataFrameTool):
-                return self._execute_dataframe_tool(node, results, sig_hashes, workflow)
+                outcome = self._execute_dataframe_tool(
+                    node, results, sig_hashes, workflow
+                )
             elif isinstance(node.tool, ProcessingTool):
                 if not node._column_bindings:
-                    return self._execute_source_processing_tool(
+                    outcome = self._execute_source_processing_tool(
                         node, results, sig_hashes, workflow
                     )
                 else:
-                    return self._execute_processing_tool_with_column_bindings(
+                    outcome = self._execute_processing_tool_with_column_bindings(
                         node, results, sig_hashes, workflow
                     )
             else:
                 raise RuntimeError(f"Unknown tool type: {type(node.tool)}")
+            self._raise_if_cancelled(workflow)
+            return outcome
         except WorkflowCancelledError:
             self._emit_progress(workflow, node.name, "cancelled")
             raise
@@ -144,6 +151,7 @@ class _NodeExecutionMixin:
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
 
+        self._raise_if_cancelled(workflow)
         if sig_hash is not None:
             df = self._coerce_numeric_columns(
                 dataframe_publish(
@@ -152,6 +160,11 @@ class _NodeExecutionMixin:
                     sig_hash,
                     df,
                     run_id=str(workflow._run_view_context["run_id"]),
+                    engine=self._effective_engine_name(workflow),
+                    tool_identity=(
+                        f"{type(node.tool).__module__}:"
+                        f"{type(node.tool).__qualname__}"
+                    ),
                     column_kinds={
                         column: "external_path"
                         for column in _path_output_columns(node.tool)
@@ -229,75 +242,115 @@ class _NodeExecutionMixin:
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
-        invocation_id = Storage(workflow.storage_path).new_invocation_id()
+        storage = Storage(workflow.storage_path)
+        run_id = str(workflow._run_view_context["run_id"])
+        invocation_id = storage.new_invocation_id()
         result_key, attempt_id, staging_dir, real_assets_dir = (
             processing_prepare_attempt(
                 workflow.storage_path,
                 node.name,
                 sig_hash,
+                run_id=run_id,
+                invocation_id=invocation_id,
+                engine=self._effective_engine_name(workflow),
+                tool_identity=(
+                    f"{type(node.tool).__module__}:"
+                    f"{type(node.tool).__qualname__}"
+                ),
             )
         )
 
-        row_args = self._resolve_defaults(node, input_annotations)
-        path_input_fields = [n for n, a in input_annotations.items() if is_path_type(a)]
-        context = self._build_template_context(
-            node.name,
-            "0",
-            row_args,
-            path_input_fields=path_input_fields,
-            upstream_nodes={},
-            results={},
-            idx="0",
-        )
-        for out_field, template in templates.items():
-            row_args[out_field] = _resolve_staged_output_path(
-                real_assets_dir, template, context
+        try:
+            row_args = self._resolve_defaults(node, input_annotations)
+            path_input_fields = [
+                name
+                for name, annotation in input_annotations.items()
+                if is_path_type(annotation)
+            ]
+            context = self._build_template_context(
+                node.name,
+                "0",
+                row_args,
+                path_input_fields=path_input_fields,
+                upstream_nodes={},
+                results={},
+                idx="0",
             )
-        arguments_dicts = [row_args]
+            for out_field, template in templates.items():
+                row_args[out_field] = _resolve_staged_output_path(
+                    real_assets_dir, template, context
+                )
+            arguments_dicts = [row_args]
 
-        # --- Dispatch & build output ---
-        row_contexts, batch_context = self._build_execution_contexts(
-            staging_dir,
-            real_assets_dir,
-            aligned_index,
-        )
-        raw_results = self._dispatch_tool(
-            node.tool,
-            arguments_dicts,
-            workflow,
-            node.name,
-            row_contexts,
-            batch_context,
-            invocation_id=invocation_id,
-            cache_attempt_id=attempt_id,
-        )
-        df = self._build_output_dataframe(raw_results, aligned_index, node.tool)
-        owned_path_columns = _explicit_template_output_columns(node)
-        declared_path_columns = set(templates)
-        df = processing_publish(
-            workflow.storage_path,
-            node.name,
-            sig_hash,
-            df,
-            result_key=result_key,
-            attempt_id=attempt_id,
-            run_id=str(workflow._run_view_context["run_id"]),
-            staging_dir=staging_dir,
-            staging_assets_dir=real_assets_dir,
-            path_columns=path_output_columns,
-            owned_path_columns=owned_path_columns,
-            shared_array_columns=shared_array_output_columns,
-            declared_owned_artifact_paths=_declared_owned_artifact_paths(
-                arguments_dicts,
+            # --- Dispatch & build output ---
+            row_contexts, batch_context = self._build_execution_contexts(
+                staging_dir,
+                real_assets_dir,
                 aligned_index,
-                df,
-                declared_path_columns,
-            ),
-            declared_scalar_outputs=_declared_zero_row_scalar_outputs(
+            )
+            raw_results = self._dispatch_tool(
                 node.tool,
+                arguments_dicts,
+                workflow,
+                node.name,
+                row_contexts,
+                batch_context,
+                invocation_id=invocation_id,
+                cache_attempt_id=attempt_id,
+            )
+            df = self._build_output_dataframe(
                 raw_results,
                 aligned_index,
-            ),
+                node.tool,
+            )
+            self._raise_if_cancelled(workflow)
+            owned_path_columns = _explicit_template_output_columns(node)
+            declared_path_columns = set(templates)
+            df = processing_publish(
+                workflow.storage_path,
+                node.name,
+                sig_hash,
+                df,
+                result_key=result_key,
+                attempt_id=attempt_id,
+                run_id=run_id,
+                staging_dir=staging_dir,
+                staging_assets_dir=real_assets_dir,
+                path_columns=path_output_columns,
+                owned_path_columns=owned_path_columns,
+                shared_array_columns=shared_array_output_columns,
+                declared_owned_artifact_paths=_declared_owned_artifact_paths(
+                    arguments_dicts,
+                    aligned_index,
+                    df,
+                    declared_path_columns,
+                ),
+                declared_scalar_outputs=_declared_zero_row_scalar_outputs(
+                    node.tool,
+                    raw_results,
+                    aligned_index,
+                ),
+            )
+        except BaseException as exc:
+            storage.finish_cache_attempt(
+                result_key,
+                attempt_id,
+                status=(
+                    "cancelled"
+                    if isinstance(exc, WorkflowCancelledError)
+                    else "failed"
+                ),
+                error_type=(
+                    None
+                    if isinstance(exc, WorkflowCancelledError)
+                    else type(exc).__name__
+                ),
+            )
+            raise
+        storage.finish_cache_attempt(
+            result_key,
+            attempt_id,
+            status="succeeded",
         )
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
@@ -385,7 +438,7 @@ class _NodeExecutionMixin:
                     run_id,
                     node.name,
                     invocation_id=invocation_id,
-                    engine=self.backend_name,
+                    engine=self._effective_engine_name(workflow),
                 )
             )
         else:
@@ -395,6 +448,13 @@ class _NodeExecutionMixin:
                     workflow.storage_path,
                     node.name,
                     sig_hash,
+                    run_id=run_id,
+                    invocation_id=invocation_id,
+                    engine=self._effective_engine_name(workflow),
+                    tool_identity=(
+                        f"{type(node.tool).__module__}:"
+                        f"{type(node.tool).__qualname__}"
+                    ),
                 )
             )
 
@@ -454,6 +514,7 @@ class _NodeExecutionMixin:
                 execution_index,
                 node.tool,
             )
+            self._raise_if_cancelled(workflow)
             if not transient:
                 assert sig_hash is not None
                 assert result_key is not None
@@ -504,6 +565,23 @@ class _NodeExecutionMixin:
                         else exc
                     ),
                 )
+            else:
+                assert result_key is not None
+                assert attempt_id is not None
+                storage.finish_cache_attempt(
+                    result_key,
+                    attempt_id,
+                    status=(
+                        "cancelled"
+                        if isinstance(exc, WorkflowCancelledError)
+                        else "failed"
+                    ),
+                    error_type=(
+                        None
+                        if isinstance(exc, WorkflowCancelledError)
+                        else type(exc).__name__
+                    ),
+                )
             raise
 
         if transient:
@@ -511,6 +589,14 @@ class _NodeExecutionMixin:
                 run_id,
                 node.name,
                 invocation_id,
+                status="succeeded",
+            )
+        else:
+            assert result_key is not None
+            assert attempt_id is not None
+            storage.finish_cache_attempt(
+                result_key,
+                attempt_id,
                 status="succeeded",
             )
 

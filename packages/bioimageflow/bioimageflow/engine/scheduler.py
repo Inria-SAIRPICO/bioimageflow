@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .common import (
@@ -112,6 +113,7 @@ class DefaultEngine(
         force_sequential: bool = False,
         env_manager: "WetlandsEnvManager | None" = None,
         resource_lifetime: ResourceLifetime | str = ResourceLifetime.EXECUTION,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> None:
         try:
             self._resource_lifetime = ResourceLifetime(resource_lifetime)
@@ -150,6 +152,7 @@ class DefaultEngine(
         self._execution_active = False
         self._compiled_ordinals: dict[Node, int] = {}
         self._node_cache_hits: dict[Node, bool] = {}
+        self._external_cancellation_requested = cancellation_requested
         self._env_manager = env_manager
         if use_wetlands:
             if self._env_manager is None:
@@ -193,6 +196,26 @@ class DefaultEngine(
     def _end_execution(self) -> None:
         with self._lifecycle_lock:
             self._execution_active = False
+
+    def _is_cancellation_requested(self, workflow: Any) -> bool:
+        external = self._external_cancellation_requested
+        return bool(
+            workflow.cancel_requested
+            or (external is not None and external())
+        )
+
+    def _raise_if_cancelled(self, workflow: Any) -> None:
+        if self._is_cancellation_requested(workflow):
+            raise WorkflowCancelledError("Workflow cancelled during execution.")
+
+    def _effective_engine_name(self, workflow: Any) -> str:
+        context = getattr(workflow, "_run_view_context", None)
+        if isinstance(context, dict):
+            engine = context.get("engine")
+            execution = context.get("execution")
+            if isinstance(engine, str) and isinstance(execution, str):
+                return f"{engine}:{execution}"
+        return self.backend_name
 
     @staticmethod
     def _column_label(col_ref: Any) -> str:
@@ -280,8 +303,7 @@ class DefaultEngine(
                 sig_hashes: dict[Node, str | None] = {}
 
                 for node in order:
-                    if workflow.cancel_requested:
-                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    self._raise_if_cancelled(workflow)
 
                     if node in skipped:
                         logger.info(
@@ -384,8 +406,7 @@ class DefaultEngine(
         lock = threading.Lock()  # protects results and sig_hashes dict writes
 
         while ts.is_active():
-            if workflow.cancel_requested:
-                raise WorkflowCancelledError("Workflow cancelled by user")
+            self._raise_if_cancelled(workflow)
 
             ready = sorted(
                 ts.get_ready(),
@@ -411,8 +432,7 @@ class DefaultEngine(
             if len(pt_nodes) <= 1 or self._force_sequential:
                 # Single node or forced sequential — no threading overhead
                 for node in pt_nodes:
-                    if workflow.cancel_requested:
-                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    self._raise_if_cancelled(workflow)
                     df, sig_hash = self._execute_node(
                         node, results, sig_hashes, workflow
                     )

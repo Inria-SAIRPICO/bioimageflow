@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -141,6 +142,7 @@ class _ParslEngineSteps(Iterator[Any]):
             )
             self._engine._prepared_execution = prepared
             needs_dfk = prepared is None or prepared.needs_dfk
+            self._engine._raise_if_cancelled(self._workflow)
             if needs_dfk and prepared is not None:
                 self._engine._validate_runtime_configuration()
             dfk = (
@@ -148,6 +150,7 @@ class _ParslEngineSteps(Iterator[Any]):
                 if needs_dfk
                 else None
             )
+            self._engine._raise_if_cancelled(self._workflow)
             yield from self._engine._execute_steps_attached(
                 self._targets,
                 self._workflow,
@@ -303,7 +306,7 @@ class ParslEngine:
     @property
     def cancel_requested(self) -> bool:
         with self._lifecycle_condition:
-            return self._cancel_requested
+            return self._closed or self._cancel_requested
 
     @property
     def stop_requested(self) -> bool:
@@ -408,6 +411,7 @@ class ParslEngine:
             shared_runtime_root=self._shared_runtime_root,
             storage_mode=self._storage_mode,
             sequential=self.effective_execution(workflow) == "sequential",
+            cancellation_requested=lambda: self.cancel_requested,
         )
 
     @staticmethod
@@ -437,6 +441,14 @@ class ParslEngine:
         if not labels and config is not source:
             labels = self._executor_labels(config)
         validate_executor_labels(self._executor_bindings, labels)
+
+    def _raise_if_cancelled(self, workflow: Any) -> None:
+        if self.cancel_requested or bool(
+            getattr(workflow, "cancel_requested", False)
+        ):
+            from bioimageflow.engine import WorkflowCancelledError
+
+            raise WorkflowCancelledError("Workflow cancelled during Parsl execution.")
 
     def _run_executor_preflight(self, workflow: Any, dfk: Any) -> None:
         if self._preflight_complete:
@@ -475,15 +487,29 @@ class ParslEngine:
                 cache=False,
                 executors=[label],
             )
-            future = app(build_preflight_payload(expectation))
-            self._register_future(future)
+            future = self._submit_future(
+                lambda app=app, expectation=expectation: app(
+                    build_preflight_payload(expectation)
+                )
+            )
             futures[label] = (future, expectation)
 
         failure: BaseException | None = None
+        cancelled = False
         observed: set[Any] = set()
         for label in sorted(futures):
             future, expectation = futures[label]
             try:
+                while not future.done():
+                    if self.cancel_requested or workflow.cancel_requested:
+                        cancelled = True
+                        for submitted, _expected in futures.values():
+                            if not submitted.done():
+                                submitted.cancel()
+                        break
+                    time.sleep(0.01)
+                if cancelled:
+                    break
                 result = future.result()
                 observed.add(future)
                 validate_preflight_result(result, expectation)
@@ -500,6 +526,12 @@ class ParslEngine:
                 except BaseException:
                     pass
             self._release_future(future)
+        if cancelled:
+            from bioimageflow.engine import WorkflowCancelledError
+
+            raise WorkflowCancelledError(
+                "Workflow cancelled during Parsl executor preflight."
+            )
         if failure is not None:
             raise failure
         self._preflight_complete = True
@@ -522,6 +554,26 @@ class ParslEngine:
                 )
             with self._futures_lock:
                 self._submitted_futures.add(future)
+
+    def _submit_future(self, submit: Callable[[], Any]) -> Any:
+        """Submit and register one future atomically against close/cancel."""
+        with self._lifecycle_condition:
+            if not self._execution_active:
+                raise RuntimeError(
+                    "Parsl futures may be submitted only during execution."
+                )
+            if self._closed or self._cancel_requested or self._stop_requested:
+                raise RuntimeError(
+                    "Cannot submit a Parsl future after stop, cancellation, or close."
+                )
+            future = submit()
+            if not callable(getattr(future, "result", None)):
+                raise TypeError("A submitted Parsl future must provide result().")
+            if not callable(getattr(future, "cancel", None)):
+                raise TypeError("A submitted Parsl future must provide cancel().")
+            with self._futures_lock:
+                self._submitted_futures.add(future)
+            return future
 
     def _release_future(self, future: Any) -> None:
         """Release one future only after its terminal state was observed."""
@@ -627,9 +679,11 @@ class ParslEngine:
             )
             self._prepared_execution = prepared
             needs_dfk = prepared is None or prepared.needs_dfk
+            self._raise_if_cancelled(workflow)
             if needs_dfk and prepared is not None:
                 self._validate_runtime_configuration()
             dfk = self._start_attached_execution() if needs_dfk else None
+            self._raise_if_cancelled(workflow)
             return self._execute_attached(targets, workflow, dfk)
         finally:
             self._finish_execution()
@@ -640,7 +694,7 @@ class ParslEngine:
         workflow: Any,
         dfk: Any,
     ) -> Any:
-        from .backend import ParslBackend
+        from .backend import ParslBackend, PlannedCacheBackend
 
         prepared = self._prepared_execution
         if prepared is None:
@@ -656,6 +710,8 @@ class ParslEngine:
                 task_policy=self._task_policy,
                 sequential=self.effective_execution(workflow) == "sequential",
             )
+        else:
+            prepared.scheduler._backend = PlannedCacheBackend()
         return prepared.scheduler.execute(list(targets), workflow)
 
     def execute_steps(
@@ -672,7 +728,7 @@ class ParslEngine:
         workflow: Any,
         dfk: Any,
     ) -> Generator[Any, None, None]:
-        from .backend import ParslBackend
+        from .backend import ParslBackend, PlannedCacheBackend
 
         prepared = self._prepared_execution
         if prepared is None:
@@ -688,6 +744,8 @@ class ParslEngine:
                 task_policy=self._task_policy,
                 sequential=self.effective_execution(workflow) == "sequential",
             )
+        else:
+            prepared.scheduler._backend = PlannedCacheBackend()
         steps = prepared.scheduler.execute_steps(list(targets), workflow)
         try:
             yield from steps
@@ -706,12 +764,12 @@ class ParslEngine:
                 self._execution_thread_id == threading.get_ident()
             )
         self._request_submitted_cancellation()
-        if execution_active and not called_from_execution:
+        if execution_active and execution_reserved:
+            self._release_execution_reservation()
+        elif execution_active and not called_from_execution:
             with self._lifecycle_condition:
                 while self._execution_active:
                     self._lifecycle_condition.wait()
-        elif execution_active and execution_reserved:
-            self._release_execution_reservation()
         elif execution_active:
             return
         self._drain_submitted_futures()

@@ -127,3 +127,24 @@ class ParslProcessIdentity(ProcessingTool):
             process_id=os.getpid(),
             instance_id=id(self),
         )
+
+
+class ParslEmptyBatch(ProcessingTool):
+    """Run once for an empty aligned input using the synthetic anchor."""
+
+    environment = PARSL_TEST_ENV
+    run_empty_batch = True
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        count: int
+
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+    ) -> list[list["ParslEmptyBatch.Outputs"]]:
+        if len(arguments_list) != 1:
+            raise ValueError("empty batch must receive one synthetic row")
+        return [[self.Outputs(count=0)]]

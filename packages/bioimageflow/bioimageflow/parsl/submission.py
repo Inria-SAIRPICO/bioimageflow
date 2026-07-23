@@ -152,17 +152,24 @@ class BoundedParslCollector:
         node_ordinal: int,
         executor_label: str,
         cancel_requested: Callable[[], bool],
+        stop_requested: Callable[[], bool] = lambda: False,
         register_future: Callable[
             [ParslFuture, ProcessingTaskV1], None
         ] = lambda _future, _task: None,
+        task_submitted: Callable[
+            [ProcessingTaskV1], None
+        ] = lambda _task: None,
+        task_terminal: Callable[
+            [ProcessingTaskV1, str, BaseException | None], None
+        ] = lambda _task, _status, _error: None,
         release_future: Callable[
             [ParslFuture, ProcessingTaskV1], None
         ] = lambda _future, _task: None,
         row_complete: Callable[[int, str], None] = lambda _position, _index: None,
         failure_observed: Callable[
-            [ParslTaskError], None
+            [BaseException], None
         ] = lambda _failure: None,
-        cancellation_error: Callable[
+        stopped_error: Callable[
             [], BaseException | None
         ] = lambda: None,
     ) -> None:
@@ -173,11 +180,14 @@ class BoundedParslCollector:
         self._node_ordinal = node_ordinal
         self._executor_label = executor_label
         self._cancel_requested = cancel_requested
+        self._stop_requested = stop_requested
         self._register_future = register_future
+        self._task_submitted = task_submitted
+        self._task_terminal = task_terminal
         self._release_future = release_future
         self._row_complete = row_complete
         self._failure_observed = failure_observed
-        self._cancellation_error = cancellation_error
+        self._stopped_error = stopped_error
 
     def run(self, tasks: Iterable[ProcessingTaskV1]) -> tuple[RowResultV1, ...]:
         """Submit lazily, accept by position, and drain every submitted future."""
@@ -187,6 +197,7 @@ class BoundedParslCollector:
         failures: list[ParslTaskError] = []
         stopped = False
         cancelled = False
+        sibling_stopped = False
         pre_submission_error: BaseException | None = None
         next_row_complete = 0
 
@@ -198,12 +209,25 @@ class BoundedParslCollector:
                     future.cancel()
 
         def submit_next() -> bool:
-            nonlocal cancelled, pre_submission_error
+            nonlocal cancelled, pre_submission_error, sibling_stopped
             try:
                 task = next(task_iterator)
             except StopIteration:
                 return False
             except BaseException as exc:
+                if not hasattr(exc, "failure_order_key"):
+                    positions = tuple(row.position for row in task.rows)
+                    first_position = (
+                        -1
+                        if task.mode == "process_batch"
+                        else positions[0]
+                    )
+                    exc.failure_order_key = (  # type: ignore[attr-defined]
+                        self._node_ordinal,
+                        first_position,
+                        task.task_id,
+                    )
+                self._failure_observed(exc)
                 pre_submission_error = exc
                 stop_and_cancel()
                 return False
@@ -211,11 +235,16 @@ class BoundedParslCollector:
                 cancelled = True
                 stop_and_cancel()
                 return False
+            if self._stop_requested():
+                sibling_stopped = True
+                stop_and_cancel()
+                return False
             try:
                 validate_task_runtime_values(task)
                 future = self._submit(task)
                 active[future] = task
                 self._register_future(future, task)
+                self._task_submitted(task)
             except BaseException as exc:
                 pre_submission_error = exc
                 stop_and_cancel()
@@ -230,6 +259,9 @@ class BoundedParslCollector:
             if self._cancel_requested() and not cancelled:
                 cancelled = True
                 stop_and_cancel()
+            elif self._stop_requested() and not stopped:
+                sibling_stopped = True
+                stop_and_cancel()
             completed = {future for future in active if future.done()}
             if not completed:
                 time.sleep(0.01)
@@ -238,9 +270,12 @@ class BoundedParslCollector:
                 continue
             for future in completed:
                 task = active[future]
+                terminal_status = "failed"
+                terminal_error: BaseException | None = None
                 try:
                     raw_result = future.result()
-                    if cancelled or failures:
+                    if cancelled or sibling_stopped or failures:
+                        terminal_status = "succeeded"
                         continue
                     result = (
                         raw_result
@@ -248,6 +283,7 @@ class BoundedParslCollector:
                         else decode_processing_result(raw_result)
                     )
                     validate_processing_result(task, result)
+                    terminal_status = "succeeded"
                     for row in result.rows:
                         if row.position in accepted:
                             raise ValueError(
@@ -260,21 +296,41 @@ class BoundedParslCollector:
                             self._row_complete(row.position, row.row_index)
                             next_row_complete += 1
                 except concurrent.futures.CancelledError:
+                    terminal_status = "cancelled"
                     if (
                         not cancelled
+                        and not sibling_stopped
                         and not failures
                         and pre_submission_error is None
                     ):
                         cancelled = True
                         stop_and_cancel()
                 except BaseException as exc:
+                    terminal_error = exc
+                    if cancelled:
+                        continue
                     failure = self._task_error(task, exc)
                     failures.append(failure)
                     self._failure_observed(failure)
                     stop_and_cancel()
                 finally:
-                    self._release_future(future, task)
-                    del active[future]
+                    try:
+                        self._task_terminal(
+                            task,
+                            terminal_status,
+                            terminal_error,
+                        )
+                    except BaseException as exc:
+                        if (
+                            pre_submission_error is None
+                            and not failures
+                            and not cancelled
+                        ):
+                            pre_submission_error = exc
+                        stop_and_cancel()
+                    finally:
+                        self._release_future(future, task)
+                        del active[future]
 
             while not stopped and len(active) < self._max_in_flight:
                 if not submit_next():
@@ -288,10 +344,12 @@ class BoundedParslCollector:
         if pre_submission_error is not None:
             raise pre_submission_error
         if cancelled or self._cancel_requested():
-            cancellation_error = self._cancellation_error()
-            if cancellation_error is not None:
-                raise cancellation_error
             raise WorkflowCancelledError("Workflow cancelled during Parsl execution.")
+        if sibling_stopped or self._stop_requested():
+            stopped_error = self._stopped_error()
+            if stopped_error is not None:
+                raise stopped_error
+            raise RuntimeError("Parsl submission stopped after a sibling task failure.")
         return tuple(accepted[position] for position in sorted(accepted))
 
     def _task_error(

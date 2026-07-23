@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -174,6 +175,7 @@ def prepare_parsl_execution(
     shared_runtime_root: Path | None,
     storage_mode: str,
     sequential: bool,
+    cancellation_requested: Callable[[], bool],
 ) -> ParslExecutionPlan:
     """Compile, plan, route, and materialize before DFK acquisition."""
     validation_errors = workflow.validate(dev_mode=getattr(workflow, "_dev_mode", False))
@@ -182,7 +184,10 @@ def prepare_parsl_execution(
             "Workflow validation failed before Parsl startup: "
             + "; ".join(str(error) for error in validation_errors)
         )
-    scheduler = DefaultEngine(force_sequential=sequential)
+    scheduler = DefaultEngine(
+        force_sequential=sequential,
+        cancellation_requested=cancellation_requested,
+    )
     order, names, plans = _reachable_plan(scheduler, targets, workflow)
     plans_by_name = {plan.node_name: plan for plan in plans}
     requirements: list[WorkerRequirement] = []

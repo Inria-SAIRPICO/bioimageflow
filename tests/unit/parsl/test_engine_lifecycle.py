@@ -231,6 +231,23 @@ def test_steps_reserve_engine_before_first_iteration_and_close_cleanly() -> None
     assert engine.dfk is None
 
 
+def test_close_releases_unconsumed_reservation_across_threads() -> None:
+    engine = _Harness(
+        parsl_config=object(),
+        executor_bindings={"cpu": _binding()},
+    )
+    engine._reserve_execution()
+
+    thread = Thread(target=engine.close)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert _FakeDFK.instances == []
+    with pytest.raises(RuntimeError, match="closed"):
+        engine.execute([], object())
+
+
 def test_close_cancels_and_drains_only_registered_external_work() -> None:
     entered = Event()
     submitted: Future[None] = Future()
@@ -270,6 +287,154 @@ def test_close_cancels_and_drains_only_registered_external_work() -> None:
     assert len(failures) == 1
     assert isinstance(failures[0], CancelledError)
     assert dfk.cleanup_calls == 0
+
+
+def test_two_engines_sharing_external_dfk_own_only_their_futures() -> None:
+    dfk = _FakeDFK(config=object())
+    first_future: Future[None] = Future()
+    second_future: Future[None] = Future()
+    first_entered = Event()
+    second_entered = Event()
+    failures: list[BaseException] = []
+
+    class SharedHarness(_Harness):
+        def __init__(self, future: Future[None], entered: Event) -> None:
+            super().__init__(
+                dfk=dfk,
+                executor_bindings={"cpu": _binding()},
+                resource_lifetime="external",
+            )
+            self.future = future
+            self.entered = entered
+
+        def _execute_attached(self, targets: Any, workflow: Any, dfk: Any) -> Any:
+            del targets, workflow, dfk
+            self._register_future(self.future)
+            self.entered.set()
+            return self.future.result()
+
+    first = SharedHarness(first_future, first_entered)
+    second = SharedHarness(second_future, second_entered)
+
+    def execute(engine: ParslEngine) -> None:
+        try:
+            engine.execute([], object())
+        except BaseException as exc:
+            failures.append(exc)
+
+    first_thread = Thread(target=execute, args=(first,))
+    second_thread = Thread(target=execute, args=(second,))
+    first_thread.start()
+    second_thread.start()
+    assert first_entered.wait(timeout=5)
+    assert second_entered.wait(timeout=5)
+
+    first.close()
+    assert first_future.cancelled()
+    assert not second_future.cancelled()
+    second_future.set_result(None)
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+    second.close()
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert len(failures) == 1
+    assert isinstance(failures[0], CancelledError)
+    assert dfk.cleanup_calls == 0
+
+
+def test_close_cannot_overtake_atomic_submission_registration() -> None:
+    submission_entered = Event()
+    release_submission = Event()
+    submitted: Future[None] = Future()
+    failures: list[BaseException] = []
+
+    class SubmitHarness(_Harness):
+        def _execute_attached(self, targets: Any, workflow: Any, dfk: Any) -> Any:
+            del targets, workflow, dfk
+
+            def submit() -> Future[None]:
+                submission_entered.set()
+                assert release_submission.wait(timeout=5)
+                return submitted
+
+            future = self._submit_future(submit)
+            return future.result()
+
+    engine = SubmitHarness(
+        parsl_config=object(),
+        executor_bindings={"cpu": _binding()},
+        resource_lifetime="engine",
+    )
+
+    def execute() -> None:
+        try:
+            engine.execute([], object())
+        except BaseException as exc:
+            failures.append(exc)
+
+    execution_thread = Thread(target=execute)
+    execution_thread.start()
+    assert submission_entered.wait(timeout=5)
+    close_thread = Thread(target=engine.close)
+    close_thread.start()
+    assert close_thread.is_alive()
+
+    release_submission.set()
+    execution_thread.join(timeout=5)
+    close_thread.join(timeout=5)
+
+    assert not execution_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert submitted.cancelled()
+    assert len(failures) == 1
+    assert isinstance(failures[0], CancelledError)
+    assert _FakeDFK.instances[0].cleanup_calls == 1
+
+
+def test_close_waits_for_noncancellable_writer_before_owned_cleanup() -> None:
+    writer_registered = Event()
+    submitted: Future[None] = Future()
+    assert submitted.set_running_or_notify_cancel()
+    failures: list[BaseException] = []
+
+    class WriterHarness(_Harness):
+        def _execute_attached(self, targets: Any, workflow: Any, dfk: Any) -> Any:
+            del targets, workflow, dfk
+            self._register_future(submitted)
+            writer_registered.set()
+            return submitted.result()
+
+    engine = WriterHarness(
+        parsl_config=object(),
+        executor_bindings={"cpu": _binding()},
+        resource_lifetime="engine",
+    )
+
+    def execute() -> None:
+        try:
+            engine.execute([], object())
+        except BaseException as exc:
+            failures.append(exc)
+
+    execution_thread = Thread(target=execute)
+    execution_thread.start()
+    assert writer_registered.wait(timeout=5)
+    dfk = _FakeDFK.instances[0]
+    close_thread = Thread(target=engine.close)
+    close_thread.start()
+
+    assert close_thread.is_alive()
+    assert dfk.cleanup_calls == 0
+    submitted.set_result(None)
+    execution_thread.join(timeout=5)
+    close_thread.join(timeout=5)
+
+    assert not execution_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert failures == []
+    assert dfk.cleanup_calls == 1
 
 
 def test_effective_execution_uses_root_policy_only_for_workflow_mode() -> None:

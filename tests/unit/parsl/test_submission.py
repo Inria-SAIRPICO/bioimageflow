@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Iterator
+from threading import Event, Thread
 
 import pytest
 
@@ -344,3 +345,137 @@ def test_late_runtime_validation_failure_cancels_and_drains_prior_future() -> No
     assert submitted == ["task_0000000000000000"]
     assert future.cancelled()
     assert released == ["task_0000000000000000"]
+
+
+def test_cancellation_stops_partial_window_and_drains_running_futures() -> None:
+    tasks = list(
+        iter_row_tasks(
+            node_name="Tool_1",
+            invocation_id=INVOCATION_ID,
+            cache_attempt_id=ATTEMPT_ID,
+            tool=ORIGIN,
+            rows=_rows(5),
+            row_chunk_size=1,
+        )
+    )
+    submitted: list[tuple[object, concurrent.futures.Future]] = []
+    window_ready = Event()
+    cancelled = Event()
+    released: list[str] = []
+    failures: list[BaseException] = []
+
+    def submit(task):
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        assert future.set_running_or_notify_cancel()
+        submitted.append((task, future))
+        if len(submitted) == 2:
+            window_ready.set()
+        return future
+
+    def collect() -> None:
+        try:
+            BoundedParslCollector(
+                submit=submit,
+                max_in_flight=2,
+                node_ordinal=0,
+                executor_label="cpu",
+                cancel_requested=cancelled.is_set,
+                release_future=lambda _future, task: released.append(task.task_id),
+            ).run(tasks)
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = Thread(target=collect)
+    thread.start()
+    assert window_ready.wait(timeout=5)
+    cancelled.set()
+    for task, future in submitted:
+        future.set_result(_result(task))
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(submitted) == 2
+    assert len(released) == 2
+    assert len(failures) == 1
+    assert isinstance(failures[0], WorkflowCancelledError)
+
+
+@pytest.mark.parametrize("first_failure", ["high", "low"])
+def test_sibling_collectors_report_late_failures_for_deterministic_selection(
+    first_failure: str,
+) -> None:
+    low_task = next(
+        iter_row_tasks(
+            node_name="Low_1",
+            invocation_id=INVOCATION_ID,
+            cache_attempt_id=ATTEMPT_ID,
+            tool=ORIGIN,
+            rows=_rows(1),
+            row_chunk_size=1,
+        )
+    )
+    high_task = next(
+        iter_row_tasks(
+            node_name="High_1",
+            invocation_id=INVOCATION_ID,
+            cache_attempt_id=ATTEMPT_ID,
+            tool=ORIGIN,
+            rows=_rows(1),
+            row_chunk_size=1,
+        )
+    )
+    low_future: concurrent.futures.Future = concurrent.futures.Future()
+    high_future: concurrent.futures.Future = concurrent.futures.Future()
+    assert low_future.set_running_or_notify_cancel()
+    assert high_future.set_running_or_notify_cancel()
+    stop = Event()
+    observed: list[ParslTaskError] = []
+    failures: list[BaseException] = []
+
+    def report(failure: ParslTaskError) -> None:
+        observed.append(failure)
+        stop.set()
+
+    def collect(task, future, ordinal: int) -> None:
+        try:
+            BoundedParslCollector(
+                submit=lambda _task: future,
+                max_in_flight=1,
+                node_ordinal=ordinal,
+                executor_label="cpu",
+                cancel_requested=lambda: False,
+                stop_requested=stop.is_set,
+                failure_observed=report,
+                stopped_error=lambda: min(
+                    observed,
+                    key=lambda failure: failure.failure_order_key,
+                ),
+            ).run([task])
+        except BaseException as exc:
+            failures.append(exc)
+
+    low_thread = Thread(target=collect, args=(low_task, low_future, 0))
+    high_thread = Thread(target=collect, args=(high_task, high_future, 1))
+    low_thread.start()
+    high_thread.start()
+    first_future = high_future if first_failure == "high" else low_future
+    second_future = low_future if first_failure == "high" else high_future
+    first_future.set_exception(RuntimeError(f"{first_failure} failed first"))
+    assert stop.wait(timeout=5)
+    second_future.set_exception(RuntimeError("sibling failed later"))
+    low_thread.join(timeout=5)
+    high_thread.join(timeout=5)
+
+    assert not low_thread.is_alive()
+    assert not high_thread.is_alive()
+    assert sorted(
+        failure.failure_order_key for failure in observed
+    ) == [
+        (0, 0, "task_0000000000000000"),
+        (1, 0, "task_0000000000000000"),
+    ]
+    primary = min(
+        (error for error in failures if isinstance(error, ParslTaskError)),
+        key=lambda failure: failure.failure_order_key,
+    )
+    assert primary.scoped_node_name == "Low_1"

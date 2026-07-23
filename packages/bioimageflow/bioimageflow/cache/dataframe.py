@@ -10,9 +10,7 @@ from .common import (
     canonical_dataframe_identity,
     json,
     make_record_id,
-    os,
     pd,
-    shutil,
 )
 from .identity import (
     dataframe_result_key,
@@ -23,6 +21,7 @@ from .metadata import (
     _write_dataframe_result_metadata,
     cache_load,
 )
+from .publication import create_record_candidate, install_record_candidate
 
 
 def _dataframe_record_path(storage: Storage, result_key: str, record_id: str) -> Path:
@@ -55,6 +54,8 @@ def dataframe_publish(
     df: pd.DataFrame,
     *,
     run_id: str,
+    engine: str,
+    tool_identity: str,
     column_kinds: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Publish a DataFrameTool result through the immutable record model."""
@@ -64,6 +65,14 @@ def dataframe_publish(
     result_dir = storage.result_dir(result_key)
     staging_dir = result_dir / "attempts" / attempt_id / "staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
+    storage.start_cache_attempt(
+        result_key,
+        attempt_id,
+        run_id=run_id,
+        node_key=node_name,
+        tool_identity=tool_identity,
+        engine=engine,
+    )
     staging_parquet = staging_dir / "dataframe.parquet"
     _write_canonical_parquet(df, staging_parquet)
     logical_schema, logical_digest = canonical_dataframe_identity(
@@ -84,35 +93,13 @@ def dataframe_publish(
         "outputs": [],
     }
     record_id = make_record_id(manifest_material)
-    records_dir = result_dir / "records"
-    if records_dir.exists() or records_dir.is_symlink():
-        try:
-            records_dir.resolve().relative_to(result_dir.resolve())
-        except ValueError as exc:
-            raise CacheCorruptionError(
-                "Records directory escapes result directory."
-            ) from exc
-        if records_dir.is_symlink():
-            raise CacheCorruptionError("Records directory must not be a symlink.")
-    else:
-        records_dir.mkdir(parents=True)
-    record_dir = records_dir / record_id
-    if record_dir.exists() or record_dir.is_symlink():
-        try:
-            record_dir.resolve().relative_to((result_dir / "records").resolve())
-        except ValueError as exc:
-            raise CacheCorruptionError(
-                "Record directory escapes records directory."
-            ) from exc
-        if record_dir.is_symlink():
-            raise CacheCorruptionError("Record directory must not be a symlink.")
-    else:
-        record_dir.mkdir(parents=True)
-    record_parquet = record_dir / "dataframe.parquet"
-    if not record_parquet.exists():
-        tmp_parquet = record_dir / f".dataframe.{attempt_id}.tmp"
-        shutil.copy2(staging_parquet, tmp_parquet)
-        os.replace(tmp_parquet, record_parquet)
+    candidate = create_record_candidate(
+        storage,
+        result_key,
+        attempt_id,
+        record_id,
+    )
+    (candidate / "dataframe.parquet").write_bytes(staging_parquet.read_bytes())
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
@@ -121,13 +108,10 @@ def dataframe_publish(
         dataframe_logical_schema=logical_schema,
         outputs=[],
     )
-    manifest_path = record_dir / "manifest.json"
-    if not manifest_path.exists():
-        tmp_manifest = record_dir / f".manifest.{attempt_id}.tmp"
-        tmp_manifest.write_text(
-            json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
-        )
-        os.replace(tmp_manifest, manifest_path)
+    (candidate / "manifest.json").write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
+    )
+    install_record_candidate(storage, result_key, record_id, candidate)
     _write_dataframe_result_metadata(
         result_dir,
         node_name=node_name,
@@ -142,8 +126,14 @@ def dataframe_publish(
         run_id=run_id,
     )
     try:
-        return cache_load(
+        selected = cache_load(
             _dataframe_record_path(storage, result_key, pointer.record_id)
         )
     except Exception as exc:
         raise CacheCorruptionError("Published dataframe is unreadable.") from exc
+    storage.finish_cache_attempt(
+        result_key,
+        attempt_id,
+        status="succeeded",
+    )
+    return selected

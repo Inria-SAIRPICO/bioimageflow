@@ -11,7 +11,9 @@ import json
 
 import os
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pandas as pd
 
@@ -69,6 +71,47 @@ def test_current_pointer_guarded_update_first_valid_policy(tmp_path: Path) -> No
     assert selected_again.record_id == record_a
     conflicts = list((result_dir / "conflicts").glob("*.json"))
     assert len(conflicts) == 1
+
+
+def test_concurrent_first_valid_selection_returns_one_selected_record(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "concurrent-segment"})
+    record_a = _write_record(storage, result_key)
+    record_b = _write_record(storage, result_key, dataframe_content=b"other-parquet")
+    barrier = Barrier(2)
+
+    def select(record_id: str, suffix: str) -> CurrentPointer:
+        barrier.wait(timeout=5)
+        return storage.select_current_record(
+            result_key,
+            candidate_record_id=record_id,
+            attempt_id=f"attempt_{suffix}",
+            run_id=f"run_{suffix}",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        selections = [
+            future.result(timeout=5)
+            for future in (
+                pool.submit(select, record_a, "a"),
+                pool.submit(select, record_b, "b"),
+            )
+        ]
+
+    selected_ids = {selection.record_id for selection in selections}
+    assert len(selected_ids) == 1
+    assert storage.load_current(result_key).record_id in {record_a, record_b}
+    conflicts = list(
+        (storage.result_dir(result_key) / "conflicts").glob("*.json")
+    )
+    assert len(conflicts) == 1
+    conflict = json.loads(conflicts[0].read_text())
+    assert {
+        conflict["current_record_id"],
+        conflict["candidate_record_id"],
+    } == {record_a, record_b}
 
 
 def test_select_current_record_rejects_unsafe_record_id(tmp_path: Path) -> None:

@@ -25,9 +25,9 @@ from .metadata import (
 )
 from .processing_lookup import (
     _ensure_record_child_dir,
-    _ensure_record_dir,
     _rehydrate_processing_assets,
 )
+from .publication import create_record_candidate, install_record_candidate
 from .assets import (
     _processing_manifest_entries_and_dataframe,
 )
@@ -97,12 +97,17 @@ def processing_publish(
         result_key=result_key,
         attempt_id=attempt_id,
     )
-    record_dir = _ensure_record_dir(result_dir, record_id)
+    candidate = create_record_candidate(
+        storage,
+        result_key,
+        attempt_id,
+        record_id,
+    )
     for relative, source in owned_assets.items():
         parts = validate_relative_posix_path(relative).split("/")
         if parts[0] != "assets":
             raise CacheCorruptionError("Owned asset path must be under assets/.")
-        destination_parent = record_dir
+        destination_parent = candidate
         for part in parts[:-1]:
             destination_parent = _ensure_record_child_dir(
                 destination_parent,
@@ -110,29 +115,11 @@ def processing_publish(
                 "Record asset directory",
             )
         destination = destination_parent / parts[-1]
-        if destination.exists() or destination.is_symlink():
-            try:
-                destination.resolve().relative_to(record_dir.resolve())
-            except ValueError as exc:
-                raise CacheCorruptionError(
-                    "Owned asset path escapes record directory."
-                ) from exc
-            if destination.is_symlink():
-                raise CacheCorruptionError("Owned asset must not be a symlink.")
-            if source.is_dir() != destination.is_dir():
-                raise CacheCorruptionError("Owned asset path has incompatible type.")
-            continue
-        tmp_asset = destination_parent / f".{destination.name}.{attempt_id}.tmp"
         if source.is_dir():
-            shutil.copytree(source, tmp_asset)
+            shutil.copytree(source, destination)
         else:
-            shutil.copy2(source, tmp_asset)
-        os.replace(tmp_asset, destination)
-    record_parquet = record_dir / "dataframe.parquet"
-    if not record_parquet.exists():
-        tmp_parquet = record_dir / f".dataframe.{attempt_id}.tmp"
-        shutil.copy2(staging_parquet, tmp_parquet)
-        os.replace(tmp_parquet, record_parquet)
+            shutil.copy2(source, destination)
+    shutil.copy2(staging_parquet, candidate / "dataframe.parquet")
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
@@ -141,13 +128,10 @@ def processing_publish(
         dataframe_logical_schema=logical_schema,
         outputs=outputs,
     )
-    manifest_path = record_dir / "manifest.json"
-    if not manifest_path.exists():
-        tmp_manifest = record_dir / f".manifest.{attempt_id}.tmp"
-        tmp_manifest.write_text(
-            json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
-        )
-        os.replace(tmp_manifest, manifest_path)
+    (candidate / "manifest.json").write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
+    )
+    install_record_candidate(storage, result_key, record_id, candidate)
     pointer = storage.select_current_record(
         result_key,
         candidate_record_id=record_id,
