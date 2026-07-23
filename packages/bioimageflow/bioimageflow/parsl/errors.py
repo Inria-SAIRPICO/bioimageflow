@@ -37,6 +37,18 @@ class ParslTaskError(WorkerTaskError):
         self.original_type = original_type
         self.original_message = original_message
         self.remote_traceback = remote_traceback
+        first_position = (
+            -1
+            if row_position is None
+            else row_position[0]
+            if isinstance(row_position, tuple)
+            else row_position
+        )
+        self.failure_order_key: tuple[int, int, str] = (
+            0,
+            first_position,
+            task_id,
+        )
 
         if message is None:
             correlation = (
