@@ -208,28 +208,41 @@ class BoundedParslCollector:
                 if not future.done():
                     future.cancel()
 
+        def report_pre_submission_error(
+            error: BaseException,
+            task: ProcessingTaskV1 | None = None,
+        ) -> None:
+            nonlocal pre_submission_error
+            if not hasattr(error, "failure_order_key"):
+                positions = (
+                    tuple(row.position for row in task.rows)
+                    if task is not None
+                    else ()
+                )
+                first_position = (
+                    -1
+                    if task is None
+                    or task.mode == "process_batch"
+                    or not positions
+                    else positions[0]
+                )
+                error.failure_order_key = (  # type: ignore[attr-defined]
+                    self._node_ordinal,
+                    first_position,
+                    "" if task is None else task.task_id,
+                )
+            self._failure_observed(error)
+            pre_submission_error = error
+            stop_and_cancel()
+
         def submit_next() -> bool:
-            nonlocal cancelled, pre_submission_error, sibling_stopped
+            nonlocal cancelled, sibling_stopped
             try:
                 task = next(task_iterator)
             except StopIteration:
                 return False
             except BaseException as exc:
-                if not hasattr(exc, "failure_order_key"):
-                    positions = tuple(row.position for row in task.rows)
-                    first_position = (
-                        -1
-                        if task.mode == "process_batch"
-                        else positions[0]
-                    )
-                    exc.failure_order_key = (  # type: ignore[attr-defined]
-                        self._node_ordinal,
-                        first_position,
-                        task.task_id,
-                    )
-                self._failure_observed(exc)
-                pre_submission_error = exc
-                stop_and_cancel()
+                report_pre_submission_error(exc)
                 return False
             if self._cancel_requested():
                 cancelled = True
@@ -246,8 +259,7 @@ class BoundedParslCollector:
                 self._register_future(future, task)
                 self._task_submitted(task)
             except BaseException as exc:
-                pre_submission_error = exc
-                stop_and_cancel()
+                report_pre_submission_error(exc, task)
                 return False
             return True
 
