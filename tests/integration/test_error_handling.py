@@ -28,7 +28,12 @@ from bioimageflow_core import (
     Semantic,
 )
 
-from .conftest import FileLoader, StubSegmenter, StubStats, imageio_env
+from tests.testkit.integration_tools import (
+    FileLoader,
+    StubSegmenter,
+    StubStats,
+    imageio_env,
+)
 
 
 class TestBindingError:
@@ -304,7 +309,7 @@ class TestDeferredColumnValidation:
         segment = StubSegmenter()
 
         # CsvLoader has no Outputs declaration — column validation is deferred
-        from .conftest import CsvLoader
+        from tests.testkit.integration_tools import CsvLoader
         csv_load = CsvLoader()
 
         with pytest.raises(Exception, match="column|not found|ColumnNotFound|KeyError"):

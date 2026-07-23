@@ -214,9 +214,9 @@ The exact internal split may change during refactoring, but ownership should rem
 | `bioimageflow/execution.py` or an equivalent focused module | Public `WorkflowExecutionContext` and finalization/cancellation state. |
 | `bioimageflow/parsl_types.py` | Strict public task-policy, binding, attestation, capability, and slot-capacity value types without importing Parsl. |
 | `bioimageflow/parsl_engine.py` | Lazy Parsl import, attached engine lifecycle, startup, preflight, routing, app construction, dispatch, collection, drain, and Parsl error mapping. |
-| `bioimageflow/engine.py` | Backend-neutral lifecycle/startup/prepare/dispatch hooks, compiled scheduling, deterministic failures, shared validation calls, and optional cache identity. |
-| `bioimageflow/workflow.py` | Engine preference/factory, active run context, root-wrapper propagation, effective engine metadata, and public compute signatures. |
-| `bioimageflow/cache.py` and `bioimageflow/storage.py` | Canonical logical dataframe identity, active-run provenance, optional publication, transient path helpers, and canonical v1 publication only. |
+| `bioimageflow/engine/` and `bioimageflow/backends.py` | Backend-neutral lifecycle/startup/prepare/dispatch hooks, compiled scheduling, deterministic failures, shared validation calls, optional cache identity, and the processing-backend seam. |
+| `bioimageflow/workflow/` | Engine preference/factory, active run context, root-wrapper propagation, effective engine metadata, and public compute signatures. |
+| `bioimageflow/cache/` and `bioimageflow/storage/` | Canonical logical dataframe identity, active-run provenance, optional publication, transient path helpers, and canonical v1 publication only. |
 | `bioimageflow/tool_origin.py` or an equivalent focused module | Orchestrator-side origin construction, shared-root validation, and archive-source materialization inputs. |
 | `bioimageflow/env_manager.py` | Reuse of existing loader-token discovery without making Wetlands a Parsl provisioner. |
 | `bioimageflow-core/bioimageflow_core/worker_protocol.py` or equivalent | Python 3.9-safe task/result/origin envelopes, strict decoding, canonical origin identity, preflight request/result values, and top-level worker calls. |
@@ -956,13 +956,13 @@ Extend existing coverage in:
 - `tests/unit/test_core_python39_compat.py`,
 - `tests/unit/test_core_package_metadata.py`,
 - `tests/unit/test_package_artifacts.py`,
-- `tests/unit/test_storage.py`,
+- `tests/unit/storage/`,
 - `tests/unit/test_cache.py`,
-- `tests/unit/test_tool_loader.py`,
+- `tests/unit/tool_loader/`,
 - `tests/unit/test_workflow_clean_api.py`,
 - `tests/integration/test_engine_injection.py`,
 - `tests/integration/test_compute_steps.py`,
-- `tests/integration/test_runtime_cache.py`,
+- `tests/integration/runtime_cache/`,
 - `tests/integration/test_unified_workflows.py`,
 - `tests/integration/test_batch_processing.py`,
 - `tests/integration/test_progress_monitoring.py`,

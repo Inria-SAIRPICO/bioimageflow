@@ -25,13 +25,13 @@ Fast tests should:
 - cover public tool schemas, core mechanisms, successful execution paths, output contracts, and important failure modes;
 - write outputs only under pytest temporary directories.
 
-CI runs the required fast matrix with deterministic non-fast and complete/resource tiers excluded:
+CI runs the required fast selector with deterministic non-fast and complete/resource tiers excluded:
 
 ```bash
 uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 ```
 
-The GitHub Actions regular-test matrix runs that command on Python 3.10 and 3.12.
+GitHub Actions runs `tests/unit` and `tests/integration` as independent jobs on Python 3.10 and 3.12 so failures arrive sooner and can be rerun by concern.
 Python 3.11 runs the `compat` smoke selector on every pipeline, while full deterministic Python 3.11 validation is manually available before tagging and rerun by the release workflow as a required publication gate.
 
 Run the Python-version compatibility smoke selector with:
@@ -173,21 +173,26 @@ Use the smallest data that proves the behavior.
 ## Agent Workflow
 
 Agents should run relevant regular tests while developing.
-For a quick advisory mapping from changed paths to likely local tests, run:
+For the smallest edit-loop validation mapped to changed platform areas, run:
 
 ```bash
-git diff --name-only main...HEAD | uv run python scripts/affected_tests.py --stdin
+git diff --name-only | uv run python scripts/affected_tests.py --stdin
 ```
 
-The affected-test helper fails open to broader tests for unknown paths and does not replace CI gates.
-Use it to choose an initial local check, then run the required gates for the change before merge.
+For suite-level validation before committing, add `--stage precommit`.
+For the complete deterministic fast merge gate, add `--stage merge`.
+The ownership map is stored in `tests/ownership.toml`, unknown paths fail open to the full fast suite, and the helper never replaces CI gates.
+See :doc:`platform_development` for source ownership, module-size limits, dependency boundaries, and the backend seam.
 
 Before broad finalization, run:
 
 ```bash
 uv run ruff check .
 uv run pyright
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run python scripts/check_file_sizes.py
+uv run python scripts/check_import_boundaries.py
+uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py

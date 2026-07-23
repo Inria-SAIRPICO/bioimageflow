@@ -13,7 +13,12 @@ import pytest
 
 from bioimageflow import SourceToolUpstreamError, Workflow
 
-from .conftest import CsvLoader, FileLoader, StubSegmenter, StubSourceProcessingTool
+from tests.testkit.integration_tools import (
+    CsvLoader,
+    FileLoader,
+    StubSegmenter,
+    StubSourceProcessingTool,
+)
 
 
 class TestDataFrameToolSource:

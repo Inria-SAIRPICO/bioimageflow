@@ -170,12 +170,18 @@ The full test workflow is documented in `docs/source/reference/testing.md`.
 # Run quality checks
 uv run ruff check .
 uv run pyright
+uv run python scripts/check_file_sizes.py
+uv run python scripts/check_import_boundaries.py
 
-# Run regular tests
+# Print focused tests for the current edit
+git diff --name-only | uv run python scripts/affected_tests.py --stdin
+
+# Run the independent fast suites used by CI
+uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+
+# Run regular tests before broad finalization
 uv run pytest
-
-# Run the CI fast deterministic test tier
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 
 # Run deterministic acceptance tests
 uv run pytest -m "acceptance and not complete"

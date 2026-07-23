@@ -49,16 +49,18 @@ This split ensures that worker environments carry only the minimal footprint nee
 ```text
 bioimageflow-core (all environments)       bioimageflow (main process only)
 ├── types.py        # Type system          ├── dataframe_tool.py # DataFrameTool base class
-├── environment.py  # EnvironmentSpec      ├── registry.py     # Tool registry
-├── tool.py         # BaseTool,            ├── resolution.py   # Column resolver
-│                   #   ProcessingTool,    ├── template.py     # Output templating
-│                   #   IOModel, GUIMeta   ├── cache.py        # Hash & cache
-├── arguments.py    # Arguments            ├── storage.py      # File management
-├── io.py           # I/O dispatch (*)     ├── node.py         # Node, ColumnRef
-└── shm.py          # Shared memory (*)    ├── engine.py       # Execution engines
-                                           ├── validation.py   # Pydantic validation
-                                           ├── tool_loader.py  # Versioned package loading
-                                           └── workflow.py     # Workflow container
+├── environment.py  # EnvironmentSpec      ├── registry.py       # Tool registry
+├── tool.py         # BaseTool,            ├── resolution.py     # Column resolver
+│                   #   ProcessingTool,    ├── template.py       # Output templating
+│                   #   IOModel, GUIMeta   ├── cache/            # Hashing and publication
+├── arguments.py    # Arguments            ├── storage/          # Records and output views
+├── io.py           # I/O dispatch (*)     ├── node.py           # Node, ColumnRef
+└── shm.py          # Shared memory (*)    ├── engine/           # Scheduling and dispatch
+                                           ├── backends.py       # Processing backend seam
+                                           ├── events.py         # Progress event values
+                                           ├── validation/       # Pydantic validation
+                                           ├── tool_loader.py    # Versioned package loading
+                                           └── workflow/         # Workflow coordination
 
 (*) io.py and shm.py use NumPy at runtime and NumPy is a declared
     `bioimageflow-core` dependency so shared-memory APIs work in every
@@ -66,6 +68,9 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
+
+The orchestrator package façades preserve the established public import paths while implementation modules remain focused.
+The scheduler owns graph, cache, progress, and failure semantics; execution-specific processing dispatch is isolated behind the `ProcessingBackend` protocol so future distributed engines can reuse those semantics.
 
 Pydantic-based validation of `Inputs`/`Outputs` is performed exclusively in the orchestrator (`bioimageflow` package), which does declare `pydantic` as a dependency. Worker environments never run Pydantic validation.
 

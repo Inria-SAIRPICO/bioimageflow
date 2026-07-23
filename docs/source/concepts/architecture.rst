@@ -58,6 +58,13 @@ This package is the orchestrator. It:
 4. **Manages caching** via result keys and selected records
 5. **Stores results** as DataFrames and asset files
 
+The implementation keeps those responsibilities in focused ``engine/``,
+``workflow/``, ``storage/``, ``cache/``, and ``validation/`` packages.
+Their package ``__init__`` modules preserve the public import paths.
+Processing execution is delegated through a small backend contract; direct and
+Wetlands adapters share the same scheduler, and future distributed adapters
+must reuse that scheduler rather than duplicate graph and cache semantics.
+
 Key classes:
 
 - :class:`~bioimageflow.Workflow` --- entry point, context manager

@@ -28,7 +28,7 @@ from bioimageflow_core import (
 )
 from bioimageflow_core.types import ImageSpec
 
-from .conftest import FileLoader, StubSegmenter
+from tests.testkit.integration_tools import FileLoader, StubSegmenter
 
 
 class TestCacheHit:

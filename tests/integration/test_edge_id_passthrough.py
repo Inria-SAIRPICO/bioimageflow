@@ -6,7 +6,7 @@ import pytest
 
 from bioimageflow import Workflow
 
-from .conftest import FileLoader, FilterRows, StubSegmenter
+from tests.testkit.integration_tools import FileLoader, FilterRows, StubSegmenter
 
 
 def _column_graph(tmp_path: Path) -> dict:

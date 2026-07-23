@@ -11,7 +11,7 @@ import pandas as pd
 
 from bioimageflow import Workflow
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubStats
 
 
 class TestFanOut:

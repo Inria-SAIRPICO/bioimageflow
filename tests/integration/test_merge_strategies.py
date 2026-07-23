@@ -16,7 +16,7 @@ import pytest
 from bioimageflow import Workflow
 from bioimageflow_common_tools import Collect, Concat, CrossJoin, InnerJoin, JoinOnColumn
 
-from .conftest import (
+from tests.testkit.integration_tools import (
     ColumnRegex,
     CsvLoader,
     FileLoader,

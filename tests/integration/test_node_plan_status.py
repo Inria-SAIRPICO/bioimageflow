@@ -10,7 +10,7 @@ from pathlib import Path
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.storage import Storage
 
-from .conftest import FileLoader, StubSegmenter
+from tests.testkit.integration_tools import FileLoader, StubSegmenter
 
 
 class TestNodePlanStatusBasics:

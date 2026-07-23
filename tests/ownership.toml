@@ -1,0 +1,117 @@
+version = 1
+
+[[areas]]
+name = "engine"
+sources = [
+    "packages/bioimageflow/bioimageflow/backends.py",
+    "packages/bioimageflow/bioimageflow/engine",
+    "packages/bioimageflow/bioimageflow/env_manager.py",
+    "packages/bioimageflow/bioimageflow/events.py",
+]
+edit_tests = [
+    "tests/unit/test_env_manager_core_dependency.py",
+    "tests/unit/test_environment_lifecycle.py",
+    "tests/unit/worker_timeout",
+    "tests/integration/test_compute_steps.py",
+    "tests/integration/test_engine_injection.py",
+    "tests/integration/test_execution_context.py",
+    "tests/integration/test_progress_monitoring.py",
+    "tests/integration/test_resource_constraints.py",
+    "tests/integration/test_wetlands_task_api.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "workflow"
+sources = [
+    "packages/bioimageflow/bioimageflow/session.py",
+    "packages/bioimageflow/bioimageflow/workflow",
+]
+edit_tests = [
+    "tests/unit/test_workflow_clean_api.py",
+    "tests/integration/test_basic_workflow.py",
+    "tests/integration/test_branching.py",
+    "tests/integration/test_disable_nodes.py",
+    "tests/integration/test_unified_workflows.py",
+    "tests/integration/test_workflow_execution_semantics.py",
+    "tests/integration/test_workflow_factories.py",
+    "tests/integration/test_workflow_inspection.py",
+    "tests/integration/test_workflow_session.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "storage-cache"
+sources = [
+    "packages/bioimageflow/bioimageflow/cache",
+    "packages/bioimageflow/bioimageflow/storage",
+]
+edit_tests = [
+    "tests/unit/test_cache.py",
+    "tests/unit/storage",
+    "tests/integration/runtime_cache",
+    "tests/integration/test_caching.py",
+    "tests/integration/test_invalidate.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "validation"
+sources = ["packages/bioimageflow/bioimageflow/validation"]
+edit_tests = [
+    "tests/unit/test_constant_serialization.py",
+    "tests/unit/test_validation.py",
+    "tests/unit/validation_serialization",
+    "tests/integration/gui_validation",
+    "tests/integration/test_type_compatibility.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "graph-and-dataframes"
+sources = [
+    "packages/bioimageflow/bioimageflow/dataframe_tool.py",
+    "packages/bioimageflow/bioimageflow/node.py",
+    "packages/bioimageflow/bioimageflow/template.py",
+    "packages/bioimageflow/bioimageflow/workflow_node.py",
+]
+edit_tests = [
+    "tests/unit/test_arguments.py",
+    "tests/unit/test_template.py",
+    "tests/unit/test_tool.py",
+    "tests/integration/test_dataframe_tools.py",
+    "tests/integration/test_edge_id_passthrough.py",
+    "tests/integration/test_io_model.py",
+    "tests/integration/test_merge_strategies.py",
+    "tests/integration/test_output_templating.py",
+    "tests/integration/test_source_nodes.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "tool-loading"
+sources = [
+    "packages/bioimageflow/bioimageflow/registry.py",
+    "packages/bioimageflow/bioimageflow/tool_loader.py",
+]
+edit_tests = [
+    "tests/unit/test_tool_registry.py",
+    "tests/unit/tool_loader",
+    "tests/integration/test_tool_package_export.py",
+    "tests/integration/test_versioned_tools.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "platform-foundation"
+sources = [
+    "packages/bioimageflow/bioimageflow/__init__.py",
+    "packages/bioimageflow/bioimageflow/logging_config.py",
+    "packages/bioimageflow/bioimageflow/paths.py",
+]
+edit_tests = [
+    "tests/unit/test_logging_config.py",
+    "tests/unit/test_worker_safe_tool_imports.py",
+    "tests/integration/test_runtime_paths.py",
+]
+precommit_suites = ["unit", "integration"]

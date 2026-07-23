@@ -9,7 +9,7 @@ import pytest
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.storage import Storage
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubStats
 
 
 def _invalidated_node_names(invalidated) -> set[str]:

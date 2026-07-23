@@ -17,7 +17,11 @@ from bioimageflow import DataFrameTool
 from bioimageflow import Workflow
 from bioimageflow_core import Arguments, IOModel, ProcessingTool, Template
 
-from .conftest import FileLoader, StubBatchExploder, StubBatchProcessor
+from tests.testkit.integration_tools import (
+    FileLoader,
+    StubBatchExploder,
+    StubBatchProcessor,
+)
 
 
 class EmptySource(DataFrameTool):
@@ -162,7 +166,7 @@ class TestBatchOverrideDetection:
         assert type(StubBatchProcessor()).process_batch is not ProcessingTool.process_batch
 
     def test_row_tool_is_not_batch(self):
-        from .conftest import StubSegmenter
+        from tests.testkit.integration_tools import StubSegmenter
         assert type(StubSegmenter()).process_batch is ProcessingTool.process_batch
 
 

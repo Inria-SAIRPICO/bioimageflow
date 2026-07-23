@@ -17,7 +17,7 @@ import pandas as pd
 
 from bioimageflow import Workflow
 
-from .conftest import (
+from tests.testkit.integration_tools import (
     FileLoader,
     StubSegmenter,
     StubStats,

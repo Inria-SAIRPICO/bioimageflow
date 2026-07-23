@@ -19,7 +19,7 @@ def _bad_data(tmp_path: Path, *, valid_count: int = 0) -> dict:
         nodes.append({
             "name": f"valid_{i}",
             "type": "tool",
-            "tool_module": "tests.integration.conftest",
+            "tool_module": "tests.testkit.integration_tools",
             "tool_class": "FileLoader",
             "tool_package": None,
             "tool_package_version": None,
@@ -51,7 +51,7 @@ class TestFailedNodes:
             "nodes": [{
                 "name": "load",
                 "type": "tool",
-                "tool_module": "tests.integration.conftest",
+                "tool_module": "tests.testkit.integration_tools",
                 "tool_class": "FileLoader",
                 "tool_package": None,
                 "tool_package_version": None,

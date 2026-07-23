@@ -16,7 +16,11 @@ import pytest
 
 from bioimageflow import Workflow
 
-from .conftest import FileLoader, StubSharedMemoryConsumer, StubSharedMemoryTool
+from tests.testkit.integration_tools import (
+    FileLoader,
+    StubSharedMemoryConsumer,
+    StubSharedMemoryTool,
+)
 
 
 @pytest.mark.shared_memory

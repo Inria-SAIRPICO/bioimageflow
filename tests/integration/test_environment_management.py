@@ -12,7 +12,7 @@ import pytest
 
 from bioimageflow_core import EnvironmentSpec
 
-from .conftest import cellpose_env, stardist_env
+from tests.testkit.integration_tools import cellpose_env, stardist_env
 
 
 class TestEnvironmentSpec:
@@ -80,7 +80,7 @@ class TestEnvironmentMismatch:
             def process_row(self, arguments, *, context: object | None = None):
                 return self.Outputs(result=2.0)
 
-        from .conftest import FileLoader
+        from tests.testkit.integration_tools import FileLoader
 
         load = FileLoader()
 

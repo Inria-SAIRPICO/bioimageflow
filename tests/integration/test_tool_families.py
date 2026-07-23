@@ -11,7 +11,7 @@ Covers:
 
 from bioimageflow import Workflow
 
-from .conftest import (
+from tests.testkit.integration_tools import (
     CellposeSegmenter,
     CellposeTrain,
     FileLoader,

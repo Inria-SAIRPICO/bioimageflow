@@ -13,7 +13,7 @@ Covers:
 from bioimageflow import Workflow
 from bioimageflow_common_tools import Collect
 
-from .conftest import FileLoader, StubSegmenter, StubTiler
+from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubTiler
 
 
 class TestBasicExplosion:

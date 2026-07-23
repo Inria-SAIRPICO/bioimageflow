@@ -19,7 +19,7 @@ import pytest
 from bioimageflow import ProgressEvent, Workflow
 from bioimageflow.engine import DefaultEngine, SequentialEngine, WorkflowCancelledError
 
-from .conftest import FileLoader
+from tests.testkit.integration_tools import FileLoader
 from .wetlands_test_tools import (
     BatchTool,
     CancellableRowTool,
@@ -434,7 +434,7 @@ class TestBranchParallelism:
 
     def test_dataframe_tool_never_concurrent(self, workspace):
         """DataFrameTool nodes always run on the main thread."""
-        from .conftest import AddColumn
+        from tests.testkit.integration_tools import AddColumn
 
         load = FileLoader()
         tool = SimpleRowTool()

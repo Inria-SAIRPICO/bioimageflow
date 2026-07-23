@@ -12,7 +12,7 @@ import pytest
 from bioimageflow_common_tools import Collect, Concat, JoinOnColumn
 from bioimageflow import Workflow
 
-from .conftest import (
+from tests.testkit.integration_tools import (
     CellposeSegmenter,
     ColumnRegex,
     CsvLoader,
@@ -72,7 +72,7 @@ class TestMultiModalPipeline:
         regex = ColumnRegex()
         join = JoinOnColumn()
 
-        from .conftest import StubRegistration
+        from tests.testkit.integration_tools import StubRegistration
 
         register = StubRegistration()
 

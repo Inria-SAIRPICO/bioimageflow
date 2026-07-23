@@ -11,6 +11,7 @@ Integrators trees.
    logging
    environments
    testing
+   platform_development
    releasing
    tool_packages
    tool_package_strategy

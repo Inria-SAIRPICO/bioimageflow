@@ -12,7 +12,7 @@ import pytest
 
 from bioimageflow_core import ResourceSpec
 
-from .conftest import StubBatchProcessor, StubSegmenter
+from tests.testkit.integration_tools import StubBatchProcessor, StubSegmenter
 
 
 class TestResourceSpec:
@@ -61,7 +61,7 @@ class TestSequentialEngineIgnoresResources:
     def test_gpu_tool_runs_on_sequential_engine(self, tmp_workspace):
         """Sequential engine runs GPU tools without GPU (ignores resource spec)."""
         from bioimageflow import Workflow
-        from .conftest import FileLoader
+        from tests.testkit.integration_tools import FileLoader
 
         load = FileLoader()
         batch = StubBatchProcessor()

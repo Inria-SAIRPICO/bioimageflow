@@ -11,7 +11,12 @@ from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
 from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
 
-from .conftest import AddColumn, FileLoader, StubSegmenter, imageio_env
+from tests.testkit.integration_tools import (
+    AddColumn,
+    FileLoader,
+    StubSegmenter,
+    imageio_env,
+)
 
 
 def _processing_current_exists(storage: Path, result_key: str | None) -> bool:

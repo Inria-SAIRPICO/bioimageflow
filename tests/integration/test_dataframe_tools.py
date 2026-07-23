@@ -16,7 +16,7 @@ import pytest
 
 from bioimageflow import ColumnNotFoundError, Workflow
 
-from .conftest import (
+from tests.testkit.integration_tools import (
     ColumnRegex,
     FileLoader,
     FilterRows,
@@ -245,7 +245,7 @@ class TestNodeGetOutputSchema:
 
     def test_processing_tool_static_schema(self):
         with Workflow(engine="direct"):
-            from .conftest import StubSegmenter, FileLoader
+            from tests.testkit.integration_tools import FileLoader, StubSegmenter
 
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])

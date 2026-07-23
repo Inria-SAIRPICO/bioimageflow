@@ -6,6 +6,10 @@ FAST_TEST_SELECTOR = (
     "and not model_runtime"
 )
 FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
+UNIT_TEST_COMMAND = f'uv run pytest tests/unit -m "{FAST_TEST_SELECTOR}"'
+DIRECT_INTEGRATION_TEST_COMMAND = (
+    f'uv run pytest tests/integration -m "{FAST_TEST_SELECTOR}"'
+)
 FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND = (
     f'uv run pytest tests -m "{FAST_TEST_SELECTOR} and not shared_memory"'
 )
@@ -29,10 +33,11 @@ PACKAGE_METADATA_CONTRACTS_COMMAND = (
     "tests/unit/test_core_package_metadata.py"
 )
 CI_QUALITY_CONFIG_COMMAND = (
-    "uv run pytest tests/unit/test_ci_quality_config.py "
-    "tests/unit/test_complete_test_gating.py "
-    "tests/unit/test_package_docs_dependency_posture.py"
+    "uv run pytest tests/unit/test_development_workflow.py "
+    "tests/unit/test_complete_test_gating.py tests/unit/test_release_tooling.py"
 )
+FILE_SIZE_COMMAND = "uv run python scripts/check_file_sizes.py"
+IMPORT_BOUNDARY_COMMAND = "uv run python scripts/check_import_boundaries.py"
 DOCS_BUILD_COMMAND = "uv run sphinx-build -W --keep-going docs/source docs/_build/html"
 RUFF_COMMAND = "uv run ruff check ."
 PYRIGHT_COMMAND = "uv run pyright"

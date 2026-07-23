@@ -11,7 +11,7 @@ Covers:
 
 from bioimageflow import ProgressEvent, Workflow
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubStats
 
 
 class TestProgressCallback:

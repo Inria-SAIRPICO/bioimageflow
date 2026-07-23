@@ -12,7 +12,7 @@ from bioimageflow_core import (
     Template,
 )
 
-from .conftest import FileLoader, imageio_env
+from tests.testkit.integration_tools import FileLoader, imageio_env
 
 
 class RowContextTool(ProcessingTool):

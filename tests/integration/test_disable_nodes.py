@@ -23,7 +23,7 @@ import pytest
 from bioimageflow import Workflow
 from bioimageflow.engine import DisabledNodeError
 
-from .conftest import FileLoader, StubSegmenter, StubStats
+from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubStats
 
 
 class TestNodeEnabledAttribute:

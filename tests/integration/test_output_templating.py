@@ -20,7 +20,7 @@ from bioimageflow import Workflow
 from bioimageflow_core import Arguments, IOModel, ProcessingTool, Semantic, Template
 from bioimageflow_core.types import ImageSpec
 
-from .conftest import FileLoader, StubTiler, imageio_env
+from tests.testkit.integration_tools import FileLoader, StubTiler, imageio_env
 
 
 class StubDefaultTemplate(ProcessingTool):
@@ -213,7 +213,7 @@ class TestColumnTemplate:
                 Path(arguments.result).write_text("DATA")
                 return self.Outputs(result=arguments.result)
 
-        from .conftest import ColumnRegex
+        from tests.testkit.integration_tools import ColumnRegex
 
         load = FileLoader()
         regex = ColumnRegex()
