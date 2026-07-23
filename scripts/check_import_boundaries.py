@@ -38,7 +38,7 @@ RULES = (
     ),
     ImportRule(
         "packages/bioimageflow-core/bioimageflow_core",
-        ("bioimageflow", "pandas", "pydantic"),
+        ("bioimageflow", "pandas", "parsl", "pydantic"),
         top_level_only=True,
     ),
 )

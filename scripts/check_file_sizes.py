@@ -19,6 +19,11 @@ class SizeRule:
 
 RULES = (
     SizeRule("packages/bioimageflow/bioimageflow/**/*.py", 800, "orchestrator module"),
+    SizeRule(
+        "packages/bioimageflow-core/bioimageflow_core/**/*.py",
+        800,
+        "core production module",
+    ),
     SizeRule("tests/**/test_*.py", 500, "test module"),
     SizeRule("tests/testkit/*.py", 700, "shared test helper"),
     SizeRule("tests/**/conftest.py", 700, "pytest configuration"),

@@ -15,11 +15,11 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow.env_manager import _find_tool_file
 from bioimageflow.storage import Storage
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
+from bioimageflow.worker_origins import resolve_worker_tool_origin
 from bioimageflow_core import Arguments, ProcessingTool
-from bioimageflow_core.worker import _load_module_from_file
+from bioimageflow_core.worker_origins import load_worker_tool
 
 from bioimageflow_sairpico_tools import (
     CImgDenoising,
@@ -181,21 +181,9 @@ def test_worker_loads_runtime_modules_as_packages(
     tool_cls: type[ProcessingTool],
     module_name: str,
 ) -> None:
-    tool_file = _find_tool_file(tool_cls)
-    config = json.loads(tool_file)
-    assert config == {
-        "mode": "module",
-        "module": module_name,
-        "sys_path": str(SAIRPICO_PACKAGE.parent),
-    }
-
-    original_path = list(sys.path)
-    try:
-        sys.path[:] = [entry for entry in sys.path if entry != config["sys_path"]]
-        module = _load_module_from_file(tool_file)
-        assert getattr(module, tool_cls.__name__).__name__ == tool_cls.__name__
-    finally:
-        sys.path[:] = original_path
+    origin = resolve_worker_tool_origin(tool_cls)
+    assert getattr(origin, "module", None) == module_name
+    assert type(load_worker_tool(origin)).__name__ == tool_cls.__name__
 
 
 def test_tools_are_isolated_by_runtime_module() -> None:

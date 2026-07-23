@@ -49,7 +49,7 @@ class TestWorkerTimeoutErrorRaised:
         wf = Workflow(engine="direct")
         wf.get_environment(tool).worker_timeout = 10.0
         # Engine will call _resolve_worker_config → (1, None, 10.0)
-        # Then map_process_rows → hanging tasks → TimeoutError → WorkerTimeoutError
+        # Then map_processing_tasks → hanging tasks → WorkerTimeoutError
 
         with pytest.raises(WorkerTimeoutError, match="row 0"):
             row_contexts, batch_context = _execution_contexts(2)
@@ -124,15 +124,25 @@ class TestWorkerTimeoutErrorRaised:
                 self.last_worker_timeout = "sentinel"
                 self.tasks: list[_PassThroughTask] = []
 
-            def submit_process_batch(self, *args, worker_timeout=None, **kwargs):
+            def submit_processing_task(
+                self, env_spec, payload, *, worker_timeout=None, **kwargs
+            ):
+                from bioimageflow_core.worker import execute_processing_task
+
                 self.last_worker_timeout = worker_timeout
                 t = _PassThroughTask()
+                t.result = execute_processing_task(payload)
                 self.tasks.append(t)
                 return t
 
-            def map_process_rows(self, *args, worker_timeout=None, **kwargs):
+            def map_processing_tasks(
+                self, env_spec, payloads, *, worker_timeout=None, **kwargs
+            ):
+                from bioimageflow_core.worker import execute_processing_task
+
                 self.last_worker_timeout = worker_timeout
                 t = _PassThroughTask()
+                t.result = execute_processing_task(payloads[0])
                 self.tasks.append(t)
                 return [t]
 

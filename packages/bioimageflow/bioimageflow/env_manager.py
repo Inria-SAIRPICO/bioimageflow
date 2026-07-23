@@ -6,8 +6,6 @@ Call :func:`configure_wetlands` once at the top of your script to set paths;
 everything else picks up the same instance automatically.
 """
 
-import inspect
-import json
 import logging
 import os
 import threading
@@ -151,79 +149,6 @@ def _find_worker_file() -> str:
     return str(Path(bioimageflow_core.__file__).parent / "worker.py")
 
 
-def _package_sys_path(source_file: Path, module_name: str) -> str | None:
-    """Return the import root for a package module, or ``None`` for raw files."""
-    if "." not in module_name:
-        return None
-    top_package = module_name.split(".", 1)[0]
-    for parent in [source_file.parent, *source_file.parents]:
-        if parent.name != top_package:
-            continue
-        if (parent / "__init__.py").exists():
-            return str(parent.parent)
-    return None
-
-
-def _versioned_package_sys_path(source_file: Path, package: str, version: str) -> str | None:
-    """Return the version directory for a tool-store package module."""
-    for parent in [source_file.parent, *source_file.parents]:
-        if parent.name != package:
-            continue
-        if parent.parent.name == version and (parent / "__init__.py").exists():
-            return str(parent.parent)
-    return None
-
-
-def _find_tool_file(tool_class: type) -> str:
-    """Return the absolute file path of the module defining a tool class."""
-    worker_module = getattr(tool_class, "_bif_worker_module", None)
-    worker_sys_path = getattr(tool_class, "_bif_worker_sys_path", None)
-    if worker_module and worker_sys_path:
-        return json.dumps({
-            "mode": "module",
-            "module": worker_module,
-            "sys_path": worker_sys_path,
-        }, sort_keys=True)
-
-    source_file = Path(inspect.getfile(tool_class)).resolve()
-    versioned_module = getattr(tool_class, "_bif_canonical_module", None)
-    versioned_package = getattr(tool_class, "_bif_package", None)
-    versioned_package_version = getattr(tool_class, "_bif_package_version", None)
-    if versioned_module and versioned_package and versioned_package_version:
-        versioned_sys_path = _versioned_package_sys_path(
-            source_file,
-            versioned_package,
-            versioned_package_version,
-        )
-        if versioned_sys_path is not None:
-            return json.dumps({
-                "mode": "versioned_module",
-                "module": tool_class.__module__,
-                "package": versioned_package,
-                "sys_path": versioned_sys_path,
-            }, sort_keys=True)
-
-    try:
-        from bioimageflow.workflow import _find_custom_tools_dir
-        tools_dir = _find_custom_tools_dir(source_file)
-        if tools_dir is not None:
-            return json.dumps({
-                "mode": "module",
-                "module": tool_class.__module__,
-                "sys_path": str(tools_dir.parent),
-            }, sort_keys=True)
-    except Exception:
-        pass
-    package_sys_path = _package_sys_path(source_file, tool_class.__module__)
-    if package_sys_path is not None:
-        return json.dumps({
-            "mode": "module",
-            "module": tool_class.__module__,
-            "sys_path": package_sys_path,
-        }, sort_keys=True)
-    return str(Path(inspect.getfile(tool_class)).resolve())
-
-
 class WetlandsEnvManager:
     """Manages Wetlands environments for ProcessingTool execution.
 
@@ -352,48 +277,43 @@ class WetlandsEnvManager:
             self._launch_configs[env_spec.name] = (max_workers, worker_env, worker_timeout)
             return env
 
-    def submit_process_batch(
+    def submit_processing_task(
         self,
         env_spec: EnvironmentSpec,
-        tool_file_path: str,
-        tool_class_name: str,
-        arguments_dicts: list[dict],
-        context_dict: dict,
+        payload: dict[str, Any],
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> Any:
-        """Submit a batch call via ``env.submit()``.  Returns a ``Task``."""
+        """Submit one strict processing-task payload via ``env.submit()``."""
         env = self.get_or_create(
             env_spec, max_workers=max_workers, worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
         return env.submit(
-            self._worker_file, "run_process_batch",
-            args=(tool_file_path, tool_class_name, arguments_dicts, context_dict),
+            self._worker_file,
+            "execute_processing_task",
+            args=(payload,),
         )
 
-    def map_process_rows(
+    def map_processing_tasks(
         self,
         env_spec: EnvironmentSpec,
-        tool_file_path: str,
-        tool_class_name: str,
-        arguments_dicts: list[dict],
-        context_dicts: list[dict],
+        payloads: list[dict[str, Any]],
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> list:
-        """Submit per-row calls via ``env.map_tasks()``.  Returns ``list[Task]``."""
+        """Submit strict processing-task payloads via ``env.map_tasks()``."""
         env = self.get_or_create(
             env_spec, max_workers=max_workers, worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
-        row_args = [
-            (tool_file_path, tool_class_name, d, c)
-            for d, c in zip(arguments_dicts, context_dicts)
-        ]
-        return env.map_tasks(self._worker_file, "run_process_row", row_args)
+        return env.map_tasks(
+            self._worker_file,
+            "execute_processing_task",
+            payloads,
+        )
 
     def shutdown_all(self) -> None:
         """Shut down all managed Wetlands environments."""

@@ -1,217 +1,152 @@
-"""Worker-side dispatcher for Wetlands environments.
+"""Canonical backend-neutral processing worker entry point."""
 
-This module is executed by Wetlands workers via ``env.submit()`` and
-``env.map_tasks()``.  It discovers tool classes in a given module file
-and dispatches ``process_row`` / ``process_batch`` calls.
+from __future__ import annotations
 
-All functions accept and return only picklable types (dicts, lists,
-strings, numbers) to cross the Wetlands serialization boundary.
-
-Functions that declare a ``task`` keyword parameter receive a
-``RemoteTaskHandle`` injected by Wetlands' module executor, which is
-forwarded to the tool if its ``process_row`` / ``process_batch``
-method also declares ``task``.
-"""
-
-import importlib.util
 import inspect
-import json
-import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-_CORE_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _CORE_PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _CORE_PROJECT_ROOT)
-
-from bioimageflow_core.arguments import Arguments, ExecutionContext  # noqa: E402
-from bioimageflow_core.tool import BaseTool, ProcessingTool, IOModel  # noqa: E402
-
-
-# Per-file registries: file_path -> {class_name -> class}
-_tool_registries: dict[str, dict[str, type]] = {}
-# Per-file instances: file_path -> {class_name -> instance}
-_instances: dict[str, dict[str, ProcessingTool]] = {}
-# Cache: tool_class -> bool (whether process_row accepts 'task')
-_accepts_task: dict[type, bool] = {}
-# Cache: tool_class -> bool (whether process_batch accepts 'task')
-_batch_accepts_task_cache: dict[type, bool] = {}
-# Cache: tool_class -> bool (whether process_row accepts 'context')
-_accepts_context: dict[type, bool] = {}
-# Cache: tool_class -> bool (whether process_batch accepts 'context')
-_batch_accepts_context_cache: dict[type, bool] = {}
+from bioimageflow_core.arguments import Arguments, ExecutionContext
+from bioimageflow_core.tool import IOModel, ProcessingTool
+from bioimageflow_core.worker_origins import load_worker_tool
+from bioimageflow_core.worker_protocol import (
+    ProcessingTaskResultV1,
+    ProcessingTaskV1,
+    RowResultV1,
+    decode_processing_task,
+    encode_processing_result,
+)
 
 
-def _load_versioned_module(config: dict[str, Any]) -> object:
-    module_name = str(config["module"])
-    package_name = str(config["package"])
-    sys_path = str(config["sys_path"])
-    if sys_path not in sys.path:
-        sys.path.insert(0, sys_path)
-    scoped_package = module_name.split(".", 1)[0]
-    package_dir = Path(sys_path) / package_name
-    init_path = package_dir / "__init__.py"
-    if scoped_package not in sys.modules:
-        spec = importlib.util.spec_from_file_location(
-            scoped_package,
-            init_path,
-            submodule_search_locations=[str(package_dir)],
+def _accepts_keyword(method: Any, keyword: str) -> bool:
+    return keyword in inspect.signature(method).parameters
+
+
+def _outputs_to_dict(output: IOModel, output_type: type) -> Dict[str, Any]:
+    if not isinstance(output, output_type):
+        raise TypeError(
+            f"Tool returned {type(output).__name__}; expected {output_type.__name__}."
         )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load package from '{init_path}'")
-        package_module = importlib.util.module_from_spec(spec)
-        package_module.__package__ = scoped_package
-        sys.modules[scoped_package] = package_module
-        spec.loader.exec_module(package_module)
-    return importlib.import_module(module_name)
+    values: Dict[str, Any] = {}
+    for name in output._get_all_annotations():
+        value = getattr(output, name)
+        values[name] = str(value) if isinstance(value, Path) else value
+    return values
 
 
-def _discover_tools(module: object) -> dict[str, type]:
-    """Build a name->class registry from all BaseTool subclasses in the module."""
-    registry: dict[str, type] = {}
-    for name, obj in inspect.getmembers(module, inspect.isclass):
-        if issubclass(obj, BaseTool) and obj is not BaseTool:
-            registry[obj.__name__] = obj
-    return registry
-
-
-def _load_module_from_file(file_path: str) -> object:
-    """Load a Python module from a file path."""
-    if file_path.startswith("{"):
-        config = json.loads(file_path)
-        if config.get("mode") == "versioned_module":
-            return _load_versioned_module(config)
-        if config.get("mode") == "module":
-            sys_path = config.get("sys_path")
-            if sys_path and sys_path not in sys.path:
-                sys.path.insert(0, sys_path)
-            return importlib.import_module(config["module"])
-
-    path = Path(file_path)
-    module_name = path.stem
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load module from '{file_path}'")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _get_instance(tool_file_path: str, tool_class_name: str) -> ProcessingTool:
-    """Get or create a cached tool instance for the given file and class."""
-    if tool_file_path not in _tool_registries:
-        mod = _load_module_from_file(tool_file_path)
-        _tool_registries[tool_file_path] = _discover_tools(mod)
-        _instances[tool_file_path] = {}
-    registry = _tool_registries[tool_file_path]
-    instances = _instances[tool_file_path]
-    if tool_class_name not in instances:
-        if tool_class_name not in registry:
-            raise ValueError(
-                f"Tool class '{tool_class_name}' not found in '{tool_file_path}'. "
-                f"Available: {list(registry.keys())}"
-            )
-        instances[tool_class_name] = registry[tool_class_name]()
-    return instances[tool_class_name]
-
-
-def _outputs_to_dict(outputs: IOModel) -> dict[str, Any]:
-    """Convert an Outputs instance to a plain dict with picklable values."""
-    if hasattr(outputs, '_get_all_annotations'):
-        d: dict[str, Any] = {}
-        for k in outputs._get_all_annotations():
-            v = getattr(outputs, k)
-            if isinstance(v, Path):
-                v = str(v)
-            d[k] = v
-        return d
-    return {k: str(v) if isinstance(v, Path) else v for k, v in vars(outputs).items()}
-
-
-def _tool_accepts_task(tool: ProcessingTool) -> bool:
-    """Check (once per class) whether process_row accepts a 'task' kwarg."""
-    cls = type(tool)
-    if cls not in _accepts_task:
-        sig = inspect.signature(tool.process_row)
-        _accepts_task[cls] = 'task' in sig.parameters
-    return _accepts_task[cls]
-
-
-def _batch_accepts_task(tool: ProcessingTool) -> bool:
-    """Check (once per class) whether process_batch accepts a 'task' kwarg."""
-    cls = type(tool)
-    if cls not in _batch_accepts_task_cache:
-        sig = inspect.signature(tool.process_batch)
-        _batch_accepts_task_cache[cls] = 'task' in sig.parameters
-    return _batch_accepts_task_cache[cls]
-
-
-def _tool_accepts_context(tool: ProcessingTool) -> bool:
-    """Check (once per class) whether process_row accepts 'context'."""
-    cls = type(tool)
-    if cls not in _accepts_context:
-        sig = inspect.signature(tool.process_row)
-        _accepts_context[cls] = 'context' in sig.parameters
-    return _accepts_context[cls]
-
-
-def _batch_accepts_context(tool: ProcessingTool) -> bool:
-    """Check (once per class) whether process_batch accepts 'context'."""
-    cls = type(tool)
-    if cls not in _batch_accepts_context_cache:
-        sig = inspect.signature(tool.process_batch)
-        _batch_accepts_context_cache[cls] = 'context' in sig.parameters
-    return _batch_accepts_context_cache[cls]
-
-
-def run_process_row(args_tuple, *, task=None):
-    """Dispatch a single-row call to a tool's process_row method.
-
-    ``args_tuple``: ``(tool_file_path, tool_class_name, arguments_dict)``
-    or ``(tool_file_path, tool_class_name, arguments_dict, context_dict)``
-    ``task``: ``RemoteTaskHandle`` injected by Wetlands via module_executor (optional).
-
-    Returns a list of output dicts (one per output row, usually one).
-    """
-    if len(args_tuple) == 3:
-        tool_file_path, tool_class_name, arguments_dict = args_tuple
-        context_dict = None
-    else:
-        tool_file_path, tool_class_name, arguments_dict, context_dict = args_tuple
-    tool = _get_instance(tool_file_path, tool_class_name)
-    args = Arguments(**arguments_dict)
-    kwargs: dict[str, Any] = {}
-    if task is not None and _tool_accepts_task(tool):
-        kwargs["task"] = task
-    if context_dict is not None and _tool_accepts_context(tool):
-        kwargs["context"] = ExecutionContext.from_dict(context_dict)
-    result = tool.process_row(args, **kwargs)
+def _normalize_row_outputs(
+    result: Any, output_type: type
+) -> Tuple[Dict[str, Any], ...]:
     outputs = result if isinstance(result, list) else [result]
-    return [_outputs_to_dict(out) for out in outputs]
+    return tuple(_outputs_to_dict(output, output_type) for output in outputs)
 
 
-def run_process_batch(
-    tool_file_path: str,
-    tool_class_name: str,
-    arguments_dicts: list[dict],
-    context_dict: Optional[dict] = None,
-    *,
-    task=None,
-) -> list[list[dict]]:
-    """Dispatch a batch call to a tool's process_batch method.
+def _row_kwargs(
+    tool: ProcessingTool,
+    context: Optional[Dict[str, Any]],
+    remote_task: Any,
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {}
+    if context is not None and _accepts_keyword(tool.process_row, "context"):
+        kwargs["context"] = ExecutionContext.from_dict(context)
+    if remote_task is not None and _accepts_keyword(tool.process_row, "task"):
+        kwargs["task"] = remote_task
+    return kwargs
 
-    Returns a list of lists of output dicts (one inner list per input row).
-    """
-    tool = _get_instance(tool_file_path, tool_class_name)
-    args_list = [Arguments(**d) for d in arguments_dicts]
-    kwargs: dict[str, Any] = {}
-    if task is not None and _batch_accepts_task(tool):
-        kwargs["task"] = task
-    if context_dict is not None and _batch_accepts_context(tool):
-        kwargs["context"] = ExecutionContext.from_dict(context_dict)
-    results = tool.process_batch(args_list, **kwargs)
-    # Auto-wrap list[Outputs] -> list[list[Outputs]] for 1-to-1 batch tools
-    if results and not isinstance(results[0], list):
-        results = [[r] for r in results]
-    return [[_outputs_to_dict(out) for out in row_outputs] for row_outputs in results]
+
+def _batch_kwargs(
+    tool: ProcessingTool,
+    context: Optional[Dict[str, Any]],
+    remote_task: Any,
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {}
+    if context is not None and _accepts_keyword(tool.process_batch, "context"):
+        kwargs["context"] = ExecutionContext.from_dict(context)
+    if remote_task is not None and _accepts_keyword(tool.process_batch, "task"):
+        kwargs["task"] = remote_task
+    return kwargs
+
+
+def _execute_rows(
+    task: ProcessingTaskV1,
+    tool: ProcessingTool,
+    output_type: type,
+    remote_task: Any,
+) -> Tuple[RowResultV1, ...]:
+    results: List[RowResultV1] = []
+    for row in sorted(task.rows, key=lambda item: item.position):
+        output = tool.process_row(
+            Arguments(**row.arguments),
+            **_row_kwargs(tool, row.context, remote_task),
+        )
+        results.append(
+            RowResultV1(
+                position=row.position,
+                row_index=row.row_index,
+                outputs=_normalize_row_outputs(output, output_type),
+            )
+        )
+    return tuple(results)
+
+
+def _execute_batch(
+    task: ProcessingTaskV1,
+    tool: ProcessingTool,
+    output_type: type,
+    remote_task: Any,
+) -> Tuple[RowResultV1, ...]:
+    ordered_rows = tuple(sorted(task.rows, key=lambda item: item.position))
+    raw = tool.process_batch(
+        [Arguments(**row.arguments) for row in ordered_rows],
+        **_batch_kwargs(tool, task.batch_context, remote_task),
+    )
+    if not isinstance(raw, list):
+        raise TypeError("process_batch must return a list.")
+    if raw and not isinstance(raw[0], list):
+        if len(raw) != len(ordered_rows):
+            raise ValueError(
+                "Flat process_batch output count must match the input row count."
+            )
+        grouped = [[output] for output in raw]
+    else:
+        grouped = raw
+        if len(grouped) != len(ordered_rows):
+            raise ValueError(
+                "Nested process_batch output groups must match the input row count."
+            )
+    return tuple(
+        RowResultV1(
+            position=row.position,
+            row_index=row.row_index,
+            outputs=tuple(
+                _outputs_to_dict(output, output_type) for output in row_outputs
+            ),
+        )
+        for row, row_outputs in zip(ordered_rows, grouped)
+    )
+
+
+def execute_processing_task(
+    payload: Mapping[str, Any], *, task: Any = None
+) -> Dict[str, Any]:
+    """Decode, execute, and encode one strict processing-task envelope."""
+    invocation = decode_processing_task(payload)
+    tool = load_worker_tool(invocation.tool)
+    output_type = tool.Outputs
+    if output_type is None:
+        raise TypeError(f"{type(tool).__name__} does not declare Outputs.")
+    if invocation.mode == "row_chunk":
+        rows = _execute_rows(invocation, tool, output_type, task)
+    else:
+        rows = _execute_batch(invocation, tool, output_type, task)
+    return encode_processing_result(
+        ProcessingTaskResultV1(
+            task_id=invocation.task_id,
+            node_name=invocation.node_name,
+            invocation_id=invocation.invocation_id,
+            cache_attempt_id=invocation.cache_attempt_id,
+            task_retry=invocation.task_retry,
+            mode=invocation.mode,
+            rows=rows,
+        )
+    )

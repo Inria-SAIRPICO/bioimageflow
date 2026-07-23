@@ -40,6 +40,22 @@ def tool_store(tmp_path):
     ]:
         pkg_dir = store / "dummy_tools" / version / "dummy_tools"
         pkg_dir.mkdir(parents=True)
+        metadata_dir = (
+            store
+            / "dummy_tools"
+            / version
+            / f"dummy_tools-{version}.dist-info"
+        )
+        metadata_dir.mkdir()
+        (metadata_dir / "METADATA").write_text(
+            "Metadata-Version: 2.1\n"
+            "Name: dummy-tools\n"
+            f"Version: {version}\n",
+            encoding="utf-8",
+        )
+        (metadata_dir / "top_level.txt").write_text(
+            "dummy_tools\n", encoding="utf-8"
+        )
         dep_dir = store / "dummy_tools" / version / "dep_pkg"
         dep_dir.mkdir()
         (dep_dir / "__init__.py").write_text("DEP_VALUE = 42\n")

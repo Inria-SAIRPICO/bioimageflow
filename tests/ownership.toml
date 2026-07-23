@@ -1,6 +1,22 @@
 version = 1
 
 [[areas]]
+name = "core-worker"
+sources = [
+    "packages/bioimageflow-core/bioimageflow_core/worker.py",
+    "packages/bioimageflow-core/bioimageflow_core/worker_origins.py",
+    "packages/bioimageflow-core/bioimageflow_core/worker_protocol.py",
+    "packages/bioimageflow/bioimageflow/worker_origins.py",
+]
+edit_tests = [
+    "tests/unit/worker_protocol",
+    "tests/unit/test_core_python39_compat.py",
+    "tests/unit/test_worker_safe_tool_imports.py",
+    "tests/unit/tool_loader/test_dependencies.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
 name = "engine"
 sources = [
     "packages/bioimageflow/bioimageflow/backends.py",

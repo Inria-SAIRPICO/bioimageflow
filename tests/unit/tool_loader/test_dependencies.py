@@ -4,8 +4,6 @@
 
 import inspect
 
-import json
-
 import sys
 
 import pytest
@@ -91,19 +89,21 @@ class TestTransitiveDeps:
     def test_worker_loads_versioned_package_tool_with_relative_imports(
         self, tool_store
     ):
-        from bioimageflow.env_manager import _find_tool_file
         from bioimageflow.tool_loader import load_versioned_package
-        from bioimageflow_core.worker import _load_module_from_file
+        from bioimageflow.worker_origins import resolve_worker_tool_origin
+        from bioimageflow_core import VersionedModuleOriginV1
+        from bioimageflow_core.worker_origins import load_worker_tool
 
         package = load_versioned_package("dummy_tools", "1.0.0", tool_store)
-        tool_file = _find_tool_file(package.AlphaTool)
-        config = json.loads(tool_file)
-        assert config == {
-            "mode": "versioned_module",
-            "module": "dummy_tools__1_0_0.alpha",
-            "package": "dummy_tools",
-            "sys_path": str(tool_store / "dummy_tools" / "1.0.0"),
-        }
+        origin = resolve_worker_tool_origin(package.AlphaTool)
+        assert isinstance(origin, VersionedModuleOriginV1)
+        assert origin.distribution == "dummy-tools"
+        assert origin.import_package == "dummy_tools"
+        assert origin.canonical_module == "dummy_tools.alpha"
+        assert origin.scoped_module == "dummy_tools__1_0_0.alpha"
+        assert origin.store_root == str(
+            (tool_store / "dummy_tools" / "1.0.0").resolve()
+        )
 
         original_path = list(sys.path)
         for module_name in list(sys.modules):
@@ -111,25 +111,25 @@ class TestTransitiveDeps:
                 sys.modules.pop(module_name, None)
         sys.modules.pop("dep_pkg", None)
         try:
-            sys.path[:] = [entry for entry in sys.path if entry != config["sys_path"]]
-            module = _load_module_from_file(tool_file)
-            alpha_tool = getattr(module, "AlphaTool")
-            assert alpha_tool().process_row(None).result == "v1"
+            sys.path[:] = [
+                entry for entry in sys.path if entry != origin.store_root
+            ]
+            assert load_worker_tool(origin).process_row(None).result == "v1"
         finally:
             sys.path[:] = original_path
 
     def test_worker_loads_two_versioned_package_tools_without_module_collision(
         self, tool_store
     ):
-        from bioimageflow.env_manager import _find_tool_file
         from bioimageflow.tool_loader import load_versioned_package
-        from bioimageflow_core.worker import _load_module_from_file
+        from bioimageflow.worker_origins import resolve_worker_tool_origin
+        from bioimageflow_core.worker_origins import load_worker_tool
 
         v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
         v2 = load_versioned_package("dummy_tools", "2.0.0", tool_store)
 
-        module_v1 = _load_module_from_file(_find_tool_file(v1.AlphaTool))
-        module_v2 = _load_module_from_file(_find_tool_file(v2.AlphaTool))
+        tool_v1 = load_worker_tool(resolve_worker_tool_origin(v1.AlphaTool))
+        tool_v2 = load_worker_tool(resolve_worker_tool_origin(v2.AlphaTool))
 
-        assert getattr(module_v1, "AlphaTool")().process_row(None).result == "v1"
-        assert getattr(module_v2, "AlphaTool")().process_row(None).result == "v2"
+        assert tool_v1.process_row(None).result == "v1"
+        assert tool_v2.process_row(None).result == "v2"

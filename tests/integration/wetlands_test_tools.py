@@ -1,8 +1,8 @@
 """Standalone tool definitions for Wetlands integration tests.
 
 These tools run inside Wetlands worker processes and must only depend on
-bioimageflow_core (auto-injected by the env manager).  They are loaded
-by file path via the worker's ``_load_module_from_file()``.
+bioimageflow_core (auto-injected by the environment manager). They are loaded
+through the canonical strict worker origin and processing-task protocol.
 """
 
 import time

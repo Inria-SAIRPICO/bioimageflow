@@ -121,13 +121,10 @@ class _StubEnvManager:
         self.last_worker_timeout: float | None = None
         self.hanging_tasks: list[_HangingTask] = []
 
-    def submit_process_batch(
+    def submit_processing_task(
         self,
         env_spec,
-        tool_file_path,
-        tool_class_name,
-        arguments_dicts,
-        context_dict=None,
+        payload,
         max_workers=1,
         worker_env=None,
         worker_timeout=None,
@@ -137,19 +134,16 @@ class _StubEnvManager:
         self.hanging_tasks.append(t)
         return t
 
-    def map_process_rows(
+    def map_processing_tasks(
         self,
         env_spec,
-        tool_file_path,
-        tool_class_name,
-        arguments_dicts,
-        context_dicts=None,
+        payloads,
         max_workers=1,
         worker_env=None,
         worker_timeout=None,
     ):
         self.last_worker_timeout = worker_timeout
-        tasks = [_HangingTask() for _ in arguments_dicts]
+        tasks = [_HangingTask() for _ in payloads]
         self.hanging_tasks.extend(tasks)
         return tasks
 
@@ -164,12 +158,12 @@ class _FailingEnvManager:
         self.exception = exception
         self.tasks: list[_FailedTask] = []
 
-    def submit_process_batch(self, *args, **kwargs):
+    def submit_processing_task(self, *args, **kwargs):
         task = _FailedTask(self.exception)
         self.tasks.append(task)
         return task
 
-    def map_process_rows(self, *args, **kwargs):
+    def map_processing_tasks(self, *args, **kwargs):
         task = _FailedTask(self.exception)
         self.tasks.append(task)
         return [task]

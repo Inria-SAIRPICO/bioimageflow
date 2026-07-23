@@ -5,6 +5,16 @@
 
 from __future__ import annotations
 
+import uuid
+
+from bioimageflow_core import (
+    ProcessingTaskV1,
+    RowInvocationV1,
+    decode_processing_result,
+    encode_processing_task,
+    validate_processing_result,
+)
+
 from .common import (
     Any,
     Arguments,
@@ -148,7 +158,7 @@ class _DispatchMixin:
         batch_context: ExecutionContext,
     ) -> list[list[Any]]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
-        from bioimageflow.env_manager import _find_tool_file
+        from bioimageflow.worker_origins import resolve_worker_tool_origin
         from wetlands.task import TaskStatus, TaskEventType
 
         assert self._env_manager is not None
@@ -159,20 +169,42 @@ class _DispatchMixin:
         ):
             return []
         env_spec = tool.environment
-        tool_file_path = _find_tool_file(type(tool))
-        tool_class_name = type(tool).__name__
+        origin = resolve_worker_tool_origin(tool)
+        invocation_id = f"inv_{uuid.uuid4().hex}"
         max_workers, worker_env, worker_timeout = self._resolve_worker_config(
             tool, workflow
         )
         engine_timeout = _compute_engine_timeout(worker_timeout)
 
         if has_batch:
-            task = self._env_manager.submit_process_batch(
+            invocation = ProcessingTaskV1(
+                task_id="task_0000000000000000",
+                node_name=node_name,
+                invocation_id=invocation_id,
+                cache_attempt_id=None,
+                task_retry=0,
+                mode="process_batch",
+                tool=origin,
+                rows=tuple(
+                    RowInvocationV1(
+                        position=position,
+                        row_index=(
+                            context.row_index
+                            if context.row_index is not None
+                            else str(position)
+                        ),
+                        arguments=arguments,
+                        context=context.to_dict(),
+                    )
+                    for position, (arguments, context) in enumerate(
+                        zip(arguments_dicts, row_contexts)
+                    )
+                ),
+                batch_context=batch_context.to_dict(),
+            )
+            task = self._env_manager.submit_processing_task(
                 env_spec,
-                tool_file_path,
-                tool_class_name,
-                arguments_dicts,
-                batch_context.to_dict(),
+                encode_processing_task(invocation),
                 max_workers=max_workers,
                 worker_env=worker_env,
                 worker_timeout=worker_timeout,
@@ -198,16 +230,43 @@ class _DispatchMixin:
                 raise WorkflowCancelledError(
                     "Workflow cancelled during batch execution"
                 )
-            result_dicts = task.result
+            result = decode_processing_result(task.result)
+            validate_processing_result(invocation, result)
             assert tool.Outputs is not None
-            return [[tool.Outputs(**d) for d in row] for row in result_dicts]
+            return [
+                [tool.Outputs(**output) for output in row.outputs]
+                for row in result.rows
+            ]
 
-        tasks = self._env_manager.map_process_rows(
+        invocations = [
+            ProcessingTaskV1(
+                task_id=f"task_{position:016x}",
+                node_name=node_name,
+                invocation_id=invocation_id,
+                cache_attempt_id=None,
+                task_retry=0,
+                mode="row_chunk",
+                tool=origin,
+                rows=(
+                    RowInvocationV1(
+                        position=position,
+                        row_index=(
+                            context.row_index
+                            if context.row_index is not None
+                            else str(position)
+                        ),
+                        arguments=arguments,
+                        context=context.to_dict(),
+                    ),
+                ),
+            )
+            for position, (arguments, context) in enumerate(
+                zip(arguments_dicts, row_contexts)
+            )
+        ]
+        tasks = self._env_manager.map_processing_tasks(
             env_spec,
-            tool_file_path,
-            tool_class_name,
-            arguments_dicts,
-            [context.to_dict() for context in row_contexts],
+            [encode_processing_task(invocation) for invocation in invocations],
             max_workers=max_workers,
             worker_env=worker_env,
             worker_timeout=worker_timeout,
@@ -276,8 +335,12 @@ class _DispatchMixin:
         for i, task in enumerate(tasks):
             if task.status == TaskStatus.CANCELED:
                 continue
-            result_dicts = task.result
-            raw_results.append([tool.Outputs(**d) for d in result_dicts])
+            result = decode_processing_result(task.result)
+            validate_processing_result(invocations[i], result)
+            row_result = result.rows[0]
+            raw_results.append(
+                [tool.Outputs(**output) for output in row_result.outputs]
+            )
             self._emit_progress(
                 workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
             )
