@@ -1,8 +1,9 @@
-"""Local configuration shell for attached Parsl execution."""
+"""Attached Parsl configuration and resource lifecycle."""
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping
+import threading
+from collections.abc import Generator, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -96,12 +97,64 @@ def _normalize_shared_runtime_root(value: str | Path | None) -> Path | None:
     return path.resolve(strict=False)
 
 
-class ParslEngine:
-    """Validate and retain attached Parsl runtime configuration.
+class _ParslEngineSteps(Iterator[Any]):
+    """Reserve one engine execution before stepped iteration begins."""
 
-    The constructor performs no external Parsl import and acquires no runtime
-    resources. Execution is supplied by the later dispatch and lifecycle work
-    packages.
+    def __init__(
+        self,
+        engine: "ParslEngine",
+        targets: Any,
+        workflow: Any,
+    ) -> None:
+        self._engine = engine
+        self._targets = targets
+        self._workflow = workflow
+        self._iterator: Generator[Any, None, None] | None = None
+        self._closed = False
+        self._engine._begin_execution()
+
+    def __next__(self) -> Any:
+        if self._closed:
+            raise StopIteration
+        if self._iterator is None:
+            self._iterator = self._iterate()
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self._closed = True
+            raise
+        except BaseException:
+            self._closed = True
+            raise
+
+    def _iterate(self) -> Generator[Any, None, None]:
+        try:
+            dfk = self._engine._start_attached_execution()
+            yield from self._engine._execute_steps_attached(
+                self._targets,
+                self._workflow,
+                dfk,
+            )
+        finally:
+            self._engine._finish_execution()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._iterator is None:
+            self._engine._finish_execution()
+            return
+        self._iterator.close()
+
+
+class ParslEngine:
+    """Attached Parsl runtime with explicit DFK ownership.
+
+    Construction validates local configuration only.
+    DFK acquisition is deferred until execution startup, and processing
+    dispatch is supplied through focused hooks implemented by the dispatch
+    work package.
     """
 
     def __init__(
@@ -147,7 +200,7 @@ class ParslEngine:
         bindings = _normalize_bindings(executor_bindings)
         binding_labels = frozenset(bindings)
         self._parsl_config = parsl_config
-        self._dfk = dfk
+        self._active_dfk = dfk
         self._executor_bindings = bindings
         self._node_routes = _normalize_routes(
             node_routes,
@@ -170,7 +223,15 @@ class ParslEngine:
         self._storage_mode = selected_storage_mode
         self._task_policy = task_policy or ParslTaskPolicy()
         self._resource_lifetime = lifetime
+        self._lifecycle_condition = threading.Condition(threading.RLock())
+        self._dfk_lock = threading.RLock()
+        self._futures_lock = threading.RLock()
+        self._submitted_futures: set[Any] = set()
         self._closed = False
+        self._execution_active = False
+        self._execution_reserved = False
+        self._execution_thread_id: int | None = None
+        self._cancel_requested = False
 
     @property
     def parsl_config(self) -> Any | None:
@@ -178,7 +239,8 @@ class ParslEngine:
 
     @property
     def dfk(self) -> Any | None:
-        return self._dfk
+        with self._dfk_lock:
+            return self._active_dfk
 
     @property
     def executor_bindings(self) -> Mapping[str, ExecutorBinding]:
@@ -212,36 +274,228 @@ class ParslEngine:
     def resource_lifetime(self) -> ResourceLifetime:
         return self._resource_lifetime
 
+    @property
+    def backend_name(self) -> str:
+        return "parsl"
+
+    @property
+    def cancel_requested(self) -> bool:
+        with self._lifecycle_condition:
+            return self._cancel_requested
+
+    def effective_execution(self, workflow: Any) -> str:
+        """Resolve the scheduling policy for one root workflow."""
+        if self._execution != "workflow":
+            return self._execution
+        value = getattr(workflow, "execution", None)
+        if value not in {"parallel", "sequential"}:
+            raise ValueError(
+                "The root workflow execution policy must be 'parallel' or "
+                "'sequential'."
+            )
+        return value
+
     def _ensure_open(self) -> None:
-        if self._closed:
-            raise RuntimeError("This execution engine is closed.")
+        with self._lifecycle_condition:
+            if self._closed:
+                raise RuntimeError("This execution engine is closed.")
+
+    def _begin_execution(self) -> None:
+        with self._lifecycle_condition:
+            if self._closed:
+                raise RuntimeError("This execution engine is closed.")
+            if self._execution_active:
+                if (
+                    self._execution_reserved
+                    and self._execution_thread_id == threading.get_ident()
+                ):
+                    self._execution_reserved = False
+                    return
+                raise RuntimeError(
+                    "This ParslEngine already has an active execution."
+                )
+            self._execution_active = True
+            self._execution_reserved = False
+            self._execution_thread_id = threading.get_ident()
+            self._cancel_requested = False
+
+    def _reserve_execution(self) -> None:
+        """Claim the engine before workflow run metadata is created."""
+        with self._lifecycle_condition:
+            if self._closed:
+                raise RuntimeError("This execution engine is closed.")
+            if self._execution_active:
+                raise RuntimeError(
+                    "This ParslEngine already has an active execution."
+                )
+            self._execution_active = True
+            self._execution_reserved = True
+            self._execution_thread_id = threading.get_ident()
+            self._cancel_requested = False
+
+    def _release_execution_reservation(self) -> None:
+        """Release a claim when workflow startup fails before execution."""
+        with self._lifecycle_condition:
+            if not self._execution_reserved:
+                return
+            self._execution_active = False
+            self._execution_reserved = False
+            self._execution_thread_id = None
+            self._lifecycle_condition.notify_all()
+
+    def _start_attached_execution(self) -> Any:
+        parsl_module = require_parsl()
+        with self._dfk_lock:
+            if self._active_dfk is not None:
+                return self._active_dfk
+            kernel_type = getattr(parsl_module, "DataFlowKernel", None)
+            if kernel_type is None:
+                raise RuntimeError(
+                    "The installed Parsl package does not export "
+                    "DataFlowKernel."
+                )
+            self._active_dfk = kernel_type(config=self._parsl_config)
+            return self._active_dfk
+
+    def _register_future(self, future: Any) -> None:
+        """Register one future owned by the active engine execution."""
+        if not callable(getattr(future, "result", None)):
+            raise TypeError("A submitted Parsl future must provide result().")
+        if not callable(getattr(future, "cancel", None)):
+            raise TypeError("A submitted Parsl future must provide cancel().")
+        with self._lifecycle_condition:
+            if not self._execution_active:
+                raise RuntimeError(
+                    "Parsl futures may be registered only during execution."
+                )
+            if self._closed or self._cancel_requested:
+                future.cancel()
+                raise RuntimeError(
+                    "Cannot register a Parsl future after cancellation or close."
+                )
+            with self._futures_lock:
+                self._submitted_futures.add(future)
+
+    def _request_submitted_cancellation(self) -> None:
+        with self._lifecycle_condition:
+            self._cancel_requested = True
+        with self._futures_lock:
+            futures = tuple(self._submitted_futures)
+        for future in futures:
+            try:
+                future.cancel()
+            except BaseException:
+                continue
+
+    def _drain_submitted_futures(self) -> tuple[BaseException, ...]:
+        """Wait only for futures registered by this engine."""
+        failures: list[BaseException] = []
+        while True:
+            with self._futures_lock:
+                futures = tuple(self._submitted_futures)
+            if not futures:
+                return tuple(failures)
+            for future in futures:
+                try:
+                    future.result()
+                except BaseException as exc:
+                    failures.append(exc)
+            with self._futures_lock:
+                self._submitted_futures.difference_update(futures)
+
+    def _cleanup_owned_dfk(self) -> None:
+        if self._resource_lifetime is ResourceLifetime.EXTERNAL:
+            return
+        with self._dfk_lock:
+            dfk = self._active_dfk
+            self._active_dfk = None
+        if dfk is not None:
+            dfk.cleanup()
+
+    def _finish_execution(self) -> None:
+        cleanup_error: BaseException | None = None
+        try:
+            self._drain_submitted_futures()
+            with self._lifecycle_condition:
+                should_cleanup = (
+                    self._resource_lifetime is ResourceLifetime.EXECUTION
+                    or self._closed
+                )
+            if should_cleanup:
+                self._cleanup_owned_dfk()
+        except BaseException as exc:
+            cleanup_error = exc
+        finally:
+            with self._lifecycle_condition:
+                self._execution_active = False
+                self._execution_reserved = False
+                self._execution_thread_id = None
+                self._lifecycle_condition.notify_all()
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def execute(self, targets: Any, workflow: Any) -> Any:
-        """Enter the lazy optional-dependency boundary for execution."""
-        self._ensure_open()
-        require_parsl()
+        """Execute through the attached DFK dispatch hook."""
+        self._begin_execution()
+        try:
+            dfk = self._start_attached_execution()
+            return self._execute_attached(targets, workflow, dfk)
+        finally:
+            self._finish_execution()
+
+    def _execute_attached(
+        self,
+        targets: Any,
+        workflow: Any,
+        dfk: Any,
+    ) -> Any:
+        del targets, workflow, dfk
         raise NotImplementedError(
-            "Parsl workflow dispatch is implemented by the later execution "
-            "work package."
+            "Parsl workflow dispatch is not configured on this engine."
         )
 
     def execute_steps(
         self,
         targets: Any,
         workflow: Any,
+    ) -> _ParslEngineSteps:
+        """Reserve one stepped execution before returning its iterator."""
+        return _ParslEngineSteps(self, targets, workflow)
+
+    def _execute_steps_attached(
+        self,
+        targets: Any,
+        workflow: Any,
+        dfk: Any,
     ) -> Generator[Any, None, None]:
-        """Enter the lazy optional-dependency boundary for stepped execution."""
-        self._ensure_open()
-        require_parsl()
+        del targets, workflow, dfk
         raise NotImplementedError(
-            "Parsl stepped dispatch is implemented by the later execution "
-            "work package."
+            "Parsl stepped dispatch is not configured on this engine."
         )
         yield
 
     def close(self) -> None:
-        """Close this local shell; no external resource has been acquired."""
-        self._closed = True
+        """Drain active work and clean resources owned by this engine."""
+        with self._lifecycle_condition:
+            if self._closed:
+                return
+            self._closed = True
+            execution_active = self._execution_active
+            execution_reserved = self._execution_reserved
+            called_from_execution = (
+                self._execution_thread_id == threading.get_ident()
+            )
+        self._request_submitted_cancellation()
+        if execution_active and not called_from_execution:
+            with self._lifecycle_condition:
+                while self._execution_active:
+                    self._lifecycle_condition.wait()
+        elif execution_active and execution_reserved:
+            self._release_execution_reservation()
+        elif execution_active:
+            return
+        self._drain_submitted_futures()
+        self._cleanup_owned_dfk()
 
     def __enter__(self) -> "ParslEngine":
         self._ensure_open()
