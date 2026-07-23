@@ -29,6 +29,8 @@ class ProcessingDispatch:
     row_contexts: tuple[ExecutionContext, ...]
     batch_context: ExecutionContext
     has_batch: bool
+    invocation_id: str
+    cache_attempt_id: str | None
 
 
 class ProcessingBackend(Protocol):
@@ -131,6 +133,8 @@ class WetlandsBackend:
             request.has_batch,
             list(request.row_contexts),
             request.batch_context,
+            request.invocation_id,
+            request.cache_attempt_id,
         )
 
     def cleanup_execution(self, engine: "DefaultEngine") -> None:

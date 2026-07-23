@@ -203,6 +203,45 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
     assert (record_dir / "assets" / "mask_0.txt").read_text() == "blank"
 
 
+@pytest.mark.parametrize(
+    "relative",
+    ["work/rows/000000/value.txt", "work/batch/value.txt"],
+)
+def test_processing_tool_publish_rejects_work_paths_as_external_outputs(
+    tmp_path: Path,
+    relative: str,
+) -> None:
+    storage_path = tmp_path / "results"
+    node_name = "WorkPathWriter_1"
+    sig_hash = "sig"
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
+        storage_path,
+        node_name,
+        sig_hash,
+    )
+    work_output = staging_dir / relative
+    work_output.parent.mkdir(parents=True, exist_ok=True)
+    work_output.write_text("mutable")
+    df = pd.DataFrame({"output": [str(work_output)]}, index=["0"])
+
+    with pytest.raises(CacheCorruptionError, match="mutable work state"):
+        processing_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+            df,
+            result_key=result_key,
+            attempt_id=attempt_id,
+            run_id="run_0123456789abcdef0123456789abcdef",
+            staging_dir=staging_dir,
+            staging_assets_dir=assets_dir,
+            path_columns={"output"},
+            owned_path_columns=set(),
+        )
+
+    assert Storage(storage_path).load_current(result_key) is None
+
+
 def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
     tmp_path: Path,
 ) -> None:

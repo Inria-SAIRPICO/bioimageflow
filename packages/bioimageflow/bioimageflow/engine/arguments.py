@@ -11,25 +11,15 @@ from .common import (
     ExecutionContext,
     Node,
     Path,
-    ProcessingTool,
-    Storage,
     _absolute_runtime_path,
     _batch_work_dir,
-    _pending_assets_dir,
     _resolve_staged_output_path,
     _rows_work_dir,
     _safe_work_dir_name,
     _to_python,
     _work_dir,
-    cast,
-    compute_env_hash,
-    compute_signature_hash,
-    get_output_templates,
-    get_source_hash,
-    get_tool_version,
     is_path_type,
     pd,
-    resolve_template,
     time,
 )
 
@@ -102,8 +92,7 @@ class _ArgumentsMixin:
         input_annotations: dict[str, Any],
         templates: dict[str, str],
         path_input_fields: list[str],
-        workflow: Any,
-        assets_dir: Path | None = None,
+        assets_dir: Path,
     ) -> list[dict[str, Any]]:
         """Resolve per-row arguments for all rows in the aligned index."""
         arguments_dicts: list[dict[str, Any]] = []
@@ -134,19 +123,12 @@ class _ArgumentsMixin:
                 idx,
                 timestamp,
             )
-            template_assets_dir = assets_dir or _pending_assets_dir(
-                workflow.storage_path,
-                node.name,
-            )
             for out_field, template in templates.items():
-                if assets_dir is None:
-                    row_args[out_field] = str(
-                        template_assets_dir / resolve_template(template, context)
-                    )
-                else:
-                    row_args[out_field] = _resolve_staged_output_path(
-                        template_assets_dir, template, context
-                    )
+                row_args[out_field] = _resolve_staged_output_path(
+                    assets_dir,
+                    template,
+                    context,
+                )
 
             arguments_dicts.append(row_args)
         return arguments_dicts
@@ -320,105 +302,6 @@ class _ArgumentsMixin:
                     f"'{col_ref.node.name}'. Available columns: "
                     f"{list(up_df.columns)}"
                 )
-
-    # ── Signature hashing ──────────────────────────────────────────────
-
-    def _upstream_identity_map(
-        self,
-        workflow: Any,
-        upstream_nodes: list[Node],
-        sig_hashes: dict[Node, str],
-    ) -> dict[str, str]:
-        """Return cache identity material for upstream nodes."""
-        identities: dict[str, str] = {}
-        storage = Storage(workflow.storage_path)
-        for upstream in upstream_nodes:
-            sig_hash = sig_hashes[upstream]
-            result_key = self._node_result_key(upstream, sig_hash)
-            if result_key is None:
-                identities[upstream.name] = f"signature:{sig_hash}"
-                continue
-            pointer = storage.load_current(result_key)
-            if pointer is None:
-                identities[upstream.name] = f"signature:{sig_hash}"
-            else:
-                identities[upstream.name] = f"record:{result_key}:{pointer.record_id}"
-        return identities
-
-    def _compute_sig_hash(
-        self,
-        node: Node,
-        env_hash: str,
-        resolved_params: Any,
-        upstream_hashes: dict[str, str],
-        workflow: Any,
-    ) -> str:
-        """Compute the logical digest for any node type."""
-        tool_version = get_tool_version(node.tool)
-        source_hash = get_source_hash(type(node.tool)) if workflow._dev_mode else None
-        return compute_signature_hash(
-            type(node.tool).__name__,
-            tool_version,
-            env_hash,
-            resolved_params,
-            upstream_hashes,
-            source_hash=source_hash,
-        )
-
-    def _compute_processing_sig_hash(
-        self,
-        node: Node,
-        input_annotations: dict[str, Any],
-        upstream_nodes: dict[str, Node],
-        sig_hashes: dict[Node, str],
-        workflow: Any,
-    ) -> str:
-        """Compute the logical digest for a non-source ProcessingTool."""
-        env_hash = compute_env_hash(
-            cast(ProcessingTool, node.tool).environment.dependencies
-        )
-        assert node.tool.Outputs is not None
-        missing = [n.name for n in upstream_nodes.values() if n not in sig_hashes]
-        if missing:
-            raise RuntimeError(
-                f"Cannot compute logical digest for node: upstream nodes "
-                f"{missing} have not been executed yet."
-            )
-        upstream_hash_map = self._upstream_identity_map(
-            workflow,
-            list(upstream_nodes.values()),
-            sig_hashes,
-        )
-        signature_constants = dict(node._constant_bindings)
-        self._normalize_path_arguments(signature_constants, input_annotations)
-        signature_defaults = {
-            f: getattr(node.tool.Inputs, f)
-            for f in input_annotations
-            if f not in node._column_bindings
-            and f not in node._constant_bindings
-            and hasattr(node.tool.Inputs, f)
-        }
-        self._normalize_path_arguments(signature_defaults, input_annotations)
-        resolved_params: dict[str, Any] = {
-            "bindings": {
-                f: {"node": cr.node.name, "column": cr.column}
-                for f, cr in node._column_bindings.items()
-            },
-            "constants": signature_constants,
-            "defaults": signature_defaults,
-            "output_templates": get_output_templates(
-                node.tool.Outputs,
-                node.tool.Inputs,
-                node.output_templates,
-            ),
-        }
-        return self._compute_sig_hash(
-            node,
-            env_hash,
-            resolved_params,
-            upstream_hash_map,
-            workflow,
-        )
 
     # ── Dispatch & output construction ─────────────────────────────────
 

@@ -72,7 +72,7 @@ def compute_signature_hash(
     tool_version: str,
     env_hash: str,
     resolved_params: Any,
-    upstream_hashes: dict[str, str],
+    upstream_hashes: dict[str, Any],
     source_hash: str | None = None,
 ) -> str:
     """Compute the logical digest for a node."""
@@ -80,9 +80,8 @@ def compute_signature_hash(
     if source_hash is not None:
         parts.append(source_hash)
     parts.append(deterministic_serialize(resolved_params))
-    # Sort upstream hashes by node name for determinism
-    for name, h in sorted(upstream_hashes.items()):
-        parts.append(f"{name}:{h}")
+    for name, identity in sorted(upstream_hashes.items()):
+        parts.append(f"{name}:{deterministic_serialize(identity)}")
     combined = "|".join(parts)
     return hashlib.sha256(combined.encode()).hexdigest()
 

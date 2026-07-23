@@ -99,10 +99,6 @@ def _rows_work_dir(run_dir: Path) -> Path:
     return _work_dir(run_dir) / "rows"
 
 
-def _pending_assets_dir(storage_path: str | Path, node_name: str) -> Path:
-    return Path(storage_path) / "cache" / "v1" / "pending" / node_name / "assets"
-
-
 def _batch_work_dir(run_dir: Path) -> Path:
     return _work_dir(run_dir) / "batch"
 
@@ -562,7 +558,7 @@ class NodeStep:
         node: Node,
         engine: "DefaultEngine",
         results: dict[Node, pd.DataFrame],
-        sig_hashes: dict[Node, str],
+        sig_hashes: dict[Node, str | None],
         workflow: Any,
         skipped: bool = False,
     ) -> None:

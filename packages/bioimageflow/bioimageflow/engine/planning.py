@@ -72,7 +72,8 @@ class _PlanningMixin:
 
         plan: dict[str, NodePlan] = {}
         results: dict[Node, Any] = {}
-        sig_hashes: dict[Node, str] = {}
+        sig_hashes: dict[Node, str | None] = {}
+        diagnostic_hashes: dict[Node, str] = {}
 
         with scoped_node_names(scoped_names):
             for node in order:
@@ -84,7 +85,14 @@ class _PlanningMixin:
                         tuple(self._plan_upstream_names(node)),
                     )
                     continue
-                self._plan_node(node, results, sig_hashes, workflow, plan)
+                self._plan_node(
+                    node,
+                    results,
+                    sig_hashes,
+                    diagnostic_hashes,
+                    workflow,
+                    plan,
+                )
 
         # Include any nodes not reachable from terminals (shouldn't happen
         # in practice, but plan is expected to cover every registered node).
@@ -104,7 +112,8 @@ class _PlanningMixin:
         self,
         node: Node,
         results: dict[Node, Any],
-        sig_hashes: dict[Node, str],
+        sig_hashes: dict[Node, str | None],
+        diagnostic_hashes: dict[Node, str],
         workflow: Any,
         plan: dict[str, NodePlan],
     ) -> None:
@@ -113,7 +122,12 @@ class _PlanningMixin:
         from bioimageflow.workflow_node import WorkflowNode
 
         if isinstance(node, WorkflowNode):
-            self._plan_compiled_workflow_node(node, sig_hashes, plan)
+            self._plan_compiled_workflow_node(
+                node,
+                sig_hashes,
+                diagnostic_hashes,
+                plan,
+            )
             return
 
         cached_df, sig_hash = self._check_node_cache(
@@ -124,32 +138,40 @@ class _PlanningMixin:
             hydrate_assets=False,
         )
         if sig_hash is None:
-            # Workflow boundaries are handled above; executable tools are cacheable.
+            upstream = tuple(self._plan_upstream_names(node))
+            pending_upstreams = tuple(
+                name
+                for name in upstream
+                if (entry := plan.get(name)) is not None
+                and entry.selected_record_id is None
+                and entry.status is not NodePlanStatus.SKIPPED
+            )
+            sig_hashes[node] = None
+            diagnostic_hash = self._compute_pending_diagnostic_sig_hash(
+                node,
+                diagnostic_hashes,
+                workflow,
+            )
+            diagnostic_hashes[node] = diagnostic_hash
             plan[node.name] = NodePlan(
                 node.name,
-                "",
-                NodePlanStatus.UNEXECUTED,
-                tuple(self._plan_upstream_names(node)),
+                diagnostic_hash,
+                (
+                    NodePlanStatus.PENDING_UPSTREAM
+                    if pending_upstreams
+                    else NodePlanStatus.UNEXECUTED
+                ),
+                upstream,
+                pending_upstreams=pending_upstreams,
             )
             return
         sig_hashes[node] = sig_hash
+        diagnostic_hashes[node] = sig_hash
         upstream = tuple(self._plan_upstream_names(node))
-        pending_upstreams = tuple(
-            name
-            for name in upstream
-            if (entry := plan.get(name)) is not None
-            and entry.selected_record_id is None
-            and entry.status not in {NodePlanStatus.CACHED, NodePlanStatus.SKIPPED}
-        )
-        final_result_key = (
-            self._plan_final_result_key(node, sig_hash)
-            if not pending_upstreams
-            else None
-        )
+        pending_upstreams: tuple[str, ...] = ()
+        final_result_key = self._plan_final_result_key(node, sig_hash)
         selected_record_id = self._plan_selected_record_id(workflow, final_result_key)
-        if pending_upstreams:
-            status = NodePlanStatus.PENDING_UPSTREAM
-        elif cached_df is not None:
+        if cached_df is not None:
             status = NodePlanStatus.CACHED
         else:
             if isinstance(node.tool, DataFrameTool):
@@ -200,19 +222,21 @@ class _PlanningMixin:
     def _plan_compiled_workflow_node(
         self,
         node: "WorkflowNode",
-        sig_hashes: dict[Node, str],
+        sig_hashes: dict[Node, str | None],
+        diagnostic_hashes: dict[Node, str],
         plan: dict[str, NodePlan],
     ) -> None:
         """Reduce already-planned compiled internals to one boundary entry."""
-        terminal_hashes = {
-            field: sig_hashes[col_ref.node]
+        terminal_hashes: dict[str, str] = {
+            field: diagnostic_hash
             for field, col_ref in node._published_outputs.items()
-            if col_ref.node in sig_hashes
+            if (diagnostic_hash := diagnostic_hashes.get(col_ref.node)) is not None
         }
         combined = hashlib.sha256(
             json.dumps(terminal_hashes, sort_keys=True).encode()
         ).hexdigest()
-        sig_hashes[node] = combined
+        sig_hashes[node] = None
+        diagnostic_hashes[node] = combined
         internal_statuses = [
             plan[internal.name].status
             for internal in node.internal_nodes

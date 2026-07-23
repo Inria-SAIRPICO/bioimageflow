@@ -12,6 +12,7 @@ from .common import (
     Storage,
     _path_output_columns,
     _shared_array_output_columns,
+    canonical_dataframe_digest,
     compute_env_hash,
     dataframe_lookup,
     dataframe_result_key,
@@ -89,7 +90,7 @@ class _CacheRuntimeMixin:
         self,
         node: Node,
         results: dict[Node, pd.DataFrame],
-        sig_hashes: dict[Node, str],
+        sig_hashes: dict[Node, str | None],
         workflow: Any,
         *,
         hydrate_assets: bool = True,
@@ -109,15 +110,18 @@ class _CacheRuntimeMixin:
         # ── Compute signature hash ──
         if isinstance(node.tool, DataFrameTool):
             _arguments, args_dict = self._resolve_constant_arguments(node)
+            for index, argument in enumerate(node._args):
+                if isinstance(argument, pd.DataFrame):
+                    args_dict[f"workflow_dataframe_input_{index}"] = (
+                        canonical_dataframe_digest(argument)
+                    )
             upstream_identities = self._upstream_identity_map(
                 workflow,
-                [
-                    arg
-                    for arg in node._args
-                    if isinstance(arg, Node) and arg in sig_hashes
-                ],
+                self._dataframe_upstream_recipes(node),
                 sig_hashes,
             )
+            if upstream_identities is None:
+                return None, None
             sig_hash = self._compute_sig_hash(
                 node, "", args_dict, upstream_identities, workflow
             )
@@ -143,6 +147,8 @@ class _CacheRuntimeMixin:
                     sig_hashes,
                     workflow,
                 )
+                if sig_hash is None:
+                    return None, None
         else:
             return None, None
 

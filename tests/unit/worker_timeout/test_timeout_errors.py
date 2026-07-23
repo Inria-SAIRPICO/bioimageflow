@@ -61,6 +61,8 @@ class TestWorkerTimeoutErrorRaised:
                 has_batch=False,
                 row_contexts=row_contexts,
                 batch_context=batch_context,
+                invocation_id=f"inv_{'1' * 32}",
+                cache_attempt_id=f"att_{'2' * 32}",
             )
 
         # All tasks should have been asked to cancel after timeout
@@ -89,6 +91,8 @@ class TestWorkerTimeoutErrorRaised:
                 has_batch=True,
                 row_contexts=row_contexts,
                 batch_context=batch_context,
+                invocation_id=f"inv_{'1' * 32}",
+                cache_attempt_id=f"att_{'2' * 32}",
             )
 
         assert stub.hanging_tasks[0].cancel_called
@@ -167,6 +171,8 @@ class TestWorkerTimeoutErrorRaised:
             has_batch=False,
             row_contexts=row_contexts,
             batch_context=batch_context,
+            invocation_id=f"inv_{'1' * 32}",
+            cache_attempt_id=f"att_{'2' * 32}",
         )
         assert stub.last_worker_timeout is None
         assert stub.tasks[0].timeouts_seen == [None]

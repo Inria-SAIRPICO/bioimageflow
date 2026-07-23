@@ -14,8 +14,6 @@ from .common import (
     Path,
     ProcessingTool,
     cast,
-    hashlib,
-    json,
     pd,
 )
 
@@ -63,22 +61,13 @@ class _DataframesMixin:
         self,
         node: "WorkflowNode",
         results: dict[Node, pd.DataFrame],
-        sig_hashes: dict[Node, str],
+        sig_hashes: dict[Node, str | None],
         workflow: Any,
-    ) -> tuple[pd.DataFrame, str]:
+    ) -> tuple[pd.DataFrame, None]:
         """Assemble a compiled workflow boundary after its tools complete."""
-        del workflow
+        del sig_hashes, workflow
         output_df = self._assemble_workflow_output(node, results)
-        terminal_hashes = {
-            field: sig_hashes[col_ref.node]
-            for field, col_ref in node._published_outputs.items()
-            if col_ref.node in sig_hashes
-        }
-        combined = hashlib.sha256(
-            json.dumps(terminal_hashes, sort_keys=True).encode()
-        ).hexdigest()
-
-        return output_df, combined
+        return output_df, None
 
     def _assemble_workflow_output(
         self,

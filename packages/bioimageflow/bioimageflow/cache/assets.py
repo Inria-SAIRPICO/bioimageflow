@@ -176,6 +176,31 @@ def _add_processing_scalar_output(
     seen_outputs.add(entry_key)
 
 
+def _reject_mutable_workspace_output(
+    path: Path,
+    staging_assets_dir: Path,
+) -> None:
+    """Reject outputs that point anywhere inside the mutable attempt workspace."""
+    workspace_root = staging_assets_dir.parent
+    lexical_path = Path(os.path.abspath(path))
+    lexical_root = Path(os.path.abspath(workspace_root))
+    try:
+        lexical_path.relative_to(lexical_root)
+    except ValueError:
+        pass
+    else:
+        raise CacheCorruptionError(
+            f"Processing output path points into mutable work state: {path}"
+        )
+    try:
+        path.resolve().relative_to(workspace_root.resolve())
+    except ValueError:
+        return
+    raise CacheCorruptionError(
+        f"Processing output path points into mutable work state: {path}"
+    )
+
+
 def _processing_manifest_entries_and_dataframe(
     df: pd.DataFrame,
     path_columns: set[str],
@@ -246,6 +271,7 @@ def _processing_manifest_entries_and_dataframe(
             try:
                 path.resolve().relative_to(staging_root)
             except ValueError:
+                _reject_mutable_workspace_output(path, staging_assets_dir)
                 if column in owned_path_columns:
                     raise CacheCorruptionError(
                         f"Declared owned output asset is outside staging assets: {path}"

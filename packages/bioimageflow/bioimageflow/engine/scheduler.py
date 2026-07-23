@@ -29,6 +29,7 @@ from .graph import _GraphMixin
 from .cache_runtime import _CacheRuntimeMixin
 from .node_execution import _NodeExecutionMixin
 from .arguments import _ArgumentsMixin
+from .identity_runtime import _IdentityRuntimeMixin
 from .dispatch import _DispatchMixin
 from .dataframes import _DataframesMixin
 from .planning import _PlanningMixin
@@ -87,6 +88,7 @@ class DefaultEngine(
     _CacheRuntimeMixin,
     _NodeExecutionMixin,
     _ArgumentsMixin,
+    _IdentityRuntimeMixin,
     _DispatchMixin,
     _DataframesMixin,
     _PlanningMixin,
@@ -275,7 +277,7 @@ class DefaultEngine(
                 )
 
                 results: dict[Node, pd.DataFrame] = {}
-                sig_hashes: dict[Node, str] = {}
+                sig_hashes: dict[Node, str | None] = {}
 
                 for node in order:
                     if workflow.cancel_requested:
@@ -378,7 +380,7 @@ class DefaultEngine(
         ts.prepare()
 
         results: dict[Node, pd.DataFrame] = {}
-        sig_hashes: dict[Node, str] = {}
+        sig_hashes: dict[Node, str | None] = {}
         lock = threading.Lock()  # protects results and sig_hashes dict writes
 
         while ts.is_active():

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from bioimageflow_core import (
     ProcessingTaskV1,
     RowInvocationV1,
@@ -43,6 +41,9 @@ class _DispatchMixin:
         node_name: str,
         row_contexts: list[ExecutionContext],
         batch_context: ExecutionContext,
+        *,
+        invocation_id: str,
+        cache_attempt_id: str | None,
     ) -> list[list[Any]]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
@@ -55,6 +56,8 @@ class _DispatchMixin:
             row_contexts=tuple(row_contexts),
             batch_context=batch_context,
             has_batch=has_batch,
+            invocation_id=invocation_id,
+            cache_attempt_id=cache_attempt_id,
         )
         return self._backend.dispatch(self, request)
 
@@ -165,6 +168,8 @@ class _DispatchMixin:
         has_batch: bool,
         row_contexts: list[ExecutionContext],
         batch_context: ExecutionContext,
+        invocation_id: str,
+        cache_attempt_id: str | None,
     ) -> list[list[Any]]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from bioimageflow.worker_origins import resolve_worker_tool_origin
@@ -179,7 +184,6 @@ class _DispatchMixin:
             return []
         env_spec = tool.environment
         origin = resolve_worker_tool_origin(tool)
-        invocation_id = f"inv_{uuid.uuid4().hex}"
         max_workers, worker_env, worker_timeout = self._resolve_worker_config(
             tool, workflow
         )
@@ -190,7 +194,7 @@ class _DispatchMixin:
                 task_id="task_0000000000000000",
                 node_name=node_name,
                 invocation_id=invocation_id,
-                cache_attempt_id=None,
+                cache_attempt_id=cache_attempt_id,
                 task_retry=0,
                 mode="process_batch",
                 tool=origin,
@@ -249,7 +253,7 @@ class _DispatchMixin:
                 task_id=f"task_{position:016x}",
                 node_name=node_name,
                 invocation_id=invocation_id,
-                cache_attempt_id=None,
+                cache_attempt_id=cache_attempt_id,
                 task_retry=0,
                 mode="row_chunk",
                 tool=origin,

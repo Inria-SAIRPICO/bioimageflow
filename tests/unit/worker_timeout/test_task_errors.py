@@ -63,6 +63,8 @@ class TestWorkerTaskErrorRaised:
                 has_batch=False,
                 row_contexts=row_contexts,
                 batch_context=batch_context,
+                invocation_id=f"inv_{'1' * 32}",
+                cache_attempt_id=f"att_{'2' * 32}",
             )
 
         message = str(exc_info.value)
@@ -98,6 +100,8 @@ class TestWorkerTaskErrorRaised:
                 has_batch=True,
                 row_contexts=row_contexts,
                 batch_context=batch_context,
+                invocation_id=f"inv_{'1' * 32}",
+                cache_attempt_id=f"att_{'2' * 32}",
             )
 
         message = str(exc_info.value)
