@@ -2,7 +2,7 @@
 
 Status: dependency-ordered implementation guide for the future attached Parsl engine specified by `docs/parsl_distributed_engine_specs.md`.
 
-This guide was reviewed against the current library specification, recursive workflow contract, cache/storage contract, implementation, packaging, and test suite on 2026-07-22.
+This guide was rebaselined against repository commit `6a3f67b`, the library specification, recursive workflow contract, cache/storage contract, focused package structure, backend seam, test ownership, and CI topology on 2026-07-23.
 
 The Parsl engine is not implemented yet.
 
@@ -20,6 +20,9 @@ The platform contracts win if this guide conflicts with them.
 The distributed-engine specification wins for Parsl-specific behavior that the platform contracts have already been extended to permit.
 Sections 17 through 19 and acceptance Section 21.7 of the distributed-engine specification are not part of Phase 1a.
 
+Section 5 records final-design decisions selected during preparation.
+When one of those decisions differs from a normative document, WP0 must update the normative document before any implementation that depends on it is merged.
+
 The implementation must update the platform contracts before landing public or cross-engine behavior that those contracts do not yet describe.
 Phase 1a is not complete while any contract gate in Section 5 of this guide remains open.
 
@@ -27,7 +30,7 @@ Phase 1a is not complete while any contract gate in Section 5 of this guide rema
 
 Phase 1a delivers an attached, shared-filesystem execution backend.
 A caller constructs a runtime-only `ParslEngine`, attaches it to the current Python process, and passes it explicitly to `Workflow.compute()` or `Workflow.compute_steps()`.
-The orchestrator compiles the workflow, resolves cache identity and arguments, executes every `DataFrameTool` and `WorkflowNode` boundary locally, dispatches reachable `ProcessingTool` calls through Parsl, and publishes through the existing v1 cache and view APIs.
+The orchestrator compiles the workflow, resolves cache identity and arguments, executes every `DataFrameTool` and `WorkflowNode` boundary locally, dispatches reachable `ProcessingTool` calls through Parsl, and publishes through the final cache and view contracts.
 
 The feature is done only when all of the following are true:
 
@@ -39,6 +42,8 @@ The feature is done only when all of the following are true:
 - A real local Parsl executor test covers the control plane, and a process-isolated local Parsl executor test covers serialization, imports, worker state, and shared paths.
 - Every applicable item in distributed-engine acceptance Sections 21.1 through 21.6 has a named automated test or an explicitly documented environment-dependent test.
 - The documented repository validation commands pass.
+- The final source tree, tests, and normative documentation describe only the chosen architecture and contain no superseded implementation path, compatibility shim, deprecated alias, fallback reader, dual writer, or historical design commentary.
+- A concise GUI-update guide is written only after the final library API, events, storage, run views, and output views are stable.
 
 A single successful `process_row` example is an integration milestone, not the Phase 1a completion criterion.
 
@@ -58,7 +63,7 @@ Phase 1a includes:
 - shared absolute storage, attempt, transient, source, and archive-materialization paths,
 - explicit executor bindings, environment attestations, node/environment routing, resource-capacity checks, and per-executor preflight,
 - installed-module, versioned-module, shared-module, source-file, and materialized-archive-module worker origins,
-- the existing `"execution"`, `"engine"`, and `"external"` lifecycle vocabulary,
+- the final `"execution"`, `"engine"`, and `"external"` resource-lifetime vocabulary,
 - context-scoped cancellation, future cancellation requests, complete future draining, and safe attempt retention,
 - direct/Wetlands/Parsl parity for shared cache identity, publication, views, output validation, failure selection, and progress.
 
@@ -78,43 +83,50 @@ Phase 1a does not include:
 - automatic chunk growth, chunk-to-row fallback, or split `process_batch()`,
 - a generic `parsl_resource_specification` adapter,
 - Parsl app caching, a second result cache, or global Parsl loader/cleanup ownership,
-- universal worker stdout/stderr capture or worker-originated live progress.
+- universal worker stdout/stderr capture or worker-originated live progress,
+- GUI implementation work or preservation of GUI assumptions while the library is being designed and implemented.
 
 Parsl providers may allocate worker blocks for an attached engine.
 That does not turn provider configuration into a BioImageFlow launcher API.
 
-## 4. Current Repository Baseline
+## 4. Prepared Repository Baseline
 
-The implementation must start from the current seams rather than the assumptions in the previous version of this guide.
+Phase 1a starts from commit `6a3f67b`.
 
-| Area | Current implementation | Required Phase 1a change |
+| Area | Prepared owner | Remaining Phase 1a work |
 |---|---|---|
-| Workflow backend selection | `Workflow.__init__` accepts only `"direct"` and `"wetlands"`; `Workflow.create_engine()` constructs direct/Wetlands engines. | Add the preference string and strict runtime-only factory arguments without putting live Parsl objects in graph or archive data. |
-| Cancellation | `Workflow` owns a definition-local `_cancel_event`; `compute()` clears it while `compute_steps()` does not. | Add one active `WorkflowExecutionContext`, propagate it through synthetic root wrappers, and make idle cancellation non-sticky. |
-| Lifecycle | `EnvironmentLifetime` and `DefaultEngine` validate and clean up in Wetlands-specific terms. | Extract backend-neutral ownership, active-execution, context-manager, close, and cleanup hooks while preserving Wetlands behavior. |
-| Step preparation | `NodeStep.prepare()` directly uses the Wetlands environment manager and worker configuration. | Delegate preparation to an engine hook so direct, Wetlands, and Parsl prepare only their own resources. |
-| Scheduling and failures | Parallel orchestration uses `as_completed()` and retains the first exception observed by completion race. | Assign deterministic compiled ordinals, retain sibling failures, drain submitted work, and choose the primary failure by the normative key. |
-| Processing dispatch | `_dispatch_tool()` switches directly between local and Wetlands execution and does not carry the complete immutable dispatch state needed by a remote backend. | Introduce one backend-neutral processing-dispatch request and backend hook used by all engines. |
-| Recursive cache identity | `_upstream_identity_map()` may use `signature:<diagnostic-hash>` for a workflow boundary. | Compile provider/selector provenance recipes and resolve selected real-provider record references at runtime; return no reusable result key when any consumed value is non-reusable. |
-| Dataframe identity | `Storage.canonical_dataframe_digest()` exists, but publication still derives record identity from staged Parquet bytes and root dataframe inputs use a separate identity path. | Use one canonical logical digest for publication and root inputs, while retaining a separate transport-integrity digest if useful. |
-| Publication provenance | Processing publication invents an attempt-derived run ID. | Pass the active workflow run ID as non-content provenance and record the effective injected engine. |
-| Non-reusable processing | The storage API has no contract-backed run-scoped `ProcessingTool` workspace when `result_key is None`. | Add confined transient storage helpers only after the storage contract reserves the namespace and retention rules. |
-| Worker loading | The core worker understands raw files, module plus import root, and scoped versioned tokens, but the token and instance key are not the required origin protocol. | Formalize all five origins, verify them in preflight, and key worker instances by the canonical complete origin. |
-| Worker result validation | Direct and Wetlands paths do not share every output reconstruction and batch-cardinality check. | Extract one orchestrator validator and apply it to direct, Wetlands, and Parsl. |
-| Packaging | The orchestrator has no Parsl optional extra, the workspace has no Parsl test dependency, and pytest has no `parsl` marker. | Add the extra, lock and CI coverage, marker documentation, artifact checks, and lazy-import tests. |
+| Processing backend seam | `bioimageflow/backends.py` defines `ProcessingBackend`, immutable `ProcessingDispatch`, and direct/Wetlands adapters. | Extend the final request with run, cache/transient, aligned-index, and resource identity; add the Parsl backend without moving scheduling into the backend. |
+| Scheduling and graph execution | `bioimageflow/engine/` owns scheduler, graph, arguments, node execution, dispatch, dataframe construction, planning, and cache runtime. | Add deterministic compiled ordinals and failure aggregation, active-execution enforcement, bounded remote dispatch, shared output validation, and optional cache identity. |
+| Workflow runtime | `bioimageflow/workflow/runtime.py` owns engine creation, compute, stepped execution, cancellation, and run-view lifecycle. | Add `WorkflowExecutionContext`, root-wrapper propagation, final engine selection, and one-active-workflow execution. |
+| Cache and storage | `bioimageflow/cache/` and `bioimageflow/storage/` separate identity, publication, manifests, repositories, run views, and output views. | Add final logical dataframe publication, selected-provider recipes, non-reusable transients, directory assets, and active-run provenance in their existing ownership layers. |
+| Custom sources and loading | `bioimageflow/workflow/custom_sources.py`, `bioimageflow/tool_loader.py`, `bioimageflow/env_manager.py`, and `bioimageflow-core` own source capture and worker loading. | Define the final worker-origin model, shared archive materialization, preflight, and one strict worker protocol. |
+| Focused tests | Test packages are below the size ceiling, shared fixtures live under `tests/testkit/`, and `tests/ownership.toml` maps focused edit tests and broader gates. | Add Parsl ownership, unit/integration packages, real-runtime tiers, and acceptance traceability. |
+| Development guardrails | File-size, import-boundary, affected-test, and split-CI tooling is available. | Apply the guardrails to every new Parsl/core module and use affected-test commands throughout implementation. |
 
-The old API `Workflow(engine="parsl", parsl_config=config)` is intentionally not supported.
-Live Parsl configuration belongs to an engine instance or `Workflow.create_engine()` call, never to a workflow definition.
+The backend-neutral dispatch seam is therefore a completed prerequisite that must be extended, not recreated.
+No work package may reintroduce scheduler, cache, publication, progress, or graph logic inside a backend.
 
-The old source-path-only worker plan is also obsolete.
-Phase 1a supports every `WorkerToolOriginV1` variant required by the distributed-engine specification.
+## 5. Final-Design Policy and Contract Gates
 
-## 5. Contract and Design Gates
+These gates precede implementation beyond independent test scaffolding.
+WP0 updates every normative contract to the final chosen model before downstream code is merged.
 
-These gates precede claims of Phase 1a support.
-Work on independent core types and unit-test scaffolding may proceed in parallel, but integration must not bypass them.
+### 5.1 Clean final architecture
 
-### 5.1 Public platform contract
+Implementation targets only the final normative design.
+
+- Preserve an API or behavior only when it is deliberately selected as part of the final library contract, never merely because an earlier implementation exposed it.
+- Do not add compatibility shims, deprecated aliases, fallback readers, dual writers, schema translation, or migration code.
+- When a shared path is replaced, migrate direct, Wetlands, and Parsl to the final path and delete the superseded implementation, tests, comments, and documentation in the same work package.
+- Existing cache/storage contents are disposable development data and receive no read or migration support.
+- Tests create fresh storage under the final contract and do not carry fixtures for superseded cache or worker formats.
+- Final normative documentation describes only the resulting system and contains no implementation history or superseded architecture.
+- The library implementation does not preserve GUI assumptions or coordinate changes with GUI code.
+- After the library and all acceptance gates are final, WP10 writes a short GUI-update guide describing the final integration surfaces and the high-level changes a GUI agent must apply.
+
+The final guide is a handoff document, not a compatibility layer or a reason to constrain the library design.
+
+### 5.2 Public platform contract
 
 Update `docs/source/specs.md` to describe:
 
@@ -129,11 +141,14 @@ Update `docs/source/specs.md` to describe:
 - deterministic workflow-wide failure selection,
 - effective-engine and active-run publication provenance.
 
+WP0 also applies the final backend-neutral names `ResourceLifetime` and `resource_lifetime` to direct, Wetlands, and Parsl resource ownership.
+No alternate lifetime type, parameter alias, or backend-specific ownership name remains.
+
 Do not change the strict recursive graph or archive schema except for accepting `"parsl"` in the existing engine preference field.
 
-### 5.2 Non-reusable `ProcessingTool` storage
+### 5.3 Non-reusable `ProcessingTool` storage
 
-`docs/source/reference/output_cache_storage.md` is exhaustive and does not yet reserve the proposed tree:
+Extend `docs/source/reference/output_cache_storage.md` with the final tree:
 
 ```text
 cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/
@@ -151,37 +166,39 @@ Before implementing that tree, the storage contract must define:
 - whether and where non-record run diagnostics are written,
 - the prohibition on records, `current.json`, latest pointers, run-node record pointers, and output projections for this path.
 
-Until this contract lands, the engine must not fabricate a result key or use a workflow diagnostic signature to obtain a normal cache attempt.
+The implementation does not fabricate a result key or use a workflow diagnostic signature to obtain a normal cache attempt.
 
-### 5.3 Directory-asset contract
+### 5.4 Directory-asset contract
 
-The implementation already handles some directory outputs, but the storage reference does not yet define a reusable-record directory-asset manifest contract.
+Define and implement one final reusable-record directory-asset contract:
 
-Before Phase 1a claims directory-output parity, specify and test:
-
-- the manifest kind and exact fields,
-- deterministic recursive content identity,
-- file type, ordering, symlink, and traversal rules,
+- manifest entries use `kind="owned_asset"` and an explicit `asset_type` of `"file"` or `"directory"`,
+- a directory digest is computed from canonical sorted relative entries containing entry type, relative path, file size, and file digest,
+- symlinks, special files, duplicate normalized paths, traversal, and case-normalization collisions are rejected,
 - record validation and cache-hit rehydration,
 - run/output-view materialization behavior.
 
-### 5.4 Processing task correlation for non-reusable nodes
+The final implementation contains one directory-asset path, not separate local and distributed variants.
 
-The normative `ProcessingTaskV1` currently requires `cache_attempt_id`, while the non-reusable path explicitly creates no result-key attempt and names its workspace with `invocation-id`.
+### 5.5 Processing task correlation
 
-Before implementing that path, clarify the distributed-engine specification in one of two ways:
+WP0 revises the worker protocol before implementation:
 
-- define the existing correlation field as the node execution attempt/invocation identifier for both reusable and transient work, or
-- add a separately versioned invocation identifier while retaining `cache_attempt_id` only for reusable attempts.
+- `invocation_id` is required for every processing-node execution and identifies its reusable or transient workspace,
+- `cache_attempt_id` is optional and is present only when a reusable result key created a cache attempt,
+- `task_id` identifies one submitted row chunk or whole-node batch task,
+- task results echo and validate all three fields exactly.
 
-Do not silently overload the field in code without a matching protocol contract and exact result-envelope validation.
+No field is overloaded with two meanings.
 
-### 5.5 Canonical dataframe artifact contract
+### 5.6 Canonical dataframe artifact contract
 
-The storage contract already requires a canonical logical dataframe digest and a documented deterministic Parquet writer configuration before distributed execution is supported.
+Publication uses the canonical logical dataframe digest for record identity and a separately named Parquet transport digest for file-integrity validation.
+The manifest schema contains both meanings explicitly.
 
 Choose, document, and test the writer settings used for the supported pandas/PyArrow range.
-Parquet bytes may have a transport-integrity digest, but they must not substitute for logical dataframe identity.
+Root dataframe identity uses the same canonical logical digest.
+No reader, writer, fixture, or documentation for the superseded manifest meaning is retained.
 
 ## 6. Package and Responsibility Boundaries
 
@@ -192,6 +209,10 @@ The orchestrator remains Python `>=3.10` and owns graph compilation, pandas obje
 Core worker code must not import pandas, Pydantic, Parsl, or orchestrator graph modules.
 Use `Optional[...]` and other Python 3.9-compatible annotations in core protocol types.
 
+Apply the repository's 800-line production-module ceiling to both orchestrator and core Python modules.
+Extend the import-boundary guard so storage, cache, and shared engine modules cannot import `bioimageflow.parsl` or the external `parsl` package, core cannot import either package, and no production module performs a top-level external `parsl` import.
+Only functions inside the focused `bioimageflow.parsl` implementation may load the optional external package, after a caller selects Parsl behavior.
+
 The orchestrator resolves every constant, default, dataframe binding, absolute runtime path, output template, and `ExecutionContext` before dispatch.
 The worker receives plain resolved values and a worker origin; it never receives the graph-construction tool instance or workflow graph.
 
@@ -201,31 +222,92 @@ The worker receives plain resolved values and a worker origin; it never receives
 Parsl owns executor/provider behavior and transport.
 BioImageFlow owns only the futures submitted by the current `ParslEngine` execution.
 
-## 7. Expected File Ownership
+## 7. Implementation Ownership and Worktrees
 
-The exact internal split may change during refactoring, but ownership should remain recognizable.
+### 7.1 File ownership
+
+The final implementation follows the focused package structure and repository size limits.
 
 | File or area | Expected responsibility |
 |---|---|
-| `docs/source/specs.md` | Public and cross-engine contract changes from Section 5.1 of this guide. |
-| `docs/source/reference/output_cache_storage.md` | Transient processing, directory assets, and deterministic artifact rules from Section 5 of this guide. |
+| `docs/source/specs.md` and the normative reference documents | Final public, execution, recursive, cache, storage, and worker contracts from Section 5 of this guide. |
 | `packages/bioimageflow/pyproject.toml` and `uv.lock` | `bioimageflow[parsl]`, selected supported Parsl range, and locked development/test dependency. |
 | Root `pyproject.toml` | `parsl` pytest marker, development dependency selection, and test-tier configuration. |
-| `bioimageflow/execution.py` or an equivalent focused module | Public `WorkflowExecutionContext` and finalization/cancellation state. |
-| `bioimageflow/parsl_types.py` | Strict public task-policy, binding, attestation, capability, and slot-capacity value types without importing Parsl. |
-| `bioimageflow/parsl_engine.py` | Lazy Parsl import, attached engine lifecycle, startup, preflight, routing, app construction, dispatch, collection, drain, and Parsl error mapping. |
-| `bioimageflow/engine/` and `bioimageflow/backends.py` | Backend-neutral lifecycle/startup/prepare/dispatch hooks, compiled scheduling, deterministic failures, shared validation calls, optional cache identity, and the processing-backend seam. |
-| `bioimageflow/workflow/` | Engine preference/factory, active run context, root-wrapper propagation, effective engine metadata, and public compute signatures. |
-| `bioimageflow/cache/` and `bioimageflow/storage/` | Canonical logical dataframe identity, active-run provenance, optional publication, transient path helpers, and canonical v1 publication only. |
-| `bioimageflow/tool_origin.py` or an equivalent focused module | Orchestrator-side origin construction, shared-root validation, and archive-source materialization inputs. |
-| `bioimageflow/env_manager.py` | Reuse of existing loader-token discovery without making Wetlands a Parsl provisioner. |
-| `bioimageflow-core/bioimageflow_core/worker_protocol.py` or equivalent | Python 3.9-safe task/result/origin envelopes, strict decoding, canonical origin identity, preflight request/result values, and top-level worker calls. |
-| `bioimageflow-core/bioimageflow_core/worker.py` | Shared origin loader and worker-instance cache used by existing Wetlands and new Parsl entry points. |
-| Package `__init__.py` files | Explicit public exports while preserving import without Parsl installed. |
-| `tests/unit/` and `tests/integration/` | Shared regressions, fake lifecycle tests, real Parsl tests, and acceptance traceability. |
+| `scripts/check_file_sizes.py` and `scripts/check_import_boundaries.py` | Core production-module size coverage and the optional-Parsl dependency boundaries from Section 6. |
+| `bioimageflow/parsl/` | Focused modules for public value types, engine lifecycle, backend dispatch, routing, startup/preflight, archive materialization, and errors; no module may exceed the orchestrator size ceiling. |
+| `bioimageflow/backends.py` | Small backend-neutral protocol plus direct and Wetlands adapters; `ProcessingDispatch` remains scheduler-owned resolved input. |
+| `bioimageflow/engine/execution_context.py` | Public `WorkflowExecutionContext`, cancellation, active binding, and terminal finalization state. |
+| `bioimageflow/engine/` | Compiled scheduling, deterministic failures, shared output validation, optional cache identity, argument resolution, dataframe construction, and backend orchestration. |
+| `bioimageflow/workflow/runtime.py` | Engine preference/factory, active-context binding, root-wrapper propagation, effective engine metadata, and public compute signatures. |
+| `bioimageflow/cache/identity.py`, `cache/processing.py`, `cache/dataframe.py`, and `cache/metadata.py` | Provider recipes, logical identity, reusable publication, active-run provenance, and shared cache metadata. |
+| `bioimageflow/storage/identity.py`, `storage/manifests.py`, `storage/repository.py`, `storage/run_views.py`, and `storage/output_views.py` | Final logical/transport digests, transient paths, directory assets, record validation, and public views. |
+| `bioimageflow/worker_origins.py` and `bioimageflow/env_manager.py` | One orchestrator-side origin model used by remote backends, without provisioning Parsl environments through Wetlands. |
+| `bioimageflow-core/bioimageflow_core/worker_protocol.py` | Python 3.9-safe task/result/origin envelopes, strict decoding, canonical origin identity, and preflight request/result values. |
+| `bioimageflow-core/bioimageflow_core/worker.py` | One strict origin loader, worker-instance cache, and top-level processing entry point used by Wetlands and Parsl. |
+| Package `__init__.py` files | Final explicit public exports and lazy optional-dependency behavior, without deprecated aliases. |
+| `tests/unit/parsl/` and `tests/integration/parsl/` | Focused Parsl value, lifecycle, routing, preflight, dispatch, semantics, and real-runtime tests. |
+| Existing focused test packages | Cross-engine regression coverage selected through `tests/ownership.toml`. |
+| `docs/parsl_phase1a_gui_update_guide.md` | Concise final GUI-agent handoff created only in WP10 after every library acceptance gate passes. |
 
-Avoid placing all shared refactors in `parsl_engine.py`.
+Avoid concentrating the Parsl implementation in one module.
 Any observable rule that also applies to direct or Wetlands belongs in a shared helper or engine path and needs cross-engine tests.
+
+### 7.2 Integration worktree
+
+All Phase 1a implementation is integrated in:
+
+```text
+.worktrees/parsl-phase1a
+branch: feature/parsl-phase1a
+base: 6a3f67b
+```
+
+The primary working tree remains on `main`.
+The integration agent owns the feature branch, master plan, merge order, final public façades, `uv.lock`, `tests/ownership.toml`, and cross-package validation.
+
+### 7.3 Parallel agent worktrees
+
+Create a child worktree only for a concrete independent slice based on the latest integration commit.
+Use short-lived branches and paths such as:
+
+```text
+.worktrees/parsl-core-protocol
+.worktrees/parsl-public-types
+.worktrees/parsl-storage
+```
+
+Rules:
+
+- one writing agent owns one child worktree,
+- no two agents edit the same ownership area concurrently,
+- child agents commit only their scoped production and test changes,
+- child agents report contract discoveries to the integration agent instead of changing the master plan independently,
+- the integration agent reviews and merges one validated commit series at a time,
+- conflict-heavy façades, dependency locks, test ownership, and final documentation remain integration-agent work,
+- after merge, move the child worktree to trash, run `git worktree prune`, and delete the merged branch.
+
+Use at most two parallel implementation agents plus the integration agent.
+The remaining agent slot is reserved for read-only review, race analysis, or focused test audit.
+
+Parallel work is appropriate after WP0 for:
+
+- the core worker protocol and origin model,
+- public Parsl value types plus optional-dependency tests,
+- isolated testkit fixtures and acceptance-test scaffolding.
+
+Shared scheduler, workflow context, cache identity, publication, cancellation, and future-drain changes are integrated sequentially unless their interfaces and file ownership have already been frozen by a completed gate.
+
+### 7.4 Plan-update cadence
+
+The integration agent updates the master plan:
+
+- after every work-package exit gate,
+- before creating child worktrees from a new integration baseline,
+- immediately when a normative decision changes downstream interfaces or test ownership,
+- after merging parallel branches and before starting their consumers.
+
+Do not update the plan after every file or individual test.
+Each checkpoint records completed commits, focused validation, remaining blockers, and any changed downstream dependencies.
 
 ## 8. Delivery Sequence
 
@@ -234,9 +316,9 @@ Later packages may be developed behind tests, but they must not be integrated as
 
 | Work package | Deliverable | Exit gate |
 |---|---|---|
-| WP0 | Contract updates and regression baseline | Section 5 of this guide is resolved and current direct/Wetlands behavior is captured. |
+| WP0 | Final contract updates and regression baseline | Section 5 of this guide is fully normative and direct/Wetlands tests assert only the chosen final behavior. |
 | WP1 | Worker-safe protocol and origin model | Core imports on Python 3.9 and strict round-trip/origin tests pass. |
-| WP2 | Shared execution context and engine seams | Existing direct/Wetlands lifecycle, steps, cancellation, validation, and failure tests pass through the new seams. |
+| WP2 | Shared execution context and extended backend seam | Direct/Wetlands lifecycle, steps, cancellation, validation, and failure behavior pass through the final context and dispatch contracts. |
 | WP3 | Shared cache identity and storage prerequisites | No boundary diagnostic key remains; canonical digests and reusable/non-reusable paths follow the storage contract. |
 | WP4 | Public Parsl API and side-effect-free lifecycle | API, packaging, lazy import, constructor, factory, ownership, and close tests pass without processing submission. |
 | WP5 | Compile, route, materialize, acquire, and preflight | Invalid runs fail before processing; a known fully cached run needs no DFK. |
@@ -244,11 +326,12 @@ Later packages may be developed behind tests, but they must not be integrated as
 | WP7 | Chunk, batch, empty, validation, and recursive parity | Shared semantics pass for direct, Wetlands, and Parsl. |
 | WP8 | Progress, errors, cancellation, deterministic failure, drain, and cleanup | Failure/cancellation cannot publish partial state or leave an engine reusable while a writer is active. |
 | WP9 | Acceptance and release hardening | Distributed-engine acceptance Sections 21.1 through 21.6 and repository validation pass. |
+| WP10 | Final GUI-update guide | A concise handoff describes the final public API, events, storage/view surfaces, and high-level GUI work without constraining or changing the library. |
 
 ## 9. WP0: Contracts and Regression Baseline
 
 Land the Section 5 contract updates from this guide first.
-Add tests for the current direct and Wetlands behavior that the shared refactors could accidentally change.
+Update direct and Wetlands tests to assert the final shared behavior before adding Parsl dispatch.
 
 The baseline must cover at least:
 
@@ -262,8 +345,8 @@ The baseline must cover at least:
 - progress callback serialization and public status vocabulary,
 - shared-memory cache behavior that remains valid for local execution.
 
-Do not weaken existing behavior to make Parsl implementation easier.
-Where current direct and Wetlands behavior conflicts with the revised normative contract, update both backends together and name that migration in the test.
+Do not weaken the final platform behavior to make Parsl implementation easier.
+When a direct or Wetlands path differs from the final normative contract, replace it and delete tests for the superseded behavior.
 
 ## 10. WP1: Worker Protocol and Tool Origins
 
@@ -292,7 +375,7 @@ It is distinct from the node attempt or invocation identifier.
 
 ### 10.2 Origin construction and loading
 
-Extract and formalize the current worker loader instead of replacing it with source-file loading.
+Implement one strict worker-origin resolver and processing entry point for every remote backend.
 
 Origin resolution rules are:
 
@@ -303,7 +386,7 @@ Origin resolution rules are:
 - `archive_module` carries source ID/hash, canonical/scoped module names, verified materialization root, and class.
 
 A distribution name and an import-package name are different identities and must not be inferred from each other.
-In particular, the current versioned loader's package token is an import package, so the origin builder must obtain the true distribution from explicit installation metadata or verified distribution metadata.
+The origin builder obtains the true distribution from explicit installation metadata or verified distribution metadata.
 If installed distribution metadata is unavailable, installed-module mode fails and the deployment must select another origin variant.
 
 Every filesystem value is normalized, absolute, confined to its declared shared root, and verified before processing submission.
@@ -327,7 +410,8 @@ Unit tests must prove:
 - two versions, two archives, and equal class names from different origins use separate instances,
 - installed distribution metadata mismatch fails,
 - source hash mismatch and path escape fail,
-- current Wetlands worker entry points still load supported tools through the shared loader.
+- Wetlands and Parsl both use the final protocol, origin resolver, and worker-instance identity,
+- no tuple-based entry point, informal JSON token, permissive decoder, or alternate instance-cache key remains.
 
 ## 11. WP2: Shared Execution Context and Engine Seams
 
@@ -362,12 +446,14 @@ Launcher return persistence and the act of selecting deferred success in a submi
 
 ### 11.2 Backend-neutral lifecycle
 
-Refactor `DefaultEngine` so lifecycle validation, resource acquisition, execution cleanup, close, and context management call backend-neutral hooks.
-Preserve the existing public `EnvironmentLifetime` name for compatibility.
+Refactor shared engine lifecycle validation, resource acquisition, execution cleanup, close, and context management around `ResourceLifetime` and backend-neutral hooks.
 
 Direct execution accepts only its no-resource default policy.
-Wetlands retains its current manager ownership and reuse behavior.
-Parsl maps the same values to DFK/executor ownership described in Section 13.5 of this guide and distributed-engine Section 6.1.
+Wetlands applies the final manager ownership and reuse behavior.
+Parsl maps the same values to DFK/executor ownership described in Section 13.5 of this guide.
+
+Remove transitional engine-factory and import-re-export paths while migrating these backends.
+Shared modules import focused owners directly; if `engine/common.py` remains, it contains only intentionally shared values and helpers and is not an alternate engine namespace.
 
 `close()` is idempotent.
 Executing a closed engine raises `RuntimeError`.
@@ -429,7 +515,7 @@ Workflow aggregate plan entries never own a final result key or selected record 
 
 ### 12.2 Reusable and non-reusable execution
 
-For a reusable result key, use the existing v1 attempt, immutable record, guarded current selection, run/latest view, and optional output-view flow.
+For a reusable result key, use the canonical attempt, immutable record, guarded current selection, run/latest view, and optional output-view flow.
 
 For `result_key is None`:
 
@@ -482,14 +568,17 @@ Never put attempt, work, worker-local, output-view, run, executor, or launcher p
 ### 13.1 Optional dependency
 
 Add a `parsl` project extra to the orchestrator distribution and update the workspace lock.
-Select and test a supported Parsl version range before implementation; do not leave the dependency unbounded and do not guess a range in code without compatibility tests.
+The prepared Phase 1a dependency range is `parsl>=2026.5.25,<2026.6`.
+Pin the development lock to a release inside that range and run the complete Parsl matrix against it.
+Replacing this range requires an explicit WP0 dependency-validation review and a new bounded range; do not widen it opportunistically during implementation.
+Parsl `2026.5.25` requires Python `>=3.10`, matching the orchestrator's supported floor while leaving the Python 3.9 core package independent of Parsl.
 
 Ordinary `import bioimageflow`, non-Parsl workflow construction, graph/archive serialization, validation, and `Workflow.plan()` must not import Parsl.
 Public Parsl value types and `ParslEngine` may be imported without Parsl installed as long as the optional library is loaded only when a Parsl operation requires it.
 
 A missing dependency error names both `parsl` and the install target `bioimageflow[parsl]`.
 
-Export all public Parsl configuration types, `ParslEngine`, `ParslTaskError`, `WorkflowExecutionContext`, and the existing `WorkflowCancelledError` through `bioimageflow.__all__`.
+Export all public Parsl configuration types, `ParslEngine`, `ParslTaskError`, `ResourceLifetime`, `WorkflowExecutionContext`, and `WorkflowCancelledError` through `bioimageflow.__all__`.
 Export public core protocol/origin types explicitly if they are part of the supported worker API.
 
 ### 13.2 Canonical attached API
@@ -500,14 +589,14 @@ The canonical API is:
 engine = ParslEngine(
     parsl_config=config,
     executor_bindings=bindings,
-    environment_lifetime="engine",
+    resource_lifetime="engine",
 )
 
 with engine:
     result = workflow.compute(inputs=inputs, engine=engine)
 ```
 
-The constructor is the exact surface from distributed-engine Section 5.2:
+WP0 makes the following constructor the normative surface:
 
 ```python
 ParslEngine(
@@ -521,12 +610,12 @@ ParslEngine(
     execution="workflow",
     storage_mode="shared_fs",
     task_policy=None,
-    environment_lifetime="execution",
+    resource_lifetime="execution",
 )
 ```
 
 Exactly one of `parsl_config` and `dfk` is required.
-An injected DFK requires `environment_lifetime="external"`.
+An injected DFK requires `resource_lifetime="external"`.
 `"external"` without an injected DFK is invalid.
 `storage_mode="staged"` is recognized but rejected as unavailable in Phase 1a.
 
@@ -544,7 +633,7 @@ Add the exact keyword-only factory surface from distributed-engine Section 5.3:
 ```python
 workflow.create_engine(
     *,
-    environment_lifetime="execution",
+    resource_lifetime="execution",
     env_manager=None,
     parsl_config=None,
     dfk=None,
@@ -560,19 +649,20 @@ workflow.create_engine(
 Validate arguments by selected backend:
 
 - direct rejects non-default lifetime, `env_manager`, and every Parsl argument,
-- Wetlands preserves its lifecycle and manager behavior and rejects every Parsl argument,
+- Wetlands applies its final lifecycle and manager behavior and rejects every Parsl argument,
 - Parsl rejects `env_manager`, requires bindings plus Config/DFK, and forwards only Parsl runtime values.
 
 The factory resolves its default `parsl_execution="workflow"` to the workflow's configured execution policy before constructing the engine.
 An explicitly constructed reusable engine may retain `execution="workflow"` and resolve it separately for each executed root workflow.
 
-`_make_engine()` remains a compatibility wrapper.
+Remove the private alternate engine-factory path and keep one final factory implementation.
 Bare `Workflow(engine="parsl").compute(...)` has no implicit cluster configuration and fails before graph execution with an actionable construction example.
 
 ### 13.4 Public value validation
 
 Implement strict, immutable, JSON-safe types for:
 
+- `ResourceLifetime`,
 - `ParslTaskPolicy`,
 - `WorkerSlotCapacity`,
 - `ExecutorCapabilities`,
@@ -780,7 +870,7 @@ Apply this cardinality rule and the same canonical output shape to direct and We
 
 ### 16.3 Empty and zero-row behavior
 
-Preserve the complete existing empty-input contract:
+Implement the complete normative empty-input contract:
 
 - skip an empty aligned batch by default,
 - run an empty batch only for a real `process_batch()` override with `run_empty_batch=True` on a column-bound node,
@@ -818,14 +908,14 @@ Verify that:
 - internal `ProcessingTool` nodes use their stable scoped names and dispatch remotely,
 - ready internal `DataFrameTool` nodes execute under orchestrator coordination on the main thread and boundaries remain local,
 - every enabled internal terminal, including a detached branch, gates boundary completion,
-- boundary output assembly uses stable ports, current public names, compatible published indexes, and existing index lineage,
+- boundary output assembly uses stable ports, final public names, compatible published indexes, and canonical index lineage,
 - completion-only changes do not invalidate consumers of unchanged published values,
 - zero-output workflows run their terminals and return the canonical empty dataframe,
-- reserved `::` source indexes are rejected and unrelated roots or divergent sibling explosions retain their current alignment errors,
+- reserved `::` source indexes are rejected and unrelated roots or divergent sibling explosions raise the canonical alignment errors,
 - a disabled ordinary real tool appears as a skipped step,
 - a disabled `WorkflowNode` subtree is not expanded into steps,
 - no boundary aggregate is yielded as a `NodeStep`,
-- executing a skipped step raises `DisabledNodeError`, while advancing past an unexecuted non-skipped step retains the current auto-execution behavior,
+- executing a skipped step raises `DisabledNodeError`, while advancing past an unexecuted non-skipped step applies the final auto-execution behavior,
 - multiple requested targets omit skipped targets when another target executes, while all-skipped targets raise `DisabledNodeError`,
 - parallel policy overlaps independent processing nodes,
 - sequential policy permits one real node and one row future at a time.
@@ -837,7 +927,7 @@ Do not stream partial upstream rows into downstream nodes.
 
 ### 17.1 Progress
 
-Emit only the existing statuses:
+Emit only the final statuses:
 
 - `started`,
 - `row_progress`,
@@ -857,7 +947,7 @@ For row and chunk execution, buffer `row_complete` and emit it once per accepted
 When an out-of-order chunk closes a gap, emit every newly contiguous row in order.
 Whole-node batch emits no `row_complete` events.
 
-Serialize callbacks through the existing callback lock while allowing independent-node event streams to interleave.
+Serialize callbacks through one shared callback lock while allowing independent-node event streams to interleave.
 Keep executor labels, task IDs, queued/running states, provider job IDs, and retries in backend diagnostics rather than new public statuses.
 
 ### 17.2 Errors
@@ -882,7 +972,7 @@ The orchestrator must:
 5. ignore late successful results for construction and publication,
 6. leave the incomplete attempt unselected,
 7. preserve records selected by nodes completed before cancellation,
-8. emit normalized cancelled progress and raise the existing workflow cancellation error,
+8. emit normalized cancelled progress and raise `WorkflowCancelledError`,
 9. clean only resources owned by this engine.
 
 A running `DataFrameTool` is observed for cancellation after its local call returns or raises.
@@ -941,14 +1031,31 @@ Extend `tests/unit/test_package_artifacts.py` to inspect the built wheel metadat
 
 ### 18.3 Proposed test ownership
 
-Add focused unit modules such as:
+Add a `parsl` area to `tests/ownership.toml`.
+It owns `bioimageflow/parsl/` and the dedicated Parsl tests.
+Add a separate `worker-protocol` area for `bioimageflow-core/bioimageflow_core/worker_protocol.py`, the final core worker entry point, `bioimageflow/worker_origins.py`, and their focused tests.
+Extend the existing engine area for the complete `bioimageflow/backends.py` file and cross-engine tests, and extend the platform-foundation area for final public exports.
+Each production path belongs to exactly one ownership area even when an area's edit tests overlap another area's integration gates.
+Focused edit tests are organized into packages such as:
 
-- `tests/unit/test_parsl_types.py`,
-- `tests/unit/test_parsl_optional_dependency.py`,
-- `tests/unit/test_parsl_engine_lifecycle.py`,
-- `tests/unit/test_parsl_protocol.py`.
+- `tests/unit/parsl/test_types.py`,
+- `tests/unit/parsl/test_optional_dependency.py`,
+- `tests/unit/parsl/test_engine_lifecycle.py`,
+- `tests/unit/parsl/test_routing.py`,
+- `tests/unit/parsl/test_preflight.py`,
+- `tests/unit/worker_protocol/test_envelopes.py`,
+- `tests/unit/worker_protocol/test_origins.py`.
 
-Add a real integration module such as `tests/integration/test_parsl_engine.py` and split it if lifecycle, preflight, and semantics become unwieldy.
+Real-runtime coverage is split by concern, for example:
+
+- `tests/integration/parsl/test_thread_executor.py`,
+- `tests/integration/parsl/test_process_executor.py`,
+- `tests/integration/parsl/test_recursive_workflows.py`,
+- `tests/integration/parsl/test_cache_and_views.py`,
+- `tests/integration/parsl/test_cancellation_and_failures.py`.
+
+Every actual test module remains below 500 lines.
+Shared Parsl fixtures belong in focused modules under `tests/testkit/` and remain below the testkit ceiling.
 
 Extend existing coverage in:
 
@@ -998,7 +1105,7 @@ Section 21.7 is explicitly Phase 1b and must remain unclaimed.
 - Direct and Wetlands use the new execution context, lifecycle hooks, output validator, canonical digest, and deterministic failure path.
 - Boundary signatures no longer substitute for selected-provider records.
 - Optional cache identity and transient execution follow the storage contract.
-- Existing deterministic tests pass without Parsl installed.
+- The deterministic non-Parsl tests pass without Parsl installed.
 
 ### 19.2 Control-plane gate
 
@@ -1034,7 +1141,29 @@ Section 21.7 is explicitly Phase 1b and must remain unclaimed.
 ## 20. Validation Commands
 
 During implementation, run the smallest focused tests for the work package first.
-Before merging each shared-prerequisite package, run the fast deterministic suite without relying on Parsl availability.
+Use the repository ownership map after every coherent edit:
+
+```bash
+git diff --name-only | uv run python scripts/affected_tests.py --stdin
+```
+
+Before committing a work-package slice:
+
+```bash
+git diff --name-only | uv run python scripts/affected_tests.py --stdin --stage precommit
+```
+
+Before merging a child branch or closing a work-package gate:
+
+```bash
+git diff --name-only | uv run python scripts/affected_tests.py --stdin --stage merge
+uv run python scripts/check_file_sizes.py
+uv run python scripts/check_import_boundaries.py
+uv run pytest tests/unit/test_development_workflow.py
+```
+
+The affected-test selector is advisory and never replaces the unconditional CI jobs.
+Add every new source module to exactly one ownership area before its implementation commit is merged.
 
 The final Phase 1a validation includes:
 
@@ -1055,7 +1184,32 @@ Run the core compatibility matrix on Python 3.9 and the orchestrator matrix on e
 
 If CI assigns the Parsl marker differently, update these commands, the root pytest marker definition, README, and testing reference in the same change.
 
-## 21. Phase 1b Handoff
+## 21. WP10: Final GUI-Update Guide
+
+WP10 starts only after WP9 passes and the final library commit set is stable.
+No earlier work package writes a provisional GUI guide or changes library design to reduce GUI work.
+
+Create `docs/parsl_phase1a_gui_update_guide.md` as a concise handoff for a separate GUI agent.
+It describes only:
+
+- final public engine construction and execution entry points relevant to a GUI,
+- final progress, cancellation, error, and run-state surfaces,
+- final storage, run-view, latest-view, output-view, manifest, and returned-path surfaces a GUI may consume,
+- high-level categories of GUI code that must be reviewed or updated,
+- a short verification checklist for the GUI agent.
+
+The guide does not:
+
+- document implementation internals,
+- preserve a library interface for the GUI,
+- provide compatibility adapters or migration code,
+- reproduce the distributed-engine specification,
+- include superseded architecture details,
+- change the completed library.
+
+Validate the guide against the final code and normative documentation, commit it as the last Phase 1a deliverable, and then close the implementation plan.
+
+## 22. Phase 1b Handoff
 
 Phase 1a is ready for Phase 1b only after every gate above passes for an attached run and the attached engine has no launcher assumptions.
 
