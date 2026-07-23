@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from bioimageflow_core import ExecutionContext, ProcessingTool
+from bioimageflow_core import ExecutionContext, ProcessingTool, ResourceSpec
 
 if TYPE_CHECKING:
     from bioimageflow.engine import DefaultEngine
@@ -31,6 +31,12 @@ class ProcessingDispatch:
     has_batch: bool
     invocation_id: str
     cache_attempt_id: str | None
+    run_id: str
+    run_context: Any
+    compiled_node_ordinal: int
+    row_positions: tuple[int, ...]
+    row_indexes: tuple[str, ...]
+    resources: ResourceSpec
 
 
 class ProcessingBackend(Protocol):

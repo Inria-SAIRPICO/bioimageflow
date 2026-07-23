@@ -6,6 +6,7 @@ sources = [
     "packages/bioimageflow-core/bioimageflow_core/worker.py",
     "packages/bioimageflow-core/bioimageflow_core/worker_origins.py",
     "packages/bioimageflow-core/bioimageflow_core/worker_protocol.py",
+    "packages/bioimageflow-core/bioimageflow_core/preflight.py",
     "packages/bioimageflow/bioimageflow/worker_origins.py",
 ]
 edit_tests = [
@@ -136,5 +137,8 @@ precommit_suites = ["unit", "integration"]
 [[areas]]
 name = "parsl"
 sources = ["packages/bioimageflow/bioimageflow/parsl"]
-edit_tests = ["tests/unit/parsl"]
+edit_tests = [
+    "tests/unit/parsl",
+    "tests/integration/parsl/test_thread_executor.py",
+]
 precommit_suites = ["unit", "parsl-fast"]

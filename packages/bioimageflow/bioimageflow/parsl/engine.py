@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Generator, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -129,7 +130,24 @@ class _ParslEngineSteps(Iterator[Any]):
 
     def _iterate(self) -> Generator[Any, None, None]:
         try:
-            dfk = self._engine._start_attached_execution()
+            prepared = (
+                self._engine._prepare_attached_execution(
+                    self._targets,
+                    self._workflow,
+                )
+                if type(self._engine)._execute_steps_attached
+                is ParslEngine._execute_steps_attached
+                else None
+            )
+            self._engine._prepared_execution = prepared
+            needs_dfk = prepared is None or prepared.needs_dfk
+            if needs_dfk and prepared is not None:
+                self._engine._validate_runtime_configuration()
+            dfk = (
+                self._engine._start_attached_execution()
+                if needs_dfk
+                else None
+            )
             yield from self._engine._execute_steps_attached(
                 self._targets,
                 self._workflow,
@@ -232,6 +250,10 @@ class ParslEngine:
         self._execution_reserved = False
         self._execution_thread_id: int | None = None
         self._cancel_requested = False
+        self._stop_requested = False
+        self._submitted_failure: BaseException | None = None
+        self._prepared_execution: Any | None = None
+        self._preflight_complete = False
 
     @property
     def parsl_config(self) -> Any | None:
@@ -283,6 +305,11 @@ class ParslEngine:
         with self._lifecycle_condition:
             return self._cancel_requested
 
+    @property
+    def stop_requested(self) -> bool:
+        with self._lifecycle_condition:
+            return self._stop_requested
+
     def effective_execution(self, workflow: Any) -> str:
         """Resolve the scheduling policy for one root workflow."""
         if self._execution != "workflow":
@@ -318,6 +345,9 @@ class ParslEngine:
             self._execution_reserved = False
             self._execution_thread_id = threading.get_ident()
             self._cancel_requested = False
+            self._stop_requested = False
+            self._submitted_failure = None
+            self._preflight_complete = False
 
     def _reserve_execution(self) -> None:
         """Claim the engine before workflow run metadata is created."""
@@ -332,6 +362,9 @@ class ParslEngine:
             self._execution_reserved = True
             self._execution_thread_id = threading.get_ident()
             self._cancel_requested = False
+            self._stop_requested = False
+            self._submitted_failure = None
+            self._preflight_complete = False
 
     def _release_execution_reservation(self) -> None:
         """Release a claim when workflow startup fails before execution."""
@@ -357,6 +390,120 @@ class ParslEngine:
             self._active_dfk = kernel_type(config=self._parsl_config)
             return self._active_dfk
 
+    def _prepare_attached_execution(
+        self,
+        targets: Any,
+        workflow: Any,
+    ) -> Any | None:
+        if not hasattr(workflow, "validate"):
+            return None
+        from .startup import prepare_parsl_execution
+
+        return prepare_parsl_execution(
+            list(targets),
+            workflow,
+            executor_bindings=dict(self._executor_bindings),
+            node_routes=dict(self._node_routes),
+            environment_routes=dict(self._environment_routes),
+            shared_runtime_root=self._shared_runtime_root,
+            storage_mode=self._storage_mode,
+            sequential=self.effective_execution(workflow) == "sequential",
+        )
+
+    @staticmethod
+    def _executor_labels(value: Any) -> tuple[str, ...]:
+        executors = getattr(value, "executors", None)
+        if isinstance(executors, Mapping):
+            return tuple(executors)
+        if executors is None:
+            return ()
+        return tuple(
+            label
+            for executor in executors
+            if isinstance((label := getattr(executor, "label", None)), str)
+        )
+
+    def _validate_runtime_configuration(self) -> None:
+        from .routing import validate_executor_labels
+
+        source = self._active_dfk or self._parsl_config
+        config = getattr(source, "config", source)
+        retries = getattr(config, "retries", None)
+        if type(retries) is not int or retries != 0:
+            raise ValueError(
+                "Parsl Phase 1a requires effective Config.retries=0."
+            )
+        labels = self._executor_labels(source)
+        if not labels and config is not source:
+            labels = self._executor_labels(config)
+        validate_executor_labels(self._executor_bindings, labels)
+
+    def _run_executor_preflight(self, workflow: Any, dfk: Any) -> None:
+        if self._preflight_complete:
+            return
+        prepared = self._prepared_execution
+        if prepared is None or not prepared.needs_dfk:
+            self._preflight_complete = True
+            return
+        from bioimageflow_core.preflight import execute_executor_preflight
+        from .preflight import (
+            build_preflight_expectation,
+            build_preflight_payload,
+            validate_preflight_result,
+        )
+
+        parsl_module = require_parsl()
+        storage_root = Path(workflow.storage_path).resolve(strict=False)
+        futures: dict[str, tuple[Any, Any]] = {}
+        for label in prepared.routing.selected_executor_labels:
+            sentinel = (
+                storage_root
+                / "runtime"
+                / "v1"
+                / "preflight"
+                / f"probe_{uuid.uuid4().hex}"
+            )
+            expectation = build_preflight_expectation(
+                prepared.routing,
+                label,
+                storage_root=storage_root,
+                sentinel_path=sentinel,
+            )
+            app = parsl_module.python_app(
+                function=execute_executor_preflight,
+                data_flow_kernel=dfk,
+                cache=False,
+                executors=[label],
+            )
+            future = app(build_preflight_payload(expectation))
+            self._register_future(future)
+            futures[label] = (future, expectation)
+
+        failure: BaseException | None = None
+        observed: set[Any] = set()
+        for label in sorted(futures):
+            future, expectation = futures[label]
+            try:
+                result = future.result()
+                observed.add(future)
+                validate_preflight_result(result, expectation)
+            except BaseException as exc:
+                failure = exc
+                for submitted, _expected in futures.values():
+                    if not submitted.done():
+                        submitted.cancel()
+                break
+        for future, _expectation in futures.values():
+            if future not in observed:
+                try:
+                    future.result()
+                except BaseException:
+                    pass
+            self._release_future(future)
+        if failure is not None:
+            raise failure
+        self._preflight_complete = True
+
     def _register_future(self, future: Any) -> None:
         """Register one future owned by the active engine execution."""
         if not callable(getattr(future, "result", None)):
@@ -375,6 +522,38 @@ class ParslEngine:
                 )
             with self._futures_lock:
                 self._submitted_futures.add(future)
+
+    def _release_future(self, future: Any) -> None:
+        """Release one future only after its terminal state was observed."""
+        with self._futures_lock:
+            self._submitted_futures.discard(future)
+
+    def _report_task_failure(self, failure: BaseException) -> None:
+        """Stop sibling submission after retaining the canonical task failure."""
+        with self._lifecycle_condition:
+            current = self._submitted_failure
+            if current is None or getattr(
+                failure,
+                "failure_order_key",
+                (2**31, 2**31, ""),
+            ) < getattr(
+                current,
+                "failure_order_key",
+                (2**31, 2**31, ""),
+            ):
+                self._submitted_failure = failure
+            self._stop_requested = True
+        with self._futures_lock:
+            futures = tuple(self._submitted_futures)
+        for future in futures:
+            try:
+                future.cancel()
+            except BaseException:
+                continue
+
+    def _submitted_failure_error(self) -> BaseException | None:
+        with self._lifecycle_condition:
+            return self._submitted_failure
 
     def _request_submitted_cancellation(self) -> None:
         with self._lifecycle_condition:
@@ -430,6 +609,9 @@ class ParslEngine:
                 self._execution_active = False
                 self._execution_reserved = False
                 self._execution_thread_id = None
+                self._prepared_execution = None
+                self._stop_requested = False
+                self._submitted_failure = None
                 self._lifecycle_condition.notify_all()
         if cleanup_error is not None:
             raise cleanup_error
@@ -438,7 +620,16 @@ class ParslEngine:
         """Execute through the attached DFK dispatch hook."""
         self._begin_execution()
         try:
-            dfk = self._start_attached_execution()
+            prepared = (
+                self._prepare_attached_execution(targets, workflow)
+                if type(self)._execute_attached is ParslEngine._execute_attached
+                else None
+            )
+            self._prepared_execution = prepared
+            needs_dfk = prepared is None or prepared.needs_dfk
+            if needs_dfk and prepared is not None:
+                self._validate_runtime_configuration()
+            dfk = self._start_attached_execution() if needs_dfk else None
             return self._execute_attached(targets, workflow, dfk)
         finally:
             self._finish_execution()
@@ -449,10 +640,23 @@ class ParslEngine:
         workflow: Any,
         dfk: Any,
     ) -> Any:
-        del targets, workflow, dfk
-        raise NotImplementedError(
-            "Parsl workflow dispatch is not configured on this engine."
-        )
+        from .backend import ParslBackend
+
+        prepared = self._prepared_execution
+        if prepared is None:
+            raise RuntimeError("Parsl execution was not prepared.")
+        if prepared.needs_dfk:
+            if dfk is None:
+                raise RuntimeError("Parsl execution requires an attached DFK.")
+            self._run_executor_preflight(workflow, dfk)
+            prepared.scheduler._backend = ParslBackend(
+                owner=self,
+                dfk=dfk,
+                routing=prepared.routing,
+                task_policy=self._task_policy,
+                sequential=self.effective_execution(workflow) == "sequential",
+            )
+        return prepared.scheduler.execute(list(targets), workflow)
 
     def execute_steps(
         self,
@@ -468,11 +672,27 @@ class ParslEngine:
         workflow: Any,
         dfk: Any,
     ) -> Generator[Any, None, None]:
-        del targets, workflow, dfk
-        raise NotImplementedError(
-            "Parsl stepped dispatch is not configured on this engine."
-        )
-        yield
+        from .backend import ParslBackend
+
+        prepared = self._prepared_execution
+        if prepared is None:
+            raise RuntimeError("Parsl execution was not prepared.")
+        if prepared.needs_dfk:
+            if dfk is None:
+                raise RuntimeError("Parsl execution requires an attached DFK.")
+            self._run_executor_preflight(workflow, dfk)
+            prepared.scheduler._backend = ParslBackend(
+                owner=self,
+                dfk=dfk,
+                routing=prepared.routing,
+                task_policy=self._task_policy,
+                sequential=self.effective_execution(workflow) == "sequential",
+            )
+        steps = prepared.scheduler.execute_steps(list(targets), workflow)
+        try:
+            yield from steps
+        finally:
+            steps.close()
 
     def close(self) -> None:
         """Drain active work and clean resources owned by this engine."""

@@ -159,6 +159,12 @@ class BoundedParslCollector:
             [ParslFuture, ProcessingTaskV1], None
         ] = lambda _future, _task: None,
         row_complete: Callable[[int, str], None] = lambda _position, _index: None,
+        failure_observed: Callable[
+            [ParslTaskError], None
+        ] = lambda _failure: None,
+        cancellation_error: Callable[
+            [], BaseException | None
+        ] = lambda: None,
     ) -> None:
         if type(max_in_flight) is not int or max_in_flight < 1:
             raise ValueError("max_in_flight must be an integer >= 1.")
@@ -170,6 +176,8 @@ class BoundedParslCollector:
         self._register_future = register_future
         self._release_future = release_future
         self._row_complete = row_complete
+        self._failure_observed = failure_observed
+        self._cancellation_error = cancellation_error
 
     def run(self, tasks: Iterable[ProcessingTaskV1]) -> tuple[RowResultV1, ...]:
         """Submit lazily, accept by position, and drain every submitted future."""
@@ -262,6 +270,7 @@ class BoundedParslCollector:
                 except BaseException as exc:
                     failure = self._task_error(task, exc)
                     failures.append(failure)
+                    self._failure_observed(failure)
                     stop_and_cancel()
                 finally:
                     self._release_future(future, task)
@@ -279,6 +288,9 @@ class BoundedParslCollector:
         if pre_submission_error is not None:
             raise pre_submission_error
         if cancelled or self._cancel_requested():
+            cancellation_error = self._cancellation_error()
+            if cancellation_error is not None:
+                raise cancellation_error
             raise WorkflowCancelledError("Workflow cancelled during Parsl execution.")
         return tuple(accepted[position] for position in sorted(accepted))
 

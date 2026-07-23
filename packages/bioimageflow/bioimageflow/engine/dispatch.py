@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from bioimageflow_core import (
     ProcessingTaskV1,
+    ResourceSpec,
     RowInvocationV1,
     decode_processing_result,
     encode_processing_task,
@@ -47,6 +48,20 @@ class _DispatchMixin:
     ) -> list[list[Any]]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
+        compiled_node_ordinal = next(
+            ordinal
+            for node, ordinal in self._compiled_ordinals.items()
+            if node.name == node_name
+        )
+        row_indexes = tuple(
+            context.row_index
+            if context.row_index is not None
+            else str(position)
+            for position, context in enumerate(row_contexts)
+        )
+        run_view = getattr(workflow, "_run_view_context", None)
+        if not isinstance(run_view, dict) or "run_id" not in run_view:
+            raise RuntimeError("Processing dispatch requires an active workflow run.")
 
         request = ProcessingDispatch(
             tool=tool,
@@ -58,6 +73,12 @@ class _DispatchMixin:
             has_batch=has_batch,
             invocation_id=invocation_id,
             cache_attempt_id=cache_attempt_id,
+            run_id=str(run_view["run_id"]),
+            run_context=getattr(workflow, "_active_run_context", None),
+            compiled_node_ordinal=compiled_node_ordinal,
+            row_positions=tuple(range(len(arguments_dicts))),
+            row_indexes=row_indexes,
+            resources=getattr(tool, "resources", None) or ResourceSpec(),
         )
         return self._backend.dispatch(self, request)
 
