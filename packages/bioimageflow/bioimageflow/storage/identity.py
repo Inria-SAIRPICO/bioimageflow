@@ -198,9 +198,12 @@ def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -
             "value": validate_relative_posix_path(Path(value).as_posix()),
         }
     if column_kind == "external_path":
-        path = Path(value).as_posix() if isinstance(value, Path) else str(value)
-        if path == "":
+        if str(value) == "":
             raise TypeError("Unsupported dataframe value: empty external path")
+        path = Path(value).expanduser() if isinstance(value, Path) else Path(str(value))
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path = path.as_posix()
         return {"kind": "external_path", "value": path}
     if isinstance(value, bool):
         return {"kind": "bool", "value": value}
@@ -218,7 +221,10 @@ def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -
     if isinstance(value, str):
         return {"kind": "string", "value": unicodedata.normalize("NFC", value)}
     if isinstance(value, Path):
-        return {"kind": "external_path", "value": Path(value).as_posix()}
+        path = value.expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return {"kind": "external_path", "value": path.as_posix()}
     raise TypeError(f"Unsupported dataframe value: {type(value).__name__}")
 
 
@@ -252,28 +258,37 @@ def _ordered_dataframe_columns(
     return {name: column_by_name[name] for name in [*declared, *additional]}
 
 
-def canonical_dataframe_digest(
+def canonical_dataframe_identity(
     df: pd.DataFrame,
     *,
     declared_columns: Sequence[str] | None = None,
     column_kinds: Mapping[str, str] | None = None,
-) -> str:
-    """Return a stable digest for the supported dataframe surface."""
+) -> tuple[list[dict[str, Any]], str]:
+    """Return the canonical logical schema and digest for a dataframe."""
     columns = _ordered_dataframe_columns(df, declared_columns)
     kinds = {str(key): value for key, value in (column_kinds or {}).items()}
-    column_schema = [
-        {
-            "name": name,
-            "dtype": str(df[original].dtype),
+    column_schema: list[dict[str, Any]] = []
+    for name, original in columns.items():
+        series = df[original]
+        entry: dict[str, Any] = {
+            "name": unicodedata.normalize("NFC", name),
+            "dtype": str(series.dtype),
             "kind": kinds.get(name, "scalar"),
         }
-        for name, original in columns.items()
-    ]
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            entry["categories"] = [
+                unicodedata.normalize("NFC", str(value))
+                for value in series.cat.categories
+            ]
+            entry["ordered"] = bool(series.cat.ordered)
+        if pd.api.types.is_datetime64_any_dtype(series.dtype):
+            entry["timezone"] = str(getattr(series.dtype, "tz", None) or "naive-utc")
+        column_schema.append(entry)
     rows: list[dict[str, Any]] = []
     for index, row in df.iterrows():
         rows.append(
             {
-                "index": str(index),
+                "index": unicodedata.normalize("NFC", str(index)),
                 "values": {
                     name: _cell_payload(
                         row[original],
@@ -285,7 +300,23 @@ def canonical_dataframe_digest(
             }
         )
     payload = {"columns": column_schema, "rows": rows}
-    return f"sha256:{hashlib.sha256(canonical_json_bytes(payload)).hexdigest()}"
+    digest = f"sha256:{hashlib.sha256(canonical_json_bytes(payload)).hexdigest()}"
+    return column_schema, digest
+
+
+def canonical_dataframe_digest(
+    df: pd.DataFrame,
+    *,
+    declared_columns: Sequence[str] | None = None,
+    column_kinds: Mapping[str, str] | None = None,
+) -> str:
+    """Return the canonical logical digest for a dataframe."""
+    _schema, digest = canonical_dataframe_identity(
+        df,
+        declared_columns=declared_columns,
+        column_kinds=column_kinds,
+    )
+    return digest
 
 
 def _file_sha256(path: Path) -> str:
@@ -308,9 +339,9 @@ def asset_digest_and_size(path: Path) -> tuple[int, str]:
     root = path.resolve()
     total_size = 0
     entries: list[dict[str, Any]] = []
-    for child in sorted(
-        path.rglob("*"), key=lambda item: item.relative_to(path).as_posix()
-    ):
+    normalized_paths: set[str] = set()
+    casefold_paths: set[str] = set()
+    for child in path.rglob("*"):
         if child.is_symlink():
             raise CacheCorruptionError(f"Directory asset contains a symlink: {child}")
         try:
@@ -319,9 +350,17 @@ def asset_digest_and_size(path: Path) -> tuple[int, str]:
             raise CacheCorruptionError(
                 f"Directory asset escapes its root: {child}"
             ) from exc
-        relative = validate_relative_posix_path(child.relative_to(path).as_posix())
+        relative = unicodedata.normalize("NFC", child.relative_to(path).as_posix())
+        relative = validate_relative_posix_path(relative)
+        folded = relative.casefold()
+        if relative in normalized_paths or folded in casefold_paths:
+            raise CacheCorruptionError(
+                f"Directory asset contains colliding paths: {relative}"
+            )
+        normalized_paths.add(relative)
+        casefold_paths.add(folded)
         if child.is_dir():
-            entries.append({"kind": "directory", "path": relative})
+            entries.append({"type": "directory", "path": relative})
             continue
         if not child.is_file():
             raise CacheCorruptionError(
@@ -332,13 +371,16 @@ def asset_digest_and_size(path: Path) -> tuple[int, str]:
         entries.append(
             {
                 "digest": _file_sha256(child),
-                "kind": "file",
+                "type": "file",
                 "path": relative,
                 "size": size,
             }
         )
+    entries.sort(key=lambda entry: str(entry["path"]))
     digest = hashlib.sha256(
-        canonical_json_bytes({"kind": "directory", "entries": entries})
+        canonical_json_bytes(
+            {"schema": "bioimageflow.directory_asset.v1", "entries": entries}
+        )
     ).hexdigest()
     return total_size, f"sha256:{digest}"
 
@@ -355,7 +397,12 @@ def make_record_id(manifest_material: dict[str, Any]) -> str:
         "pid",
         "duration",
     }
-    content = {
+    content: dict[str, Any] = {
         key: value for key, value in manifest_material.items() if key not in excluded
     }
+    dataframe = content.get("dataframe")
+    if isinstance(dataframe, dict):
+        content["dataframe"] = {
+            key: value for key, value in dataframe.items() if key != "transport_digest"
+        }
     return _sha256_token("rec", {"schema": RECORD_SCHEMA, "content": content})

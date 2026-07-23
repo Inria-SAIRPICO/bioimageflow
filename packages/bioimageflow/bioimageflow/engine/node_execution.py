@@ -16,12 +16,12 @@ from .common import (
     _path_output_columns,
     _resolve_staged_output_path,
     _shared_array_output_columns,
+    canonical_dataframe_digest,
     compute_env_hash,
     dataframe_lookup,
     dataframe_publish,
     dataframe_result_key,
     get_output_templates,
-    hashlib,
     is_path_type,
     pd,
     processing_lookup,
@@ -92,16 +92,9 @@ class _NodeExecutionMixin:
         arguments, args_dict = self._resolve_constant_arguments(node)
         for index, arg in enumerate(node._args):
             if isinstance(arg, pd.DataFrame):
-                digest = hashlib.sha256()
-                frame_json = arg.to_json(
-                    orient="split",
-                    date_format="iso",
-                    default_handler=str,
+                args_dict[f"workflow_dataframe_input_{index}"] = (
+                    canonical_dataframe_digest(arg)
                 )
-                digest.update((frame_json or "").encode())
-                digest.update(repr(list(arg.columns)).encode())
-                digest.update(repr([str(dtype) for dtype in arg.dtypes]).encode())
-                args_dict[f"workflow_dataframe_input_{index}"] = digest.hexdigest()
 
         upstream_identities = self._upstream_identity_map(
             workflow,
@@ -138,7 +131,17 @@ class _NodeExecutionMixin:
         df.index = df.index.astype(str)
 
         df = self._coerce_numeric_columns(
-            dataframe_publish(workflow.storage_path, node.name, sig_hash, df)
+            dataframe_publish(
+                workflow.storage_path,
+                node.name,
+                sig_hash,
+                df,
+                run_id=str(workflow._run_view_context["run_id"]),
+                column_kinds={
+                    column: "external_path"
+                    for column in _path_output_columns(node.tool)
+                },
+            )
         )
         self._emit_progress(
             workflow,
@@ -256,6 +259,7 @@ class _NodeExecutionMixin:
             df,
             result_key=result_key,
             attempt_id=attempt_id,
+            run_id=str(workflow._run_view_context["run_id"]),
             staging_dir=staging_dir,
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,
@@ -404,6 +408,7 @@ class _NodeExecutionMixin:
             df,
             result_key=result_key,
             attempt_id=attempt_id,
+            run_id=str(workflow._run_view_context["run_id"]),
             staging_dir=staging_dir,
             staging_assets_dir=real_assets_dir,
             path_columns=path_output_columns,

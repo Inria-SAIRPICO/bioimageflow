@@ -24,6 +24,7 @@ from bioimageflow.storage import (
     RecordManifest,
     Storage,
     canonical_dataframe_digest,
+    canonical_dataframe_identity,
     canonical_json_bytes,
     canonical_scalar_payload,
     make_node_keys,
@@ -32,6 +33,7 @@ from bioimageflow.storage import (
     result_shard_parts,
     validate_relative_posix_path,
 )
+from bioimageflow.cache import _write_canonical_parquet
 
 
 def _file_digest(content: bytes) -> str:
@@ -39,7 +41,11 @@ def _file_digest(content: bytes) -> str:
 
 
 def _record_id_for(
-    result_key: str, dataframe_digest: str, outputs: list[dict[str, object]]
+    result_key: str,
+    dataframe_digest: str,
+    outputs: list[dict[str, object]],
+    *,
+    logical_schema: list[dict[str, object]] | None = None,
 ) -> str:
     return make_record_id(
         {
@@ -47,11 +53,25 @@ def _record_id_for(
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
-                "digest": dataframe_digest,
+                "format": "parquet",
+                "logical_digest": dataframe_digest,
+                "logical_schema": list(logical_schema or []),
+                "transport_digest": "sha256:" + "0" * 64,
             },
             "outputs": outputs,
         }
     )
+
+
+def _write_test_dataframe(
+    path: Path,
+    content: bytes = b"parquet",
+) -> tuple[list[dict[str, object]], str, str]:
+    frame = pd.DataFrame({"payload": [content.hex()]}, index=["row"])
+    _write_canonical_parquet(frame, path)
+    logical_schema, logical_digest = canonical_dataframe_identity(frame)
+    transport_digest = _file_digest(path.read_bytes())
+    return logical_schema, logical_digest, transport_digest
 
 
 def _write_record(
@@ -62,21 +82,41 @@ def _write_record(
     outputs: list[dict[str, object]] | None = None,
     dataframe_content: bytes = b"parquet",
 ) -> str:
-    outputs = list(outputs or [])
-    dataframe_digest = dataframe_digest or _file_digest(dataframe_content)
-    record_id = _record_id_for(result_key, dataframe_digest, outputs)
+    outputs = [dict(output) for output in (outputs or [])]
+    for output in outputs:
+        if output.get("kind") == "owned_asset":
+            output.setdefault("asset_type", "file")
+    provisional_dir = storage.result_dir(result_key) / "records" / "provisional"
+    provisional_dir.mkdir(parents=True)
+    parquet_path = provisional_dir / "dataframe.parquet"
+    logical_schema, logical_digest, transport_digest = _write_test_dataframe(
+        parquet_path,
+        dataframe_content,
+    )
+    logical_digest = dataframe_digest or logical_digest
+    record_id = _record_id_for(
+        result_key,
+        logical_digest,
+        outputs,
+        logical_schema=logical_schema,
+    )
     record_dir = storage.result_dir(result_key) / "records" / record_id
-    record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(dataframe_content)
+    provisional_dir.rename(record_dir)
     for output in outputs:
         if output.get("kind") == "owned_asset":
             asset_path = record_dir / str(output["path"])
-            asset_path.parent.mkdir(parents=True, exist_ok=True)
-            asset_path.write_bytes(b"mask")
+            if output.get("asset_type") == "directory":
+                asset_path.mkdir(parents=True, exist_ok=True)
+                (asset_path / "content.txt").write_bytes(b"mask")
+            else:
+                asset_path.parent.mkdir(parents=True, exist_ok=True)
+                asset_path.write_bytes(b"mask")
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=logical_schema,
         outputs=outputs,
     )
     (record_dir / "manifest.json").write_text(

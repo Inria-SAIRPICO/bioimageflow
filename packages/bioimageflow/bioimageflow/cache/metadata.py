@@ -10,47 +10,75 @@ from .common import (
     os,
     pd,
 )
-from .identity import (
-    dataframe_result_key,
-    processing_result_key,
-)
-
-
 def cache_load(cache_path: Path) -> pd.DataFrame:
-    """Load a DataFrame from cache.
-
-    Accepts either a ``.parquet`` or ``.csv`` path.
-    """
-    if cache_path.suffix == ".parquet":
-        df = pd.read_parquet(cache_path)
-    else:
-        # CSV support for lightweight fixtures and manually inspected caches.
-        df = pd.read_csv(cache_path, index_col=0, keep_default_na=False)
-        # Restore numeric columns where possible
-        for col in df.columns:
-            if pd.api.types.is_string_dtype(df[col]):
-                try:
-                    df[col] = pd.to_numeric(df[col])
-                except (ValueError, TypeError):
-                    pass
+    """Load the canonical Parquet dataframe from a cache record."""
+    if cache_path.name != "dataframe.parquet":
+        raise ValueError(
+            "Cache dataframes must use the canonical dataframe.parquet path."
+        )
+    df = pd.read_parquet(cache_path)
     df.index = df.index.astype(str)
     return df
 
 
 def _prepare_dataframe_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
-    # Parquet requires Arrow-serializable types — convert Path/SharedArray-like
-    # objects to strings while preserving ordinary scalar values.
+    """Normalize supported path cells and reject unsupported object values."""
     df_save = df.copy()
     for col in df_save.columns:
         if df_save[col].dtype == object or pd.api.types.is_string_dtype(df_save[col]):
-            df_save[col] = df_save[col].apply(
-                lambda v: (
-                    str(v)
-                    if not isinstance(v, (str, int, float, bool, type(None)))
-                    else v
+            normalized: list[Any] = []
+            for value in df_save[col]:
+                if isinstance(value, Path):
+                    path = value.expanduser()
+                    if not path.is_absolute():
+                        path = Path.cwd() / path
+                    normalized.append(path.as_posix())
+                    continue
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    normalized.append(value)
+                    continue
+                try:
+                    if bool(pd.isna(value)):
+                        normalized.append(value)
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                if hasattr(value, "item"):
+                    scalar = value.item()
+                    if isinstance(scalar, (str, int, float, bool, type(None))):
+                        normalized.append(scalar)
+                        continue
+                raise TypeError(
+                    f"Unsupported dataframe value in column {str(col)!r}: "
+                    f"{type(value).__name__}"
                 )
-            )
+            df_save[col] = normalized
     return df_save
+
+
+def _write_canonical_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Write the canonical dataframe transport artifact."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    prepared = _prepare_dataframe_for_parquet(df)
+    table = pa.Table.from_pandas(prepared, preserve_index=True)
+    pq.write_table(
+        table,
+        path,
+        version="2.6",
+        data_page_version="1.0",
+        compression="zstd",
+        compression_level=3,
+        use_dictionary=False,
+        write_statistics=False,
+        write_page_index=False,
+        coerce_timestamps="us",
+        allow_truncated_timestamps=False,
+        store_schema=True,
+        use_compliant_nested_type=True,
+        row_group_size=65_536,
+    )
 
 
 def _file_sha256(path: Path) -> str:
@@ -124,13 +152,10 @@ def _iter_result_metadata(
     storage_path: str | Path,
     *,
     kind: str,
-    result_key_for: Any,
-    known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     results_root = Path(storage_path) / "cache" / "v1" / "results"
     if not results_root.exists():
         return []
-    known_node_signatures = known_node_signatures or {}
     rows: list[dict[str, Any]] = []
     for result_dir in results_root.glob("*/*/rk_*"):
         current_path = result_dir / "current.json"
@@ -148,43 +173,24 @@ def _iter_result_metadata(
             ):
                 rows.append(metadata)
                 continue
-        result_key = result_dir.name
-        for node_name, signatures in known_node_signatures.items():
-            for sig_hash in signatures:
-                if result_key_for(node_name, sig_hash) == result_key:
-                    rows.append(
-                        {
-                            "schema": "bioimageflow.cache.result.v1",
-                            "kind": kind,
-                            "node": node_name,
-                            "logical_digest": sig_hash,
-                            "result_key": result_key,
-                        }
-                    )
     return rows
 
 
 def iter_dataframe_result_metadata(
     storage_path: str | Path,
-    known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return DataFrameTool result metadata, inferring metadata-less records when possible."""
+    """Return selected DataFrameTool result metadata."""
     return _iter_result_metadata(
         storage_path,
         kind="dataframe_tool",
-        result_key_for=dataframe_result_key,
-        known_node_signatures=known_node_signatures,
     )
 
 
 def iter_processing_result_metadata(
     storage_path: str | Path,
-    known_node_signatures: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ProcessingTool result metadata, inferring metadata-less records when possible."""
+    """Return selected ProcessingTool result metadata."""
     return _iter_result_metadata(
         storage_path,
         kind="processing_tool",
-        result_key_for=processing_result_key,
-        known_node_signatures=known_node_signatures,
     )

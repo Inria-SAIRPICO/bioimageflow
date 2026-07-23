@@ -1,4 +1,4 @@
-"""Cache lookup, publication, and compatibility exports."""
+"""Cache identity, lookup, and publication exports."""
 
 # ruff: noqa: F401
 
@@ -15,6 +15,7 @@ from .metadata import (
     _file_sha256,
     _iter_result_metadata,
     _prepare_dataframe_for_parquet,
+    _write_canonical_parquet,
     _write_dataframe_result_metadata,
     _write_processing_result_metadata,
     _write_result_metadata,

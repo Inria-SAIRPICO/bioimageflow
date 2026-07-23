@@ -20,6 +20,7 @@ from bioimageflow.cache import (
 from bioimageflow.storage import (
     CacheCorruptionError,
     Storage,
+    canonical_dataframe_identity,
     make_record_id,
 )
 
@@ -292,7 +293,8 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
     sig_hash = "sig"
     df = pd.DataFrame({"value": [1]})
     result_key = dataframe_result_key(node_name, sig_hash)
-    dataframe_digest = _parquet_digest(df, tmp_path / "expected.parquet")
+    transport_digest = _parquet_digest(df, tmp_path / "expected.parquet")
+    logical_schema, logical_digest = canonical_dataframe_identity(df)
     parquet_content = b"PAR1"
     record_id = make_record_id(
         {
@@ -300,7 +302,10 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
-                "digest": dataframe_digest,
+                "format": "parquet",
+                "logical_digest": logical_digest,
+                "logical_schema": logical_schema,
+                "transport_digest": transport_digest,
             },
             "outputs": [],
         }
@@ -313,7 +318,13 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
     (records_dir / record_id).symlink_to(outside)
 
     with pytest.raises(CacheCorruptionError):
-        dataframe_publish(storage_path, node_name, sig_hash, df)
+        dataframe_publish(
+            storage_path,
+            node_name,
+            sig_hash,
+            df,
+            run_id="run_0123456789abcdef0123456789abcdef",
+        )
     assert (outside / "dataframe.parquet").read_bytes() == parquet_content
 
 
@@ -334,6 +345,10 @@ def test_dataframe_tool_publish_rejects_symlinked_records_directory_before_writi
 
     with pytest.raises(CacheCorruptionError):
         dataframe_publish(
-            storage_path, node_name, sig_hash, pd.DataFrame({"value": [1]})
+            storage_path,
+            node_name,
+            sig_hash,
+            pd.DataFrame({"value": [1]}),
+            run_id="run_0123456789abcdef0123456789abcdef",
         )
     assert list(outside.iterdir()) == []

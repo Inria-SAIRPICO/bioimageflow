@@ -67,6 +67,7 @@ def test_source_shared_array_processing_tool_publishes_durable_asset_and_rehydra
             "shape": [2, 2],
         },
         "asset_role": "shared_array",
+        "asset_type": "file",
         "digest": output["digest"],
         "kind": "owned_asset",
         "path": output["path"],

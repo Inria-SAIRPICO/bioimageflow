@@ -20,6 +20,7 @@ from bioimageflow.storage import (
     RecordManifest,
     Storage,
     asset_digest_and_size,
+    canonical_dataframe_identity,
     canonical_scalar_payload,
     make_record_id,
     make_result_key,

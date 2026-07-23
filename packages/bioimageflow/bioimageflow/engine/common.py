@@ -43,6 +43,7 @@ from bioimageflow.node import IndexAlignmentError, Node, scoped_node_names
 from bioimageflow.storage import (
     CacheCorruptionError,
     Storage,
+    canonical_dataframe_digest,
     validate_relative_posix_path,
 )
 from bioimageflow.template import get_output_templates, resolve_template
@@ -332,10 +333,7 @@ def _processing_has_other_current(
     storage_path: str | Path, node_name: str, sig_hash: str
 ) -> bool:
     expected_key = processing_result_key(node_name, sig_hash)
-    for metadata in iter_processing_result_metadata(
-        storage_path,
-        {node_name: {sig_hash}},
-    ):
+    for metadata in iter_processing_result_metadata(storage_path):
         if (
             metadata.get("node") != node_name
             or metadata.get("result_key") == expected_key
@@ -349,10 +347,7 @@ def _dataframe_has_other_current(
     storage_path: str | Path, node_name: str, sig_hash: str
 ) -> bool:
     expected_key = dataframe_result_key(node_name, sig_hash)
-    for metadata in iter_dataframe_result_metadata(
-        storage_path,
-        {node_name: {sig_hash}},
-    ):
+    for metadata in iter_dataframe_result_metadata(storage_path):
         if (
             metadata.get("node") != node_name
             or metadata.get("result_key") == expected_key

@@ -14,6 +14,7 @@ import pytest
 from bioimageflow.storage import (
     CacheCorruptionError,
     Storage,
+    asset_digest_and_size,
     make_result_key,
 )
 
@@ -395,6 +396,66 @@ def test_materialize_run_outputs_hardlinks_owned_files(tmp_path: Path) -> None:
     assert materialized == [output_path]
     assert output_path.read_bytes() == b"mask"
     assert output_path.stat().st_ino == source_path.stat().st_ino
+
+
+@pytest.mark.parametrize("mode", ["pointer", "symlink", "copy", "hardlink"])
+def test_materialize_latest_outputs_supports_directory_assets(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    storage = Storage(tmp_path / "storage")
+    capability = storage.probe_output_view_mode(mode)
+    if not capability.supported:
+        pytest.skip(f"{mode} is unavailable: {capability.code}")
+    identity_dir = tmp_path / "identity"
+    identity_dir.mkdir()
+    (identity_dir / "content.txt").write_bytes(b"mask")
+    size, digest = asset_digest_and_size(identity_dir)
+    output = {
+        "path": "assets/dataset.zarr",
+        "kind": "owned_asset",
+        "asset_type": "directory",
+        "size": size,
+        "digest": digest,
+    }
+    result_key = make_result_key({"node": f"directory-{mode}"})
+    record_id = _write_record(storage, result_key, outputs=[output])
+    storage.write_run_metadata(
+        "run_directory",
+        workflow_identity="workflow-directory",
+        engine="direct:parallel",
+        status="succeeded",
+        target_nodes=["Directory_1"],
+    )
+    storage.write_run_node_result(
+        "run_directory",
+        "Directory_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    storage.update_latest_node("Directory_1", "run_directory")
+
+    [materialized] = storage.materialize_latest_outputs(mode)
+
+    if mode == "pointer":
+        payload = json.loads(materialized.read_text())
+        assert payload["kind"] == "directory"
+        target = (materialized.parent / payload["target"]).resolve()
+        assert (target / "content.txt").read_bytes() == b"mask"
+    else:
+        assert (materialized / "content.txt").read_bytes() == b"mask"
+        assert materialized.is_symlink() is (mode == "symlink")
+        if mode == "hardlink":
+            source = (
+                storage.result_dir(result_key)
+                / "records"
+                / record_id
+                / "assets"
+                / "dataset.zarr"
+                / "content.txt"
+            )
+            assert (materialized / "content.txt").stat().st_ino == source.stat().st_ino
 
 
 def test_materialize_latest_rejects_pointer_escaping_storage(tmp_path: Path) -> None:

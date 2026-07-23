@@ -75,6 +75,7 @@ def _write_shared_array_asset(
             "shape": list(array.shape),
         },
         "asset_role": "shared_array",
+        "asset_type": "file",
         "digest": digest,
         "kind": "owned_asset",
         "path": relative,
@@ -135,6 +136,7 @@ def _add_processing_owned_asset(
         entry = {
             "path": record_relative,
             "kind": "owned_asset",
+            "asset_type": "directory" if path.is_dir() else "file",
             "size": size,
             "digest": digest,
         }
@@ -142,8 +144,6 @@ def _add_processing_owned_asset(
             entry["output_column"] = str(output_column)
         if row_index is not None:
             entry["row_index"] = str(row_index)
-        if path.is_dir():
-            entry["asset_type"] = "directory"
         outputs.append(entry)
         seen_outputs.add(entry_key)
     return record_relative

@@ -91,7 +91,13 @@ def test_select_current_record_rejects_invalid_manifest(tmp_path: Path) -> None:
         {
             "schema": "bioimageflow.cache.record.v1",
             "result_key": result_key,
-            "dataframe": {"path": "dataframe.parquet", "digest": "sha256:" + "1" * 64},
+            "dataframe": {
+                "path": "dataframe.parquet",
+                "format": "parquet",
+                "logical_digest": "sha256:" + "1" * 64,
+                "transport_digest": "sha256:" + "1" * 64,
+                "logical_schema": [],
+            },
             "outputs": [],
         }
     )
@@ -120,7 +126,9 @@ def test_select_current_record_rejects_symlinked_record_directory(
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=_file_digest(b"parquet"),
+        dataframe_logical_digest=_file_digest(b"parquet"),
+        dataframe_transport_digest=_file_digest(b"parquet"),
+        dataframe_logical_schema=[],
         outputs=[],
     )
     (outside_record / "manifest.json").write_text(

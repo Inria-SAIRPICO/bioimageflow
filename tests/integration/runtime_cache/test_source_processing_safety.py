@@ -120,6 +120,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
         df,
         result_key=result_key,
         attempt_id=attempt_id,
+        run_id="run_0123456789abcdef0123456789abcdef",
         staging_dir=staging_dir,
         staging_assets_dir=assets_dir,
         path_columns={"mask"},
@@ -142,6 +143,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
             df,
             result_key=result_key,
             attempt_id=attempt_id,
+            run_id="run_0123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
             staging_assets_dir=assets_dir,
             path_columns={"mask"},
@@ -172,6 +174,7 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
         df,
         result_key=result_key,
         attempt_id=attempt_id,
+        run_id="run_0123456789abcdef0123456789abcdef",
         staging_dir=staging_dir,
         staging_assets_dir=assets_dir,
         path_columns={"mask"},
@@ -188,6 +191,7 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
+            "asset_type": "file",
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "output_column": "mask",
@@ -228,6 +232,7 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
             df,
             result_key=result_key,
             attempt_id=attempt_id,
+            run_id="run_0123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
             staging_assets_dir=assets_dir,
             path_columns={"directory", "child"},

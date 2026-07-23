@@ -40,19 +40,18 @@ from tests.testkit.storage import (
 )
 
 
-def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> None:
+def test_run_node_result_references_named_immutable_record(tmp_path: Path) -> None:
     storage = Storage(tmp_path)
     result_key = make_result_key({"node": "segment"})
     record_a = _write_record(storage, result_key)
 
-    with pytest.raises(CacheCorruptionError, match="selected current"):
-        storage.write_run_node_result(
-            "run_003",
-            "Segment_1",
-            result_key=result_key,
-            record_id=record_a,
-            cache_hit=False,
-        )
+    storage.write_run_node_result(
+        "run_003",
+        "Segment_1",
+        result_key=result_key,
+        record_id=record_a,
+        cache_hit=False,
+    )
 
     storage.select_current_record(
         result_key,
@@ -61,15 +60,15 @@ def test_run_node_result_requires_selected_current_record(tmp_path: Path) -> Non
         run_id="run_003",
     )
     record_b = _write_record(storage, result_key, dataframe_content=b"other-parquet")
+    storage.select_current_record(
+        result_key,
+        candidate_record_id=record_b,
+        attempt_id="attempt_b",
+        run_id="run_003",
+    )
 
-    with pytest.raises(CacheCorruptionError, match="selected current"):
-        storage.write_run_node_result(
-            "run_003",
-            "Segment_1",
-            result_key=result_key,
-            record_id=record_b,
-            cache_hit=False,
-        )
+    payload = storage._validate_run_node_view("run_003", "Segment_1")
+    assert payload["record_id"] == record_a
 
 
 def test_run_view_writes_do_not_mutate_current_pointer(tmp_path: Path) -> None:

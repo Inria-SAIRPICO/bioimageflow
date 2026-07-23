@@ -37,22 +37,30 @@ from bioimageflow.storage import (
 from tests.testkit.storage import (
     _file_digest,
     _record_id_for,
+    _write_test_dataframe,
 )
 
 
 def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> None:
     result_key = make_result_key({"node": "segment"})
-    dataframe_digest = _file_digest(b"parquet")
     output = {
         "path": "assets/mask.tif",
         "kind": "owned_asset",
+        "asset_type": "file",
         "size": 4,
         "digest": _file_digest(b"not-mask"),
     }
-    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    seed_dir = tmp_path / "seed"
+    seed_dir.mkdir()
+    schema, logical_digest, transport_digest = _write_test_dataframe(
+        seed_dir / "dataframe.parquet"
+    )
+    record_id = _record_id_for(
+        result_key, logical_digest, [output], logical_schema=schema
+    )
     record_dir = tmp_path / "records" / record_id
-    record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    record_dir.parent.mkdir()
+    seed_dir.rename(record_dir)
     asset = record_dir / "assets" / "mask.tif"
     asset.parent.mkdir()
     asset.write_bytes(b"mask")
@@ -60,7 +68,9 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=schema,
         outputs=[output],
     )
 
@@ -70,37 +80,63 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
     valid_output = {
         "path": "assets/mask.tif",
         "kind": "owned_asset",
+        "asset_type": "file",
         "size": 4,
         "digest": _file_digest(b"mask"),
     }
-    record_id = _record_id_for(result_key, dataframe_digest, [valid_output])
+    record_id = _record_id_for(
+        result_key, logical_digest, [valid_output], logical_schema=schema
+    )
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    _write_test_dataframe(record_dir / "dataframe.parquet")
     asset = record_dir / "assets" / "mask.tif"
     asset.parent.mkdir()
     asset.write_bytes(b"mask")
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=_file_digest(
+            (record_dir / "dataframe.parquet").read_bytes()
+        ),
+        dataframe_logical_schema=schema,
         outputs=[valid_output],
     )
     manifest.validate(record_dir)
 
     bad_record_id = _record_id_for(
         result_key,
-        dataframe_digest,
-        [{"path": "../escape.tif", "kind": "owned_asset", "size": 1}],
+        logical_digest,
+        [
+            {
+                "path": "../escape.tif",
+                "kind": "owned_asset",
+                "asset_type": "file",
+                "size": 1,
+            }
+        ],
+        logical_schema=schema,
     )
     bad_record_dir = tmp_path / "records" / bad_record_id
     bad_record_dir.mkdir(parents=True)
-    (bad_record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    _write_test_dataframe(bad_record_dir / "dataframe.parquet")
     bad_manifest = RecordManifest(
         result_key=result_key,
         record_id=bad_record_id,
-        dataframe_digest=dataframe_digest,
-        outputs=[{"path": "../escape.tif", "kind": "owned_asset", "size": 1}],
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=_file_digest(
+            (bad_record_dir / "dataframe.parquet").read_bytes()
+        ),
+        dataframe_logical_schema=schema,
+        outputs=[
+            {
+                "path": "../escape.tif",
+                "kind": "owned_asset",
+                "asset_type": "file",
+                "size": 1,
+            }
+        ],
     )
     with pytest.raises(CacheCorruptionError):
         bad_manifest.validate(bad_record_dir)
@@ -108,22 +144,27 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
 
 def test_record_manifest_validation_accepts_scalar_outputs(tmp_path: Path) -> None:
     result_key = make_result_key({"node": "hotspot"})
-    dataframe_digest = _file_digest(b"parquet")
     output = {
         "kind": "scalar_output",
         "output_column": "spot_count",
         "row_index": "0",
         "value": {"kind": "signed_integer", "value": "0"},
     }
-    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    seed = tmp_path / "dataframe.parquet"
+    schema, logical_digest, transport_digest = _write_test_dataframe(seed)
+    record_id = _record_id_for(
+        result_key, logical_digest, [output], logical_schema=schema
+    )
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    seed.replace(record_dir / "dataframe.parquet")
 
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=schema,
         outputs=[output],
     )
 
@@ -171,15 +212,20 @@ def test_record_manifest_validation_rejects_invalid_scalar_outputs(
     output: dict[str, object],
 ) -> None:
     result_key = make_result_key({"node": "hotspot"})
-    dataframe_digest = _file_digest(b"parquet")
-    record_id = _record_id_for(result_key, dataframe_digest, [output])
+    seed = tmp_path / "dataframe.parquet"
+    schema, logical_digest, transport_digest = _write_test_dataframe(seed)
+    record_id = _record_id_for(
+        result_key, logical_digest, [output], logical_schema=schema
+    )
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+    seed.replace(record_dir / "dataframe.parquet")
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=schema,
         outputs=[output],
     )
 
@@ -200,37 +246,41 @@ def test_record_manifest_validation_rejects_symlink_escape(
     expected_match: str,
 ) -> None:
     result_key = make_result_key({"node": "segment"})
-    dataframe_digest = _file_digest(b"parquet")
     outputs: list[dict[str, object]] = []
     if escape_case == "asset":
         outputs = [
             {
                 "path": "assets/mask.tif",
                 "kind": "owned_asset",
+                "asset_type": "file",
                 "size": 4,
                 "digest": _file_digest(b"mask"),
             }
         ]
 
-    record_id = _record_id_for(result_key, dataframe_digest, outputs)
+    outside = tmp_path / "outside.parquet"
+    schema, logical_digest, transport_digest = _write_test_dataframe(outside)
+    record_id = _record_id_for(
+        result_key, logical_digest, outputs, logical_schema=schema
+    )
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
     if escape_case == "asset":
-        (record_dir / "dataframe.parquet").write_bytes(b"parquet")
+        outside.replace(record_dir / "dataframe.parquet")
         outside = tmp_path / "outside.tif"
         outside.write_bytes(b"mask")
         asset = record_dir / "assets" / "mask.tif"
         asset.parent.mkdir()
         asset.symlink_to(outside)
     else:
-        outside = tmp_path / "outside.parquet"
-        outside.write_bytes(b"parquet")
         (record_dir / "dataframe.parquet").symlink_to(outside)
 
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=schema,
         outputs=outputs,
     )
 
@@ -242,15 +292,18 @@ def test_record_manifest_validation_checks_declared_dataframe_file_digest(
     tmp_path: Path,
 ) -> None:
     result_key = make_result_key({"node": "segment"})
-    dataframe_digest = _file_digest(b"expected")
-    record_id = _record_id_for(result_key, dataframe_digest, [])
+    actual = tmp_path / "actual.parquet"
+    schema, logical_digest, _transport_digest = _write_test_dataframe(actual)
+    record_id = _record_id_for(result_key, logical_digest, [], logical_schema=schema)
     record_dir = tmp_path / "records" / record_id
     record_dir.mkdir(parents=True)
-    (record_dir / "dataframe.parquet").write_bytes(b"actual")
+    actual.replace(record_dir / "dataframe.parquet")
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=_file_digest(b"expected"),
+        dataframe_logical_schema=schema,
         outputs=[],
     )
 
@@ -264,7 +317,13 @@ def test_record_manifest_from_dict_rejects_non_mapping_and_unknown_fields() -> N
         "schema": "bioimageflow.cache.record.v1",
         "result_key": result_key,
         "record_id": _record_id_for(result_key, "sha256:" + "1" * 64, []),
-        "dataframe": {"path": "dataframe.parquet", "digest": "sha256:" + "1" * 64},
+        "dataframe": {
+            "path": "dataframe.parquet",
+            "format": "parquet",
+            "logical_digest": "sha256:" + "1" * 64,
+            "transport_digest": "sha256:" + "1" * 64,
+            "logical_schema": [],
+        },
         "outputs": [],
         "extra": "not allowed",
     }
@@ -278,12 +337,34 @@ def test_record_manifest_from_dict_rejects_non_mapping_and_unknown_fields() -> N
 def test_make_record_id_excludes_execution_metadata() -> None:
     manifest = {
         "result_key": "rk_abcdef",
-        "dataframe_digest": "sha256:" + "1" * 64,
-        "outputs": [{"path": "assets/a.tif", "kind": "owned_asset", "size": 1}],
+        "dataframe": {
+            "path": "dataframe.parquet",
+            "format": "parquet",
+            "logical_digest": "sha256:" + "1" * 64,
+            "transport_digest": "sha256:" + "2" * 64,
+            "logical_schema": [],
+        },
+        "outputs": [
+            {
+                "path": "assets/a.tif",
+                "kind": "owned_asset",
+                "asset_type": "file",
+                "size": 1,
+                "digest": "sha256:" + "3" * 64,
+            }
+        ],
         "attempt_id": "attempt_a",
         "created_at": "today",
     }
 
-    other = dict(manifest, attempt_id="attempt_b", created_at="tomorrow")
+    other = {
+        **manifest,
+        "attempt_id": "attempt_b",
+        "created_at": "tomorrow",
+        "dataframe": {
+            **manifest["dataframe"],
+            "transport_digest": "sha256:" + "4" * 64,
+        },
+    }
 
     assert make_record_id(manifest) == make_record_id(other)

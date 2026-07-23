@@ -251,7 +251,7 @@ class _OutputViewsMixin:
                 raise CacheCorruptionError(
                     f"Run output link target is missing: {relative}"
                 )
-            asset_type = str(output.get("asset_type", "file"))
+            asset_type = output.get("asset_type")
             if asset_type not in {"file", "directory"}:
                 raise CacheCorruptionError(
                     f"Run output link asset type is invalid: {relative}"
@@ -437,7 +437,7 @@ class _OutputViewsMixin:
                 raise CacheCorruptionError(
                     f"Output view target is missing: {source_relative}"
                 )
-            asset_type = str(output.get("asset_type", "file"))
+            asset_type = output.get("asset_type")
             if asset_type not in {"file", "directory"}:
                 raise CacheCorruptionError(
                     f"Output view asset type is invalid: {source_relative}"
@@ -492,9 +492,27 @@ class _OutputViewsMixin:
             return
         if mode == "hardlink":
             if source.is_dir():
-                raise OSError(
-                    "Output view hardlink mode does not support directory assets."
-                )
+                destination.mkdir()
+                for child in sorted(
+                    source.rglob("*"),
+                    key=lambda path: path.relative_to(source).as_posix(),
+                ):
+                    if child.is_symlink():
+                        raise CacheCorruptionError(
+                            "Directory asset contains a symlink."
+                        )
+                    relative = child.relative_to(source)
+                    target = destination / relative
+                    if child.is_dir():
+                        target.mkdir()
+                    elif child.is_file():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        os.link(child, target)
+                    else:
+                        raise CacheCorruptionError(
+                            "Directory asset contains an unsupported entry."
+                        )
+                return
             os.link(source, destination)
             return
         raise ValueError(f"Invalid output_view mode '{mode}'.")

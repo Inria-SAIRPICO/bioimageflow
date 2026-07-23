@@ -67,16 +67,11 @@ class _RunViewsMixin:
         record_id: str,
         cache_hit: bool,
     ) -> Path:
-        """Write a run-local view over the selected current record for one node."""
+        """Write a run-local view over one immutable record."""
         safe_run_id = _validate_path_segment(run_id, label="Run ID")
         safe_node_key = _validate_node_key(node_key)
         result_shard_parts(result_key)
         record_id = _validate_record_id(record_id)
-        current = self.load_current(result_key)
-        if current is None or current.record_id != record_id:
-            raise CacheCorruptionError(
-                "Run node result must reference the selected current record."
-            )
         manifest = self._load_record_manifest(result_key, record_id)
         record_dir = self.result_dir(result_key) / "records" / record_id
         node_dir = self.run_node_dir(run_id, node_key)
@@ -181,11 +176,6 @@ class _RunViewsMixin:
             raise CacheCorruptionError(
                 "Run node result contains invalid identifiers."
             ) from exc
-        current = self.load_current(result_key)
-        if current is None or current.record_id != record_id:
-            raise CacheCorruptionError(
-                "Run node result no longer references the selected current record."
-            )
         manifest = self._load_record_manifest(result_key, record_id)
         record_dir = self.result_dir(result_key) / "records" / record_id
         if payload.get("outputs") != manifest.outputs:
@@ -203,7 +193,9 @@ class _RunViewsMixin:
             if output.get("kind") != "owned_asset":
                 continue
             relative = validate_relative_posix_path(str(output["path"]))
-            asset_type = str(output.get("asset_type", "file"))
+            asset_type = output.get("asset_type")
+            if asset_type not in {"file", "directory"}:
+                raise CacheCorruptionError("Run node output asset type is invalid.")
             link_kind = "directory" if asset_type == "directory" else "file"
             digest = (
                 str(output.get("digest"))

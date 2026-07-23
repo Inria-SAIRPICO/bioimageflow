@@ -7,6 +7,7 @@ from .common import (
     Path,
     RecordManifest,
     Storage,
+    canonical_dataframe_identity,
     json,
     make_record_id,
     os,
@@ -18,7 +19,7 @@ from .identity import (
 )
 from .metadata import (
     _file_sha256,
-    _prepare_dataframe_for_parquet,
+    _write_canonical_parquet,
     _write_dataframe_result_metadata,
     cache_load,
 )
@@ -52,24 +53,33 @@ def dataframe_publish(
     node_name: str,
     sig_hash: str,
     df: pd.DataFrame,
+    *,
+    run_id: str,
+    column_kinds: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Publish a DataFrameTool result through the immutable record model."""
     storage = Storage(storage_path)
     result_key = dataframe_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
-    run_id = f"run_{attempt_id}"
     result_dir = storage.result_dir(result_key)
     staging_dir = result_dir / "attempts" / attempt_id / "staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
     staging_parquet = staging_dir / "dataframe.parquet"
-    _prepare_dataframe_for_parquet(df).to_parquet(staging_parquet, index=True)
-    dataframe_digest = _file_sha256(staging_parquet)
+    _write_canonical_parquet(df, staging_parquet)
+    logical_schema, logical_digest = canonical_dataframe_identity(
+        df,
+        column_kinds=column_kinds,
+    )
+    transport_digest = _file_sha256(staging_parquet)
     manifest_material = {
         "schema": "bioimageflow.cache.record.v1",
         "result_key": result_key,
         "dataframe": {
             "path": "dataframe.parquet",
-            "digest": dataframe_digest,
+            "format": "parquet",
+            "logical_digest": logical_digest,
+            "logical_schema": logical_schema,
+            "transport_digest": transport_digest,
         },
         "outputs": [],
     }
@@ -106,7 +116,9 @@ def dataframe_publish(
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=logical_schema,
         outputs=[],
     )
     manifest_path = record_dir / "manifest.json"

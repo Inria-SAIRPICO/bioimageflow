@@ -21,6 +21,7 @@ from bioimageflow import NodePlanStatus, ProgressEvent, Workflow
 from bioimageflow.dataframe_tool import DataFrameTool
 
 from bioimageflow.cache import (
+    _write_canonical_parquet,
     dataframe_result_key,
     processing_prepare_attempt,
     processing_publish,
@@ -31,6 +32,7 @@ from bioimageflow.storage import (
     CurrentPointer,
     RecordManifest,
     Storage,
+    canonical_dataframe_identity,
     make_record_id,
 )
 
@@ -488,7 +490,7 @@ def _planned_result_key(wf: Workflow, node_name: str) -> str:
 
 
 def _parquet_digest(df: pd.DataFrame, path: Path) -> str:
-    df.to_parquet(path, index=True)
+    _write_canonical_parquet(df, path)
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
@@ -498,13 +500,17 @@ def _write_manual_dataframe_record(
     scratch = storage.result_dir(result_key) / "manual.parquet"
     scratch.parent.mkdir(parents=True, exist_ok=True)
     dataframe_digest = _parquet_digest(df, scratch)
+    logical_schema, logical_digest = canonical_dataframe_identity(df)
     record_id = make_record_id(
         {
             "schema": "bioimageflow.cache.record.v1",
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
-                "digest": dataframe_digest,
+                "format": "parquet",
+                "logical_digest": logical_digest,
+                "transport_digest": dataframe_digest,
+                "logical_schema": logical_schema,
             },
             "outputs": [],
         }
@@ -515,7 +521,9 @@ def _write_manual_dataframe_record(
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=dataframe_digest,
+        dataframe_logical_schema=logical_schema,
         outputs=[],
     )
     (record_dir / "manifest.json").write_text(

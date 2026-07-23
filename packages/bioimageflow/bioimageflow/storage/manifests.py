@@ -13,6 +13,7 @@ from .common import (
     _RECORD_MANIFEST_FIELDS,
     _UNSIGNED_INTEGER_RE,
     datetime,
+    pd,
     timezone,
 )
 from .models import (
@@ -23,6 +24,7 @@ from .identity import (
     _validate_record_id,
     _validate_sha256_digest,
     asset_digest_and_size,
+    canonical_dataframe_identity,
     make_record_id,
     result_shard_parts,
     validate_relative_posix_path,
@@ -35,7 +37,9 @@ class RecordManifest:
 
     result_key: str
     record_id: str
-    dataframe_digest: str
+    dataframe_logical_digest: str
+    dataframe_transport_digest: str
+    dataframe_logical_schema: list[dict[str, Any]]
     outputs: list[dict[str, Any]]
     schema: str = RECORD_SCHEMA
 
@@ -46,7 +50,10 @@ class RecordManifest:
             "record_id": self.record_id,
             "dataframe": {
                 "path": "dataframe.parquet",
-                "digest": self.dataframe_digest,
+                "format": "parquet",
+                "logical_digest": self.dataframe_logical_digest,
+                "transport_digest": self.dataframe_transport_digest,
+                "logical_schema": list(self.dataframe_logical_schema),
             },
             "outputs": list(self.outputs),
         }
@@ -67,6 +74,27 @@ class RecordManifest:
             raise CacheCorruptionError("Record manifest is missing dataframe metadata.")
         if dataframe.get("path") != "dataframe.parquet":
             raise CacheCorruptionError("Record manifest has an invalid dataframe path.")
+        if set(dataframe) != {
+            "path",
+            "format",
+            "logical_digest",
+            "transport_digest",
+            "logical_schema",
+        }:
+            raise CacheCorruptionError(
+                "Record manifest has invalid dataframe metadata fields."
+            )
+        if dataframe.get("format") != "parquet":
+            raise CacheCorruptionError(
+                "Record manifest has an invalid dataframe format."
+            )
+        logical_schema = dataframe.get("logical_schema")
+        if not isinstance(logical_schema, list) or not all(
+            isinstance(column, dict) for column in logical_schema
+        ):
+            raise CacheCorruptionError(
+                "Record manifest has an invalid dataframe logical schema."
+            )
         outputs = value.get("outputs")
         if not isinstance(outputs, list):
             raise CacheCorruptionError("Record manifest outputs must be a list.")
@@ -74,7 +102,9 @@ class RecordManifest:
             return cls(
                 result_key=str(value["result_key"]),
                 record_id=str(value["record_id"]),
-                dataframe_digest=str(dataframe["digest"]),
+                dataframe_logical_digest=str(dataframe["logical_digest"]),
+                dataframe_transport_digest=str(dataframe["transport_digest"]),
+                dataframe_logical_schema=[dict(column) for column in logical_schema],
                 outputs=[dict(output) for output in outputs],
                 schema=str(value["schema"]),
             )
@@ -97,7 +127,12 @@ class RecordManifest:
             raise CacheCorruptionError("Record manifest result key mismatch.")
         if record_dir.name != self.record_id:
             raise CacheCorruptionError("Record manifest record ID mismatch.")
-        _validate_sha256_digest(self.dataframe_digest, label="dataframe")
+        _validate_sha256_digest(
+            self.dataframe_logical_digest, label="dataframe logical"
+        )
+        _validate_sha256_digest(
+            self.dataframe_transport_digest, label="dataframe transport"
+        )
         dataframe = record_dir / "dataframe.parquet"
         if not dataframe.exists():
             raise CacheCorruptionError("Record is missing dataframe.parquet.")
@@ -107,8 +142,44 @@ class RecordManifest:
             raise CacheCorruptionError(
                 "Record dataframe escapes record directory."
             ) from exc
-        if _file_sha256(dataframe) != self.dataframe_digest:
-            raise CacheCorruptionError("Record dataframe digest mismatch.")
+        if _file_sha256(dataframe) != self.dataframe_transport_digest:
+            raise CacheCorruptionError("Record dataframe transport digest mismatch.")
+        try:
+            frame = pd.read_parquet(dataframe)
+            for column in self.dataframe_logical_schema:
+                name = str(column["name"])
+                dtype = str(column["dtype"])
+                if name not in frame.columns:
+                    continue
+                if dtype == "category":
+                    frame[name] = frame[name].astype(
+                        pd.CategoricalDtype(
+                            categories=list(column.get("categories", [])),
+                            ordered=bool(column.get("ordered", False)),
+                        )
+                    )
+                else:
+                    frame[name] = frame[name].astype(dtype)
+            declared_columns = [
+                str(column["name"]) for column in self.dataframe_logical_schema
+            ]
+            column_kinds = {
+                str(column["name"]): str(column["kind"])
+                for column in self.dataframe_logical_schema
+            }
+            logical_schema, logical_digest = canonical_dataframe_identity(
+                frame,
+                declared_columns=declared_columns,
+                column_kinds=column_kinds,
+            )
+        except Exception as exc:
+            raise CacheCorruptionError(
+                "Record dataframe logical identity is unreadable."
+            ) from exc
+        if logical_schema != self.dataframe_logical_schema:
+            raise CacheCorruptionError("Record dataframe logical schema mismatch.")
+        if logical_digest != self.dataframe_logical_digest:
+            raise CacheCorruptionError("Record dataframe logical digest mismatch.")
         for output in self.outputs:
             self._validate_output(record_dir, output)
         if make_record_id(self.to_dict()) != self.record_id:
@@ -138,7 +209,7 @@ class RecordManifest:
                 raise CacheCorruptionError(
                     f"Record asset is missing size or digest: {relative}"
                 )
-            asset_type = str(output.get("asset_type", "file"))
+            asset_type = output.get("asset_type")
             if asset_type not in {"file", "directory"}:
                 raise CacheCorruptionError(f"Record asset type is invalid: {relative}")
             if asset_type == "file" and not asset_path.is_file():

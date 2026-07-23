@@ -108,11 +108,7 @@ class _InvalidationMixin:
             if isinstance(node, WorkflowNode):
                 continue
             entry = plan.get(name)
-            sig_hash = entry.logical_signature if entry is not None else None
             result_key = entry.final_result_key if entry is not None else None
-            known_sig_hashes = (
-                {sig_hash} if sig_hash and result_key is not None else set()
-            )
             if isinstance(node.tool, DataFrameTool):
                 if result_key is not None:
                     selection = _remove_current_selection(
@@ -124,7 +120,6 @@ class _InvalidationMixin:
                     _clear_currents_for_node(
                         self.storage_path,
                         name,
-                        known_sig_hashes,
                         kind="dataframe_tool",
                     )
                 )
@@ -139,7 +134,6 @@ class _InvalidationMixin:
                     _clear_currents_for_node(
                         self.storage_path,
                         name,
-                        known_sig_hashes,
                         kind="processing_tool",
                     )
                 )

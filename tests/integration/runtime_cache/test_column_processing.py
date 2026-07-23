@@ -80,6 +80,7 @@ def test_column_bound_processing_tool_publishes_owned_asset_record_and_uses_cach
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
+            "asset_type": "file",
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "path": "assets/label_row.txt",

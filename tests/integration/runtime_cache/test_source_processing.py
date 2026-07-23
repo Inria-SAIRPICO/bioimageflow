@@ -48,6 +48,7 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
+            "asset_type": "file",
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "path": "assets/mask_0.txt",
@@ -89,6 +90,7 @@ def test_zero_row_processing_tool_publishes_written_template_asset_without_senti
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
+            "asset_type": "file",
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "output_column": "mask",
@@ -125,6 +127,7 @@ def test_zero_row_processing_tool_publishes_written_default_template_asset(
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {
+            "asset_type": "file",
             "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "output_column": "output",

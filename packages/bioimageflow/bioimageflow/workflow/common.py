@@ -295,7 +295,6 @@ def _remove_current_selection(
 def _clear_currents_for_node(
     storage_path: str | Path,
     node_name: str,
-    known_sig_hashes: set[str],
     *,
     kind: Literal["dataframe_tool", "processing_tool"],
 ) -> set[InvalidatedSelection]:
@@ -315,10 +314,7 @@ def _clear_currents_for_node(
         if kind == "dataframe_tool"
         else iter_processing_result_metadata
     )
-    for metadata in metadata_iter(
-        storage_path,
-        {node_name: known_sig_hashes},
-    ):
+    for metadata in metadata_iter(storage_path):
         if metadata.get("node") != node_name:
             continue
         result_key = metadata.get("result_key")

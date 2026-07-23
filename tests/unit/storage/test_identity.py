@@ -23,6 +23,7 @@ from bioimageflow.storage import (
     OutputViewCapability,
     RecordManifest,
     Storage,
+    asset_digest_and_size,
     canonical_dataframe_digest,
     canonical_json_bytes,
     canonical_scalar_payload,
@@ -133,6 +134,43 @@ def test_canonical_dataframe_digest_rejects_unsafe_record_asset_path() -> None:
             pd.DataFrame({"asset": ["../escape.tif"]}),
             column_kinds={"asset": "record_asset"},
         )
+
+
+def test_root_dataframe_distinguishes_path_cells_from_string_cells(
+    tmp_path: Path,
+) -> None:
+    relative = Path("images/input.tif")
+    path_digest = canonical_dataframe_digest(pd.DataFrame({"value": [relative]}))
+    string_digest = canonical_dataframe_digest(
+        pd.DataFrame({"value": [relative.as_posix()]})
+    )
+    absolute_digest = canonical_dataframe_digest(
+        pd.DataFrame({"value": [tmp_path / relative]})
+    )
+
+    assert path_digest != string_digest
+    assert absolute_digest != string_digest
+
+
+def test_directory_asset_identity_is_recursive_and_rejects_symlinks(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "dataset.zarr"
+    (directory / "nested" / "empty").mkdir(parents=True)
+    (directory / "nested" / "data.bin").write_bytes(b"data")
+
+    size, digest = asset_digest_and_size(directory)
+
+    assert size == 4
+    assert digest.startswith("sha256:")
+    (directory / "nested" / "empty").rmdir()
+    assert asset_digest_and_size(directory)[1] != digest
+
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"outside")
+    (directory / "link.bin").symlink_to(outside)
+    with pytest.raises(CacheCorruptionError, match="symlink"):
+        asset_digest_and_size(directory)
 
 
 def test_canonical_scalar_payload_matches_dataframe_cell_encoding() -> None:

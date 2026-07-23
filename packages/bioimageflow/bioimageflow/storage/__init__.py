@@ -1,4 +1,4 @@
-"""Cache storage primitives and compatibility exports."""
+"""Cache storage primitives and public exports."""
 
 # ruff: noqa: F401
 
@@ -21,6 +21,7 @@ from .identity import (
     _validate_sha256_digest,
     asset_digest_and_size,
     canonical_dataframe_digest,
+    canonical_dataframe_identity,
     canonical_json_bytes,
     canonical_scalar_payload,
     make_node_keys,
@@ -39,6 +40,7 @@ __all__ = [
     "Storage",
     "asset_digest_and_size",
     "canonical_dataframe_digest",
+    "canonical_dataframe_identity",
     "canonical_json_bytes",
     "canonical_scalar_payload",
     "make_node_keys",

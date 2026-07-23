@@ -9,6 +9,7 @@ from .common import (
     Path,
     RecordManifest,
     Storage,
+    canonical_dataframe_identity,
     json,
     make_record_id,
     os,
@@ -18,7 +19,7 @@ from .common import (
 )
 from .metadata import (
     _file_sha256,
-    _prepare_dataframe_for_parquet,
+    _write_canonical_parquet,
     _write_processing_result_metadata,
     cache_load,
 )
@@ -40,6 +41,7 @@ def processing_publish(
     *,
     result_key: str,
     attempt_id: str,
+    run_id: str,
     staging_dir: Path,
     staging_assets_dir: Path,
     path_columns: set[str],
@@ -61,14 +63,28 @@ def processing_publish(
         declared_scalar_outputs,
     )
     staging_parquet = staging_dir / "dataframe.parquet"
-    _prepare_dataframe_for_parquet(stored_df).to_parquet(staging_parquet, index=True)
-    dataframe_digest = _file_sha256(staging_parquet)
+    _write_canonical_parquet(stored_df, staging_parquet)
+    record_asset_columns = set(owned_path_columns)
+    record_asset_columns.update(shared_array_columns or set())
+    column_kinds = {
+        column: ("record_asset" if column in record_asset_columns else "external_path")
+        for column in path_columns | (shared_array_columns or set())
+    }
+    logical_schema, logical_digest = canonical_dataframe_identity(
+        stored_df,
+        declared_columns=[str(column) for column in stored_df.columns],
+        column_kinds=column_kinds,
+    )
+    transport_digest = _file_sha256(staging_parquet)
     manifest_material = {
         "schema": "bioimageflow.cache.record.v1",
         "result_key": result_key,
         "dataframe": {
             "path": "dataframe.parquet",
-            "digest": dataframe_digest,
+            "format": "parquet",
+            "logical_digest": logical_digest,
+            "logical_schema": logical_schema,
+            "transport_digest": transport_digest,
         },
         "outputs": outputs,
     }
@@ -120,7 +136,9 @@ def processing_publish(
     manifest = RecordManifest(
         result_key=result_key,
         record_id=record_id,
-        dataframe_digest=dataframe_digest,
+        dataframe_logical_digest=logical_digest,
+        dataframe_transport_digest=transport_digest,
+        dataframe_logical_schema=logical_schema,
         outputs=outputs,
     )
     manifest_path = record_dir / "manifest.json"
@@ -134,7 +152,7 @@ def processing_publish(
         result_key,
         candidate_record_id=record_id,
         attempt_id=attempt_id,
-        run_id=f"run_{attempt_id}",
+        run_id=run_id,
     )
     selected_record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
     selected_manifest = storage._load_record_manifest(result_key, pointer.record_id)
