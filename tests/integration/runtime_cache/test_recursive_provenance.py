@@ -286,7 +286,7 @@ def test_missing_provider_selection_propagates_non_reusable_execution(
     assert invocation["status"] == "succeeded"
     assert invocation["invocation_id"] == invocation_dir.name
     assert invocation["node_key"] == "writer"
-    assert invocation["engine"] == "direct"
+    assert invocation["engine"] == "direct:parallel"
     [request] = backend.requests
     assert request.invocation_id == invocation["invocation_id"]
     assert request.cache_attempt_id is None

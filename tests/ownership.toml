@@ -139,6 +139,6 @@ name = "parsl"
 sources = ["packages/bioimageflow/bioimageflow/parsl"]
 edit_tests = [
     "tests/unit/parsl",
-    "tests/integration/parsl/test_thread_executor.py",
+    "tests/integration/parsl",
 ]
 precommit_suites = ["unit", "parsl-fast"]

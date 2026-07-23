@@ -1,11 +1,18 @@
 """Small importable processing tools for real Parsl executor tests."""
 
-from __future__ import annotations
-
 import time
 import os
+from pathlib import Path
+from typing import Any
 
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool
+from bioimageflow_core import (
+    Arguments,
+    EnvironmentSpec,
+    IOModel,
+    ProcessingTool,
+    SharedArray,
+    Template,
+)
 
 
 PARSL_TEST_ENV = EnvironmentSpec(
@@ -148,3 +155,108 @@ class ParslEmptyBatch(ProcessingTool):
         if len(arguments_list) != 1:
             raise ValueError("empty batch must receive one synthetic row")
         return [[self.Outputs(count=0)]]
+
+
+class ParslDrop(ProcessingTool):
+    """Return no output row."""
+
+    environment = PARSL_TEST_ENV
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        value: int
+
+    def process_row(self, arguments: Arguments) -> list["ParslDrop.Outputs"]:
+        del arguments
+        return []
+
+
+class ParslFlatBatch(ProcessingTool):
+    """Return the one-to-one flat batch shorthand."""
+
+    environment = PARSL_TEST_ENV
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        value: int
+
+    def process_batch(
+        self,
+        arguments_list: list[Arguments],
+    ) -> list["ParslFlatBatch.Outputs"]:
+        return [
+            self.Outputs(value=arguments.value + 1)
+            for arguments in arguments_list
+        ]
+
+
+class ParslDirectoryWriter(ProcessingTool):
+    """Write one declared directory asset."""
+
+    environment = PARSL_TEST_ENV
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        directory: Path = Template("dataset_{row_index}.zarr")
+
+    def process_row(
+        self,
+        arguments: Arguments,
+    ) -> "ParslDirectoryWriter.Outputs":
+        directory = Path(arguments.directory)
+        directory.mkdir()
+        (directory / "value.txt").write_text(str(arguments.value))
+        return self.Outputs(directory=directory)
+
+
+class ParslRuntimeSharedArray(ProcessingTool):
+    """Return a runtime SharedArray through a statically plain field."""
+
+    environment = PARSL_TEST_ENV
+
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        value: Any
+
+    def process_row(
+        self,
+        arguments: Arguments,
+    ) -> "ParslRuntimeSharedArray.Outputs":
+        del arguments
+        return self.Outputs(
+            value=SharedArray(name="runtime", shape=(1,), dtype="uint8")
+        )
+
+
+class ParslConcurrencyProbe(ProcessingTool):
+    """Measure worker-thread overlap without exposing scheduler metadata."""
+
+    environment = PARSL_TEST_ENV
+    class Inputs(IOModel):
+        value: int
+
+    class Outputs(IOModel):
+        value: int
+        started_ns: int
+        finished_ns: int
+
+    def process_row(
+        self,
+        arguments: Arguments,
+    ) -> "ParslConcurrencyProbe.Outputs":
+        started_ns = time.monotonic_ns()
+        time.sleep(0.05)
+        finished_ns = time.monotonic_ns()
+        return self.Outputs(
+            value=arguments.value,
+            started_ns=started_ns,
+            finished_ns=finished_ns,
+        )

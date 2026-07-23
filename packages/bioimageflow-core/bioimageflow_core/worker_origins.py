@@ -585,27 +585,30 @@ def _load_archive_module(origin: ArchiveModuleOriginV1) -> Any:
 def _load_origin_class(
     origin: WorkerToolOriginV1, identity: str
 ) -> Type[ProcessingTool]:
-    if isinstance(origin, InstalledModuleOriginV1):
-        _verify_distribution(origin.distribution, origin.version)
-        distribution = importlib.metadata.distribution(origin.distribution)
-        top_package = origin.module.split(".", 1)[0]
-        if top_package not in _distribution_imports(
-            distribution
-        ) and not _editable_distribution_provides(distribution, origin.module):
-            raise ImportError(
-                f"Module {origin.module!r} is not provided by distribution "
-                f"{origin.distribution!r}."
-            )
-        module = importlib.import_module(origin.module)
-    elif isinstance(origin, VersionedModuleOriginV1):
-        module = _load_versioned_module(origin)
-    elif isinstance(origin, SharedModuleOriginV1):
-        module = _load_shared_module(origin)
-    elif isinstance(origin, SourceFileOriginV1):
-        module = _load_source_file(origin, identity)
-    else:
-        module = _load_archive_module(origin)
-    return _require_processing_tool(module, origin.class_name)
+    with _instance_lock:
+        if isinstance(origin, InstalledModuleOriginV1):
+            _verify_distribution(origin.distribution, origin.version)
+            distribution = importlib.metadata.distribution(origin.distribution)
+            top_package = origin.module.split(".", 1)[0]
+            if top_package not in _distribution_imports(
+                distribution
+            ) and not _editable_distribution_provides(
+                distribution, origin.module
+            ):
+                raise ImportError(
+                    f"Module {origin.module!r} is not provided by distribution "
+                    f"{origin.distribution!r}."
+                )
+            module = importlib.import_module(origin.module)
+        elif isinstance(origin, VersionedModuleOriginV1):
+            module = _load_versioned_module(origin)
+        elif isinstance(origin, SharedModuleOriginV1):
+            module = _load_shared_module(origin)
+        elif isinstance(origin, SourceFileOriginV1):
+            module = _load_source_file(origin, identity)
+        else:
+            module = _load_archive_module(origin)
+        return _require_processing_tool(module, origin.class_name)
 
 
 def load_worker_tool(origin: WorkerToolOriginV1) -> ProcessingTool:
