@@ -8,12 +8,12 @@ from .common import (
     Any,
     DirectBackend,
     DisabledNodeError,
-    EnvironmentLifetime,
     Generator,
     Node,
     NodeStep,
     ProcessingBackend,
     ProcessingTool,
+    ResourceLifetime,
     TopologicalSorter,
     WetlandsBackend,
     WorkflowCancelledError,
@@ -35,6 +35,51 @@ from .planning import _PlanningMixin
 
 if TYPE_CHECKING:
     from bioimageflow.env_manager import WetlandsEnvManager
+
+
+class _EngineSteps:
+    """Iterator that owns one eagerly reserved engine execution."""
+
+    def __init__(
+        self,
+        engine: "DefaultEngine",
+        iterator: Generator[NodeStep, None, None],
+    ) -> None:
+        self._engine = engine
+        self._iterator = iterator
+        self._closed = False
+
+    def __iter__(self) -> "_EngineSteps":
+        return self
+
+    def __next__(self) -> NodeStep:
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self._release()
+            raise
+        except BaseException:
+            self._release()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._iterator.close()
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._engine._cleanup_after_execution()
+        finally:
+            self._engine._end_execution()
 
 
 class DefaultEngine(
@@ -64,23 +109,34 @@ class DefaultEngine(
         wetlands_config: dict[str, Any] | None = None,
         force_sequential: bool = False,
         env_manager: "WetlandsEnvManager | None" = None,
-        environment_lifetime: EnvironmentLifetime | str = EnvironmentLifetime.EXECUTION,
+        resource_lifetime: ResourceLifetime | str = ResourceLifetime.EXECUTION,
     ) -> None:
         try:
-            self._environment_lifetime = EnvironmentLifetime(environment_lifetime)
+            self._resource_lifetime = ResourceLifetime(resource_lifetime)
         except ValueError as exc:
-            expected = ", ".join(lifetime.value for lifetime in EnvironmentLifetime)
+            expected = ", ".join(lifetime.value for lifetime in ResourceLifetime)
             raise ValueError(
-                f"Unknown environment_lifetime '{environment_lifetime}'. Expected {expected}."
+                f"Unknown resource_lifetime '{resource_lifetime}'. Expected {expected}."
             ) from exc
         if env_manager is not None and not use_wetlands:
             raise ValueError("env_manager requires use_wetlands=True.")
         if (
-            self._environment_lifetime is EnvironmentLifetime.EXTERNAL
-            and env_manager is None
+            not use_wetlands
+            and self._resource_lifetime is not ResourceLifetime.EXECUTION
         ):
             raise ValueError(
-                "environment_lifetime='external' requires an injected env_manager."
+                "Direct execution accepts only resource_lifetime='execution'."
+            )
+        if (
+            env_manager is not None
+            and self._resource_lifetime is not ResourceLifetime.EXTERNAL
+        ):
+            raise ValueError(
+                "An injected env_manager requires resource_lifetime='external'."
+            )
+        if self._resource_lifetime is ResourceLifetime.EXTERNAL and env_manager is None:
+            raise ValueError(
+                "resource_lifetime='external' requires an injected env_manager."
             )
 
         self._use_wetlands = use_wetlands
@@ -89,6 +145,8 @@ class DefaultEngine(
         self._cache_hit_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
         self._closed = False
+        self._execution_active = False
+        self._compiled_ordinals: dict[Node, int] = {}
         self._node_cache_hits: dict[Node, bool] = {}
         self._env_manager = env_manager
         if use_wetlands:
@@ -101,9 +159,14 @@ class DefaultEngine(
             self._backend = DirectBackend()
 
     @property
-    def environment_lifetime(self) -> EnvironmentLifetime:
-        """Return the engine's Wetlands environment ownership policy."""
-        return self._environment_lifetime
+    def resource_lifetime(self) -> ResourceLifetime:
+        """Return the engine's execution-resource ownership policy."""
+        return self._resource_lifetime
+
+    @property
+    def backend_name(self) -> str:
+        """Return the effective processing backend name."""
+        return "wetlands" if self._use_wetlands else "direct"
 
     @property
     def environment_manager(self) -> "WetlandsEnvManager | None":
@@ -114,6 +177,20 @@ class DefaultEngine(
         with self._lifecycle_lock:
             if self._closed:
                 raise RuntimeError("This execution engine is closed.")
+
+    def _begin_execution(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("This execution engine is closed.")
+            if self._execution_active:
+                raise RuntimeError(
+                    "This execution engine already has an active execution."
+                )
+            self._execution_active = True
+
+    def _end_execution(self) -> None:
+        with self._lifecycle_lock:
+            self._execution_active = False
 
     @staticmethod
     def _column_label(col_ref: Any) -> str:
@@ -150,17 +227,20 @@ class DefaultEngine(
 
     def execute(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Execute the workflow, returning results for target nodes."""
-        self._ensure_open()
+        self._begin_execution()
         try:
             return self._execute_impl(targets, workflow)
         finally:
-            self._cleanup_after_execution()
+            try:
+                self._cleanup_after_execution()
+            finally:
+                self._end_execution()
 
     def execute_steps(
         self,
         targets: list[Node],
         workflow: Any,
-    ) -> Generator[NodeStep, None, None]:
+    ) -> _EngineSteps:
         """Yield a :class:`NodeStep` for each node in topological order.
 
         The engine (and any Wetlands environments) stays alive between yields.
@@ -173,8 +253,9 @@ class DefaultEngine(
 
         Cleanup runs when the generator is exhausted or closed (early ``break``).
         """
-        self._ensure_open()
-        try:
+        self._begin_execution()
+
+        def iterate() -> Generator[NodeStep, None, None]:
             reachable, completion_dependencies, scoped_names = (
                 self._compile_execution_graph(targets)
             )
@@ -185,6 +266,9 @@ class DefaultEngine(
                     reachable,
                     completion_dependencies,
                 )
+                self._compiled_ordinals = {
+                    node: ordinal for ordinal, node in enumerate(order)
+                }
                 _executable, skipped = self._filter_executable(
                     order,
                     completion_dependencies,
@@ -234,8 +318,8 @@ class DefaultEngine(
                         step.execute()
                     results[node] = step._df  # type: ignore[assignment]
                     sig_hashes[node] = step._sig_hash  # type: ignore[assignment]
-        finally:
-            self._cleanup_after_execution()
+
+        return _EngineSteps(self, iterate())
 
     def _execute_impl(
         self, targets: list[Node], workflow: Any
@@ -271,6 +355,7 @@ class DefaultEngine(
         from bioimageflow.dataframe_tool import DataFrameTool
 
         order = self._topological_sort(reachable, completion_dependencies)
+        self._compiled_ordinals = {node: ordinal for ordinal, node in enumerate(order)}
         executable, skipped = self._filter_executable(
             order,
             completion_dependencies,
@@ -300,7 +385,10 @@ class DefaultEngine(
             if workflow.cancel_requested:
                 raise WorkflowCancelledError("Workflow cancelled by user")
 
-            ready = list(ts.get_ready())
+            ready = sorted(
+                ts.get_ready(),
+                key=lambda node: self._compiled_ordinals[node],
+            )
             if not ready:
                 break
 
@@ -347,14 +435,13 @@ class DefaultEngine(
                         ): node
                         for node in pt_nodes
                     }
-                    first_error: Exception | None = None
+                    failures: list[tuple[Node, BaseException]] = []
                     for future in concurrent.futures.as_completed(future_to_node):
                         node = future_to_node[future]
                         try:
                             df, sig_hash = future.result()
-                        except Exception as exc:
-                            if first_error is None:
-                                first_error = exc
+                        except BaseException as exc:
+                            failures.append((node, exc))
                             continue
                         cache_hit = self._pop_node_cache_hit(node)
                         self._write_run_node_view(
@@ -364,8 +451,12 @@ class DefaultEngine(
                             results[node] = df
                             sig_hashes[node] = sig_hash
                         ts.done(node)
-                    if first_error is not None:
-                        raise first_error
+                    if failures:
+                        _node, primary = min(
+                            failures,
+                            key=lambda failure: self._failure_order_key(*failure),
+                        )
+                        raise primary
 
         # Log skipped targets
         for t in targets:
@@ -373,6 +464,23 @@ class DefaultEngine(
                 logger.info("Skipping disabled target node '%s'", t.name)
 
         return {t.name: results[t] for t in targets if t not in skipped}
+
+    def _failure_order_key(
+        self,
+        node: Node,
+        error: BaseException,
+    ) -> tuple[int, int, str]:
+        """Return the deterministic public failure-selection key."""
+        supplied = getattr(error, "failure_order_key", None)
+        if (
+            isinstance(supplied, tuple)
+            and len(supplied) == 3
+            and isinstance(supplied[0], int)
+            and isinstance(supplied[1], int)
+            and isinstance(supplied[2], str)
+        ):
+            return supplied
+        return self._compiled_ordinals[node], -1, ""
 
     def _emit_progress(
         self,

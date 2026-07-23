@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from .common import (
     Any,
-    CycleError,
     EnvironmentMismatchError,
     Node,
     ProcessingTool,
-    TopologicalSorter,
 )
 
 
@@ -161,15 +159,39 @@ class _GraphMixin:
         nodes: set[Node],
         extra_dependencies: dict[Node, set[Node]] | None = None,
     ) -> list[Node]:
-        """Topological sort of reachable nodes using graphlib.TopologicalSorter."""
+        """Return deterministic topological order using scoped paths as ties."""
         dep_graph = self._build_dep_graph_from_set(nodes, extra_dependencies)
-        try:
-            return list(TopologicalSorter(dep_graph).static_order())
-        except CycleError as exc:
+        dependents: dict[Node, set[Node]] = {node: set() for node in nodes}
+        remaining = {
+            node: len(dependencies) for node, dependencies in dep_graph.items()
+        }
+        for node, dependencies in dep_graph.items():
+            for dependency in dependencies:
+                dependents[dependency].add(node)
+
+        ready = sorted(
+            (node for node, count in remaining.items() if count == 0),
+            key=lambda node: node.name,
+        )
+        order: list[Node] = []
+        while ready:
+            node = ready.pop(0)
+            order.append(node)
+            newly_ready: list[Node] = []
+            for dependent in dependents[node]:
+                remaining[dependent] -= 1
+                if remaining[dependent] == 0:
+                    newly_ready.append(dependent)
+            ready.extend(newly_ready)
+            ready.sort(key=lambda candidate: candidate.name)
+
+        if len(order) != len(nodes):
+            cyclic = sorted(node.name for node, count in remaining.items() if count > 0)
             raise RuntimeError(
-                f"Cycle detected in the DAG. The workflow graph must be acyclic. "
-                f"Cycle info: {exc.args[1]}"
-            ) from exc
+                "Cycle detected in the DAG. The workflow graph must be acyclic. "
+                f"Nodes in cycles: {cyclic}"
+            )
+        return order
 
     def _build_dep_graph_from_set(
         self,

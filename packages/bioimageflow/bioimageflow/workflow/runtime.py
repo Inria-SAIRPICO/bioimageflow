@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping
+import importlib
+from collections.abc import Generator, Iterator, Mapping
 from typing import TYPE_CHECKING, Literal
 
 from .common import (
@@ -21,52 +22,149 @@ from .common import (
     logger,
     timezone,
 )
+from .execution_context import WorkflowExecutionContext
 
 if TYPE_CHECKING:
-    from bioimageflow.engine import DefaultEngine, EnvironmentLifetime, NodeStep
+    from bioimageflow.engine import DefaultEngine, NodeStep, ResourceLifetime
     from bioimageflow.env_manager import WetlandsEnvManager
+
+
+class _WorkflowSteps(Iterator["NodeStep"]):
+    """Iterator that reserves and releases a Workflow execution eagerly."""
+
+    def __init__(
+        self,
+        workflow: Any,
+        iterator: Generator["NodeStep", None, None],
+    ) -> None:
+        self._workflow = workflow
+        self._iterator = iterator
+        self._closed = False
+
+    def __next__(self) -> "NodeStep":
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self._release()
+            raise
+        except BaseException:
+            self._release()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._iterator.close()
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._workflow._end_public_execution()
 
 
 class _RuntimeMixin:
     def create_engine(
         self,
         *,
-        environment_lifetime: "EnvironmentLifetime | str" = "execution",
+        resource_lifetime: "ResourceLifetime | str" = "execution",
         env_manager: "WetlandsEnvManager | None" = None,
+        parsl_config: Any = None,
+        dfk: Any = None,
+        executor_bindings: Mapping[str, Any] | None = None,
+        parsl_node_routes: Mapping[str, str] | None = None,
+        parsl_environment_routes: Mapping[str, str] | None = None,
+        parsl_shared_runtime_root: str | Path | None = None,
+        parsl_execution: Literal["workflow", "parallel", "sequential"] = "workflow",
+        parsl_task_policy: Any = None,
     ) -> "DefaultEngine":
-        """Create an engine preserving this workflow's execution configuration.
-
-        ``environment_lifetime`` controls whether Wetlands workers stop after
-        each execution (``"execution"``), remain warm until ``engine.close()``
-        (``"engine"``), or are owned entirely by the caller
-        (``"external"``). An existing manager can be injected so multiple
-        workflows and engines share the same worker environments.
-        """
+        """Create the configured direct, Wetlands, or Parsl engine."""
         from bioimageflow.engine import DefaultEngine, SequentialEngine
 
+        parsl_values = {
+            "parsl_config": parsl_config,
+            "dfk": dfk,
+            "executor_bindings": executor_bindings,
+            "parsl_node_routes": parsl_node_routes,
+            "parsl_environment_routes": parsl_environment_routes,
+            "parsl_shared_runtime_root": parsl_shared_runtime_root,
+            "parsl_task_policy": parsl_task_policy,
+        }
+        supplied_parsl = [
+            name for name, value in parsl_values.items() if value is not None
+        ]
+        if parsl_execution != "workflow":
+            supplied_parsl.append("parsl_execution")
+
+        if self.engine_type == "parsl":
+            if env_manager is not None:
+                raise ValueError("env_manager is not valid for the Parsl backend.")
+            ParslEngine = importlib.import_module("bioimageflow.parsl").ParslEngine
+
+            execution = (
+                self.execution if parsl_execution == "workflow" else parsl_execution
+            )
+            return ParslEngine(
+                parsl_config=parsl_config,
+                dfk=dfk,
+                executor_bindings=executor_bindings,
+                node_routes=parsl_node_routes,
+                environment_routes=parsl_environment_routes,
+                shared_runtime_root=parsl_shared_runtime_root,
+                execution=execution,
+                task_policy=parsl_task_policy,
+                resource_lifetime=resource_lifetime,
+            )
+
+        if supplied_parsl:
+            raise ValueError(
+                f"Parsl arguments are invalid for engine='{self.engine_type}': "
+                f"{', '.join(sorted(supplied_parsl))}."
+            )
+        if self.engine_type == "direct" and env_manager is not None:
+            raise ValueError("env_manager is valid only for the Wetlands backend.")
         use_wetlands = self.engine_type == "wetlands"
         kwargs: dict[str, Any] = {
             "use_wetlands": use_wetlands,
             "wetlands_config": self.wetlands_config,
-            "environment_lifetime": environment_lifetime,
+            "resource_lifetime": resource_lifetime,
             "env_manager": env_manager,
         }
         if self.execution == "sequential":
             return SequentialEngine(**kwargs)
         return DefaultEngine(**kwargs)
 
-    def _make_engine(self) -> "DefaultEngine":
-        """Compatibility wrapper for the former private engine factory."""
-        return self.create_engine()
-
     def cancel(self) -> None:
         """Request cancellation of the running workflow."""
-        self._cancel_event.set()
+        with self._execution_lock:
+            context = self._active_run_context
+        if context is not None:
+            context.request_cancel()
 
     @property
     def cancel_requested(self) -> bool:
         """Whether cancellation has been requested."""
-        return self._cancel_event.is_set()
+        with self._execution_lock:
+            context = self._active_run_context
+        return bool(context is not None and context.cancel_requested)
+
+    def _begin_public_execution(
+        self,
+        context: WorkflowExecutionContext,
+    ) -> None:
+        with self._execution_lock:
+            if self._active_run_context is not None:
+                raise RuntimeError("This Workflow already has an active execution.")
+            self._active_run_context = context
+
+    def _end_public_execution(self) -> None:
+        with self._execution_lock:
+            self._active_run_context = None
 
     def get_environment(
         self, target: "ProcessingTool | EnvironmentSpec | str"
@@ -105,13 +203,31 @@ class _RuntimeMixin:
         inputs: Mapping[str, Any] | None = None,
         dev_mode: bool = False,
         engine: "DefaultEngine | None" = None,
+        run_context: WorkflowExecutionContext | None = None,
     ) -> Any:
-        """Execute the workflow and return results.
+        """Execute the workflow and return results."""
+        context = run_context or WorkflowExecutionContext()
+        self._begin_public_execution(context)
+        try:
+            return self._compute_bound(
+                targets,
+                inputs=inputs,
+                dev_mode=dev_mode,
+                engine=engine,
+                run_context=context,
+            )
+        finally:
+            self._end_public_execution()
 
-        Parameters:
-            dev_mode: Development mode flag
-            engine: Optional pre-configured engine to use. If None, the configured engine backend and execution policy are used. Providing an engine allows post-execution inspection and testing."""
-        self._cancel_event.clear()
+    def _compute_bound(
+        self,
+        targets: tuple[Node, ...],
+        *,
+        inputs: Mapping[str, Any] | None,
+        dev_mode: bool,
+        engine: "DefaultEngine | None",
+        run_context: WorkflowExecutionContext,
+    ) -> Any:
         self._dev_mode = dev_mode
 
         if inputs is not None or not targets:
@@ -130,7 +246,17 @@ class _RuntimeMixin:
             with parent:
                 boundary = self(name=self.name, **supplied)
             boundary._is_root_boundary = True
-            return parent.compute(boundary, dev_mode=dev_mode, engine=engine)
+            parent._active_run_context = run_context
+            try:
+                return parent._compute_bound(
+                    (boundary,),
+                    inputs=None,
+                    dev_mode=dev_mode,
+                    engine=engine,
+                    run_context=run_context,
+                )
+            finally:
+                parent._active_run_context = None
 
         # If targets are not registered (explicit workflow without context manager),
         # discover the graph by tracing upstream
@@ -138,18 +264,15 @@ class _RuntimeMixin:
         self._discover_graph(target_list)
 
         if engine is None:
-            engine = self._make_engine()
-        self._start_run_view(target_list)
+            engine = self.create_engine()
+        self._start_run_view(target_list, run_context=run_context, engine=engine)
         try:
             results = engine.execute(target_list, self)
-        except Exception as exc:
-            self._finish_run_view(
-                self._run_status_for_exception(exc),
-                update_latest_success=False,
-            )
+        except BaseException as exc:
+            run_context._execution_failed(exc)
             raise
         else:
-            self._finish_run_view("succeeded", update_latest_success=True)
+            run_context._execution_succeeded()
 
         if len(target_list) == 1:
             return list(results.values())[0]
@@ -161,7 +284,8 @@ class _RuntimeMixin:
         inputs: Mapping[str, Any] | None = None,
         dev_mode: bool = False,
         engine: "DefaultEngine | None" = None,
-    ) -> "Generator[NodeStep, None, None]":
+        run_context: WorkflowExecutionContext | None = None,
+    ) -> "_WorkflowSteps":
         """Execute the workflow step by step, yielding a :class:`NodeStep`
         for each node in topological (dependency) order.
 
@@ -183,6 +307,26 @@ class _RuntimeMixin:
         If ``step.execute()`` is not called before advancing to the next
         iteration, the step auto-executes to keep downstream nodes consistent.
         """
+        context = run_context or WorkflowExecutionContext()
+        self._begin_public_execution(context)
+        iterator = self._compute_steps_bound(
+            targets,
+            inputs=inputs,
+            dev_mode=dev_mode,
+            engine=engine,
+            run_context=context,
+        )
+        return _WorkflowSteps(self, iterator)
+
+    def _compute_steps_bound(
+        self,
+        targets: tuple[Node, ...],
+        *,
+        inputs: Mapping[str, Any] | None,
+        dev_mode: bool,
+        engine: "DefaultEngine | None",
+        run_context: WorkflowExecutionContext,
+    ) -> "Generator[NodeStep, None, None]":
         self._dev_mode = dev_mode
 
         if inputs is not None or not targets:
@@ -201,32 +345,39 @@ class _RuntimeMixin:
             with parent:
                 boundary = self(name=self.name, **supplied)
             boundary._is_root_boundary = True
-            yield from parent.compute_steps(
-                boundary,
-                dev_mode=dev_mode,
-                engine=engine,
-            )
-            return
+            parent._active_run_context = run_context
+            try:
+                yield from parent._compute_steps_bound(
+                    (boundary,),
+                    inputs=None,
+                    dev_mode=dev_mode,
+                    engine=engine,
+                    run_context=run_context,
+                )
+                return
+            finally:
+                parent._active_run_context = None
 
         target_list = list(targets)
         self._discover_graph(target_list)
 
         if engine is None:
-            engine = self._make_engine()
-        self._start_run_view(target_list)
+            engine = self.create_engine()
+        self._start_run_view(target_list, run_context=run_context, engine=engine)
         try:
             yield from engine.execute_steps(target_list, self)
         except GeneratorExit:
-            self._finish_run_view("cancelled", update_latest_success=False)
-            raise
-        except Exception as exc:
-            self._finish_run_view(
-                self._run_status_for_exception(exc),
-                update_latest_success=False,
+            from bioimageflow.engine import WorkflowCancelledError
+
+            run_context._execution_failed(
+                WorkflowCancelledError("Workflow step execution was closed.")
             )
             raise
+        except BaseException as exc:
+            run_context._execution_failed(exc)
+            raise
         else:
-            self._finish_run_view("succeeded", update_latest_success=True)
+            run_context._execution_succeeded()
 
     def export_outputs(
         self,
@@ -282,22 +433,48 @@ class _RuntimeMixin:
                 exc_info=True,
             )
 
-    def _start_run_view(self, targets: list[Node]) -> None:
+    def _start_run_view(
+        self,
+        targets: list[Node],
+        *,
+        run_context: WorkflowExecutionContext,
+        engine: Any,
+    ) -> None:
         from bioimageflow.storage import Storage
 
         storage = Storage(self.storage_path)
-        run_id = f"run_{storage.new_attempt_id()}"
         started_at = datetime.now(timezone.utc).isoformat()
         target_nodes = [target.name for target in targets]
+
+        def finish_success() -> None:
+            self._finish_run_view("succeeded", update_latest_success=True)
+
+        def finish_failure(error: BaseException) -> None:
+            self._finish_run_view(
+                self._run_status_for_exception(error),
+                update_latest_success=False,
+            )
+
+        run_id = run_context._bind(
+            self,
+            on_success=finish_success,
+            on_failure=finish_failure,
+        )
         self._run_view_context = {
             "run_id": run_id,
             "started_at": started_at,
             "target_nodes": target_nodes,
+            "engine": engine.backend_name,
+            "execution": (
+                self.execution
+                if getattr(engine, "execution", "workflow") == "workflow"
+                else getattr(engine, "execution", self.execution)
+            ),
         }
         storage.write_run_metadata(
             run_id,
             workflow_identity=self._workflow_identity(target_nodes),
-            engine=f"{self.engine_type}:{self.execution}",
+            engine=f"{self._run_view_context['engine']}:{self._run_view_context['execution']}",
             status="running",
             target_nodes=target_nodes,
             started_at=started_at,
@@ -315,7 +492,7 @@ class _RuntimeMixin:
         storage.write_run_metadata(
             run_id,
             workflow_identity=self._workflow_identity(list(context["target_nodes"])),
-            engine=f"{self.engine_type}:{self.execution}",
+            engine=f"{context['engine']}:{context['execution']}",
             status=status,
             target_nodes=list(context["target_nodes"]),
             started_at=str(context["started_at"]),
@@ -336,7 +513,7 @@ class _RuntimeMixin:
         ).hexdigest()
         return f"workflow:{digest}"
 
-    def _run_status_for_exception(self, exc: Exception) -> str:
+    def _run_status_for_exception(self, exc: BaseException) -> str:
         from bioimageflow.engine import WorkflowCancelledError
 
         return "cancelled" if isinstance(exc, WorkflowCancelledError) else "failed"

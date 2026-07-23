@@ -1,4 +1,4 @@
-"""Public execution-environment lifecycle API tests."""
+"""Public execution-resource lifecycle API tests."""
 
 from __future__ import annotations
 
@@ -10,12 +10,13 @@ import pytest
 
 from bioimageflow import (
     DefaultEngine,
-    EnvironmentLifetime,
+    ResourceLifetime,
     SequentialEngine,
     WetlandsEnvManager,
     Workflow,
 )
 from bioimageflow_core import EnvironmentSpec
+from bioimageflow.backends import WetlandsBackend
 from bioimageflow.engine import WorkflowCancelledError
 
 
@@ -32,14 +33,14 @@ class _HarnessEngine(DefaultEngine):
         self,
         manager: _TrackingManager | WetlandsEnvManager,
         *,
-        lifetime: EnvironmentLifetime | str = EnvironmentLifetime.EXECUTION,
+        lifetime: ResourceLifetime | str = ResourceLifetime.EXECUTION,
         error: Exception | None = None,
     ) -> None:
-        super().__init__(
-            use_wetlands=True,
-            env_manager=cast(WetlandsEnvManager, manager),
-            environment_lifetime=lifetime,
-        )
+        super().__init__()
+        self._use_wetlands = True
+        self._backend = WetlandsBackend()
+        self._resource_lifetime = ResourceLifetime(lifetime)
+        self._env_manager = cast(WetlandsEnvManager, manager)
         self.error = error
         self.on_execute: Any = None
 
@@ -56,13 +57,13 @@ class _SequentialHarness(SequentialEngine):
         self,
         manager: _TrackingManager,
         *,
-        lifetime: EnvironmentLifetime | str,
+        lifetime: ResourceLifetime | str,
     ) -> None:
-        super().__init__(
-            use_wetlands=True,
-            env_manager=cast(WetlandsEnvManager, manager),
-            environment_lifetime=lifetime,
-        )
+        super().__init__()
+        self._use_wetlands = True
+        self._backend = WetlandsBackend()
+        self._resource_lifetime = ResourceLifetime(lifetime)
+        self._env_manager = cast(WetlandsEnvManager, manager)
 
     def _execute_impl(self, targets: Any, workflow: Any) -> dict[str, Any]:
         return {}
@@ -98,9 +99,7 @@ def _bare_manager(
 ) -> WetlandsEnvManager:
     manager = object.__new__(WetlandsEnvManager)
     manager._envs = dict(envs or {})
-    manager._launch_configs = {
-        name: (1, None, None) for name in manager._envs
-    }
+    manager._launch_configs = {name: (1, None, None) for name in manager._envs}
     manager._lock = threading.RLock()
     return manager
 
@@ -118,7 +117,7 @@ def test_default_execution_lifetime_shuts_down_after_execute(
         with pytest.raises(RuntimeError, match="execution failed"):
             engine.execute([], object())
 
-    assert engine.environment_lifetime is EnvironmentLifetime.EXECUTION
+    assert engine.resource_lifetime is ResourceLifetime.EXECUTION
     assert manager.shutdown_calls == 1
 
 
@@ -231,15 +230,24 @@ def test_external_manager_is_never_shut_down_by_engine() -> None:
     assert manager.shutdown_calls == 0
 
 
-def test_environment_lifetime_validation() -> None:
-    with pytest.raises(ValueError, match="environment_lifetime"):
-        DefaultEngine(environment_lifetime="forever")
+def test_resource_lifetime_validation() -> None:
+    with pytest.raises(ValueError, match="resource_lifetime"):
+        DefaultEngine(resource_lifetime="forever")
 
     with pytest.raises(ValueError, match="injected env_manager"):
-        DefaultEngine(use_wetlands=True, environment_lifetime="external")
+        DefaultEngine(use_wetlands=True, resource_lifetime="external")
 
     with pytest.raises(ValueError, match="use_wetlands=True"):
         DefaultEngine(env_manager=cast(WetlandsEnvManager, _TrackingManager()))
+
+    with pytest.raises(ValueError, match="requires resource_lifetime='external'"):
+        DefaultEngine(
+            use_wetlands=True,
+            env_manager=cast(WetlandsEnvManager, _TrackingManager()),
+        )
+
+    with pytest.raises(ValueError, match="Direct execution"):
+        DefaultEngine(resource_lifetime="engine")
 
 
 def test_manager_stop_and_status_introspection() -> None:
@@ -273,7 +281,9 @@ def test_sequential_engine_honors_engine_lifetime() -> None:
     assert manager.shutdown_calls == 1
 
 
-def test_workflow_public_factory_preserves_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workflow_public_factory_preserves_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     created: list[dict[str, Any]] = []
 
     class FakeManager(_TrackingManager):
@@ -288,12 +298,12 @@ def test_workflow_public_factory_preserves_configuration(monkeypatch: pytest.Mon
         max_workers=4,
     )
 
-    engine = workflow.create_engine(environment_lifetime="engine")
+    engine = workflow.create_engine(resource_lifetime="engine")
 
     assert isinstance(engine, SequentialEngine)
     assert engine._use_wetlands is True
     assert engine._force_sequential is True
-    assert engine.environment_lifetime is EnvironmentLifetime.ENGINE
+    assert engine.resource_lifetime is ResourceLifetime.ENGINE
     assert created == [{"debug": True}]
     assert workflow.max_workers == 4
     engine.close()
@@ -305,7 +315,7 @@ def test_workflow_factory_injects_external_manager() -> None:
 
     engine = workflow.create_engine(
         env_manager=cast(WetlandsEnvManager, manager),
-        environment_lifetime=EnvironmentLifetime.EXTERNAL,
+        resource_lifetime=ResourceLifetime.EXTERNAL,
     )
     engine.close()
 

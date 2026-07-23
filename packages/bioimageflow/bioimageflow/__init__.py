@@ -1,12 +1,21 @@
 """BioImageFlow orchestrator — main process only."""
 
-from bioimageflow.dataframe_tool import DataFrameTool as DataFrameTool, Passthrough as Passthrough
-from bioimageflow.workflow import Workflow as Workflow, ProgressEvent as ProgressEvent, InvalidatedSelection as InvalidatedSelection, OutputView as OutputView
+from bioimageflow.dataframe_tool import (
+    DataFrameTool as DataFrameTool,
+    Passthrough as Passthrough,
+)
+from bioimageflow.workflow import (
+    Workflow as Workflow,
+    WorkflowExecutionContext as WorkflowExecutionContext,
+    ProgressEvent as ProgressEvent,
+    InvalidatedSelection as InvalidatedSelection,
+    OutputView as OutputView,
+)
 from bioimageflow.storage import OutputViewCapability as OutputViewCapability
 from bioimageflow.workflow_node import WorkflowNode as WorkflowNode
 from bioimageflow.engine import (
     DefaultEngine as DefaultEngine,
-    EnvironmentLifetime as EnvironmentLifetime,
+    ResourceLifetime as ResourceLifetime,
     NodeStep as NodeStep,
     NodePlan as NodePlan,
     NodePlanStatus as NodePlanStatus,
@@ -15,8 +24,15 @@ from bioimageflow.engine import (
     WorkerTaskError as WorkerTaskError,
     WorkerTimeoutError as WorkerTimeoutError,
     SequentialEngine as SequentialEngine,
+    WorkflowCancelledError as WorkflowCancelledError,
 )
-from bioimageflow.node import ColumnRef as ColumnRef, ColumnNotFoundError as ColumnNotFoundError, BindingError as BindingError, IndexAlignmentError as IndexAlignmentError, SourceToolUpstreamError as SourceToolUpstreamError
+from bioimageflow.node import (
+    ColumnRef as ColumnRef,
+    ColumnNotFoundError as ColumnNotFoundError,
+    BindingError as BindingError,
+    IndexAlignmentError as IndexAlignmentError,
+    SourceToolUpstreamError as SourceToolUpstreamError,
+)
 from bioimageflow.validation import (
     get_inputs_schema as get_inputs_schema,
     serialize_image_spec as serialize_image_spec,
@@ -49,7 +65,11 @@ from bioimageflow.env_manager import (
     configure_wetlands as configure_wetlands,
 )
 from bioimageflow.logging_config import configure_logging as configure_logging
-from bioimageflow.paths import get_home as get_home, get_tool_store_path as get_tool_store_path, get_wetlands_path as get_wetlands_path
+from bioimageflow.paths import (
+    get_home as get_home,
+    get_tool_store_path as get_tool_store_path,
+    get_wetlands_path as get_wetlands_path,
+)
 
 __all__ = [
     "BindingError",
@@ -59,7 +79,7 @@ __all__ = [
     "DataFrameTool",
     "DefaultEngine",
     "DisabledNodeError",
-    "EnvironmentLifetime",
+    "ResourceLifetime",
     "IndexAlignmentError",
     "InvalidatedSelection",
     "NodePlan",
@@ -80,6 +100,8 @@ __all__ = [
     "WorkerTaskError",
     "WorkerTimeoutError",
     "Workflow",
+    "WorkflowCancelledError",
+    "WorkflowExecutionContext",
     "WorkflowNode",
     "WorkflowSession",
     "check_type_compat",

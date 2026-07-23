@@ -13,20 +13,58 @@ from bioimageflow.node import get_active_workflow
 
 
 PUBLIC_EXPORTS = {
-    "BindingError", "ColumnNotFoundError", "ColumnRef", "CycleInWorkflowError",
-    "DataFrameTool", "DefaultEngine", "DisabledNodeError", "EnvironmentLifetime",
-    "IndexAlignmentError", "InvalidatedSelection", "NodePlan", "NodePlanStatus",
-    "NodeStep", "OutputView", "OutputViewCapability", "Passthrough", "ProgressEvent",
-    "SchemaSerializationError", "SequentialEngine", "SourceToolUpstreamError",
-    "ToolMetadata", "ToolRegistry", "ValidationError", "ValidationErrorKind",
-    "WetlandsEnvManager", "WorkerTaskError", "WorkerTimeoutError", "Workflow",
-    "WorkflowNode", "WorkflowSession", "check_type_compat", "configure_logging",
-    "configure_wetlands", "deserialize_constant", "get_home", "get_inputs_schema",
-    "get_tool_package_info", "get_tool_store_path", "get_wetlands_path",
-    "load_versioned_package", "require_tool_packages", "serialize_constant",
-    "serialize_image_spec", "serialize_input_schema", "serialize_output_schema",
-    "serialize_resolved_outputs", "serialize_tool_metadata", "topological_order",
-    "unload_versioned_package", "validate_parameters",
+    "BindingError",
+    "ColumnNotFoundError",
+    "ColumnRef",
+    "CycleInWorkflowError",
+    "DataFrameTool",
+    "DefaultEngine",
+    "DisabledNodeError",
+    "ResourceLifetime",
+    "IndexAlignmentError",
+    "InvalidatedSelection",
+    "NodePlan",
+    "NodePlanStatus",
+    "NodeStep",
+    "OutputView",
+    "OutputViewCapability",
+    "Passthrough",
+    "ProgressEvent",
+    "SchemaSerializationError",
+    "SequentialEngine",
+    "SourceToolUpstreamError",
+    "ToolMetadata",
+    "ToolRegistry",
+    "ValidationError",
+    "ValidationErrorKind",
+    "WetlandsEnvManager",
+    "WorkerTaskError",
+    "WorkerTimeoutError",
+    "Workflow",
+    "WorkflowCancelledError",
+    "WorkflowExecutionContext",
+    "WorkflowNode",
+    "WorkflowSession",
+    "check_type_compat",
+    "configure_logging",
+    "configure_wetlands",
+    "deserialize_constant",
+    "get_home",
+    "get_inputs_schema",
+    "get_tool_package_info",
+    "get_tool_store_path",
+    "get_wetlands_path",
+    "load_versioned_package",
+    "require_tool_packages",
+    "serialize_constant",
+    "serialize_image_spec",
+    "serialize_input_schema",
+    "serialize_output_schema",
+    "serialize_resolved_outputs",
+    "serialize_tool_metadata",
+    "topological_order",
+    "unload_versioned_package",
+    "validate_parameters",
 }
 
 
@@ -36,7 +74,7 @@ def test_public_exports_match_explicit_allowlist() -> None:
 
 def test_workflow_defaults_to_wetlands_parallel_engine() -> None:
     wf = Workflow()
-    engine = wf._make_engine()
+    engine = wf.create_engine()
 
     assert wf.engine_type == "wetlands"
     assert wf.execution == "parallel"
@@ -66,7 +104,7 @@ def test_workflow_rejects_removed_constructor_arguments(
 
 
 def test_workflow_builds_direct_parallel_engine() -> None:
-    engine = Workflow(engine="direct", execution="parallel")._make_engine()
+    engine = Workflow(engine="direct", execution="parallel").create_engine()
 
     assert isinstance(engine, DefaultEngine)
     assert not isinstance(engine, SequentialEngine)
@@ -75,16 +113,18 @@ def test_workflow_builds_direct_parallel_engine() -> None:
 
 
 def test_workflow_builds_wetlands_sequential_engine() -> None:
-    engine = Workflow(execution="sequential")._make_engine()
+    engine = Workflow(execution="sequential").create_engine()
 
     assert isinstance(engine, SequentialEngine)
     assert engine._use_wetlands is True
     assert engine._force_sequential is True
 
 
-def test_workflow_rejects_unknown_engine_and_execution() -> None:
+def test_workflow_accepts_parsl_and_rejects_unknown_values() -> None:
+    assert Workflow(engine="parsl").engine_type == "parsl"
+
     with pytest.raises(ValueError, match="engine"):
-        Workflow(engine="parsl")
+        Workflow(engine="unknown")
 
     with pytest.raises(ValueError, match="execution"):
         Workflow(execution="serial")
@@ -138,7 +178,10 @@ def test_workflow_pointer_output_view_round_trips(tmp_path) -> None:
 
     assert loaded.output_view == OutputView(mode="pointer", scope="both")
     assert graph["config"]["output_view"] == {"mode": "pointer", "scope": "both"}
-    assert OutputViewCapability(mode="pointer", supported=True, code="ok").supported is True
+    assert (
+        OutputViewCapability(mode="pointer", supported=True, code="ok").supported
+        is True
+    )
 
 
 @pytest.mark.parametrize(

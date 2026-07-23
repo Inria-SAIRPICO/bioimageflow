@@ -62,15 +62,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bioimageflow")
 
 
-class EnvironmentLifetime(str, Enum):
-    """Ownership policy for Wetlands environments used by an engine.
-
-    ``EXECUTION`` preserves the historical behavior and stops environments
-    after every :meth:`DefaultEngine.execute` or
-    :meth:`DefaultEngine.execute_steps` call. ``ENGINE`` retains them until
-    :meth:`DefaultEngine.close`. ``EXTERNAL`` leaves cleanup entirely to the
-    owner of the injected environment manager.
-    """
+class ResourceLifetime(str, Enum):
+    """Ownership policy for resources used by an execution engine."""
 
     EXECUTION = "execution"
     ENGINE = "engine"

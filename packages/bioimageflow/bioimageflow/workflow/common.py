@@ -1,7 +1,6 @@
 """Shared workflow values and helpers."""
 
-# Focused workflow modules import the subset of this compatibility namespace
-# that they need.
+# Focused workflow modules import the shared values they need.
 # ruff: noqa: F401
 
 import importlib
@@ -43,7 +42,7 @@ from bioimageflow.validation import (
 if TYPE_CHECKING:
     from bioimageflow.engine import (
         DefaultEngine,
-        EnvironmentLifetime,
+        ResourceLifetime,
         NodeStep,
         NodePlan,
     )

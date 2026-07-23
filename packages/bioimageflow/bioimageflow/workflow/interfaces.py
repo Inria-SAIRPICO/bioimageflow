@@ -49,9 +49,9 @@ class _InterfacesMixin:
     ) -> None:
         if not name or "/" in name:
             raise ValueError("Workflow name must be non-empty and may not contain '/'.")
-        if engine not in {"direct", "wetlands"}:
+        if engine not in {"direct", "wetlands", "parsl"}:
             raise ValueError(
-                f"Unknown engine '{engine}'. Expected 'direct' or 'wetlands'."
+                f"Unknown engine '{engine}'. Expected 'direct', 'wetlands', or 'parsl'."
             )
         if execution not in {"parallel", "sequential"}:
             raise ValueError(
@@ -68,7 +68,8 @@ class _InterfacesMixin:
         self.max_workers = max_workers
         self.output_view = _normalize_output_view(output_view)
         self._env_configs: dict[str, WorkflowEnvironment] = {}
-        self._cancel_event = threading.Event()
+        self._execution_lock = threading.RLock()
+        self._active_run_context: Any = None
         self._nodes: dict[str, Node] = {}
         self._prev_workflow: Any = None
         self._dev_mode: bool = False

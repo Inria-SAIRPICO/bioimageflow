@@ -47,12 +47,14 @@ from .custom_sources import (
     _workflow_import_scope,
 )
 from .model import Workflow
+from .execution_context import WorkflowExecutionContext
 
 __all__ = [
     "InvalidatedSelection",
     "OutputView",
     "ProgressEvent",
     "Workflow",
+    "WorkflowExecutionContext",
     "WorkflowEnvironment",
     "WorkflowInputPort",
     "WorkflowInputRef",

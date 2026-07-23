@@ -1,9 +1,9 @@
-"""Execution engines and compatibility exports."""
+"""Execution engines and their public shared values."""
 
 from .common import (
     CycleInWorkflowError,
     DisabledNodeError,
-    EnvironmentLifetime,
+    ResourceLifetime,
     NodePlan,
     NodePlanStatus,
     NodeStep,
@@ -22,7 +22,7 @@ __all__ = [
     "CycleInWorkflowError",
     "DefaultEngine",
     "DisabledNodeError",
-    "EnvironmentLifetime",
+    "ResourceLifetime",
     "NodePlan",
     "NodePlanStatus",
     "NodeStep",

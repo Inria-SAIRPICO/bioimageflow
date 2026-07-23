@@ -134,19 +134,19 @@ class WetlandsBackend:
         )
 
     def cleanup_execution(self, engine: "DefaultEngine") -> None:
-        from bioimageflow.engine import EnvironmentLifetime
+        from bioimageflow.engine import ResourceLifetime
 
         if (
-            engine.environment_lifetime is EnvironmentLifetime.EXECUTION
+            engine.resource_lifetime is ResourceLifetime.EXECUTION
             and engine._env_manager is not None
         ):
             engine._env_manager.shutdown_all()
 
     def close(self, engine: "DefaultEngine") -> None:
-        from bioimageflow.engine import EnvironmentLifetime
+        from bioimageflow.engine import ResourceLifetime
 
         if (
             engine._env_manager is not None
-            and engine.environment_lifetime is not EnvironmentLifetime.EXTERNAL
+            and engine.resource_lifetime is not ResourceLifetime.EXTERNAL
         ):
             engine._env_manager.shutdown_all()
