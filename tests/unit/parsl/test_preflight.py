@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import importlib.metadata
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,7 @@ from bioimageflow.parsl.preflight import (
     PreflightExpectation,
     WORKER_API,
     build_preflight_expectation,
+    build_preflight_payload,
     validate_preflight_result,
     validate_preflight_results,
 )
@@ -31,6 +34,7 @@ from bioimageflow_core.worker_origins import (
     InstalledModuleOriginV1,
     SourceFileOriginV1,
 )
+from bioimageflow_core.preflight import execute_executor_preflight
 
 
 CORE_REQUIREMENT = "bioimageflow-core>=0.1.7,<0.2"
@@ -164,6 +168,58 @@ def test_validates_complete_success_evidence(tmp_path: Path) -> None:
         expectation.readable_paths
     )
     assert ExecutorPreflightResultV1.from_dict(result.to_dict()) == result
+
+
+def test_worker_probe_payload_round_trips_through_result_validation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "probe_tool.py"
+    source.write_text(
+        """
+from bioimageflow_core import Arguments, IOModel, ProcessingTool
+
+class ProbeTool(ProcessingTool):
+    class Inputs(IOModel):
+        value: str
+    class Outputs(IOModel):
+        value: str
+    def process_row(self, arguments: Arguments):
+        return self.Outputs(value=arguments.value)
+""",
+        encoding="utf-8",
+    )
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    origin = SourceFileOriginV1(
+        path=str(source.resolve()),
+        source_hash=source_hash,
+        class_name="ProbeTool",
+    )
+    expectation = PreflightExpectation(
+        executor_label="cpu",
+        environment_identities=("env_test",),
+        core_requirements=(CORE_REQUIREMENT,),
+        storage_root=str(storage.resolve()),
+        sentinel_path=str(
+            (storage / ".preflight" / "session" / "sentinel").resolve()
+        ),
+        readable_paths=(
+            str(source.resolve()),
+            str(storage.resolve()),
+        ),
+        origins=(origin,),
+        expected_core_version=importlib.metadata.version("bioimageflow-core"),
+    )
+
+    result = validate_preflight_result(
+        execute_executor_preflight(build_preflight_payload(expectation)),
+        expectation,
+    )
+
+    assert result.executor_label == "cpu"
+    assert result.origin_results[0].resolved is True
+    assert not Path(expectation.sentinel_path).exists()
 
 
 @pytest.mark.parametrize(

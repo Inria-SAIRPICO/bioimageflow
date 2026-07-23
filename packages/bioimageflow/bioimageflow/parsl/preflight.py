@@ -13,7 +13,12 @@ from bioimageflow_core.worker_origins import (
     SourceFileOriginV1,
     VersionedModuleOriginV1,
     WorkerToolOriginV1,
+    encode_worker_tool_origin,
     worker_tool_origin_identity,
+)
+from bioimageflow_core.preflight import (
+    PREFLIGHT_RESULT_SCHEMA,
+    PREFLIGHT_SCHEMA,
 )
 from bioimageflow_core.worker_protocol import TASK_SCHEMA
 
@@ -154,7 +159,7 @@ class PreflightOriginResultV1:
 class ExecutorPreflightResultV1:
     """Strict successful-result envelope returned by one executor probe."""
 
-    SCHEMA: ClassVar[str] = "bioimageflow.parsl.executor_preflight_result.v1"
+    SCHEMA: ClassVar[str] = PREFLIGHT_RESULT_SCHEMA
 
     executor_label: str
     worker_api: str
@@ -411,6 +416,25 @@ def build_preflight_expectation(
     )
 
 
+def build_preflight_payload(
+    expectation: PreflightExpectation,
+) -> dict[str, Any]:
+    """Encode one exact worker-safe executor preflight request."""
+    if type(expectation) is not PreflightExpectation:
+        raise TypeError("expectation must be a PreflightExpectation.")
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "executor_label": expectation.executor_label,
+        "core_requirements": list(expectation.core_requirements),
+        "storage_root": expectation.storage_root,
+        "sentinel_path": expectation.sentinel_path,
+        "readable_paths": list(expectation.readable_paths),
+        "origins": [
+            encode_worker_tool_origin(origin) for origin in expectation.origins
+        ],
+    }
+
+
 def _failure_prefix(expectation: PreflightExpectation) -> str:
     return (
         f"Executor preflight {expectation.executor_label!r} for environments "
@@ -549,6 +573,7 @@ __all__ = [
     "PreflightPathResultV1",
     "WORKER_API",
     "build_preflight_expectation",
+    "build_preflight_payload",
     "validate_preflight_result",
     "validate_preflight_results",
 ]
