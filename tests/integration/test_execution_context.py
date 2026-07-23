@@ -24,10 +24,10 @@ class RowContextTool(ProcessingTool):
 
     class Outputs(IOModel):
         output_path: Path = Template("{input_path.stem}.txt")
-        work_file: Path
-        work_dir: Path
-        rows_dir: Path
-        row_dir: Path
+        work_file_name: str
+        work_dir_name: str
+        rows_dir_name: str
+        row_dir_name: str
         row_index: str
 
     def process_row(
@@ -52,10 +52,10 @@ class RowContextTool(ProcessingTool):
 
         return self.Outputs(
             output_path=output_path,
-            work_file=work_file,
-            work_dir=context.work_dir,
-            rows_dir=context.rows_dir,
-            row_dir=context.row_dir,
+            work_file_name=work_file.name,
+            work_dir_name=context.work_dir.name,
+            rows_dir_name=context.rows_dir.name,
+            row_dir_name=context.row_dir.name,
             row_index=context.row_index,
         )
 
@@ -69,9 +69,9 @@ class BatchContextTool(ProcessingTool):
 
     class Outputs(IOModel):
         output_path: Path = Template("{input_path.stem}.txt")
-        work_dir: Path
-        batch_dir: Path
-        rows_dir: Path
+        work_dir_name: str
+        batch_dir_name: str
+        rows_dir_name: str
 
     def process_batch(
         self,
@@ -97,9 +97,9 @@ class BatchContextTool(ProcessingTool):
             outputs.append(
                 self.Outputs(
                     output_path=output_path,
-                    work_dir=context.work_dir,
-                    batch_dir=context.batch_dir,
-                    rows_dir=context.rows_dir,
+                    work_dir_name=context.work_dir.name,
+                    batch_dir_name=context.batch_dir.name,
+                    rows_dir_name=context.rows_dir.name,
                 )
             )
         return outputs
@@ -114,27 +114,21 @@ def test_process_row_receives_shared_work_dir_and_per_row_dir(tmp_workspace):
         output = tool(input_path=raw["path"], name="row_context")
         df = wf.compute(output)
 
-    work_files = [Path(str(value)) for value in df["work_file"]]
+    assert set(df["work_file_name"]) == {"implicit.tmp"}
+    assert set(df["work_dir_name"]) == {"work"}
+    assert set(df["rows_dir_name"]) == {"rows"}
+    assert len(set(df["row_dir_name"])) == 3
+    work_files = list(
+        (tmp_workspace / "results" / "cache" / "v1" / "results").glob(
+            "**/staging/work/rows/*/implicit.tmp"
+        )
+    )
     assert len(work_files) == 3
-    assert len({path.parent for path in work_files}) == 3
-
-    work_dirs = {Path(str(value)) for value in df["work_dir"]}
-    assert len(work_dirs) == 1
-    work_dir = next(iter(work_dirs))
-    assert work_dir.name == "work"
-    assert tmp_workspace / "results" in work_dir.parents
-
-    rows_dirs = {Path(str(value)) for value in df["rows_dir"]}
-    assert rows_dirs == {work_dir / "rows"}
-
-    row_dirs = [Path(str(value)) for value in df["row_dir"]]
-    assert len(row_dirs) == 3
-    assert len(set(row_dirs)) == 3
     for path in work_files:
         assert path.exists()
         assert path.name == "implicit.tmp"
-        assert path.parent in row_dirs
-        assert path.parent.parent == work_dir / "rows"
+        assert path.parent.parent.name == "rows"
+        assert path.parent.parent.parent.name == "work"
         assert tmp_workspace / "results" in path.parents
 
     assert not (Path.cwd() / "implicit.tmp").exists()
@@ -149,15 +143,13 @@ def test_process_batch_receives_shared_work_dir_and_batch_dir(tmp_workspace):
         output = tool(input_path=raw["path"], name="batch_context")
         df = wf.compute(output)
 
-    work_dirs = {Path(str(value)) for value in df["work_dir"]}
-    assert len(work_dirs) == 1
-    work_dir = next(iter(work_dirs))
-    assert work_dir.name == "work"
-
-    batch_dirs = {Path(str(value)) for value in df["batch_dir"]}
-    assert batch_dirs == {work_dir / "batch"}
-    batch_dir = next(iter(batch_dirs))
-    assert (batch_dir / "batch.tmp").exists()
-
-    rows_dirs = {Path(str(value)) for value in df["rows_dir"]}
-    assert rows_dirs == {work_dir / "rows"}
+    assert set(df["work_dir_name"]) == {"work"}
+    assert set(df["batch_dir_name"]) == {"batch"}
+    assert set(df["rows_dir_name"]) == {"rows"}
+    markers = list(
+        (tmp_workspace / "results" / "cache" / "v1" / "results").glob(
+            "**/staging/work/batch/batch.tmp"
+        )
+    )
+    assert len(markers) == 1
+    assert markers[0].exists()

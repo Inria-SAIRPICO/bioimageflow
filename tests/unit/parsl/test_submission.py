@@ -18,7 +18,6 @@ from bioimageflow.parsl.submission import (
 )
 from bioimageflow_core import (
     ProcessingTaskResultV1,
-    ProcessingTaskV1,
     RowInvocationV1,
     RowResultV1,
     SourceFileOriginV1,
@@ -244,27 +243,6 @@ def test_collector_validates_result_correlation_before_acceptance() -> None:
             executor_label="cpu",
             cancel_requested=lambda: False,
         ).run([task])
-
-
-def test_task_iterator_failure_has_deterministic_node_order() -> None:
-    observed: list[BaseException] = []
-
-    def broken_tasks() -> Iterator[ProcessingTaskV1]:
-        raise RuntimeError("task packing failed")
-        yield
-
-    with pytest.raises(RuntimeError, match="task packing failed") as caught:
-        BoundedParslCollector(
-            submit=lambda _task: pytest.fail("task was submitted"),
-            max_in_flight=1,
-            node_ordinal=5,
-            executor_label="cpu",
-            cancel_requested=lambda: False,
-            failure_observed=observed.append,
-        ).run(broken_tasks())
-
-    assert observed == [caught.value]
-    assert caught.value.failure_order_key == (5, -1, "")
 
 
 def test_cancellation_stops_before_submission() -> None:

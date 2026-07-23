@@ -450,11 +450,13 @@ def test_from_python_is_fresh_and_calls_exact_factory_once(tmp_path: Path) -> No
 def test_golden_recursive_fixtures_round_trip(
     fixture_name: str,
     include_custom_tools: bool,
+    tmp_path: Path,
 ) -> None:
     path = Path("tests/fixtures") / fixture_name
     source = json.loads(path.read_text())
     workflow = Workflow.from_dict(source)
     assert workflow.to_dict(include_custom_tools=include_custom_tools) == source
+    workflow.storage_path = tmp_path / "runtime"
 
     result = workflow.compute()
     if include_custom_tools:
