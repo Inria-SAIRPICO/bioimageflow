@@ -70,6 +70,15 @@ from bioimageflow.paths import (
     get_tool_store_path as get_tool_store_path,
     get_wetlands_path as get_wetlands_path,
 )
+from bioimageflow.parsl import (
+    ExecutorBinding as ExecutorBinding,
+    ExecutorCapabilities as ExecutorCapabilities,
+    ParslEngine as ParslEngine,
+    ParslTaskError as ParslTaskError,
+    ParslTaskPolicy as ParslTaskPolicy,
+    WorkerEnvironmentAttestation as WorkerEnvironmentAttestation,
+    WorkerSlotCapacity as WorkerSlotCapacity,
+)
 
 __all__ = [
     "BindingError",
@@ -79,7 +88,8 @@ __all__ = [
     "DataFrameTool",
     "DefaultEngine",
     "DisabledNodeError",
-    "ResourceLifetime",
+    "ExecutorBinding",
+    "ExecutorCapabilities",
     "IndexAlignmentError",
     "InvalidatedSelection",
     "NodePlan",
@@ -87,8 +97,12 @@ __all__ = [
     "NodeStep",
     "OutputView",
     "OutputViewCapability",
+    "ParslEngine",
+    "ParslTaskError",
+    "ParslTaskPolicy",
     "Passthrough",
     "ProgressEvent",
+    "ResourceLifetime",
     "SchemaSerializationError",
     "SequentialEngine",
     "SourceToolUpstreamError",
@@ -97,6 +111,8 @@ __all__ = [
     "ValidationError",
     "ValidationErrorKind",
     "WetlandsEnvManager",
+    "WorkerEnvironmentAttestation",
+    "WorkerSlotCapacity",
     "WorkerTaskError",
     "WorkerTimeoutError",
     "Workflow",

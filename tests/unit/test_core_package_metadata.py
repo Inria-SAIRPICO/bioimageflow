@@ -312,14 +312,19 @@ def test_publishable_package_readme_titles_include_distribution_name() -> None:
     assert offenders == {}
 
 
-def test_no_release_extras_are_declared() -> None:
-    offenders = [
-        str(path.relative_to(ROOT))
-        for path in [ROOT / "pyproject.toml", *_package_pyprojects()]
-        if "optional-dependencies" in _pyproject(path).get("project", {})
-    ]
+def test_only_orchestrator_declares_bounded_parsl_extra() -> None:
+    extras = {
+        str(path.relative_to(ROOT)): _pyproject(path)["project"].get(
+            "optional-dependencies",
+            {},
+        )
+        for path in _package_pyprojects()
+    }
 
-    assert offenders == []
+    assert extras.pop("packages/bioimageflow/pyproject.toml") == {
+        "parsl": ["parsl>=2026.5.25,<2026.6"]
+    }
+    assert extras and all(value == {} for value in extras.values())
 
 
 def test_package_uv_sources_match_first_party_runtime_dependencies() -> None:
@@ -343,7 +348,7 @@ def test_package_uv_sources_match_first_party_runtime_dependencies() -> None:
     assert offenders == {}
 
 
-def test_root_dependency_groups_do_not_define_heavy_or_deferred_runtime_surfaces() -> None:
+def test_root_dependency_groups_only_select_bounded_parsl_optional_runtime() -> None:
     groups = _pyproject(ROOT / "pyproject.toml").get("dependency-groups", {})
     offenders: dict[str, list[str]] = {}
 
@@ -351,12 +356,18 @@ def test_root_dependency_groups_do_not_define_heavy_or_deferred_runtime_surfaces
         heavy = sorted(
             dependency
             for dependency in dependencies
-            if _dependency_name(dependency) in HEAVY_OR_DEFERRED_DEPENDENCY_NAMES
+            if (
+                _dependency_name(dependency) in HEAVY_OR_DEFERRED_DEPENDENCY_NAMES
+                and _dependency_name(dependency) != "parsl"
+            )
         )
         if heavy:
             offenders[group_name] = heavy
 
     assert offenders == {}
+    assert _dependency_entries(groups["dev"], "parsl") == [
+        "parsl>=2026.5.25,<2026.6"
+    ]
 
 
 def test_pytest_marker_registry_matches_pyproject() -> None:

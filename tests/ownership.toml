@@ -115,3 +115,9 @@ edit_tests = [
     "tests/integration/test_runtime_paths.py",
 ]
 precommit_suites = ["unit", "integration"]
+
+[[areas]]
+name = "parsl"
+sources = ["packages/bioimageflow/bioimageflow/parsl"]
+edit_tests = ["tests/unit/parsl"]
+precommit_suites = ["unit", "integration"]

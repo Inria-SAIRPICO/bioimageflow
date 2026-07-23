@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from email.parser import BytesParser
+from email.policy import default
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ import tarfile
 import zipfile
 
 import pytest
+from packaging.requirements import Requirement
 
 
 pytestmark = pytest.mark.packaging
@@ -130,6 +133,14 @@ def _wheel_members(path: Path) -> list[str]:
         return archive.namelist()
 
 
+def _wheel_metadata(path: Path):
+    with zipfile.ZipFile(path) as archive:
+        [metadata_name] = [
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        ]
+        return BytesParser(policy=default).parsebytes(archive.read(metadata_name))
+
+
 def _sdist_members(path: Path) -> list[str]:
     with tarfile.open(path, "r:gz") as archive:
         names = archive.getnames()
@@ -231,8 +242,17 @@ def test_built_wheels_import_public_modules(
     code = """
 from pathlib import Path
 import importlib
+import importlib.abc
 import json
 import sys
+
+class BlockParsl(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "parsl" or fullname.startswith("parsl."):
+            raise AssertionError(f"base wheel imported optional Parsl: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockParsl())
 
 modules = json.loads(sys.argv[1])
 wheel_paths = json.loads(sys.argv[2])
@@ -269,3 +289,24 @@ if failures:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_orchestrator_wheel_declares_bounded_parsl_extra(
+    built_artifacts: Path,
+) -> None:
+    if "bioimageflow" not in _distribution_names():
+        pytest.skip("bioimageflow is not the selected release package")
+
+    metadata = _wheel_metadata(_wheel_path(built_artifacts, "bioimageflow"))
+    requirements = metadata.get_all("Requires-Dist") or []
+    parsl_requirements = [
+        Requirement(requirement)
+        for requirement in requirements
+        if Requirement(requirement).name == "parsl"
+    ]
+
+    assert metadata.get_all("Provides-Extra") == ["parsl"]
+    assert len(parsl_requirements) == 1
+    [parsl_requirement] = parsl_requirements
+    assert str(parsl_requirement.specifier) == "<2026.6,>=2026.5.25"
+    assert str(parsl_requirement.marker) == 'extra == "parsl"'

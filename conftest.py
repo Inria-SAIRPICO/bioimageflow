@@ -19,6 +19,7 @@ COMPLETE_TEST_MARKERS = [
 ]
 REGISTERED_TEST_MARKERS = [
     *COMPLETE_TEST_MARKERS,
+    "parsl: tests that execute the real optional Parsl runtime",
     "slow: deterministic or external tests excluded from the fast development loop",
     "acceptance: deterministic high-level workflow or example coverage excluded from the fast development loop",
     "packaging: build artifact, wheel, sdist, or package metadata artifact checks",

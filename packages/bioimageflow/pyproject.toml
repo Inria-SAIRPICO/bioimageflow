@@ -29,6 +29,9 @@ dependencies = [
     "wetlands>=1.1.1",
 ]
 
+[project.optional-dependencies]
+parsl = ["parsl>=2026.5.25,<2026.6"]
+
 [project.urls]
 Homepage = "https://github.com/Inria-SAIRPICO/bioimageflow"
 Documentation = "https://bioimageflow.readthedocs.io/latest/"
