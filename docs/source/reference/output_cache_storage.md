@@ -45,6 +45,16 @@ All paths below are rooted at `Workflow.storage_path`.
             current.json
             conflicts/
               <conflict-id>.json
+      transient/
+        runs/
+          <run-id>/
+            nodes/
+              <node-key>/
+                <invocation-id>/
+                  invocation.json
+                  assets/
+                  work/
+                  failed.json            # optional failure metadata
   views/
     runs/
       <run-id>/
@@ -129,7 +139,7 @@ If any consumed upstream value has no selected immutable record, the downstream 
 The downstream execution may still run, but cache lookup and reusable cache write are disabled for that path.
 
 External references are durable values outside the record directory, such as source image paths discovered by a file-listing source node.
-External reference identity is path-based to preserve the current BioImageFlow cache semantics.
+External reference identity is path-based.
 The identity material is the normalized absolute path string plus the declared reference kind.
 Input content fingerprinting is outside the current path-based external-reference contract.
 
@@ -162,13 +172,13 @@ It answers: "which worker tried to compute this?"
 Attempt IDs are not deterministic and are not part of cache identity.
 They exist so concurrent workers do not write into the same mutable directory.
 
-Attempt IDs must be unique enough for concurrent local attempts and should be lexicographically time-sortable.
-A ULID-style identifier is appropriate.
+Attempt IDs use `att_` followed by 32 lowercase hexadecimal characters generated from a UUID4 value.
+The grammar is `^att_[0-9a-f]{32}$`.
 
 Example:
 
 ```text
-01K7M9Y2EHJ6V9X3G7K8Q4T2BR
+att_a791366f6a8e4fc6a7428bf8e69b57c1
 ```
 
 Two workers computing the same `<result-key>` must create different attempt directories.
@@ -192,7 +202,7 @@ cache/v1/results/<result-shard>/<result-key>/records/<record-id>/
 The content manifest used for the record hash includes:
 
 - The result key.
-- The canonical dataframe schema and canonical dataframe artifact digest.
+- The canonical dataframe logical schema and logical digest.
 - Declared output asset paths, sizes, and digests.
 - Content-affecting metadata required to interpret the outputs.
 
@@ -206,6 +216,7 @@ The content manifest used for the record hash excludes:
 - Process IDs.
 - Scheduler job IDs.
 - Runtime duration.
+- The dataframe transport digest.
 - Logs unless logs are declared output artifacts.
 
 This split prevents the record ID from changing only because the same content was produced by a different worker or at a different time.
@@ -218,8 +229,21 @@ It answers: "which workflow run used these node results?"
 A run may use a mix of newly computed records and cache hits from previous runs.
 One run ID can therefore reference many record IDs.
 
-Run IDs should be unique and lexicographically time-sortable.
+Run IDs use `run_` followed by 32 lowercase hexadecimal characters generated from a UUID4 value.
+The grammar is `^run_[0-9a-f]{32}$`.
 They are for provenance and human navigation, not cache identity.
+
+### Invocation ID
+
+`<invocation-id>` identifies one concrete execution of a `ProcessingTool` node within a workflow run.
+It is required whether the node has a reusable result key or uses transient storage.
+
+Invocation IDs are non-content correlation values.
+They use `inv_` followed by 32 lowercase hexadecimal characters generated from a UUID4 value.
+The grammar is `^inv_[0-9a-f]{32}$`.
+They are unique within the run, are safe single path segments, and never enter result-key or record-ID material.
+For reusable execution, the invocation ID and cache attempt ID remain distinct fields even when one implementation creates them together.
+For non-reusable execution, no cache attempt ID exists.
 
 ## Directory Semantics
 
@@ -294,6 +318,30 @@ For deterministic nodes, a conflict means at least one of these is true:
 For explicitly cacheable nondeterministic nodes, alternate records may be expected.
 V1 still keeps the first valid record current and records alternates diagnostically.
 
+### `transient/runs/`
+
+`cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/` is the only workspace for a non-reusable `ProcessingTool` invocation.
+The node key is the validated scoped node path, represented as individually validated path segments.
+The run ID and invocation ID are validated storage-safe segments.
+
+The directory has these semantics:
+
+- `assets/` contains engine-owned declared outputs and is the only location beneath the invocation that may be returned as an owned runtime path.
+- `work/` contains scratch files and is never a declared output.
+- `invocation.json` contains non-content diagnostics: schema, run ID, scoped node key, invocation ID, effective engine, start time, terminal status, and terminal time.
+- `failed.json` may contain normalized failure diagnostics.
+- Every path is constructed through storage helpers, resolved beneath the invocation root, and rejected on traversal, symlink escape, unsafe segment, or case-normalization collision.
+- No result-key directory, cache attempt, immutable record, `current.json`, conflict report, run-node record pointer, latest pointer, or output projection is created for the invocation.
+- Progress events for the invocation carry neither a result key nor a record ID.
+
+Successful transient assets remain available after the attached call returns.
+They are retained until an explicit transient cleanup operation removes them; execution completion does not delete them automatically.
+Callers that need a longer retention guarantee must copy or export those assets before requesting cleanup.
+
+Transient cleanup may remove a terminal invocation only after the configured stale threshold and only when the caller has established that no engine, task, or other process can still write to or consume it.
+An engine keeps the invocation active until every submitted writer is terminal.
+Cross-process cleanup requires external coordination or a lease mechanism; age alone is never sufficient.
+
 ## Record Validity
 
 A record is valid only if all of the following hold:
@@ -302,7 +350,10 @@ A record is valid only if all of the following hold:
 - `manifest.json` exists and has schema `bioimageflow.cache.record.v1`.
 - `manifest.json` names the enclosing result key and record ID.
 - `dataframe.parquet` exists and is the canonical dataframe.
+- The Parquet byte digest matches `dataframe.transport_digest`.
+- The dataframe's recomputed canonical logical schema and digest match `dataframe.logical_schema` and `dataframe.logical_digest`.
 - Every declared asset listed in the manifest exists.
+- Every owned asset declares `asset_type`, and its file or complete directory-tree size and digest match.
 - Manifest paths are normalized relative POSIX paths.
 - Manifest paths are not absolute and do not contain `..`.
 - Manifest paths do not escape the record directory through symlinks.
@@ -316,9 +367,25 @@ Anything else is ignored for cache lookup or reported as corruption.
 `dataframe.parquet` is mandatory for every reusable record.
 `dataframe.csv` is optional human/debug output and is never authoritative.
 
-Current runtime note: publication currently hashes the staged Parquet file bytes when building record identity.
-That means Parquet writer metadata is part of the implemented record ID today.
-The canonical dataframe digest rules below describe the target cross-worker contract and must be wired into publication before distributed or heterogeneous-worker execution is treated as supported.
+The record manifest distinguishes logical identity from transport integrity:
+
+```json
+{
+  "dataframe": {
+    "path": "dataframe.parquet",
+    "format": "parquet",
+    "logical_digest": "sha256:...",
+    "transport_digest": "sha256:...",
+    "logical_schema": [
+      {"name": "mask", "dtype": "object", "kind": "record_asset"}
+    ]
+  }
+}
+```
+
+`logical_digest` and `logical_schema` enter record identity.
+`transport_digest` is the SHA-256 digest of the stored Parquet bytes and is validated when the artifact is read, but it does not enter record identity.
+Record validation loads the Parquet artifact, reconstructs the canonical logical payload using `logical_schema`, and requires the recomputed logical digest to match.
 
 V1 canonical dataframe digest rules:
 
@@ -335,7 +402,25 @@ V1 canonical dataframe digest rules:
 - The canonical dataframe payload is encoded as canonical JSON with sorted object keys and compact separators, then hashed with SHA-256.
 
 The Parquet file must contain the same logical values as the canonical dataframe digest.
-The implementation must choose and document a deterministic Parquet writer configuration before enabling distributed execution across heterogeneous workers.
+The canonical writer converts the prepared dataframe with `pyarrow.Table.from_pandas(..., preserve_index=True)` and writes it with:
+
+- Parquet format version `2.6`,
+- data-page version `1.0`,
+- Zstandard compression at level `3`,
+- dictionary encoding disabled,
+- statistics and page indexes disabled,
+- timestamp coercion to microseconds with truncation rejected,
+- Arrow schema storage enabled,
+- compliant nested types enabled,
+- a fixed row-group size of 65,536 rows.
+
+All supported pandas and PyArrow versions must round-trip to the same logical payload under these settings.
+Byte-for-byte Parquet equality across dependency versions is not required because transport bytes are integrity metadata rather than content identity.
+
+Root DataFrame inputs use the same canonical logical payload and digest helper.
+For a root DataFrame, Python `Path` cells are normalized absolute `external_path` values, string cells remain strings, supported scalar and datetime cells use the rules above, and unsupported object cells are rejected.
+A root DataFrame does not contain a `record_asset` value unless the caller supplies an explicit immutable record reference through a separately documented binding contract.
+Input transport paths and Parquet transport digests never enter root DataFrame identity.
 
 ## Path and Asset Canonicalization
 
@@ -358,11 +443,35 @@ Manifest entries distinguish owned assets from external references:
 ```json
 {
   "outputs": [
-    {"path": "assets/mask.tif", "kind": "owned_asset", "size": 123456, "digest": "sha256:..."},
+    {"path": "assets/mask.tif", "kind": "owned_asset", "asset_type": "file", "size": 123456, "digest": "sha256:..."},
     {"path": "/data/raw/cell_001.tif", "kind": "external_path", "identity": "path"}
   ]
 }
 ```
+
+Every `owned_asset` has an explicit `asset_type` of `file` or `directory`.
+
+For a directory asset, the manifest entry describes the directory root and its complete recursive identity:
+
+```json
+{
+  "kind": "owned_asset",
+  "asset_type": "directory",
+  "path": "assets/dataset.zarr",
+  "size": 123456,
+  "digest": "sha256:..."
+}
+```
+
+The directory digest is SHA-256 over canonical JSON with schema `bioimageflow.directory_asset.v1` and a list sorted by normalized relative POSIX path.
+A directory entry contains `{"type": "directory", "path": "..."}`.
+A regular-file entry contains `{"type": "file", "path": "...", "size": <bytes>, "digest": "sha256:..."}`.
+The root directory itself is not an entry, while empty descendant directories are entries and therefore affect identity.
+The manifest `size` is the sum of regular-file sizes.
+
+Directory scanning NFC-normalizes every relative path and rejects absolute paths, empty segments, `.`, `..`, NUL, backslashes, symlinks, sockets, devices, FIFOs, and other special files.
+It also rejects duplicate normalized paths, file/directory prefix collisions, and paths that collide under Unicode case folding.
+Record validation recomputes the tree identity using the same rules.
 
 Scalar output metadata uses the same deterministic scalar payload encoding as canonical dataframe cells:
 
@@ -527,7 +636,8 @@ views/runs/<run-id>/
 - Workflow identity.
 - Storage path.
 - Start and completion timestamps.
-- Engine.
+- Effective execution backend after explicit engine-injection precedence.
+- Effective parallel or sequential scheduling policy.
 - BioImageFlow version.
 - Requested target nodes.
 - Overall status.
@@ -537,7 +647,7 @@ views/runs/<run-id>/
 ```json
 {
   "schema": "bioimageflow.run.node_result.v1",
-  "run_id": "01K7M9Y2ABCD...",
+  "run_id": "run_a791366f6a8e4fc6a7428bf8e69b57c1",
   "node_key": "segmentation",
   "result_key": "rk_...",
   "record_id": "rec_...",
@@ -550,9 +660,8 @@ views/runs/<run-id>/
 `outputs/` may contain pointer files to individual user-facing artifacts for convenient browsing.
 Only `owned_asset` manifest entries create output pointer files; `external_path` and `scalar_output` entries remain metadata in `result.json`.
 
-Current runtime validation checks a run node view against the record currently selected by `current.json`.
-Historical run views may fail that validator after invalidation or manual cache-selection changes even though the files still record what the run used.
-Long-lived immutable run-history validation is a remaining hardening task.
+Run-node validation resolves and validates the exact immutable record named by `result.json`.
+It does not require that record to remain selected by `current.json`.
 
 Example:
 
@@ -640,6 +749,10 @@ The canonical run view preserves the record-relative asset path from the selecte
 The `outputs/runs/<run-id>/nodes/<node-key>/outputs/` hierarchy is record-relative for every materialization mode.
 For example, `assets/mask.tif` is materialized there as `outputs/assets/mask.tif` or, in pointer mode, `outputs/assets/mask.tif.bioimageflow-link.json`.
 
+For an owned directory, `pointer` creates one directory pointer, `symlink` links the directory root, `copy` recursively copies its validated tree, and `hardlink` creates directories and hard-links each regular file.
+The `hardlink` mode never attempts to hard-link a directory itself.
+All modes validate the complete destination mapping before writing and reject symlink or path escape in the source tree.
+
 The `outputs/latest/` hierarchy uses a human-facing mapping beneath the node layer:
 
 ```text
@@ -685,11 +798,12 @@ An explicit `cleanup_transients()` operation may remove transient, non-canonical
 - Stale incomplete attempts.
 - Failed attempts.
 - Stale temporary record directories.
+- Terminal non-reusable invocation directories under `cache/v1/transient/runs/`.
 
 `cleanup_transients()` must not delete `records/<record-id>/` directories.
 Published-record pruning is an explicit user operation and requires its own retention policy, dry-run behavior, and active-reader protection.
 
-Transient cleanup may remove an attempt or temporary record directory only when both are true:
+Transient cleanup may remove an attempt, temporary record directory, or non-reusable invocation only when both are true:
 
 - The target is older than the configured stale threshold.
 - The caller has established that no compute or publish operation can still be using it, either by external coordination or by a lease mechanism.
@@ -767,6 +881,7 @@ cache/v1/results/<result-shard>/<result-key>/
   records/<record-id>/
   current.json
 
+cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/
 views/runs/<run-id>/
 views/latest/
 outputs/runs/

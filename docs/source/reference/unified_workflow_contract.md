@@ -11,8 +11,8 @@ Workflow(
     *,
     name: str = "workflow",
     display_name: str | None = None,
-    engine: str = "wetlands",
-    execution: str = "parallel",
+    engine: Literal["direct", "wetlands", "parsl"] = "wetlands",
+    execution: Literal["parallel", "sequential"] = "parallel",
     on_progress: Callable[[ProgressEvent], None] | None = None,
     wetlands_config: dict[str, Any] | None = None,
     max_workers: int = 1,
@@ -47,7 +47,20 @@ Workflow.expose_input(
 
 Workflow.output(name: str, source: ColumnRef, *, id: str | None = None) -> None
 Workflow.__call__(*, name: str | None = None, **bindings: Any) -> WorkflowNode
-Workflow.compute(*targets: Node, inputs: Mapping[str, Any] | None = None, ...) -> Any
+Workflow.compute(
+    *targets: Node,
+    inputs: Mapping[str, Any] | None = None,
+    engine: DefaultEngine | SequentialEngine | ParslEngine | None = None,
+    run_context: WorkflowExecutionContext | None = None,
+    ...
+) -> Any
+Workflow.compute_steps(
+    *targets: Node,
+    inputs: Mapping[str, Any] | None = None,
+    engine: DefaultEngine | SequentialEngine | ParslEngine | None = None,
+    run_context: WorkflowExecutionContext | None = None,
+    ...
+) -> Iterator[NodeStep]
 Workflow.from_python(path_or_module: str | Path | ModuleType) -> Workflow
 Workflow.from_dict(data: dict[str, Any], ...) -> Workflow
 Workflow.to_dict(*, include_custom_tools: bool = False) -> dict[str, Any]
@@ -167,6 +180,9 @@ Unknown variants and malformed endpoint combinations are rejected.
 
 `config` accepts `storage_path`, `engine`, `execution`, and `output_view`.
 Nested configuration is retained as definition metadata, but root execution storage, engine, cancellation, progress, output-view, and environment-manager context take precedence.
+The serialized `engine` value is only a preference string and accepts `direct`, `wetlands`, or `parsl`.
+Live engine objects, Parsl Config/DFK objects, executor bindings, routes, task policy, credentials, and `WorkflowExecutionContext` never enter graph or archive data.
+An explicit engine passed to a root compute call has precedence over the stored preference.
 
 ## Portable archive envelope
 
@@ -207,6 +223,7 @@ Export uses the resulting object and never reruns the factory.
 
 Stored node names never include `/`.
 Compilation recursively expands workflow nodes and assigns scoped executable paths such as `outer/inner/tool`.
+It assigns every real tool a stable ordinal from deterministic topological order, using scoped path as the ready-node tie breaker.
 Progress events, run-view node keys, `compute_steps()` steps, cache entries, validation paths, and internal plan entries use these scoped paths.
 Workflow-node aggregate plan entries use the workflow node's own scoped path and do not own cache records.
 
@@ -224,6 +241,11 @@ Disabling a workflow node disables its complete subtree.
 `compute_steps()` yields only real tool steps, including disabled ordinary tools as skipped steps; it never yields workflow-node aggregate steps, and a disabled workflow node is not expanded.
 `plan()` reports executable tool entries and one aggregate entry per workflow node.
 The aggregate is `SKIPPED` when disabled, `CACHED` only when every executable internal is cached, `PENDING_UPSTREAM` when an internal final selection depends on unknown upstream records, and otherwise `UNEXECUTED`.
+`PENDING_UPSTREAM` retains a provider/selector provenance recipe and never fabricates a reusable result key.
+
+One root call owns one `WorkflowExecutionContext`, and the exact object propagates through every synthetic root wrapper and recursive boundary.
+A `Workflow` permits one active public execution.
+When sibling work fails, the scheduler drains submitted work and selects the primary error by `(compiled node ordinal, first input position, task ID)`, independently of completion order.
 
 Cache invalidation and clearing accept scoped tool paths and workflow-node paths.
 A workflow-node path selects its complete subtree; cascading crosses workflow boundaries according to data dependencies.

@@ -1,10 +1,6 @@
 # BioImageFlow Distributed Parsl Engine Specification
 
-Status: normative implementation specification for a future feature.
-
-The Parsl engine and submitted-run launcher described here are not implemented.
-
-This revision was reviewed against the current library specification, recursive workflow contract, cache/storage contract, implementation, and tests on 2026-07-22.
+Status: normative specification for attached Parsl execution and the submitted-run control plane.
 
 The normative dependencies of this document are:
 
@@ -12,7 +8,7 @@ The normative dependencies of this document are:
 - `docs/source/reference/unified_workflow_contract.md` for recursive workflows, stable interface IDs, graph/archive formats, and scoped execution identifiers.
 - `docs/source/reference/output_cache_storage.md` for cache records, publication, runtime path rehydration, run views, and output views.
 
-If this document conflicts with one of those contracts, the existing platform contract wins and this document must be corrected.
+If this document conflicts with one of those contracts, the platform contract wins and this document must be corrected.
 
 This specification adds a distributed execution backend and launcher control plane.
 It does not define a second workflow model, cache, provenance model, tool API, or scheduler.
@@ -25,32 +21,22 @@ Requirements use the following terms:
 
 ---
 
-## 1. Revision Summary
+## 1. Normative Model
 
-This revision supersedes the earlier distributed-engine draft.
+BioImageFlow has one recursive `Workflow` / `WorkflowNode` graph contract, one scheduler, one cache and provenance model, and one `ProcessingTool` worker protocol.
+Parsl is a processing backend for that model, not a second workflow system.
 
-The main changes are:
+Parsl configuration is runtime-only state.
+Attached callers inject a live `ParslEngine`; submitted callers provide a JSON-safe configuration-factory reference to the launcher.
 
-1. `SubWorkflow` and `SubWorkflowNode` have been removed from the design.
-   Distributed execution now consumes the unified recursive `Workflow` / `WorkflowNode` compiler contract.
-2. Parsl configuration remains execution-time state and is not inserted into the strict recursive graph schema.
-   Attached callers pass a live `ParslEngine`; submitted callers use a JSON-safe configuration-factory reference.
-3. Worker tool identity now represents installed modules, scoped versioned packages, project source trees, and archive custom-source bundles.
-   Shared source paths are no longer the only Phase 1 loading mechanism.
-4. Cache and artifact behavior now delegates to the canonical v1 storage contract.
-   Records contain `manifest.json`; artifact metadata lives in `manifest.outputs`; run and latest views live under `views/`; optional human-facing projections live under `outputs/`.
-5. Persisted record-owned paths are record-relative values such as `assets/mask.tif`.
-   Cache loading rehydrates them to absolute paths under the selected immutable record before runtime use.
-6. Attached execution and submitted orchestration are separate layers.
-   The launcher shares the library run ID, keeps control/binary artifacts outside portable `views/`, and links the two locations without creating a second result identity.
-7. Submitted execution supports root `Workflow.compute(inputs=...)` and persists the public return value.
-   It does not assume a `WorkflowNode` boundary owns a result key or record ID.
-8. Phase 1 uses preinstalled, explicitly attested Parsl executor environments.
-   Wetlands remains a local execution backend and package-management component, but `WetlandsEnvManager.get_or_create()` is not treated as a Parsl provisioner.
-9. Parsl-managed retries are disabled in Phase 1.
-   Future retries must be visible to BioImageFlow and distinguish task retry numbers from cache attempt IDs.
-10. Remote `DataFrameTool` execution is no longer described as necessary for production completeness.
-    It is a future platform change that requires its own tool and serialization contract.
+Workers resolve one strict installed-module, versioned-module, shared-module, source-file, or archive-module origin.
+Wetlands and Parsl use the same core envelope, origin resolver, processing entry point, and worker-instance identity.
+
+The canonical storage contract owns cache identity, immutable records, run views, output views, transient workspaces, path rehydration, and publication.
+Attached execution and submitted orchestration share the BioImageFlow run ID but keep launcher control artifacts outside portable run views.
+
+Phase 1 executor environments are preinstalled and explicitly attested.
+Parsl providers allocate workers; no compute task installs packages or starts a nested Wetlands worker.
 
 ---
 
@@ -65,12 +51,12 @@ Phase 1a MUST provide:
 - Lazy import of the optional Parsl dependency.
 - Remote execution of reachable `ProcessingTool` calls through Parsl Python apps.
 - Local orchestrator execution of every `DataFrameTool` and every `WorkflowNode` boundary.
-- The current recursive compilation, disabled-node, index-lineage, output-DataFrame, empty-batch, zero-row, cache, run-view, output-view, progress, and cancellation contracts.
+- The normative recursive compilation, disabled-node, index-lineage, output-DataFrame, empty-batch, zero-row, cache, run-view, output-view, progress, and cancellation contracts.
 - Shared-filesystem task paths only.
 - Explicit executor-to-environment compatibility declarations and executor preflight checks.
 - Installed-module, versioned-module, shared-module/source-file, and materialized-archive-module tool origins.
 - Rejection of `SharedArray` values that would cross a Parsl task boundary.
-- Engine lifecycle values `"execution"`, `"engine"`, and `"external"` with the same ownership meaning used by the current engine lifecycle API.
+- Resource-lifetime values `"execution"`, `"engine"`, and `"external"` with one backend-neutral ownership meaning.
 
 Phase 1a MUST NOT require:
 
@@ -114,9 +100,9 @@ BioImageFlow launcher adapters only start the orchestrator process.
 
 ---
 
-## 3. Current Platform Invariants
+## 3. Platform Invariants
 
-The distributed implementation MUST preserve the following platform facts.
+The distributed implementation follows these platform invariants.
 
 ### 3.1 Package boundary
 
@@ -148,8 +134,6 @@ The distributed implementation MUST preserve the following platform facts.
 - A `WorkflowNode` boundary assembles a DataFrame in the orchestrator and owns no cache record.
 - A boundary diagnostic signature is not a reusable result key and MUST NOT be used as one.
 
-The current compiler still uses a workflow-boundary diagnostic hash in downstream identity.
-Replacing that hash with flattened selected-provider record references is a shared direct/Wetlands/Parsl prerequisite, not a Parsl-only dispatch behavior.
 - A zero-output workflow executes its enabled terminals and returns a canonical zero-row, zero-column DataFrame.
 
 ### 3.4 Cache and run boundary
@@ -236,7 +220,7 @@ Site schedulers such as SLURM, PBS, LSF, and OAR are reached through Parsl provi
 
 ### 5.1 Workflow configuration
 
-The workflow constructor keeps its current fields and adds only `"parsl"` as an allowed engine preference:
+The workflow constructor accepts `"parsl"` as a serializable engine preference:
 
 ```python
 Workflow(
@@ -267,7 +251,7 @@ The canonical attached cluster API is explicit engine injection:
 engine = ParslEngine(
     parsl_config=config,
     executor_bindings=bindings,
-    environment_lifetime="engine",
+    resource_lifetime="engine",
 )
 
 with engine:
@@ -277,7 +261,7 @@ with engine:
 The required constructor is:
 
 ```python
-class ParslEngine(DefaultEngine):
+class ParslEngine:
     def __init__(
         self,
         *,
@@ -290,7 +274,7 @@ class ParslEngine(DefaultEngine):
         execution: Literal["workflow", "parallel", "sequential"] = "workflow",
         storage_mode: Literal["shared_fs", "staged"] = "shared_fs",
         task_policy: ParslTaskPolicy | None = None,
-        environment_lifetime: EnvironmentLifetime | str = "execution",
+        resource_lifetime: ResourceLifetime | str = "execution",
     ) -> None: ...
 ```
 
@@ -299,8 +283,8 @@ class ParslEngine(DefaultEngine):
 Phase 1 requires one of them.
 There is no implicit cluster configuration.
 
-An injected `dfk` requires `environment_lifetime="external"` and remains caller-owned.
-`environment_lifetime="external"` without an injected `dfk` is invalid.
+An injected `dfk` requires `resource_lifetime="external"` and remains caller-owned.
+`resource_lifetime="external"` without an injected `dfk` is invalid.
 
 The constructor stores and validates local configuration only.
 It MUST NOT compile a workflow, touch cache state, start a DataFlowKernel, provision an environment, or submit a task.
@@ -320,7 +304,7 @@ It MUST add these backend-specific keyword-only arguments without storing live o
 ```python
 workflow.create_engine(
     *,
-    environment_lifetime="execution",
+    resource_lifetime="execution",
     env_manager=None,
     parsl_config=None,
     dfk=None,
@@ -335,12 +319,11 @@ workflow.create_engine(
 
 Rules:
 
-- For `engine="direct"`, only the default `environment_lifetime="execution"` is accepted because the backend owns no persistent execution resource; `env_manager`, other lifetime values, and all Parsl arguments are rejected.
-- For `engine="wetlands"`, current `environment_lifetime` and `env_manager` behavior is preserved and Parsl arguments are rejected.
-- For `engine="parsl"`, `env_manager` is rejected, `executor_bindings` is required, `environment_lifetime` controls owned Parsl resources, and the Parsl arguments are forwarded to `ParslEngine`.
+- For `engine="direct"`, only the default `resource_lifetime="execution"` is accepted because the backend owns no persistent execution resource; `env_manager`, other lifetime values, and all Parsl arguments are rejected.
+- For `engine="wetlands"`, `resource_lifetime` controls manager ownership, `env_manager` injects an existing manager, and Parsl arguments are rejected.
+- For `engine="parsl"`, `env_manager` is rejected, `executor_bindings` is required, `resource_lifetime` controls owned Parsl resources, and the Parsl arguments are forwarded to `ParslEngine`.
 - `Workflow.create_engine()` resolves the default `parsl_execution="workflow"` to the workflow's configured `execution` value; an explicitly constructed engine may retain `"workflow"` for reuse across workflows.
 - Explicit `engine=` passed to `compute()` or `compute_steps()` remains highest precedence.
-- `_make_engine()` remains a compatibility wrapper around `create_engine()`.
 - Bare `Workflow(engine="parsl").compute(...)` without runtime arguments MUST fail before graph execution with a clear message showing how to construct and pass a `ParslEngine`.
 
 ### 5.4 Optional dependency behavior
@@ -349,8 +332,12 @@ Parsl MUST be an optional dependency of the orchestrator package.
 The distribution extra is named `bioimageflow[parsl]`.
 
 Importing `bioimageflow`, constructing non-Parsl workflows, serializing workflows, validating workflows, and calling `Workflow.plan()` MUST NOT import Parsl.
+Importing the public `ParslEngine` and JSON-safe Parsl configuration value types also MUST NOT import the external Parsl package.
+The external package is loaded lazily only when a Parsl operation requires it.
 
 Selecting the Parsl backend without the extra installed MUST raise an error that names the missing dependency and installation extra.
+
+`bioimageflow.__all__` exports `ParslEngine`, `ParslTaskError`, `ParslTaskPolicy`, `WorkerSlotCapacity`, `ExecutorCapabilities`, `WorkerEnvironmentAttestation`, `ExecutorBinding`, `ResourceLifetime`, `WorkflowExecutionContext`, and `WorkflowCancelledError`.
 
 ### 5.5 Runtime-only engine configuration
 
@@ -376,7 +363,7 @@ Submitted mode serializes a JSON-safe representation of the required runtime con
 
 ### 6.1 Lifecycle values
 
-Parsl execution uses the current lifecycle vocabulary:
+`ResourceLifetime` defines the resource-ownership vocabulary for direct, Wetlands, and Parsl engines:
 
 | Value | After `execute()` or a completed/closed `execute_steps()` generator | `engine.close()` | Ownership |
 |---|---|---|---|
@@ -384,11 +371,11 @@ Parsl execution uses the current lifecycle vocabulary:
 | `"engine"` | Retain the engine-created DFK for reuse. | Clean up the DFK and executors. | Engine session. |
 | `"external"` | Leave the injected DFK untouched. | Leave the injected DFK untouched. | Caller. |
 
-The existing parameter and enum retain the name `environment_lifetime` and `EnvironmentLifetime` for API compatibility even though they govern the owned DFK and executors for Parsl.
-A future generalization MAY add a clearer execution-resource name only with a compatibility path.
-
-Current `DefaultEngine` construction validates lifecycle values in Wetlands-specific terms.
-Before `ParslEngine` subclasses or reuses it, that validation, active-resource tracking, and cleanup dispatch MUST be refactored into backend-neutral hooks while preserving all existing Wetlands behavior and public properties.
+The only public parameter and enum names are `resource_lifetime` and `ResourceLifetime`.
+Direct accepts only its no-resource default policy.
+Wetlands applies the values to manager ownership.
+Parsl applies them to DFK and executor ownership.
+Shared lifecycle validation, active-resource tracking, and cleanup dispatch use backend-neutral hooks.
 
 `ParslEngine.close()` MUST be idempotent.
 The engine MUST support `with ParslEngine(...)`.
@@ -408,7 +395,7 @@ It MUST NOT call global Parsl cleanup, clear the active global kernel, shut down
 
 ### 6.3 Thread safety
 
-Current parallel orchestration may call remote dispatch concurrently for independent ready `ProcessingTool` nodes.
+Parallel orchestration may call remote dispatch concurrently for independent ready `ProcessingTool` nodes.
 
 The Parsl engine MUST synchronize:
 
@@ -532,17 +519,17 @@ The engine consumes the canonical compiled graph:
 6. Internal `DataFrameTool` nodes remain in the orchestrator.
 7. The boundary DataFrame is assembled in the orchestrator from published outputs.
 8. Published Series MUST have compatible indexes under the canonical alignment rules.
-9. The assembled DataFrame uses current public output names as column labels while stable output-port IDs preserve graph connectivity.
+9. The assembled DataFrame uses public output names as column labels while stable output-port IDs preserve graph connectivity.
 10. For a downstream binding that crosses the boundary, compilation preserves a recursive provenance recipe naming the real provider and declared selector without pretending that a runtime record is already selected.
 11. After upstream finalization, the shared runtime identity resolver recursively substitutes the selected provider node key, result key, and record ID into that recipe.
-12. A whole-DataFrame recipe additionally includes the stable output-port IDs and current output-name mapping because renaming changes the assembled DataFrame labels.
+12. A whole-DataFrame recipe additionally includes the stable output-port IDs and output-name mapping because renaming changes the assembled DataFrame labels.
 13. Completion-only dependencies are excluded from downstream result-key material.
 14. If any consumed published provider lacks a selected immutable record, the resolver returns no reusable result key and the downstream path uses the non-reusable execution path defined in Section 14.2.
 15. The boundary may have a separate diagnostic signature, but it owns no result key, current pointer, or immutable record.
 
 ### 8.2 Parallel scheduling policy
 
-Effective `execution="parallel"` preserves current branch-level behavior:
+Effective `execution="parallel"` supports branch-level concurrency:
 
 - ready `DataFrameTool` nodes run under orchestrator coordination on the main thread,
 - independent ready `ProcessingTool` nodes may dispatch concurrently,
@@ -557,7 +544,7 @@ It MUST NOT send a partial upstream node result to downstream nodes.
 
 ### 8.3 Disabled nodes
 
-The Parsl backend preserves current disabled-node behavior:
+Disabled nodes follow the shared scheduler contract:
 
 - disabled nodes perform no cache lookup and submit no task,
 - downstream nodes that require a disabled node are skipped,
@@ -589,13 +576,13 @@ The shared engine layer MUST expose four backend-neutral seams:
 3. a processing dispatch hook receiving one immutable orchestrator request.
 4. scheduler-level failure collection that retains independent-node failures until submitted work is drained and applies the canonical workflow-wide failure order.
 
-The dispatch request contains the `ProcessingTool`, scoped node name, active workflow/run context, cache attempt ID, resolved argument dictionaries, ordered aligned indexes, row `ExecutionContext` objects, the batch context, and whether the tool overrides `process_batch`.
+The dispatch request contains the `ProcessingTool`, scoped node name, active workflow/run context, required invocation ID, optional reusable cache attempt ID, resolved argument dictionaries, ordered aligned indexes, row `ExecutionContext` objects, the batch context, and whether the tool overrides `process_batch`.
 It returns the canonical `list[list[Outputs]]` shape or raises a normalized backend error.
 
-This extends the current `_dispatch_tool(...)` seam with attempt and execution identity.
+The processing-dispatch seam is the only backend entry point for resolved processing work.
 Direct, Wetlands, and Parsl MUST continue to share the surrounding argument resolution, optional result-key/cache-attempt, DataFrame construction, optional publication, progress, and run-view paths.
 
-Advancing the generator auto-executes an unexecuted non-skipped step as it does today.
+Advancing the generator auto-executes an unexecuted non-skipped step.
 
 ### 8.5 Planning
 
@@ -627,7 +614,8 @@ Their status is:
 
 ### 9.1 Parsl app construction
 
-The orchestrator wraps a top-level worker-safe function from `bioimageflow-core` in a Parsl `PythonApp` bound to one explicit DFK and executor label.
+Wetlands and Parsl invoke the same top-level worker-safe function from `bioimageflow-core`.
+Parsl wraps that function in a `PythonApp` bound to one explicit DFK and executor label.
 
 The worker function imports its dependencies inside the worker process and accepts only picklable values.
 
@@ -641,12 +629,12 @@ Every task uses an explicit versioned envelope.
 ```python
 @dataclass(frozen=True)
 class ProcessingTaskV1:
-    schema: Literal["bioimageflow.parsl.processing_task.v1"]
+    schema: Literal["bioimageflow.processing_task.v1"]
     task_id: str
     node_name: str
-    cache_attempt_id: str
+    invocation_id: str
+    cache_attempt_id: Optional[str]
     task_retry: int
-    executor_label: str
     mode: Literal["row_chunk", "process_batch"]
     tool: "WorkerToolOriginV1"
     rows: tuple[RowInvocationV1, ...]
@@ -660,22 +648,28 @@ class RowInvocationV1:
     context: Optional[dict[str, Any]]
 ```
 
-`cache_attempt_id` identifies the mutable node attempt under the v1 cache.
+`invocation_id` identifies the processing-node execution and its reusable or transient workspace.
+`cache_attempt_id` identifies the mutable reusable cache attempt and is `None` for non-reusable execution.
+`task_id` identifies exactly one submitted row chunk or one whole-node batch task.
+Task IDs use `task_` followed by sixteen lowercase hexadecimal digits encoding the zero-based submission sequence within the invocation.
+The grammar is `^task_[0-9a-f]{16}$`; retries reuse the same task ID and increment only `task_retry`.
 `task_retry` identifies a retry of one Parsl task envelope.
-They MUST NOT be conflated.
+These identities MUST NOT be conflated.
 
-The envelope MUST be validated before execution.
-Unknown schema versions or malformed fields fail the task without invoking tool code.
+The decoder requires the exact keys for the schema and mode.
+It rejects unknown schemas, kinds, and modes; missing or extra keys; booleans where integers are required; invalid scalar types; duplicate positions; and malformed identifiers, paths, or hashes.
+Invalid input fails before tool code runs.
 
 ### 9.3 Versioned result envelope
 
 ```python
 @dataclass(frozen=True)
 class ProcessingTaskResultV1:
-    schema: Literal["bioimageflow.parsl.processing_result.v1"]
+    schema: Literal["bioimageflow.processing_result.v1"]
     task_id: str
     node_name: str
-    cache_attempt_id: str
+    invocation_id: str
+    cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
     rows: tuple[RowResultV1, ...]
@@ -693,13 +687,15 @@ The orchestrator MUST verify exact correspondence between the invocation and res
 - schema version,
 - task ID,
 - scoped node name,
+- invocation ID,
 - cache attempt ID,
 - task retry number,
 - mode,
 - row positions,
 - row indices.
 
-Unknown, duplicate, missing, or unexpected positions fail the node.
+Result decoding applies the same exact-key and scalar validation as invocation decoding.
+Unknown, duplicate, missing, or unexpected positions fail the node before any output is accepted or published.
 
 These worker-side examples use `Optional[...]`, not PEP 604 unions, because `bioimageflow-core` supports Python 3.9.
 
@@ -737,17 +733,17 @@ If a tool overrides `process_batch`, the complete node invocation is sent as one
 
 The engine MUST NOT split `process_batch` unless a future tool contract explicitly declares partition safety.
 
-The current return forms are preserved:
+The accepted return forms are:
 
 - `list[list[Outputs]]` for zero, one, or many outputs per input row,
 - `list[Outputs]` as the one-to-one shorthand.
 
 The shared output-normalization helper MUST require a flat one-to-one result to match the invocation row count and a nested result to contain one group per invocation row.
-Because the current direct and Wetlands paths do not enforce every cardinality case consistently, this check MUST be introduced as a shared cross-engine hardening change rather than a Parsl-only rule.
+One shared validator enforces this rule for direct, Wetlands, and Parsl.
 
 ### 9.7 Empty aligned batches and zero-row metadata
 
-The Parsl engine preserves all current empty-input behavior:
+The Parsl engine implements the complete empty-input contract:
 
 - An empty aligned batch does not call `process_batch` by default.
 - `run_empty_batch=True` applies only to a tool class that overrides `process_batch` and a column-bound node whose aligned index is empty.
@@ -764,7 +760,7 @@ The Parsl engine preserves all current empty-input behavior:
 Parsl MUST use the same output normalization and validation code as direct and Wetlands execution.
 
 The orchestrator reconstructs or validates every returned plain dictionary against `tool.Outputs` before passing the canonical `list[list[Outputs]]` shape to shared DataFrame construction.
-The current engines do not yet share all of the checks below, so extracting this validator and applying it to direct and Wetlands is a Phase 1a prerequisite.
+One orchestrator validator applies the checks below to direct, Wetlands, and Parsl.
 
 At minimum the shared validator MUST:
 
@@ -834,8 +830,7 @@ Every submitted task receives a failure-order key consisting of the canonical co
 Compiled-node ordinals come from deterministic topological order with scoped node path as the ready-node tie breaker.
 After draining submitted futures, the smallest failure-order key among observed failures is primary across the whole workflow.
 
-The current branch scheduler propagates the first exception yielded by completion race.
-Phase 1a therefore requires a shared scheduler refactor, not merely a Parsl dispatch override: sibling failures are retained with their order keys, submitted work is drained, and only then is the deterministic primary raised.
+The shared scheduler retains sibling failures with their order keys, drains submitted work, and only then raises the deterministic primary.
 
 Additional failures SHOULD be attached as structured diagnostics.
 
@@ -850,7 +845,7 @@ No accepted subset becomes a cache record.
 Each reachable `ProcessingTool` produces a worker requirement containing:
 
 - `EnvironmentSpec.name`,
-- the canonical normalized dependency hash used by the current library,
+- the canonical normalized dependency hash,
 - `allow_flexible_versions`,
 - the compatible `bioimageflow-core` requirement or worker API level,
 - any anchored local dependency references,
@@ -945,7 +940,7 @@ Requested resources MUST NOT be silently discarded.
 
 ### 11.4 Wetlands-specific workflow settings
 
-Current `WorkflowEnvironment.max_workers`, `worker_env`, and `worker_timeout` are Wetlands settings.
+`WorkflowEnvironment.max_workers`, `worker_env`, and `worker_timeout` are Wetlands settings.
 
 They do not configure Parsl executor capacity or worker environment variables, and Phase 1 exposes no Parsl task-timeout policy.
 
@@ -1027,17 +1022,17 @@ WorkerToolOriginV1 = Union[
 
 Decoding requires exact keys for the selected `kind`; unknown or extra keys are rejected.
 Module, distribution, class, and hash strings are non-empty and use canonical normalized spellings.
-`import_package` is the versioned-store directory/import package consumed by the current worker loader and MUST NOT be inferred from the distribution name.
+Distribution identity and import-package identity are independent and MUST NOT be inferred from each other.
+`import_package` is the explicit package imported from the versioned store.
 Every filesystem string is absolute, normalized, preflight-verified, and confined to its declared shared root where applicable.
 
 Canonical worker instance identity is the SHA-256 digest of the complete origin, including `class_name`, encoded as canonical JSON.
 Logical cache tool identity continues to use the platform's tool/version/source-hash contract and does not acquire shared runtime paths.
 
-### 12.2 Reuse of current loading support
+### 12.2 Canonical worker loading
 
-The current core worker already understands raw file paths, importable modules with an import root, and scoped versioned-module tokens.
-
-Phase 1 SHOULD extract and formalize that logic rather than replace it with source-file-only loading.
+Wetlands and Parsl use one strict origin decoder, resolver, processing entry point, and worker-instance cache.
+There is no tuple entry point, informal JSON token, source-file-only alternate path, permissive decoder, or alternate instance-cache key.
 
 Installed-module mode MUST import from the worker's configured environment and verify the requested distribution version.
 Missing or mismatched distribution metadata fails preflight; the deployment must use another origin variant when no distribution identity exists.
@@ -1078,7 +1073,7 @@ Every `DataFrameTool` remains in the orchestrator in Phase 1 and Phase 1b.
 The Parsl engine delegates to the canonical local path:
 
 1. gather positional upstream DataFrames or root DataFrame inputs,
-2. resolve constants and defaults under the current runtime argument rules,
+2. resolve constants and defaults under the normative runtime argument rules,
 3. make path-typed arguments absolute,
 4. compute canonical result-key material from selected upstream record references, recursively flattened published-provider references, declared selectors, and canonical logical digests of root DataFrame inputs,
 5. use v1 current-record lookup only when the runtime resolver produced a reusable result key,
@@ -1087,10 +1082,10 @@ The Parsl engine delegates to the canonical local path:
 8. publish through the canonical DataFrame cache path when reusable, otherwise return the in-memory non-reusable result without creating a record,
 9. update progress and run/output views.
 
-Source `DataFrameTool`s, `accepts_upstream=False`, `Passthrough`, dynamic output schemas, and tool-controlled output indexes retain their current behavior.
+Source `DataFrameTool`s, `accepts_upstream=False`, `Passthrough`, dynamic output schemas, and tool-controlled output indexes follow the platform contract.
 
-The current root-DataFrame identity uses an ad hoc JSON digest.
-Before Phase 1a, one shared helper MUST apply the storage contract's canonical logical DataFrame rules to root DataFrame values, including index, schema, scalar kinds, and normalized external-path values, and direct, Wetlands, Parsl, and submitted execution MUST all use it.
+One shared helper applies the storage contract's canonical logical DataFrame rules to root DataFrame values, including index, schema, scalar kinds, and normalized external-path values.
+Direct, Wetlands, Parsl, and submitted execution all use it.
 Run-local transport paths and Parquet byte digests are transport integrity only and MUST NOT enter result-key material.
 
 Remote `DataFrameTool` is a separate future proposal because it would change:
@@ -1131,17 +1126,21 @@ The logical layout is:
       assets/
     current.json
     conflicts/
+  cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/
+    invocation.json
+    assets/
+    work/
   views/runs/<run-id>/
   views/latest/
   outputs/runs/
   outputs/latest/
 ```
 
-Callers and tests SHOULD use `Storage` helpers rather than assume the current shard depth.
+Callers and tests SHOULD use `Storage` helpers rather than assume the shard depth.
 
 There is no mandatory `record.json` or `artifacts.json` sidecar.
 
-### 14.2 Result-key compatibility
+### 14.2 Shared result-key identity
 
 Parsl delegates result-key composition to the canonical library implementation.
 
@@ -1161,8 +1160,7 @@ When the resolver returns `None`:
 - it still executes and returns its DataFrame for in-run consumers,
 - every downstream consumer of that value also remains non-reusable unless a later explicit materialization contract creates a real selected record.
 
-An uncacheable `ProcessingTool` still requires safe context and owned-output paths.
-Phase 1a therefore proposes a non-canonical run-scoped transient tree:
+An uncacheable `ProcessingTool` uses the canonical non-reusable run-scoped transient tree:
 
 ```text
 <storage_path>/cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/
@@ -1172,29 +1170,31 @@ Phase 1a therefore proposes a non-canonical run-scoped transient tree:
 
 These assets are available to the current attached run and are never record-relative or reusable cache inputs.
 They remain until explicit transient cleanup so paths returned to an attached caller do not disappear at method return.
-Before Phase 1a ships, the exhaustive storage contract MUST reserve this tree, define its path confinement and cleanup behavior, and define non-record run diagnostics if those are exposed.
-Until then an implementation MUST NOT fabricate a result key to reuse the normal publication path.
+`invocation.json` and optional `failed.json` are the only non-record diagnostics inside this tree.
+The exhaustive storage contract defines identifier grammar, path confinement, explicit cleanup, and active-writer protection.
+An implementation MUST NOT fabricate a result key to reuse the normal publication path.
 
-The BioImageFlow run ID, engine type, executor label, provider, scheduler job ID, transfer mechanism, task ID, task retry, cache attempt ID, worker hostname, worker-local path, log path, launcher input/return path, and Parsl run directory MUST NOT enter result-key material.
+The BioImageFlow run ID, invocation ID, engine type, executor label, provider, scheduler job ID, transfer mechanism, task ID, task retry, cache attempt ID, worker hostname, worker-local path, log path, launcher input/return path, and Parsl run directory MUST NOT enter result-key material.
 
 Run IDs and all backend identifiers are also excluded from the content manifest used to derive the immutable record ID.
 
 Resolved attempt output paths and `ExecutionContext` paths MUST NOT enter result-key material.
 
-The current path-based external-reference limitation remains unchanged.
+External-reference identity is the canonical normalized path-based identity defined by the storage contract.
 
-### 14.3 Canonical DataFrame identity prerequisite
+### 14.3 Canonical DataFrame identity
 
-The storage contract defines canonical logical DataFrame digest rules.
+The storage contract defines one canonical logical DataFrame digest and one deterministic Parquet transport.
+Record manifests name `logical_digest`, `logical_schema`, and `transport_digest` explicitly.
+The logical digest and schema enter immutable record identity; the Parquet byte digest is integrity metadata and does not.
 
-Current publication still derives record identity from staged Parquet bytes.
-
-Before Phase 1a is considered complete, publication for both `DataFrameTool` and `ProcessingTool` MUST implement those canonical logical digest rules and use a documented deterministic Parquet writer configuration.
-Distributed or heterogeneous-worker execution MUST NOT be described as supported until that prerequisite is complete.
+Publication for `DataFrameTool`, `ProcessingTool`, and root DataFrame input identity uses the same logical digest helper.
+Record validation byte-checks the transport digest, reloads the Parquet values, and recomputes the logical digest.
+No reader, writer, fixture, or API accepts an ambiguous dataframe `digest` field.
 
 ### 14.4 Attempt and ExecutionContext paths
 
-For shared-filesystem execution, `ExecutionContext` keeps its current public shape:
+For shared-filesystem execution, `ExecutionContext` has this public shape:
 
 - `run_dir`,
 - `assets_dir`,
@@ -1204,7 +1204,9 @@ For shared-filesystem execution, `ExecutionContext` keeps its current public sha
 - `batch_dir`,
 - `row_index`.
 
-Despite its name, `context.run_dir` is the node cache attempt's `staging/` directory.
+`context.run_dir` is the processing invocation workspace.
+For reusable execution it is the node cache attempt's `staging/` directory and the task carries both invocation ID and cache attempt ID.
+For non-reusable execution it is the transient invocation directory and the task carries no cache attempt ID.
 
 All context paths and path-typed arguments are absolute before dispatch.
 
@@ -1220,7 +1222,8 @@ The engine and tools MUST NOT use process-wide `os.chdir()`.
 
 ### 14.5 Publication and path canonicalization
 
-Workers write engine-owned resolved templated outputs beneath attempt `staging/assets/` and scratch beneath `staging/work/`.
+Workers write engine-owned resolved templated outputs beneath the invocation `assets/` directory and scratch beneath its `work/` directory.
+For reusable execution the invocation root is attempt staging; for non-reusable execution it is the run-scoped transient root.
 An explicitly declared external destination may be written outside staging and remains a declared external reference; it is never copied into a record implicitly.
 
 The orchestrator publishes only after every required task result has been accepted and validated.
@@ -1233,16 +1236,24 @@ Publication MUST:
 4. Canonicalize owned DataFrame path cells to record-relative `assets/...` values.
 5. Preserve legitimate declared external paths as external references.
 6. Reject attempt work paths and undeclared worker-local paths.
-7. Build and validate the record manifest.
-8. Install the immutable record.
-9. Perform the guarded `first-valid` current-record selection.
-10. Load and use the selected record, even when this attempt produced a different valid candidate.
+7. Compute the canonical logical DataFrame schema and digest.
+8. Write Parquet with the canonical transport settings and compute its byte digest.
+9. Build and validate the record manifest, using the logical digest for record identity and the transport digest only for integrity.
+10. Compute every file or canonical directory-tree asset digest and require an explicit asset type.
+11. Install the immutable record.
+12. Perform the guarded `first-valid` current-record selection.
+13. Load and use the selected record, even when this attempt produced a different valid candidate.
 
 At runtime, cache loading rehydrates record-relative asset values to absolute paths beneath the selected record.
 For record-owned asset values, it MUST reject absolute persisted values, `..`, symlink escapes, and any resolved path outside that exact record directory.
 Declared `external_path` values remain normalized absolute external references and are not subjected to record-containment checks.
 
 Persisted DataFrames MUST NOT contain attempt, `work/`, worker-local, or human output-view paths.
+
+Every owned manifest asset declares `asset_type="file"` or `asset_type="directory"`.
+Directory identity is the canonical sorted tree defined by the storage contract.
+Symlinks, special files, traversal, duplicate normalized paths, and case-normalization collisions fail publication or record validation.
+Cache-hit rehydration and run/output-view materialization preserve the validated directory root; direct, Wetlands, and Parsl use this same path.
 
 ### 14.6 Guarded first-valid selection
 
@@ -1259,13 +1270,14 @@ If a valid current record already exists:
 
 A corrupt current pointer is a cache-corruption error and MUST NOT be silently replaced.
 
-### 14.7 Attempt cleanup
+### 14.7 Invocation cleanup
 
-A failed, cancelled, or abandoned attempt is never selected.
+A failed, cancelled, or abandoned reusable attempt is never selected.
+A failed, cancelled, or abandoned transient invocation never creates a record or view pointer.
 
-The engine MUST NOT delete an attempt directory while a remote task may still write into it.
+The engine MUST NOT delete an attempt or transient invocation directory while a remote task may still write into it.
 
-An attempt may be removed only after every associated writer is known to be terminal.
+An attempt or transient invocation may be removed only after every associated writer is known to be terminal.
 Otherwise it remains unselected and is eligible for coordinated transient cleanup under the canonical storage policy.
 
 Published record pruning is never an automatic engine cleanup action.
@@ -1333,7 +1345,7 @@ The public `ProgressEvent.status` vocabulary remains:
 
 Scoped recursive node names are used in events.
 
-The existing fields remain `node_name`, `status`, `row`, `total_rows`, `message`, `current`, `maximum`, `timestamp`, `result_key`, and `record_id` with their current meanings.
+The fields are `node_name`, `status`, `row`, `total_rows`, `message`, `current`, `maximum`, `timestamp`, `result_key`, and `record_id`, with the meanings defined by the platform progress contract.
 `row` is a zero-based aligned position, not the DataFrame index label.
 
 `started` SHOULD include a known result key.
@@ -1341,7 +1353,7 @@ The existing fields remain `node_name`, `status`, `row`, `total_rows`, `message`
 
 `row_complete` means the orchestrator accepted that aligned position into the node accumulator.
 For row and row-chunk execution, events are buffered and emitted once per row in increasing aligned position, even when futures finish out of order; when a chunk closes a gap, its newly contiguous rows emit in order.
-Whole-node `process_batch` preserves the current behavior and emits no `row_complete` events.
+Whole-node `process_batch` emits no `row_complete` events.
 
 Parsl queued/running state, executor labels, task IDs, scheduler job IDs, and retry numbers are backend metadata.
 They MUST NOT become new `ProgressEvent.status` values without changing the platform progress contract.
@@ -1364,7 +1376,8 @@ Log records SHOULD include:
 
 - run ID,
 - scoped node name,
-- cache attempt ID,
+- invocation ID,
+- cache attempt ID when reusable,
 - task ID,
 - task retry,
 - executor label,
@@ -1381,7 +1394,8 @@ The engine MUST expose a structured remote-task error that includes:
 - tool origin,
 - executor label,
 - task ID,
-- cache attempt ID,
+- invocation ID,
+- cache attempt ID when reusable,
 - task retry,
 - row position or range,
 - original exception type and message,
@@ -1409,13 +1423,14 @@ The following fail before processing submission when detectable:
 Phase 1 exposes no retry-count setting.
 The supplied Parsl `Config.retries` MUST equal zero, and the engine MUST reject executor behavior that performs opaque retries which cannot be correlated with task envelopes and output paths.
 
-`task_retry` remains fixed at zero in Phase 1 task envelopes so a future version can add visible retries without conflating them with cache attempt IDs.
+`task_retry` remains fixed at zero in Phase 1 task envelopes so a future version can add visible retries without conflating them with invocation or cache attempt IDs.
 
 Future retries MUST:
 
 - resubmit the same logical row positions,
 - increment `task_retry`,
-- remain inside the same node cache attempt or explicitly define a new cache attempt,
+- remain inside the same invocation,
+- remain inside the same cache attempt when the invocation is reusable, or explicitly define a new reusable-attempt policy,
 - use retry-safe scratch paths,
 - expose retry diagnostics,
 - ignore stale completions from older retries,
@@ -1605,7 +1620,7 @@ The canonical workflow run view remains:
 It contains only the portable `run.json`, node result JSON, and pointer files defined by the storage contract.
 The library run metadata records the effective engine supplied at execution time.
 
-Phase 1b proposes a separate launcher control directory with the same run ID:
+Phase 1b uses a separate launcher control directory with the same run ID:
 
 ```text
 <storage_path>/launcher/v1/runs/<run-id>/
@@ -1625,13 +1640,12 @@ Phase 1b proposes a separate launcher control directory with the same run ID:
   return/assets/
 ```
 
-Existing canonical node and latest views are reused.
+Canonical node and latest views remain the public provenance views.
 The launcher metadata records the confined relative canonical view path.
 The launcher MUST NOT put logs, Parquet inputs, return DataFrames, mutable status, or cancellation markers under `views/`.
 It MUST NOT create a second result cache or a second run identity.
 
-Because `docs/source/reference/output_cache_storage.md` currently declares the top-level storage layout exhaustively and does not reserve `launcher/v1/`, Phase 1b MUST first extend that normative contract with this namespace, its schemas, confinement rules, and retention behavior.
-Until that shared contract is updated, the launcher tree in this section is a proposed Phase 1b layout and MUST NOT be implemented as an undeclared storage extension.
+Before Phase 1b implementation, `docs/source/reference/output_cache_storage.md` MUST reserve `launcher/v1/` and define its schemas, confinement rules, and retention behavior.
 
 Required control artifacts are immutable `submission.json`, mutable guarded `status.json`, and append-only `progress.jsonl`.
 `execution.claim` is required once startup is claimed; input files, return files, manual command, error, cancellation marker, and logs are conditional on their corresponding modes and states.
@@ -1826,7 +1840,7 @@ It requires a schema-aware `ArtifactStager` with these logical operations:
 - map canonical path inputs to worker-readable paths or URIs,
 - create worker-local `ExecutionContext` directories,
 - transfer verified tool-source bundles when required,
-- collect declared output files and, after the storage contract defines tree identity, directory assets,
+- collect declared file and canonical directory-tree assets,
 - map returned worker paths to record-relative owned assets or, after the storage contract defines URI identity, durable external URIs,
 - preserve scalar values exactly,
 - clean worker-local scratch independently from canonical cache attempts.
@@ -1843,8 +1857,8 @@ Worker-local values MUST NOT enter:
 - downstream canonical arguments.
 
 No-shared-filesystem acceptance requires archive custom-source transfer or exact installed-module resolution without an orchestrator path.
-Before this milestone, the normative storage contract MUST define directory asset type/tree-digest semantics and any durable-URI external-reference kind, validation, and cache identity.
-URI values MUST NOT reuse the current normalized-absolute-path identity implicitly.
+Before this milestone, the normative storage contract MUST define any durable-URI external-reference kind, validation, and cache identity.
+URI values MUST NOT reuse normalized-absolute-path identity implicitly.
 
 ---
 
@@ -1885,31 +1899,26 @@ A future streaming specification must define partial accumulators, row readiness
 
 Before adding Parsl dispatch:
 
-1. Replace workflow-boundary diagnostic hashes with compiled provider/selector provenance recipes, runtime selected-record resolution, and an optional reusable result key.
-2. Refactor lifecycle validation/cleanup, compiled startup, `NodeStep.prepare()`, processing dispatch, cross-node failure aggregation, effective-engine run metadata, and active-run publication metadata into backend-neutral hooks.
-3. Add `WorkflowExecutionContext`, propagate it through synthetic root wrappers, and reset stepped-execution cancellation correctly.
-4. Extract shared output reconstruction, validation, and batch cardinality checks for direct, Wetlands, and Parsl.
-5. Wire canonical logical DataFrame digests into record publication and root DataFrame input identity.
-6. Formalize the current worker loader token as the versioned `WorkerToolOriginV1` union.
-7. Add shared archive-source materialization under a verified runtime root.
-8. Synchronize the normative storage reference with the implemented directory-asset contract before claiming directory-asset parity.
-9. Extend the normative storage reference and shared execution/publication path for run-scoped non-reusable ProcessingTool transients when cache identity is `None`.
+1. Finalize the public platform, worker protocol, and storage contracts.
+2. Implement the strict backend-neutral `ProcessingTaskV1`, `ProcessingTaskResultV1`, and `WorkerToolOriginV1` protocol in `bioimageflow-core`.
+3. Replace workflow-boundary diagnostic hashes with compiled provider/selector provenance recipes, runtime selected-record resolution, and an optional reusable result key.
+4. Refactor lifecycle validation/cleanup, compiled startup, `NodeStep.prepare()`, processing dispatch, cross-node failure aggregation, effective-engine run metadata, and active-run publication metadata into backend-neutral hooks.
+5. Add `WorkflowExecutionContext` and propagate it through synthetic root wrappers and stepped execution.
+6. Extract shared output reconstruction, validation, and batch cardinality checks for direct, Wetlands, and Parsl.
+7. Apply canonical logical DataFrame identity, explicit transport integrity, directory assets, and run-scoped non-reusable transients through the shared storage layer.
+8. Add shared archive-source materialization under a verified runtime root.
 
 ### 20.2 Phase 1a implementation order
 
-1. Add the optional dependency and public exports.
+1. Add the bounded optional dependency, public value types, lazy imports, and final exports.
 2. Add `ParslEngine` lifecycle with no constructor side effects.
 3. Extend `Workflow.create_engine()` and engine selection.
 4. Add explicit execution-policy precedence, executor bindings, and static route validation.
-5. Add six-stage startup, DFK acquisition without global-kernel destruction, and archive materialization.
-6. Add executor filesystem, core, and tool-origin preflight apps.
-7. Add versioned task, result, and tool-origin envelopes in `bioimageflow-core`.
-8. Add one-row task dispatch with bounded submission.
-9. Add deterministic collection and shared output normalization.
-10. Add whole-node `process_batch` and exact empty-batch parity.
-11. Add explicit row chunking and ordered progress emission.
-12. Integrate single-active-execution enforcement, cancellation, future draining, errors, and cleanup.
-13. Verify recursive workflows, run views, output views, and cache parity.
+5. Add six-stage startup, DFK acquisition without global-kernel destruction, archive materialization, and preflight.
+6. Add one-row task dispatch with bounded submission and deterministic collection.
+7. Add whole-node `process_batch`, explicit row chunking, exact empty-batch parity, and ordered progress.
+8. Integrate single-active-execution enforcement, cancellation, future draining, errors, and cleanup.
+9. Verify recursive workflows, run views, output views, and cache parity.
 
 ### 20.3 Phase 1b implementation order
 
@@ -1987,6 +1996,8 @@ Before adding Parsl dispatch:
 - Bounded submission never exceeds the effective in-flight limit.
 - Explicit chunking preserves positions and deterministic output.
 - Worker-return dictionaries are reconstructed and validated into the same canonical output shape across all engines.
+- Reusable and transient tasks echo exact task, invocation, and optional cache-attempt correlation.
+- Malformed, missing, extra, duplicated, wrongly typed, or future-version task and result fields fail closed.
 
 ### 21.4 Executor and tool origins
 
@@ -2009,6 +2020,7 @@ Before adding Parsl dispatch:
 - Direct, Wetlands, and Parsl produce the same result keys for equivalent selected inputs.
 - Attached and submitted root DataFrame inputs produce the same result key from one canonical logical digest regardless of transport path or Parquet bytes.
 - Canonical DataFrame digests are independent of incidental Parquet bytes.
+- Record manifests validate logical DataFrame identity and Parquet transport integrity separately.
 - Successful execution publishes one valid immutable record and guarded current selection.
 - Failed and cancelled nodes select no partial record.
 - Concurrent first-valid publication selects one record safely and reports conflicts.
@@ -2018,7 +2030,7 @@ Before adding Parsl dispatch:
 - Runtime cache-hit paths are absolute beneath the selected record.
 - Cache-hit path rehydration rejects absolute, traversal, and symlink escapes.
 - Attempt, work, worker-local, and output-view paths never enter a record.
-- Directory assets appear in `manifest.outputs` after their normative storage contract is synchronized; zero-row assets and scalar metadata retain their existing contract.
+- File and directory assets use explicit asset types and canonical tree validation in `manifest.outputs`; zero-row assets and scalar metadata follow the same record contract.
 - `views/runs`, `views/latest`, latest-success, and optional output projections match the canonical storage contract.
 - Scoped recursive node paths are safe in run and output views.
 - Active workflow run IDs appear in publication provenance.
@@ -2075,7 +2087,7 @@ Before adding Parsl dispatch:
 4. Explicit engine injection is the canonical attached cluster API.
 5. Phase 1 executors are preinstalled, explicitly attested, and routed as homogeneous worker slots.
 6. Wetlands task dispatch is never nested inside Parsl.
-7. Worker tool identity is origin-aware and supports the current module and archive model.
+7. Worker tool identity is origin-aware across installed, versioned, shared, source-file, and archive modules.
 8. DataFrameTool remains local until a separate platform contract changes it.
 9. Row task size defaults to one; chunking is explicit.
 10. `process_batch` remains whole-node unless a future tool contract declares partition safety.
@@ -2093,12 +2105,17 @@ Before adding Parsl dispatch:
 22. Phase 1 exposes neither task retries nor task timeouts; those require separately specified visible semantics.
 23. A missing reusable cache identity executes through an explicitly non-canonical transient path; diagnostic hashes never create reusable records.
 24. Submitted success claims the non-cancellable `finalizing` state before canonical success and launcher success are committed.
+25. `ResourceLifetime` and `resource_lifetime` are the only public resource-ownership names.
+26. Every processing task carries a required invocation ID, an optional reusable-only cache attempt ID, and a task ID.
+27. Logical DataFrame identity is independent of Parquet transport bytes.
 
 ---
 
 ## 23. External Parsl Assumptions
 
-The implementation should pin and test a supported Parsl version range.
+Phase 1a supports `parsl>=2026.5.25,<2026.6`.
+The development lock selects a release in that range and the complete Parsl matrix runs against it.
+Parsl requires Python `>=3.10`, matching the orchestrator; `bioimageflow-core` remains Python 3.9-compatible and independent of Parsl.
 
 This design relies only on documented Parsl capabilities:
 
