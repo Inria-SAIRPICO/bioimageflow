@@ -14,6 +14,11 @@ from bioimageflow_core import (
     encode_processing_task,
     validate_processing_result,
 )
+from .output_validation import (
+    normalize_processing_batch_outputs,
+    normalize_processing_row_outputs,
+    validate_processing_result_rows,
+)
 
 from .common import (
     Any,
@@ -72,18 +77,22 @@ class _DispatchMixin:
             if _accepts_context(tool.process_batch):
                 kwargs["context"] = batch_context
             raw_results = tool.process_batch(args_list, **kwargs)
-            if raw_results and not isinstance(raw_results[0], list):
-                raw_results = [[r] for r in raw_results]
-            return raw_results
+            assert tool.Outputs is not None
+            return normalize_processing_batch_outputs(
+                raw_results,
+                tool.Outputs,
+                expected_rows=len(arguments_dicts),
+            )
 
         raw_results: list[list[Any]] = []
         accepts_context = _accepts_context(tool.process_row)
         for i, (args_dict, context) in enumerate(zip(arguments_dicts, row_contexts)):
             kwargs = {"context": context} if accepts_context else {}
             result = tool.process_row(Arguments(**args_dict), **kwargs)
-            if not isinstance(result, list):
-                result = [result]
-            raw_results.append(result)
+            assert tool.Outputs is not None
+            raw_results.append(
+                normalize_processing_row_outputs(result, tool.Outputs)
+            )
             self._emit_progress(
                 workflow,
                 node_name,
@@ -233,10 +242,7 @@ class _DispatchMixin:
             result = decode_processing_result(task.result)
             validate_processing_result(invocation, result)
             assert tool.Outputs is not None
-            return [
-                [tool.Outputs(**output) for output in row.outputs]
-                for row in result.rows
-            ]
+            return validate_processing_result_rows(result.rows, tool.Outputs)
 
         invocations = [
             ProcessingTaskV1(
@@ -338,8 +344,8 @@ class _DispatchMixin:
             result = decode_processing_result(task.result)
             validate_processing_result(invocations[i], result)
             row_result = result.rows[0]
-            raw_results.append(
-                [tool.Outputs(**output) for output in row_result.outputs]
+            raw_results.extend(
+                validate_processing_result_rows((row_result,), tool.Outputs)
             )
             self._emit_progress(
                 workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
