@@ -1,6 +1,6 @@
 # Parsl Phase 1a Implementation Guide
 
-Status: implemented attached Parsl engine plan pending final validation and the final GUI-update handoff.
+Status: completed.
 
 ## 1. Authority and Reading Order
 
@@ -1177,10 +1177,10 @@ If CI assigns the Parsl marker differently, update these commands, the root pyte
 
 ## 21. WP10: Final GUI-Update Guide
 
-WP10 starts only after WP9 passes and the final library commit set is stable.
-No earlier work package writes a provisional GUI guide or changes library design to reduce GUI work.
+WP10 started after WP9 passed and the final library commit set was stable.
+No earlier work package wrote a provisional GUI guide or changed library design to reduce GUI work.
 
-Create `docs/parsl_phase1a_gui_update_guide.md` as a concise handoff for a separate GUI agent.
+`docs/parsl_phase1a_gui_update_guide.md` is the concise final handoff for a separate GUI agent.
 It describes only:
 
 - final public engine construction and execution entry points relevant to a GUI,
@@ -1198,7 +1198,7 @@ The guide does not:
 - include superseded architecture details,
 - change the completed library.
 
-Validate the guide against the final code and normative documentation, commit it as the last Phase 1a deliverable, and then close the implementation plan.
+The guide was validated against the final code and normative documentation and closes this implementation plan.
 
 ## 22. Phase 1b Handoff
 
