@@ -16,6 +16,7 @@ class ImportRule:
     path: str
     forbidden: tuple[str, ...]
     top_level_only: bool = False
+    production_only: bool = False
 
 
 RULES = (
@@ -25,21 +26,39 @@ RULES = (
             "bioimageflow.backends",
             "bioimageflow.cache",
             "bioimageflow.engine",
+            "bioimageflow.parsl",
             "bioimageflow.workflow",
+            "parsl",
         ),
     ),
     ImportRule(
         "packages/bioimageflow/bioimageflow/cache",
-        ("bioimageflow.backends", "bioimageflow.engine", "bioimageflow.workflow"),
+        (
+            "bioimageflow.backends",
+            "bioimageflow.engine",
+            "bioimageflow.parsl",
+            "bioimageflow.workflow",
+            "parsl",
+        ),
     ),
     ImportRule(
         "packages/bioimageflow/bioimageflow/engine",
-        ("bioimageflow.workflow",),
+        ("bioimageflow.parsl", "bioimageflow.workflow", "parsl"),
     ),
     ImportRule(
         "packages/bioimageflow-core/bioimageflow_core",
-        ("bioimageflow", "pandas", "parsl", "pydantic"),
+        ("bioimageflow.parsl", "parsl"),
+    ),
+    ImportRule(
+        "packages/bioimageflow-core/bioimageflow_core",
+        ("bioimageflow", "pandas", "pydantic"),
         top_level_only=True,
+    ),
+    ImportRule(
+        "packages",
+        ("parsl",),
+        top_level_only=True,
+        production_only=True,
     ),
 )
 
@@ -59,9 +78,11 @@ def _imported_names(node: ast.Import | ast.ImportFrom) -> list[str]:
 
 def violations(root: Path = ROOT) -> list[str]:
     """Return forbidden imports with their source locations."""
-    failures: list[str] = []
+    failures: set[str] = set()
     for rule in RULES:
         for path in sorted((root / rule.path).rglob("*.py")):
+            if rule.production_only and "tests" in path.relative_to(root).parts:
+                continue
             tree = ast.parse(path.read_text(), filename=str(path))
             for node in _imports(tree, top_level_only=rule.top_level_only):
                 for imported_name in _imported_names(node):
@@ -71,10 +92,10 @@ def violations(root: Path = ROOT) -> list[str]:
                         for prefix in rule.forbidden
                     ):
                         relative = path.relative_to(root).as_posix()
-                        failures.append(
+                        failures.add(
                             f"{relative}:{node.lineno}: forbidden import {imported_name}"
                         )
-    return failures
+    return sorted(failures)
 
 
 def main() -> int:

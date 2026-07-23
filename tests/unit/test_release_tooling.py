@@ -22,6 +22,10 @@ from scripts.release_support import (
     parse_release_tag,
     validate_release_artifacts,
 )
+from tests.support.ci_selectors import (
+    PARSL_FAST_TEST_COMMAND,
+    PARSL_SLOW_TEST_COMMAND,
+)
 
 
 def _run(root: Path, *args: str) -> None:
@@ -330,6 +334,8 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "unit-tests",
         "integration-tests",
         "compatibility-tests",
+        "parsl-fast-tests",
+        "parsl-process-tests",
         "deterministic-tests",
         "packages",
         "docs",
@@ -340,6 +346,13 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "external-binaries",
         "model-runtimes",
     }
+
+    parsl_fast = ci["jobs"]["parsl-fast-tests"]
+    parsl_process = ci["jobs"]["parsl-process-tests"]
+    assert isinstance(parsl_fast, dict)
+    assert isinstance(parsl_process, dict)
+    assert PARSL_FAST_TEST_COMMAND in _job_script(parsl_fast)
+    assert PARSL_SLOW_TEST_COMMAND in _job_script(parsl_process)
 
 
 def test_complete_workflow_schedules_only_resource_dependent_suites() -> None:

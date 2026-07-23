@@ -27,6 +27,12 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 pip install bioimageflow
 ```
 
+Install the optional Parsl runtime for distributed processing:
+
+```bash
+pip install "bioimageflow[parsl]"
+```
+
 For development:
 
 ```bash
@@ -177,8 +183,12 @@ uv run python scripts/check_import_boundaries.py
 git diff --name-only | uv run python scripts/affected_tests.py --stdin
 
 # Run the independent fast suites used by CI
-uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
-uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+
+# Run the real Parsl tiers
+uv run pytest tests -m "parsl and not slow"
+uv run pytest tests -m "parsl and slow"
 
 # Run regular tests before broad finalization
 uv run pytest

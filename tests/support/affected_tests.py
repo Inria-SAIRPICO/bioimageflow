@@ -25,6 +25,7 @@ from tests.support.ci_selectors import (
     FAST_TEST_COMMAND,
     PACKAGE_METADATA_CONTRACTS_COMMAND,
     PACKAGE_TOOLS_TEST_COMMAND,
+    PARSL_FAST_TEST_COMMAND,
     UNIT_TEST_COMMAND,
 )
 
@@ -49,7 +50,7 @@ def commands_for_paths(
     root: Path = ROOT,
 ) -> list[str]:
     if stage == "merge":
-        return [FAST_TEST_COMMAND]
+        return [FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND]
 
     commands: list[str] = []
     seen: set[str] = set()
@@ -57,7 +58,7 @@ def commands_for_paths(
     ownership = load_ownership(root / "tests" / "ownership.toml")
 
     if not normalized_paths:
-        return [FAST_TEST_COMMAND]
+        return [FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND]
 
     for path in normalized_paths:
         for command in _commands_for_path(
@@ -135,6 +136,27 @@ def unowned_platform_paths(
     ]
 
 
+def nonuniquely_owned_platform_paths(
+    *,
+    root: Path = ROOT,
+    ownership: Sequence[OwnershipArea] | None = None,
+) -> list[str]:
+    """Return orchestrator modules that do not have exactly one source owner."""
+    areas = list(ownership or load_ownership(root / "tests" / "ownership.toml"))
+    package_root = root / "packages" / "bioimageflow" / "bioimageflow"
+    return [
+        path.relative_to(root).as_posix()
+        for path in sorted(package_root.rglob("*.py"))
+        if len(
+            matching_areas(
+                PurePosixPath(path.relative_to(root).as_posix()),
+                areas,
+            )
+        )
+        != 1
+    ]
+
+
 def _commands_for_path(
     path: PurePosixPath,
     *,
@@ -165,6 +187,7 @@ def _commands_for_path(
                 for suite, command in (
                     ("unit", UNIT_TEST_COMMAND),
                     ("integration", DIRECT_INTEGRATION_TEST_COMMAND),
+                    ("parsl-fast", PARSL_FAST_TEST_COMMAND),
                 )
                 if suite in suites
             )
@@ -173,7 +196,7 @@ def _commands_for_path(
     if _is_package_path(parts):
         package_name = parts[1]
         if _is_core_package(parts):
-            return (FAST_TEST_COMMAND,)
+            return (FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND)
         return (
             f'uv run pytest packages/{package_name}/tests -m "not complete"',
             PACKAGE_METADATA_CONTRACTS_COMMAND,
@@ -186,9 +209,9 @@ def _commands_for_path(
             return (UNIT_TEST_COMMAND,)
         if len(parts) > 1 and parts[1] == "integration":
             return (DIRECT_INTEGRATION_TEST_COMMAND,)
-        return (FAST_TEST_COMMAND,)
+        return (FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND)
 
-    return (FAST_TEST_COMMAND,)
+    return (FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND)
 
 
 def _is_docs_path(parts: Sequence[str]) -> bool:

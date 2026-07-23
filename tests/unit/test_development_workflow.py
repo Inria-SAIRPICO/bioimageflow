@@ -7,11 +7,13 @@ from scripts.check_import_boundaries import violations as import_boundary_violat
 from tests.support.affected_tests import (
     commands_for_paths,
     load_ownership,
+    nonuniquely_owned_platform_paths,
     unowned_platform_paths,
 )
 from tests.support.ci_selectors import (
     DIRECT_INTEGRATION_TEST_COMMAND,
     FAST_TEST_COMMAND,
+    PARSL_FAST_TEST_COMMAND,
     UNIT_TEST_COMMAND,
 )
 
@@ -27,8 +29,66 @@ def test_platform_import_boundaries_are_acyclic() -> None:
     assert import_boundary_violations(ROOT) == []
 
 
+def test_parsl_import_boundaries_cover_core_and_shared_platform_layers(
+    tmp_path: Path,
+) -> None:
+    sources = {
+        "packages/bioimageflow/bioimageflow/storage/leak.py": (
+            "from bioimageflow.parsl import ParslEngine\n"
+        ),
+        "packages/bioimageflow/bioimageflow/cache/leak.py": (
+            "def load():\n    import parsl\n"
+        ),
+        "packages/bioimageflow/bioimageflow/engine/leak.py": "import parsl\n",
+        "packages/bioimageflow-core/bioimageflow_core/leak.py": (
+            "def load():\n    from parsl import python_app\n"
+        ),
+    }
+    for relative_path, source in sources.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+
+    failures = import_boundary_violations(tmp_path)
+
+    assert len(failures) == 4
+    assert all("forbidden import" in failure for failure in failures)
+
+
+def test_external_parsl_import_is_lazy_outside_the_parsl_package(
+    tmp_path: Path,
+) -> None:
+    top_level = (
+        tmp_path
+        / "packages"
+        / "bioimageflow-example"
+        / "bioimageflow_example"
+        / "runtime.py"
+    )
+    top_level.parent.mkdir(parents=True)
+    top_level.write_text("import parsl\n")
+    test_module = (
+        tmp_path
+        / "packages"
+        / "bioimageflow-example"
+        / "tests"
+        / "test_runtime.py"
+    )
+    test_module.parent.mkdir(parents=True)
+    test_module.write_text("import parsl\n")
+
+    assert import_boundary_violations(tmp_path) == [
+        "packages/bioimageflow-example/bioimageflow_example/runtime.py:1: "
+        "forbidden import parsl"
+    ]
+
+
 def test_every_orchestrator_module_has_affected_test_ownership() -> None:
     assert unowned_platform_paths(root=ROOT) == []
+
+
+def test_every_orchestrator_module_has_exactly_one_source_owner() -> None:
+    assert nonuniquely_owned_platform_paths(root=ROOT) == []
 
 
 def test_ownership_map_references_existing_tests() -> None:
@@ -60,9 +120,18 @@ def test_precommit_stage_selects_independent_suites() -> None:
 
 
 def test_merge_and_unknown_paths_fail_open_to_fast_suite() -> None:
-    assert commands_for_paths(["unknown.file"], root=ROOT) == [FAST_TEST_COMMAND]
+    expected = [FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND]
+    assert commands_for_paths(["unknown.file"], root=ROOT) == expected
     assert commands_for_paths(
         ["packages/bioimageflow/bioimageflow/cache/identity.py"],
         stage="merge",
         root=ROOT,
-    ) == [FAST_TEST_COMMAND]
+    ) == expected
+
+
+def test_parsl_precommit_stage_selects_fake_and_real_runtime_tiers() -> None:
+    assert commands_for_paths(
+        ["packages/bioimageflow/bioimageflow/parsl/engine.py"],
+        stage="precommit",
+        root=ROOT,
+    ) == [UNIT_TEST_COMMAND, PARSL_FAST_TEST_COMMAND]

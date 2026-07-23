@@ -1,7 +1,7 @@
 version = 1
 
 [[areas]]
-name = "core-worker"
+name = "worker-protocol"
 sources = [
     "packages/bioimageflow-core/bioimageflow_core/worker.py",
     "packages/bioimageflow-core/bioimageflow_core/worker_origins.py",
@@ -127,6 +127,7 @@ sources = [
 ]
 edit_tests = [
     "tests/unit/test_logging_config.py",
+    "tests/unit/test_workflow_clean_api.py",
     "tests/unit/test_worker_safe_tool_imports.py",
     "tests/integration/test_runtime_paths.py",
 ]
@@ -136,4 +137,4 @@ precommit_suites = ["unit", "integration"]
 name = "parsl"
 sources = ["packages/bioimageflow/bioimageflow/parsl"]
 edit_tests = ["tests/unit/parsl"]
-precommit_suites = ["unit", "integration"]
+precommit_suites = ["unit", "parsl-fast"]

@@ -225,7 +225,7 @@ def test_spot_tools_atlas_data_file_is_in_wheel_and_sdist(
     assert data_path in _sdist_members(_sdist_path(built_artifacts, distribution_name))
 
 
-def test_built_wheels_import_public_modules(
+def test_base_wheels_import_public_modules_without_optional_parsl(
     built_artifacts: Path,
     tmp_path: Path,
 ) -> None:

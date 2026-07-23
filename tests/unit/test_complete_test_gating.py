@@ -16,9 +16,10 @@ EXTERNAL_TIER_MARKERS = (
     "sairpico_binary",
     "model_runtime",
 )
-DETERMINISTIC_NON_FAST_MARKERS = (
+NON_COMPLETE_GATED_MARKERS = (
     "acceptance",
     "package_tools",
+    "parsl",
     "packaging",
     "shared_memory",
     "slow",
@@ -139,8 +140,8 @@ def test_run_complete_enables_external_tier_markers(
     result.assert_outcomes(failed=1)
 
 
-@pytest.mark.parametrize("marker", DETERMINISTIC_NON_FAST_MARKERS)
-def test_deterministic_non_fast_markers_are_not_complete_gated(
+@pytest.mark.parametrize("marker", NON_COMPLETE_GATED_MARKERS)
+def test_deterministic_runtime_markers_are_not_complete_gated(
     pytester,
     marker: str,
 ) -> None:

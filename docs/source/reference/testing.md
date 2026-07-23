@@ -5,7 +5,7 @@ BioImageFlow uses multiple pytest levels so daily development stays fast while p
 ## Local Default Tests
 
 The default local pytest run executes deterministic tests and skips only the complete/resource tiers that require `--run-complete`.
-It is useful before broad finalization, but it is broader than the CI fast matrix because it still includes deterministic non-fast markers such as `acceptance`, `packaging`, and `slow`.
+It is useful before broad finalization, but it is broader than the CI fast matrix because it still includes dedicated markers such as `acceptance`, `packaging`, `parsl`, and `slow`.
 
 Run the default local suite with:
 
@@ -25,25 +25,25 @@ Fast tests should:
 - cover public tool schemas, core mechanisms, successful execution paths, output contracts, and important failure modes;
 - write outputs only under pytest temporary directories.
 
-CI runs the required fast selector with deterministic non-fast and complete/resource tiers excluded:
+CI runs the backend-neutral fast selector with deterministic non-fast, real Parsl, and complete/resource tiers excluded:
 
 ```bash
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 ```
 
 GitHub Actions runs `tests/unit` and `tests/integration` as independent jobs on Python 3.10 and 3.12 so failures arrive sooner and can be rerun by concern.
-Python 3.11 runs the `compat` smoke selector on every pipeline, while full deterministic Python 3.11 validation is manually available before tagging and rerun by the release workflow as a required publication gate.
+Python 3.11 runs the backend-neutral `compat` smoke selector on every pipeline.
 
 Run the Python-version compatibility smoke selector with:
 
 ```bash
-uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 ```
 
 For restricted sandboxes that cannot create POSIX shared-memory segments, agents may run a partial local fast loop with shared-memory tests excluded:
 
 ```bash
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not shared_memory"
+uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl and not shared_memory"
 ```
 
 That command is only for local sandbox triage.
@@ -56,6 +56,24 @@ uv run pytest packages/bioimageflow-io-tools/tests
 uv run pytest -m "package_tools and not complete"
 ```
 
+## Parsl Runtime Tests
+
+The `parsl` marker is reserved for tests that execute the real optional Parsl runtime.
+Fake DFK and future tests remain ordinary unit tests so the core execution contracts do not depend on starting Parsl.
+
+Fast real-runtime tests use local thread executors and run on Python 3.10 and 3.12 in a dedicated CI matrix:
+
+```bash
+uv run pytest tests -m "parsl and not slow"
+```
+
+Only process-isolated executor cases also carry `slow`.
+They run as a required Python 3.11 CI job and need no external scheduler:
+
+```bash
+uv run pytest tests -m "parsl and slow"
+```
+
 ## Deterministic Non-Fast Tests
 
 Deterministic non-fast tests are required coverage, but they are not part of every Python-version matrix job.
@@ -63,6 +81,7 @@ Use these markers when coverage is valuable but too broad or artifact-oriented f
 
 - `acceptance`: high-level workflow or example coverage that executes deterministic scenarios;
 - `compat`: deterministic Python-version compatibility smoke coverage;
+- `parsl`: tests that execute the real optional Parsl runtime in the dedicated runtime jobs;
 - `packaging`: build artifact, wheel, sdist, or package metadata artifact checks;
 - `package_tools`: package-local deterministic coverage that is required in a separate CI job;
 - `shared_memory`: deterministic tests requiring POSIX/shared-memory platform support;
@@ -79,6 +98,8 @@ Run package artifact checks with:
 ```bash
 uv run pytest tests/unit/test_package_artifacts.py
 ```
+
+The artifact contract verifies that Parsl is declared only by the orchestrator's `parsl` extra and that importing the base wheel never imports the optional runtime.
 
 To validate an existing package artifact directory instead of building inside the test fixture, point the test at the prebuilt output:
 
@@ -191,8 +212,10 @@ uv run ruff check .
 uv run pyright
 uv run python scripts/check_file_sizes.py
 uv run python scripts/check_import_boundaries.py
-uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
-uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
+uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests -m "parsl and not slow"
+uv run pytest tests -m "parsl and slow"
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py

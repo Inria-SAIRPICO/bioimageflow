@@ -3,7 +3,7 @@
 FAST_TEST_SELECTOR = (
     "not slow and not acceptance and not packaging and not package_tools and not complete "
     "and not wetlands and not public_data and not external_binary and not sairpico_binary "
-    "and not model_runtime"
+    "and not model_runtime and not parsl"
 )
 FAST_TEST_COMMAND = f'uv run pytest tests -m "{FAST_TEST_SELECTOR}"'
 UNIT_TEST_COMMAND = f'uv run pytest tests/unit -m "{FAST_TEST_SELECTOR}"'
@@ -15,6 +15,11 @@ FAST_TEST_WITHOUT_SHARED_MEMORY_COMMAND = (
 )
 PYTHON_COMPAT_TEST_SELECTOR = f"compat and {FAST_TEST_SELECTOR}"
 PYTHON_COMPAT_TEST_COMMAND = f'uv run pytest tests -m "{PYTHON_COMPAT_TEST_SELECTOR}"'
+
+PARSL_FAST_TEST_SELECTOR = "parsl and not slow"
+PARSL_FAST_TEST_COMMAND = f'uv run pytest tests -m "{PARSL_FAST_TEST_SELECTOR}"'
+PARSL_SLOW_TEST_SELECTOR = "parsl and slow"
+PARSL_SLOW_TEST_COMMAND = f'uv run pytest tests -m "{PARSL_SLOW_TEST_SELECTOR}"'
 
 ACCEPTANCE_TEST_SELECTOR = "acceptance and not complete"
 ACCEPTANCE_TEST_COMMAND = f'uv run pytest -m "{ACCEPTANCE_TEST_SELECTOR}"'

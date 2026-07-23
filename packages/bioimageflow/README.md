@@ -11,6 +11,12 @@ Install:
 pip install bioimageflow
 ```
 
+Install the optional distributed runtime when using `ParslEngine`:
+
+```bash
+pip install "bioimageflow[parsl]"
+```
+
 For workspace development, use the repository root:
 
 ```bash

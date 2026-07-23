@@ -82,6 +82,7 @@ When adding a dependency between platform layers, update the design instead of w
 
 ## CI topology
 
-Every pull request runs independent unit and direct-integration jobs on Python 3.10 and 3.12, plus a Python 3.11 compatibility smoke job.
+Every pull request runs independent backend-neutral unit and direct-integration jobs on Python 3.10 and 3.12, plus a Python 3.11 compatibility smoke job.
+Real Parsl coverage runs in a dedicated fast Python 3.10/3.12 matrix and a required process-isolation Python 3.11 job.
 Quality, deterministic acceptance/package tests, package builds, and documentation are separate jobs.
 This topology shortens feedback time while preserving unconditional coverage.
