@@ -17,8 +17,8 @@ bioimageflow/
 └── events.py            # Backend-neutral progress event values
 ```
 
-The package `__init__.py` modules are compatibility façades.
-Callers should continue importing public names from `bioimageflow`, `bioimageflow.engine`, `bioimageflow.workflow`, `bioimageflow.storage`, `bioimageflow.cache`, and `bioimageflow.validation`.
+The package `__init__.py` modules define the public import surface.
+Callers import public names from `bioimageflow`, `bioimageflow.engine`, `bioimageflow.workflow`, `bioimageflow.storage`, `bioimageflow.cache`, and `bioimageflow.validation`.
 New internal code should import from the focused owner module when doing so does not introduce a dependency cycle.
 
 The enforced dependency direction is storage → cache → engine → workflow.
@@ -31,8 +31,7 @@ The worker-safe `bioimageflow-core` package must not import pandas, pydantic, or
 The scheduler owns DAG semantics, input resolution, cache selection/publication, progress, cancellation, and deterministic error behavior.
 A backend prepares an uncached processing node, dispatches one immutable `ProcessingDispatch`, and releases execution- or engine-owned resources.
 
-The direct and Wetlands paths implement this same contract.
-A distributed backend should integrate at this seam instead of copying the scheduler.
+Direct, Wetlands, and Parsl implement this same contract.
 Backend-specific task policy and transport values should remain backend-neutral until dispatch, and observable behavior shared by all engines belongs in the scheduler or another shared module.
 
 ## Fast edit loop

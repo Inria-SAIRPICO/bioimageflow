@@ -4,7 +4,7 @@ The on-disk cache schema is versioned, but this module is the clean storage
 implementation used by the current runtime.
 """
 
-# Focused storage modules import this compatibility namespace.
+# Focused storage modules import these shared definitions.
 # ruff: noqa: F401
 
 from __future__ import annotations

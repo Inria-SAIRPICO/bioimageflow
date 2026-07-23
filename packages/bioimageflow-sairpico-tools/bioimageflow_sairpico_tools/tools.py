@@ -1,4 +1,4 @@
-"""Compatibility exports for BioImageFlow SAIRPICO command-line tools."""
+"""Public BioImageFlow SAIRPICO command-line tools."""
 
 from ._common import _write_sairpico_environment_report as _write_sairpico_environment_report
 from ._common import _write_sairpico_version_report as _write_sairpico_version_report

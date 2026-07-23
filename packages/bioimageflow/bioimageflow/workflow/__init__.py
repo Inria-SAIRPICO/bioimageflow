@@ -1,7 +1,6 @@
-"""Workflow model and compatibility exports."""
+"""Public workflow model."""
 
-# Compatibility exports intentionally include private names used by older
-# internal modules while they migrate to focused imports.
+# Internal exports support focused workflow modules.
 # ruff: noqa: F401
 
 from .common import (

@@ -10,7 +10,7 @@ This reference page keeps the release, packaging, and CI contract shared by firs
 The orchestrator, core package, and each companion tool package own independent versions.
 The repository is tested as one workspace, while package-specific annotated tags select one distribution for publication.
 See [Releasing Python Packages](releasing.md) for the release tag contract, status tool, CI workflow, and operator procedure.
-The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with legacy Python 3.9 binary dependencies can install the shared worker API.
+The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with Python 3.9-only binary dependencies can install the shared worker API.
 The deterministic CI matrix validates the main development/runtime surface with full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
 Full deterministic Python 3.11 validation is manually available before tagging and rerun as a required release gate, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
 

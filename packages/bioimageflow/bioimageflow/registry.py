@@ -305,8 +305,8 @@ class ToolRegistry:
 
         When several package versions expose the same class name, callers can
         pass ``package`` / ``version`` / ``module`` to select the intended
-        class. A name-only lookup keeps the historical behavior and returns the
-        most recently registered matching class.
+        class. A name-only lookup returns the most recently registered matching
+        class.
         """
         match = self._find_key(class_name, package=package, version=version, module=module)
         if match is None:

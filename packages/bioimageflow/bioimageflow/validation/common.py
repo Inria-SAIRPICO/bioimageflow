@@ -1,4 +1,4 @@
-"""Shared validation dependencies and compatibility namespace."""
+"""Shared validation dependencies."""
 
 # Focused validation modules import the subset they need.
 # ruff: noqa: F401

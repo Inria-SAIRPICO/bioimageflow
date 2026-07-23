@@ -78,24 +78,20 @@ tool needs per row:
      - Optional string hint, e.g. ``"8GB"``.
    * - ``max_concurrent``
      - ``0``
-     - Reserved scheduling hint. Direct and Wetlands do not enforce
-       it; use ``Workflow(max_workers=...)`` or
-       ``Workflow.get_environment(...).max_workers`` for local worker
-       pool sizing.
+     - Parsl bound on unfinished row or chunk tasks for one processing node.
+       Direct and Wetlands do not enforce it; use ``Workflow(max_workers=...)`` or ``Workflow.get_environment(...).max_workers`` for Wetlands worker pool sizing.
    * - ``memory``
      - ``None``
      - Optional string hint for system memory.
 
-Current local engines read the spec for one effect:
+Wetlands reads the spec for one effect:
 
-- When ``gpu >= 1`` and the environment has no explicit ``worker_env``,
-  the engine auto-installs
-  ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`` so each
-  Wetlands worker is pinned to a distinct GPU.
+- When ``gpu >= 1`` and the environment has no explicit ``worker_env``, the engine auto-installs ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`` so each Wetlands worker is pinned to a distinct GPU.
 
-The Parsl engine is reserved for richer scheduling — full ``cpu`` /
-``memory`` / ``max_concurrent`` semantics ship with that
-implementation.
+Parsl converts the resource declaration into a canonical requirement and validates it against the selected :class:`~bioimageflow.ExecutorBinding`.
+The binding's :class:`~bioimageflow.WorkerSlotCapacity` must satisfy the requested ``cpu``, ``gpu``, ``memory``, and ``gpu_memory``.
+``max_concurrent`` combines with :class:`~bioimageflow.ParslTaskPolicy.max_in_flight` to bound unfinished tasks; it is not part of slot capacity.
+See :doc:`parsl` for executor attestations and deterministic routing.
 
 WorkflowEnvironment and get_environment
 ---------------------------------------
@@ -171,7 +167,7 @@ Wetlands while installing missing tool packages.
 Environment lifetime and ownership
 ----------------------------------
 
-Workflow-created engines preserve the historical default: Wetlands workers stop after every ``compute()`` or completed/closed ``compute_steps()`` call.
+Workflow-created engines use execution-scoped ownership by default: Wetlands workers stop after every ``compute()`` or completed or closed ``compute_steps()`` call.
 Applications that execute repeatedly can create and retain an engine explicitly:
 
 .. code-block:: python
@@ -179,12 +175,12 @@ Applications that execute repeatedly can create and retain an engine explicitly:
    from bioimageflow import Workflow
 
    wf = Workflow.load("workflow.json")
-   with wf.create_engine(environment_lifetime="engine") as engine:
+   with wf.create_engine(resource_lifetime="engine") as engine:
        first = wf.compute(engine=engine)
        second = wf.compute(engine=engine)
        print(engine.environment_manager.running_environments())
 
-The public :class:`~bioimageflow.engine.EnvironmentLifetime` values define ownership:
+The public :class:`~bioimageflow.engine.ResourceLifetime` values define ownership:
 
 - ``"execution"`` stops all environments after every ``execute()`` or ``execute_steps()`` call, including failed and cancelled calls.
 - ``"engine"`` retains environments across calls and stops them when :meth:`~bioimageflow.engine.DefaultEngine.close` is called or the engine context exits.
@@ -198,16 +194,16 @@ An application can share a manager across workflow engines:
 
 .. code-block:: python
 
-   from bioimageflow import EnvironmentLifetime, WetlandsEnvManager
+   from bioimageflow import ResourceLifetime, WetlandsEnvManager
 
    manager = WetlandsEnvManager()
    first_engine = first_workflow.create_engine(
        env_manager=manager,
-       environment_lifetime=EnvironmentLifetime.EXTERNAL,
+       resource_lifetime=ResourceLifetime.EXTERNAL,
    )
    second_engine = second_workflow.create_engine(
        env_manager=manager,
-       environment_lifetime=EnvironmentLifetime.EXTERNAL,
+       resource_lifetime=ResourceLifetime.EXTERNAL,
    )
 
    try:
@@ -222,13 +218,9 @@ An application can share a manager across workflow engines:
 The manager exposes ``stop(env_name)``, ``is_running(env_name)``, ``running_environments()``, and idempotent ``shutdown_all()`` so hosts do not need to access ``_envs`` or ``_launch_configs``.
 Status means that the adapter tracks an environment as launched; it is not a process-health probe.
 
-GUI migration
-^^^^^^^^^^^^^
-
-GUI sessions should keep one ``WetlandsEnvManager`` for the desired sharing scope and build workflow engines with ``environment_lifetime="external"`` as shown above.
+Long-running applications should keep one ``WetlandsEnvManager`` for the desired sharing scope and build workflow engines with ``resource_lifetime="external"`` as shown above.
 Use ``manager.stop(name)`` for a per-environment stop action and ``manager.shutdown_all()`` during application shutdown.
-Alternatively, use one ``environment_lifetime="engine"`` engine per session and close it when that session ends.
-No workflow format or standalone caller changes are required.
+Alternatively, use one ``resource_lifetime="engine"`` engine per session and close it when that session ends.
 
 Retaining an environment preserves imported modules, CUDA process state, and BioImageFlow's cached tool instances.
 ``Cellpose3``, ``CellposeSAM``, and ``StarDistSegmenter`` lazily retain one model on each worker-side tool instance, so repeated rows and retained-engine executions with the same model selection reuse its weights.

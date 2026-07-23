@@ -1,7 +1,6 @@
 """Shared values and helpers used by execution-engine modules."""
 
-# This module intentionally re-exports the legacy engine namespace to focused
-# mixins. Each consumer imports only the names it needs.
+# This module provides shared definitions to focused engine modules.
 # ruff: noqa: F401
 
 import concurrent.futures

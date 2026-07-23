@@ -33,6 +33,19 @@ from .common import (
 )
 
 
+def _reject_reserved_source_indexes(
+    dataframe: pd.DataFrame,
+    *,
+    source: str,
+) -> None:
+    reserved = [str(index) for index in dataframe.index if "::" in str(index)]
+    if reserved:
+        raise ValueError(
+            f"{source} indexes must not contain the reserved '::' separator: "
+            f"{reserved}."
+        )
+
+
 class _NodeExecutionMixin:
     def _execute_node(
         self,
@@ -100,6 +113,10 @@ class _NodeExecutionMixin:
         arguments, args_dict = self._resolve_constant_arguments(node)
         for index, arg in enumerate(node._args):
             if isinstance(arg, pd.DataFrame):
+                _reject_reserved_source_indexes(
+                    arg,
+                    source="Root DataFrame",
+                )
                 args_dict[f"workflow_dataframe_input_{index}"] = (
                     canonical_dataframe_digest(arg)
                 )
@@ -150,6 +167,11 @@ class _NodeExecutionMixin:
         df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
+        if not dfs:
+            _reject_reserved_source_indexes(
+                df,
+                source=f"Source DataFrameTool {node.name!r}",
+            )
 
         self._raise_if_cancelled(workflow)
         if sig_hash is not None:

@@ -212,7 +212,7 @@ class ParslEngine:
         )
         if selected_storage_mode == "staged":
             raise ValueError(
-                "storage_mode='staged' is unavailable in Parsl Phase 1a."
+                "storage_mode='staged' is unsupported; use 'shared_fs'."
             )
 
         if task_policy is not None and type(task_policy) is not ParslTaskPolicy:
@@ -435,7 +435,7 @@ class ParslEngine:
         retries = getattr(config, "retries", None)
         if type(retries) is not int or retries != 0:
             raise ValueError(
-                "Parsl Phase 1a requires effective Config.retries=0."
+                "Parsl requires effective Config.retries=0."
             )
         labels = self._executor_labels(source)
         if not labels and config is not source:

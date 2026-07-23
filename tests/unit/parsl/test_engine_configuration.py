@@ -106,7 +106,7 @@ def test_constructor_requires_exactly_one_runtime_owner(
 
 
 def test_constructor_rejects_staged_storage() -> None:
-    with pytest.raises(ValueError, match="unavailable"):
+    with pytest.raises(ValueError, match="unsupported"):
         ParslEngine(
             parsl_config=object(),
             executor_bindings={"cpu": _binding()},

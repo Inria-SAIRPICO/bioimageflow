@@ -155,7 +155,7 @@ class GUIMeta:
         the field belongs to the default / unnamed group.
     path_picker : PathPicker | None
         Picker actions offered for path-typed inputs.  ``None`` lets the GUI
-        infer a backward-compatible default from the field type.  This is a
+        infer the default from the field type.  This is a
         rendering hint only and does not validate the filesystem value.
     """
     display_name: Optional[str] = None

@@ -29,13 +29,12 @@ All paths below are rooted at `Workflow.storage_path`.
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json              # optional runtime metadata
+                attempt.json
                 staging/
                   dataframe.parquet
                   dataframe.csv           # optional debug artifact
                   assets/
                   work/
-                failed.json               # optional failure metadata
             records/
               <record-id>/
                 manifest.json
@@ -55,6 +54,15 @@ All paths below are rooted at `Workflow.storage_path`.
                   assets/
                   work/
                   failed.json            # optional failure metadata
+  diagnostics/
+    v1/
+      runs/
+        <run-id>/
+          nodes/
+            <node-key>/
+              <invocation-id>/
+                tasks/
+                  <task-id>.json
   views/
     runs/
       <run-id>/
@@ -74,6 +82,7 @@ All paths below are rooted at `Workflow.storage_path`.
 ```
 
 `cache/v1/` is private machine-readable storage.
+`diagnostics/v1/` contains mutable backend-task execution metadata that is separate from reusable result identity.
 `views/` contains portable JSON provenance and pointer views.
 `outputs/` contains optional materialized files for human browsing.
 `provenance_graph.json` remains a workflow-level provenance artifact and is outside the cache namespace.
@@ -295,8 +304,8 @@ Required fields:
   "policy": "first-valid",
   "selected_at": "2026-06-16T12:00:00Z",
   "selected_by": {
-    "attempt_id": "01K7M9Y2EHJ6V9X3G7K8Q4T2BR",
-    "run_id": "01K7M9Y2ABCD..."
+    "attempt_id": "att_a791366f6a8e4fc6a7428bf8e69b57c1",
+    "run_id": "run_8e42fd04e27749e2b86791239b6368df"
   }
 }
 ```
@@ -517,6 +526,9 @@ cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/
 - Start timestamp.
 - Runtime engine.
 - Worker identity for diagnostics only.
+- Optional invocation ID.
+- Status: initially `running`, then exactly one of `succeeded`, `failed`, or `cancelled`.
+- Terminal timestamp and error type.
 
 The worker writes generated files under `staging/`.
 For `ProcessingTool` nodes, the execution context points into the attempt staging tree.
@@ -525,8 +537,22 @@ For `ProcessingTool` nodes, the execution context points into the attempt stagin
 `work/` contains scratch and intermediate files.
 Files in `work/` are not part of the public output contract unless the tool explicitly returns them and the manifest declares them as assets.
 
-The engine may write `failed.json` after execution failure.
-`failed.json` is diagnostic only and must not make the attempt reusable.
+The engine terminalizes `attempt.json` only after all possible writers for that attempt have stopped.
+Attempt metadata never makes an attempt reusable.
+
+## Backend Task Diagnostics
+
+Every submitted backend task has a separate mutable diagnostic:
+
+```text
+diagnostics/v1/runs/<run-id>/nodes/<node-key>/<invocation-id>/tasks/<task-id>.json
+```
+
+The `bioimageflow.backend_task.v1` object records the backend, run, scoped node, invocation, optional cache attempt, task, executor label, task retry, dispatch mode, aligned row positions, canonical tool origin, status, submission time, completion time, and terminal error type.
+The initial status is `submitted`.
+The engine changes it exactly once to `succeeded`, `failed`, or `cancelled` after observing or draining the corresponding future.
+
+Backend diagnostics are not record content, never enter result-key or record-ID material, and are not required for cache lookup.
 
 ## Publication Protocol
 
@@ -541,22 +567,20 @@ The high-level sequence is:
 4. Canonicalize dataframe path columns.
 5. Build a canonical content manifest from staged files.
 6. Compute `<record-id>` from the canonical content manifest.
-7. Create a temporary record directory under the same result-key directory.
-8. Move or copy finalized staged content into the temporary record directory.
-9. Write `manifest.json` in the temporary record directory.
-10. Atomically install the temporary directory as `records/<record-id>/`, or detect that an equivalent record already exists.
-11. Under a per-result-key guarded metadata update, create `current.json` if absent.
+7. Create a private `records/.candidate.<attempt-id>.<nonce>/<record-id>/` directory on the record filesystem.
+8. Move or copy finalized staged content into that private candidate directory.
+9. Write `manifest.json` and validate the complete candidate in place.
+10. Atomically rename the complete candidate to `records/<record-id>/`, or validate and use an equivalent concurrently installed record.
+11. Create a complete candidate current-pointer file and atomically hard-link it to `current.json` only if `current.json` is absent.
 12. Bind the run to the selected current record.
 13. Update run and latest views from the selected current record.
 
 All atomic renames must happen within the same filesystem.
 Where supported, files and parent directories should be fsynced before the final rename that makes a record visible.
 
-The guarded metadata update covers reading current state, deciding the outcome, and writing `current.json` or a conflict report.
-It must not be held while executing tools or copying large output payloads.
-
-Acceptable guard implementations include atomic create-if-absent, an atomic directory lock, a backend compare-and-swap primitive, or documented filesystem locking known to be safe for the configured filesystem.
-Atomic rename of `current.json` prevents torn writes but is not sufficient by itself.
+The hard-link create-if-absent operation is the first-valid compare-and-set.
+If another publisher wins, the loser validates and loads the selected record before it reports a conflict or continues downstream.
+Tool execution and record construction happen before this selection operation.
 
 Publication outcomes:
 

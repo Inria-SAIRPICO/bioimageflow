@@ -65,7 +65,7 @@ def test_materialize_latest_outputs_copies_owned_assets(tmp_path: Path) -> None:
     assert not output_path.is_symlink()
 
 
-def test_latest_output_mapping_preserves_nested_legacy_and_scoped_paths(
+def test_latest_output_mapping_preserves_nested_manifest_and_scoped_paths(
     tmp_path: Path,
 ) -> None:
     storage = Storage(tmp_path)
@@ -78,7 +78,7 @@ def test_latest_output_mapping_preserves_nested_legacy_and_scoped_paths(
             "digest": _file_digest(b"mask"),
             "asset_type": "file",
         }
-        for path in ["assets/masks/nuclei/t051.tiff", "legacy/results/table.csv"]
+        for path in ["assets/masks/nuclei/t051.tiff", "reports/results/table.csv"]
     ]
     record_id = _write_record(storage, result_key, outputs=outputs)
     storage.select_current_record(
@@ -108,7 +108,7 @@ def test_latest_output_mapping_preserves_nested_legacy_and_scoped_paths(
     latest_node = tmp_path / "outputs" / "latest" / "parent" / "segment"
     assert materialized == [
         latest_node / "masks" / "nuclei" / "t051.tiff",
-        latest_node / "legacy" / "results" / "table.csv",
+        latest_node / "reports" / "results" / "table.csv",
     ]
     assert all(path.read_bytes() == b"mask" for path in materialized)
 

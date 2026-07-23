@@ -1,14 +1,10 @@
 # Parsl Phase 1a Implementation Guide
 
-Status: dependency-ordered implementation guide for the future attached Parsl engine specified by `docs/parsl_distributed_engine_specs.md`.
-
-This guide was rebaselined against repository commit `6a3f67b`, the library specification, recursive workflow contract, cache/storage contract, focused package structure, backend seam, test ownership, and CI topology on 2026-07-23.
-
-The Parsl engine is not implemented yet.
+Status: implemented attached Parsl engine plan pending final validation and the final GUI-update handoff.
 
 ## 1. Authority and Reading Order
 
-This document explains how to implement Phase 1a safely in the current repository.
+This document records the dependency order, ownership, contract gates, and acceptance gates used to implement Phase 1a.
 It does not replace the normative behavior in:
 
 - `docs/source/specs.md`,
@@ -20,11 +16,8 @@ The platform contracts win if this guide conflicts with them.
 The distributed-engine specification wins for Parsl-specific behavior that the platform contracts have already been extended to permit.
 Sections 17 through 19 and acceptance Section 21.7 of the distributed-engine specification are not part of Phase 1a.
 
-Section 5 records final-design decisions selected during preparation.
-When one of those decisions differs from a normative document, WP0 must update the normative document before any implementation that depends on it is merged.
-
-The implementation must update the platform contracts before landing public or cross-engine behavior that those contracts do not yet describe.
-Phase 1a is not complete while any contract gate in Section 5 of this guide remains open.
+Section 5 records the final-design decisions applied by the implementation.
+The normative platform contracts contain the resulting public and cross-engine behavior.
 
 ## 2. Outcome and Definition of Done
 
@@ -89,22 +82,19 @@ Phase 1a does not include:
 Parsl providers may allocate worker blocks for an attached engine.
 That does not turn provider configuration into a BioImageFlow launcher API.
 
-## 4. Prepared Repository Baseline
+## 4. Implemented Repository Structure
 
-Phase 1a starts from commit `6a3f67b`.
-
-| Area | Prepared owner | Remaining Phase 1a work |
+| Area | Final owner | Implemented contract |
 |---|---|---|
-| Processing backend seam | `bioimageflow/backends.py` defines `ProcessingBackend`, immutable `ProcessingDispatch`, and direct/Wetlands adapters. | Extend the final request with run, cache/transient, aligned-index, and resource identity; add the Parsl backend without moving scheduling into the backend. |
-| Scheduling and graph execution | `bioimageflow/engine/` owns scheduler, graph, arguments, node execution, dispatch, dataframe construction, planning, and cache runtime. | Add deterministic compiled ordinals and failure aggregation, active-execution enforcement, bounded remote dispatch, shared output validation, and optional cache identity. |
-| Workflow runtime | `bioimageflow/workflow/runtime.py` owns engine creation, compute, stepped execution, cancellation, and run-view lifecycle. | Add `WorkflowExecutionContext`, root-wrapper propagation, final engine selection, and one-active-workflow execution. |
-| Cache and storage | `bioimageflow/cache/` and `bioimageflow/storage/` separate identity, publication, manifests, repositories, run views, and output views. | Add final logical dataframe publication, selected-provider recipes, non-reusable transients, directory assets, and active-run provenance in their existing ownership layers. |
-| Custom sources and loading | `bioimageflow/workflow/custom_sources.py`, `bioimageflow/tool_loader.py`, `bioimageflow/env_manager.py`, and `bioimageflow-core` own source capture and worker loading. | Define the final worker-origin model, shared archive materialization, preflight, and one strict worker protocol. |
-| Focused tests | Test packages are below the size ceiling, shared fixtures live under `tests/testkit/`, and `tests/ownership.toml` maps focused edit tests and broader gates. | Add Parsl ownership, unit/integration packages, real-runtime tiers, and acceptance traceability. |
-| Development guardrails | File-size, import-boundary, affected-test, and split-CI tooling is available. | Apply the guardrails to every new Parsl/core module and use affected-test commands throughout implementation. |
+| Processing backend seam | `bioimageflow/backends.py` and `bioimageflow/parsl/backend.py` | Immutable dispatch requests carry run, cache or transient, aligned-index, resource, and cancellation identity without moving scheduling into a backend. |
+| Scheduling and graph execution | `bioimageflow/engine/` | Deterministic compiled order, active-execution enforcement, bounded dispatch, shared output validation, optional cache identity, progress, and failure selection. |
+| Workflow runtime | `bioimageflow/workflow/runtime.py` and `bioimageflow/workflow/execution_context.py` | Explicit engine injection, one active execution, cancellation context propagation, root-wrapper propagation, and effective-engine run metadata. |
+| Cache and storage | `bioimageflow/cache/` and `bioimageflow/storage/` | Canonical logical dataframe identity, selected-provider recipes, non-reusable transients, directory assets, atomic immutable-record installation, first-valid selection, run views, output views, and separate diagnostics. |
+| Custom sources and loading | `bioimageflow/workflow/custom_sources.py`, `bioimageflow/tool_loader.py`, `bioimageflow/env_manager.py`, and `bioimageflow-core` | Strict worker origins, verified archive materialization, executor preflight, and one processing task/result protocol shared by remote backends. |
+| Focused tests | `tests/unit/parsl/`, `tests/integration/parsl/`, worker-protocol tests, storage tests, and cross-engine suites | Pure, controlled-future, real ThreadPoolExecutor, and process-isolated HighThroughputExecutor tiers with permanent acceptance traceability. |
+| Development guardrails | File-size, import-boundary, affected-test, and split-CI tooling | Every new production path has focused ownership and remains within the repository guardrails. |
 
-The backend-neutral dispatch seam is therefore a completed prerequisite that must be extended, not recreated.
-No work package may reintroduce scheduler, cache, publication, progress, or graph logic inside a backend.
+Scheduler, cache, publication, progress, and graph logic remain in their focused platform owners.
 
 ## 5. Final-Design Policy and Contract Gates
 
@@ -236,14 +226,15 @@ The final implementation follows the focused package structure and repository si
 | `scripts/check_file_sizes.py` and `scripts/check_import_boundaries.py` | Core production-module size coverage and the optional-Parsl dependency boundaries from Section 6. |
 | `bioimageflow/parsl/` | Focused modules for public value types, engine lifecycle, backend dispatch, routing, startup/preflight, archive materialization, and errors; no module may exceed the orchestrator size ceiling. |
 | `bioimageflow/backends.py` | Small backend-neutral protocol plus direct and Wetlands adapters; `ProcessingDispatch` remains scheduler-owned resolved input. |
-| `bioimageflow/engine/execution_context.py` | Public `WorkflowExecutionContext`, cancellation, active binding, and terminal finalization state. |
+| `bioimageflow/workflow/execution_context.py` | Public `WorkflowExecutionContext`, cancellation, active binding, and terminal finalization state. |
 | `bioimageflow/engine/` | Compiled scheduling, deterministic failures, shared output validation, optional cache identity, argument resolution, dataframe construction, and backend orchestration. |
 | `bioimageflow/workflow/runtime.py` | Engine preference/factory, active-context binding, root-wrapper propagation, effective engine metadata, and public compute signatures. |
 | `bioimageflow/cache/identity.py`, `cache/processing.py`, `cache/dataframe.py`, and `cache/metadata.py` | Provider recipes, logical identity, reusable publication, active-run provenance, and shared cache metadata. |
 | `bioimageflow/storage/identity.py`, `storage/manifests.py`, `storage/repository.py`, `storage/run_views.py`, and `storage/output_views.py` | Final logical/transport digests, transient paths, directory assets, record validation, and public views. |
 | `bioimageflow/worker_origins.py` and `bioimageflow/env_manager.py` | One orchestrator-side origin model used by remote backends, without provisioning Parsl environments through Wetlands. |
 | `bioimageflow-core/bioimageflow_core/worker_protocol.py` | Python 3.9-safe task/result/origin envelopes, strict decoding, canonical origin identity, and preflight request/result values. |
-| `bioimageflow-core/bioimageflow_core/worker.py` | One strict origin loader, worker-instance cache, and top-level processing entry point used by Wetlands and Parsl. |
+| `bioimageflow-core/bioimageflow_core/worker_origins.py` | Strict origin loading and the origin-keyed worker-instance cache. |
+| `bioimageflow-core/bioimageflow_core/worker.py` | The top-level processing entry point used by Wetlands and Parsl. |
 | Package `__init__.py` files | Final explicit public exports and lazy optional-dependency behavior, without deprecated aliases. |
 | `tests/unit/parsl/` and `tests/integration/parsl/` | Focused Parsl value, lifecycle, routing, preflight, dispatch, semantics, and real-runtime tests. |
 | Existing focused test packages | Cross-engine regression coverage selected through `tests/ownership.toml`. |
@@ -1029,7 +1020,7 @@ Update `tests/unit/test_core_package_metadata.py` deliberately because its curre
 Only the orchestrator distribution may expose the `parsl` extra, and the core distribution must remain NumPy-only.
 Extend `tests/unit/test_package_artifacts.py` to inspect the built wheel metadata and verify that the base wheel imports without the extra.
 
-### 18.3 Proposed test ownership
+### 18.3 Test ownership
 
 Add a `parsl` area to `tests/ownership.toml`.
 It owns `bioimageflow/parsl/` and the dedicated Parsl tests.

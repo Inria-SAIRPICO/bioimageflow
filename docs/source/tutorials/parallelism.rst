@@ -1,25 +1,23 @@
 Parallelism
 ===========
 
-BioImageFlow has two local execution backends.
-The default ``engine="wetlands"`` runs :class:`~bioimageflow_core.ProcessingTool`
-methods in isolated worker processes and is the backend that supports row-level
-worker-process parallelism. This page covers the knobs that size those modes.
+BioImageFlow has direct, Wetlands, and Parsl execution backends.
+The default ``engine="wetlands"`` runs :class:`~bioimageflow_core.ProcessingTool` methods in isolated local worker processes.
+An explicitly attached :class:`~bioimageflow.ParslEngine` dispatches processing tasks through configured Parsl executors.
+This page covers the knobs that size these modes.
 
 What can run in parallel
 ------------------------
 
-Two sources of local concurrency are available:
+Two sources of concurrency are available:
 
-- **Independent DAG branches** run **concurrently**. Two ``ProcessingTool``
-  nodes with no unresolved dependencies may be scheduled at the same time
-  when ``execution="parallel"`` is used.
-- **Rows of a single ProcessingTool** run **in parallel** only with
-  ``engine="wetlands"``, across the worker processes of that tool's
-  environment pool. Pool sizing is controlled by ``max_workers`` (see below).
+- **Independent DAG branches** run **concurrently**.
+  Two ``ProcessingTool`` nodes with no unresolved dependencies may be scheduled at the same time when ``execution="parallel"`` is used.
+- **Rows of a single ProcessingTool** may run **in parallel** through Wetlands environment workers or Parsl executor slots.
+  Wetlands pool sizing is controlled by ``max_workers``.
+  Parsl submission is controlled by :class:`~bioimageflow.ParslTaskPolicy`, the tool's ``ResourceSpec.max_concurrent``, and executor capacity.
 
-DataFrameTools always run in the main process; their
-``transform`` / ``merge_dataframes`` calls are not parallelised.
+DataFrameTools always run in the orchestrator process; their ``transform`` and ``merge_dataframes`` calls are not submitted to workers.
 
 Workflow-level Wetlands baseline
 --------------------------------
@@ -101,12 +99,9 @@ Fields:
   meaning no limit beyond ``max_workers``).
 - ``memory`` — string hint for system memory.
 
-The Wetlands backend honours ``gpu``: when a tool's ``ResourceSpec`` has
-``gpu >= 1`` and no explicit ``worker_env`` is set on its environment,
-the backend auto-installs
-``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``. The Parsl
-engine is reserved for richer resource scheduling; the contract for
-``cpu`` / ``memory`` / ``max_concurrent`` lives with that implementation.
+The Wetlands backend honours ``gpu``: when a tool's ``ResourceSpec`` has ``gpu >= 1`` and no explicit ``worker_env`` is set on its environment, the backend auto-installs ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``.
+The Parsl backend validates ``cpu``, ``gpu``, ``memory``, and ``gpu_memory`` against the selected executor's attested worker-slot capacity.
+For Parsl row and chunk dispatch, ``max_concurrent`` bounds unfinished submissions for that node.
 
 worker_timeout
 --------------
@@ -176,6 +171,25 @@ Each worker sees ``CUDA_VISIBLE_DEVICES`` set to its zero-based index
 Parsl engine
 ------------
 
-The implemented engines are ``direct`` and ``wetlands``.
-``engine="parsl"`` is reserved for a distributed backend that will translate
-``ResourceSpec`` into Parsl resource requests when that backend is implemented.
+Parsl configuration is runtime-only and explicit.
+A workflow file may store ``engine="parsl"``, but execution requires a :class:`~bioimageflow.ParslEngine` built with a Config or caller-owned DataFlowKernel and exact executor bindings.
+
+.. code-block:: python
+
+   from bioimageflow import ParslEngine, ParslTaskPolicy
+
+   with ParslEngine(
+       parsl_config=config,
+       executor_bindings=bindings,
+       execution="parallel",
+       task_policy=ParslTaskPolicy(
+           row_chunk_size=8,
+           max_in_flight=64,
+       ),
+       resource_lifetime="engine",
+   ) as engine:
+       result = workflow.compute(engine=engine)
+
+The engine preflights selected executor labels and shared paths before processing submission.
+It preserves deterministic dataframe, cache, progress, failure, and cancellation semantics while futures may complete out of order.
+See :doc:`/reference/parsl` for binding, routing, lifecycle, and diagnostics details.

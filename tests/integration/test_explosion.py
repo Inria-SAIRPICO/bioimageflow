@@ -10,10 +10,31 @@ Covers:
 """
 
 
-from bioimageflow import Workflow
+import pandas as pd
+import pytest
+
+from bioimageflow import DataFrameTool, Workflow
 from bioimageflow_common_tools import Collect
+from bioimageflow_core import Arguments, IOModel
 
 from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubTiler
+
+
+class _ReservedIndexSource(DataFrameTool):
+    accepts_upstream = False
+
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(IOModel):
+        value: int
+
+    def transform(
+        self,
+        df: pd.DataFrame,
+        arguments: Arguments,
+    ) -> pd.DataFrame:
+        return pd.DataFrame({"value": [1]}, index=["root::0"])
 
 
 class TestBasicExplosion:
@@ -58,6 +79,13 @@ class TestBasicExplosion:
             # No explosion — original indices preserved
             for idx in df.index:
                 assert "::" not in str(idx)
+
+    def test_source_indexes_reject_reserved_separator(self, tmp_workspace):
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
+            source = _ReservedIndexSource()()
+
+        with pytest.raises(ValueError, match="reserved '::' separator"):
+            wf.compute(source)
 
 
 class TestExplosionAlignment:

@@ -319,7 +319,7 @@ def resolve_executor_routes(
     """Resolve every worker requirement using the normative priority order."""
     if storage_mode != "shared_fs":
         raise ParslRoutingError(
-            "Parsl Phase 1a routing supports only storage_mode='shared_fs'."
+            "Parsl routing supports only storage_mode='shared_fs'."
         )
     if isinstance(requirements, (str, bytes)) or not isinstance(
         requirements, Sequence

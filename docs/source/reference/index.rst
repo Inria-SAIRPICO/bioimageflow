@@ -10,6 +10,8 @@ Integrators trees.
    errors
    logging
    environments
+   parsl
+   parsl_acceptance
    testing
    platform_development
    releasing

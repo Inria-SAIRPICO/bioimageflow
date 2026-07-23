@@ -1,4 +1,4 @@
-"""Validation helpers and compatibility exports."""
+"""Public validation helpers."""
 
 # ruff: noqa: F401
 

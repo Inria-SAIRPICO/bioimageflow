@@ -32,6 +32,7 @@ edit_tests = [
     "tests/integration/test_compute_steps.py",
     "tests/integration/test_engine_injection.py",
     "tests/integration/test_execution_context.py",
+    "tests/unit/test_progress_serialization.py",
     "tests/integration/test_progress_monitoring.py",
     "tests/integration/test_resource_constraints.py",
     "tests/integration/test_wetlands_task_api.py",

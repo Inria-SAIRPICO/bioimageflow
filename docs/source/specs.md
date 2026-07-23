@@ -2239,6 +2239,8 @@ Normal lookup must not repair corrupt `current.json` silently, must not choose a
 V1 uses one current-record policy: `first-valid`.
 If two workers publish different records for the same result key, the first valid current record remains selected and later differing records are conflicts or alternates.
 Downstream execution must consume the selected current record, not a non-current candidate produced by the same run.
+Publication validates a complete private `records/.candidate.<attempt-id>.<nonce>/<record-id>/` tree before atomically renaming it into the immutable records namespace.
+Current selection uses an atomic hard-link create-if-absent operation; a losing publisher validates and loads the selected winner before continuing downstream.
 
 Each reusable record manifest stores `dataframe.logical_digest`, `dataframe.logical_schema`, and `dataframe.transport_digest`.
 Logical fields determine record identity.
@@ -2409,7 +2411,7 @@ workspace/
           <result-key>/
             attempts/
               <attempt-id>/
-                attempt.json              # optional runtime metadata
+                attempt.json
                 staging/
                   dataframe.parquet
                   dataframe.csv           # optional debug artifact
@@ -2433,6 +2435,15 @@ workspace/
                   assets/
                   work/
                   failed.json            # optional
+  diagnostics/
+    v1/
+      runs/
+        <run-id>/
+          nodes/
+            <node-key>/
+              <invocation-id>/
+                tasks/
+                  <task-id>.json
   views/
     runs/
       <run-id>/
@@ -2454,6 +2465,8 @@ workspace/
 `cache/v1/` is the canonical machine-readable cache root.
 Reusable records are immutable once published.
 Non-reusable `ProcessingTool` invocations use the confined `cache/v1/transient/runs/` tree, create no records or views, and remain until explicit writer-safe transient cleanup.
+Reusable attempts carry required running and terminal lifecycle metadata in `attempt.json`.
+Backend task metadata is terminalized after future observation under `diagnostics/v1/` and never contributes to result keys or immutable record IDs.
 `views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
 `outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)` or `Workflow.export_outputs(...)`.
@@ -2712,7 +2725,7 @@ thread.join()
 10. The engine emits `cancelled` progress and raises `WorkflowCancelledError`.
 
 Wetlands may additionally expose cooperative worker cancellation to tool code.
-Parsl worker-side cooperative cancellation is not part of Phase 1 correctness.
+Parsl does not support worker-side cooperative cancellation.
 
 ```python
 class MyTool(ProcessingTool):

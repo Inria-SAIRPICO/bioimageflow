@@ -219,7 +219,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTaskV1:
         raise ValueError(f"Unsupported processing task schema: {task['schema']!r}.")
     retry = _require_integer(task["task_retry"], "task_retry")
     if retry != 0:
-        raise ValueError("task_retry must be zero in Phase 1a.")
+        raise ValueError("task_retry must be zero.")
     mode = _require_mode(task["mode"])
     rows = _decode_rows(task["rows"], _decode_row_invocation, "task rows")
     batch_context = _decode_context(task["batch_context"], "batch context")
@@ -293,7 +293,7 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
         raise ValueError(f"Unsupported processing result schema: {result['schema']!r}.")
     retry = _require_integer(result["task_retry"], "task_retry")
     if retry != 0:
-        raise ValueError("task_retry must be zero in Phase 1a.")
+        raise ValueError("task_retry must be zero.")
     metrics = result["metrics"]
     if metrics is not None:
         metrics = _require_plain_dict(metrics, "result metrics")

@@ -1,4 +1,4 @@
-"""Shared cache dependencies and compatibility namespace."""
+"""Shared cache dependencies."""
 
 # Focused cache modules import the subset they need.
 # ruff: noqa: F401
