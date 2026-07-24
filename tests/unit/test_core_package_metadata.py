@@ -144,11 +144,16 @@ def test_core_declares_numpy_runtime_dependency() -> None:
     assert "zero dependencies" not in pyproject["project"]["description"].lower()
 
 
-def test_workspace_core_pin_matches_local_core_version() -> None:
+def test_workspace_core_requirement_matches_local_core_version() -> None:
     workspace = _pyproject(ROOT / "pyproject.toml")
     core = _pyproject(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
 
-    assert f"bioimageflow-core=={core['project']['version']}" in workspace["project"]["dependencies"]
+    [dependency] = workspace["project"]["dependencies"]
+    _assert_bounded_local_dependency(
+        dependency,
+        "bioimageflow-core",
+        core["project"]["version"],
+    )
 
 
 def test_first_party_package_versions_are_valid_stable_release_versions() -> None:

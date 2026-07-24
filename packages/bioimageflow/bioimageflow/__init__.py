@@ -11,7 +11,10 @@ from bioimageflow.workflow import (
     InvalidatedSelection as InvalidatedSelection,
     OutputView as OutputView,
 )
-from bioimageflow.storage import OutputViewCapability as OutputViewCapability
+from bioimageflow.storage import (
+    OutputViewCapability as OutputViewCapability,
+    export_outputs as export_outputs,
+)
 from bioimageflow.workflow_node import WorkflowNode as WorkflowNode
 from bioimageflow.engine import (
     DefaultEngine as DefaultEngine,
@@ -124,6 +127,7 @@ __all__ = [
     "configure_logging",
     "configure_wetlands",
     "deserialize_constant",
+    "export_outputs",
     "get_home",
     "get_inputs_schema",
     "get_tool_package_info",

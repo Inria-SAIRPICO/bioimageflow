@@ -56,6 +56,7 @@ PUBLIC_EXPORTS = {
     "configure_logging",
     "configure_wetlands",
     "deserialize_constant",
+    "export_outputs",
     "get_home",
     "get_inputs_schema",
     "get_tool_package_info",

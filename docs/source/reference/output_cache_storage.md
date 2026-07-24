@@ -78,14 +78,12 @@ All paths below are rooted at `Workflow.storage_path`.
   outputs/
     runs/
     latest/
-  provenance_graph.json
 ```
 
 `cache/v1/` is private machine-readable storage.
 `diagnostics/v1/` contains mutable backend-task execution metadata that is separate from reusable result identity.
 `views/` contains portable JSON provenance and pointer views.
 `outputs/` contains optional materialized files for human browsing.
-`provenance_graph.json` remains a workflow-level provenance artifact and is outside the cache namespace.
 
 ## Terms and Identifiers
 
@@ -676,7 +674,19 @@ views/runs/<run-id>/
   "result_key": "rk_...",
   "record_id": "rec_...",
   "cache_hit": true,
-  "canonical": "../../../../cache/v1/results/ab/cd/rk_.../records/rec_..."
+  "canonical": "../../../../cache/v1/results/ab/cd/rk_.../records/rec_...",
+  "provenance": {
+    "kind": "processing_tool",
+    "tool": {
+      "module": "example_tools",
+      "class": "Segment",
+      "version": "1.2.0"
+    },
+    "logical_digest": "...",
+    "environment_hash": "...",
+    "parameters": {},
+    "inputs": {}
+  }
 }
 ```
 
@@ -763,7 +773,7 @@ Pointer targets should use normalized relative paths when possible.
 Output pointer targets resolve to the selected canonical record's owned assets, not to attempt staging directories or a separate run-local record copy.
 The canonical run view preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json` beneath `views/runs/<run-id>/nodes/<node-key>/`.
 
-`Workflow(output_view=...)` and `Workflow.export_outputs(...)` may materialize owned assets under `outputs/runs/` and `outputs/latest/`.
+`Workflow(output_view=...)`, `Workflow.export_outputs(...)`, and `bioimageflow.export_outputs(...)` may materialize complete node exports under `outputs/runs/` and `outputs/latest/`.
 `OutputView.mode` supports `none`, `pointer`, `symlink`, `copy`, and `hardlink`.
 `none` creates no disposable `outputs/` projection and leaves only the canonical portable JSON pointers under `views/`.
 `pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; their relative targets are validated and confined to the workflow storage root.
@@ -772,6 +782,7 @@ The canonical run view preserves the record-relative asset path from the selecte
 
 The `outputs/runs/<run-id>/nodes/<node-key>/outputs/` hierarchy is record-relative for every materialization mode.
 For example, `assets/mask.tif` is materialized there as `outputs/assets/mask.tif` or, in pointer mode, `outputs/assets/mask.tif.bioimageflow-link.json`.
+The node output directory also contains `dataframe.parquet`, `dataframe.csv`, `dataframe.json`, and `provenance.json`.
 
 For an owned directory, `pointer` creates one directory pointer, `symlink` links the directory root, `copy` recursively copies its validated tree, and `hardlink` creates directories and hard-links each regular file.
 The `hardlink` mode never attempts to hard-link a directory itself.
@@ -791,6 +802,7 @@ Exactly one leading `assets/` is stripped.
 Everything after it is preserved, while a safe manifest path that does not begin with `assets/` is mapped in full beneath the node directory.
 Scoped node paths used by recursive workflows form part of the node layer beneath `outputs/latest/`.
 The complete mapped path set is validated before materialization, including collision and file/directory-prefix checks.
+The names `dataframe.parquet`, `dataframe.csv`, `dataframe.json`, and `provenance.json` are reserved at the root of each latest node export.
 
 Each latest node tree is built and fully materialized in a temporary sibling directory before installation.
 Installation publishes exactly the complete mapped output set for that node.
@@ -803,11 +815,24 @@ Linked outputs refer to canonical cached files and should be treated as read-onl
 Copied outputs are independent but require additional storage.
 Materialized files are disposable human-facing outputs and are not canonical cache records.
 
+The selected record's canonical `dataframe.parquet` follows the requested pointer, symlink, copy, or hardlink mode.
+The readable `dataframe.csv` and versioned split-orientation `dataframe.json` are derived regular files.
+In the latest view, their owned-asset values are rewritten to the same paths produced by stripping the leading `assets/`.
+`provenance.json` consolidates run metadata, node computation metadata, selected upstream record references and selectors, record identity, dataframe metadata, and declared outputs.
+This overlap with `run.json`, node `result.json`, and record `manifest.json` is deliberate because a copied export must remain explainable outside the canonical cache tree.
+
 `Storage.probe_output_view_mode(mode: str) -> OutputViewCapability` probes beneath the actual `Storage.storage_path` and returns one of the stable diagnostic codes `ok`, `permission_denied`, `filesystem_unsupported`, `invalid_mode`, or `io_error`.
 The probe verifies both file and directory symlinks are readable, tests hardlinks only with files, exercises copy and pointer creation, and cleans its artifacts without changing cache or output selection state.
 The library does not define an automatic fallback mode; platform callers choose fallback policy.
 
-`Workflow.export_outputs(...)` is an explicit operation and raises if the requested materialization cannot be produced.
+`Workflow.export_outputs(...)` and `bioimageflow.export_outputs(...)` are explicit operations and raise if the requested materialization cannot be produced.
+The top-level function accepts only a storage path and defaults to a latest copy, making it suitable for the CLI:
+
+```bash
+bioimageflow export-outputs <storage-path>
+bioimageflow export-outputs <storage-path> --mode copy --scope runs --run-id <run-id>
+```
+
 Automatic disposable output-view materialization logs a warning and does not turn a successfully computed workflow into a failed computation.
 
 ## Invalidation, Retention, and Transient Cleanup

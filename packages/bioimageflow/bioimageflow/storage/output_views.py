@@ -10,6 +10,7 @@ from typing import Literal
 from .common import (
     Any,
     LINK_SCHEMA,
+    OUTPUT_PROVENANCE_SCHEMA,
     Path,
     _OUTPUT_VIEW_MODES,
     errno,
@@ -18,6 +19,7 @@ from .common import (
     shutil,
     unicodedata,
     uuid,
+    pd,
 )
 from .models import (
     CacheCorruptionError,
@@ -34,6 +36,10 @@ from .identity import (
 
 
 class _OutputViewsMixin:
+    _EXPORT_METADATA_NAMES = frozenset(
+        {"dataframe.parquet", "dataframe.csv", "dataframe.json", "provenance.json"}
+    )
+
     def probe_output_view_mode(self, mode: str) -> OutputViewCapability:
         """Probe an output-view mode on the workflow storage filesystem."""
         value = str(mode)
@@ -339,6 +345,14 @@ class _OutputViewsMixin:
             )
             self._materialize_path(asset_path, destination, mode, output=output)
             materialized.append(destination)
+        materialized.extend(
+            self._materialize_node_metadata(
+                payload,
+                outputs_destination,
+                mode,
+                simplify_latest=False,
+            )
+        )
         return materialized
 
     def _replace_latest_node_outputs(
@@ -364,6 +378,13 @@ class _OutputViewsMixin:
             for asset_path, relative, output in planned:
                 destination = self._materialized_destination(temporary / relative, mode)
                 self._materialize_path(asset_path, destination, mode, output=output)
+                relative_destinations.append(destination.relative_to(temporary))
+            for destination in self._materialize_node_metadata(
+                payload,
+                temporary,
+                mode,
+                simplify_latest=True,
+            ):
                 relative_destinations.append(destination.relative_to(temporary))
 
             if node_destination.exists() or node_destination.is_symlink():
@@ -405,6 +426,10 @@ class _OutputViewsMixin:
         manifest = self._load_record_manifest(result_key, record_id)
         planned: list[tuple[Path, str, dict[str, Any]]] = []
         portable_paths: dict[str, str] = {}
+        if simplify_latest:
+            portable_paths.update(
+                (name.casefold(), name) for name in self._EXPORT_METADATA_NAMES
+            )
         for output in manifest.outputs:
             if output.get("kind") != "owned_asset":
                 continue
@@ -444,6 +469,101 @@ class _OutputViewsMixin:
                 )
             planned.append((asset_path, mapped_relative, output))
         return planned
+
+    def _materialize_node_metadata(
+        self,
+        payload: dict[str, Any],
+        destination: Path,
+        mode: str,
+        *,
+        simplify_latest: bool,
+    ) -> list[Path]:
+        """Export the canonical dataframe, readable tables, and provenance."""
+        result_key = str(payload["result_key"])
+        record_id = _validate_record_id(str(payload["record_id"]))
+        record_dir = self.result_dir(result_key) / "records" / record_id
+        manifest = self._load_record_manifest(result_key, record_id)
+        parquet_source = record_dir / "dataframe.parquet"
+        parquet_destination = self._materialized_destination(
+            destination / "dataframe.parquet",
+            mode,
+        )
+        self._materialize_path(
+            parquet_source,
+            parquet_destination,
+            mode,
+            output={"digest": manifest.dataframe_transport_digest},
+        )
+
+        frame = pd.read_parquet(parquet_source)
+        if simplify_latest:
+            replacements = {
+                str(output["path"]): str(output["path"]).removeprefix("assets/")
+                for output in manifest.outputs
+                if output.get("kind") == "owned_asset"
+                and str(output.get("path", "")).startswith("assets/")
+            }
+            if replacements:
+                for column in manifest.dataframe_logical_schema:
+                    name = str(column["name"])
+                    if column.get("kind") == "record_asset" and name in frame.columns:
+                        frame[name] = frame[name].replace(replacements)
+
+        csv_path = destination / "dataframe.csv"
+        frame.to_csv(csv_path, index=True)
+        serialized_frame = frame.to_json(
+            orient="split",
+            date_format="iso",
+            date_unit="us",
+        )
+        if serialized_frame is None:
+            raise CacheCorruptionError("Could not serialize the exported dataframe.")
+        split_payload = json.loads(serialized_frame)
+        dataframe_json_path = destination / "dataframe.json"
+        _atomic_write_json(
+            dataframe_json_path,
+            {
+                "schema": "bioimageflow.dataframe_export.v1",
+                "orient": "split",
+                **split_payload,
+            },
+            stem="dataframe-export",
+        )
+
+        run = self._load_run_metadata(str(payload["run_id"]))
+        provenance_path = destination / "provenance.json"
+        _atomic_write_json(
+            provenance_path,
+            {
+                "schema": OUTPUT_PROVENANCE_SCHEMA,
+                "run": {
+                    key: run.get(key)
+                    for key in (
+                        "run_id",
+                        "workflow_identity",
+                        "started_at",
+                        "completed_at",
+                        "engine",
+                        "bioimageflow_version",
+                        "status",
+                    )
+                },
+                "node_key": payload["node_key"],
+                "cache_hit": bool(payload["cache_hit"]),
+                "result_key": result_key,
+                "record_id": record_id,
+                "computation": payload.get("provenance"),
+                "dataframe": manifest.to_dict()["dataframe"],
+                "outputs": list(manifest.outputs),
+            },
+            stem="provenance",
+        )
+        return [
+            parquet_destination,
+            csv_path,
+            dataframe_json_path,
+            provenance_path,
+        ]
 
     @staticmethod
     def _materialized_destination(destination: Path, mode: str) -> Path:

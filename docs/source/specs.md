@@ -16,6 +16,8 @@ BioImageFlow targets Python `>=3.10` for the orchestrator and first-party tool p
 `bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
 First-party packages are versioned independently and declare bounded compatibility requirements for other first-party distributions they use.
 The repository root project is workspace-only: it exists to coordinate local package development and documentation, not as a runtime package imported by users.
+Its `dev` dependency group therefore installs the workspace members and repository-only test, lint, and documentation tools.
+Runtime dependencies belong in the `[project].dependencies` table of each distributable package, where every third-party requirement declares an explicit compatible lower bound.
 Package-local documentation is source-only and is not part of the installed runtime API.
 Public package exports are explicit through each package's `__all__`; names not exported there are internal unless documented otherwise.
 
@@ -2459,7 +2461,6 @@ workspace/
   outputs/
     runs/
     latest/
-  provenance_graph.json
 ```
 
 `cache/v1/` is the canonical machine-readable cache root.
@@ -2469,7 +2470,7 @@ Reusable attempts carry required running and terminal lifecycle metadata in `att
 Backend task metadata is terminalized after future observation under `diagnostics/v1/` and never contributes to result keys or immutable record IDs.
 `views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
-`outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)` or `Workflow.export_outputs(...)`.
+`outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(output_view=...)`, `Workflow.export_outputs(...)`, the top-level `bioimageflow.export_outputs(...)` function, or the `bioimageflow export-outputs` CLI.
 Supported materialization modes are `pointer`, `symlink`, `copy`, and `hardlink`; `none` creates no `outputs/` projection and leaves only the canonical portable pointers under `views/`.
 `pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; `symlink`, `copy`, and `hardlink` use the corresponding filesystem operations.
 The canonical `cache/v1/`, `views/runs/`, and `views/latest/` layouts use record-relative paths.
@@ -2480,6 +2481,38 @@ A latest node tree is fully built and validated in a temporary sibling before it
 If materialization or installation fails, the currently published node tree stays usable or is restored; this is a failure-safety guarantee rather than a promise of filesystem-level atomic directory replacement.
 Linked outputs refer to canonical cached files and should be treated as read-only, while copied outputs require additional storage.
 Materialized files are disposable and are not canonical cache records.
+
+Every materialized node output contains its declared assets plus the following data and explanation files:
+
+```text
+dataframe.parquet
+dataframe.csv
+dataframe.json
+provenance.json
+```
+
+`dataframe.parquet` is the selected record's canonical table and follows the requested pointer, symlink, copy, or hardlink mode.
+`dataframe.csv` and `dataframe.json` are derived readable exports written as regular files; the JSON representation uses an explicitly versioned split orientation.
+For latest output views, owned-asset values in the readable table exports use the same simplified paths as the latest asset tree.
+`provenance.json` is a self-contained explanation artifact assembled from the immutable record manifest and the run view.
+It records the run and node identity, tool module/class/version, normalized parameters, environment and logical digests, cache-hit status, selected upstream result/record references and selectors, dataframe metadata, and declared outputs.
+This intentionally overlaps `run.json`, node `result.json`, and the immutable record `manifest.json`: those files retain their canonical storage roles, while `provenance.json` makes a copied output understandable without navigating back into the cache.
+
+The standalone copy API and CLI do not require reconstructing or loading the original workflow:
+
+```python
+from bioimageflow import export_outputs
+
+export_outputs("./bif_data", mode="copy", scope="latest")
+```
+
+```bash
+bioimageflow export-outputs ./bif_data
+bioimageflow export-outputs ./bif_data --scope runs --run-id run_...
+```
+
+The function and CLI default to `mode="copy"` and `scope="latest"`.
+`Workflow.export_outputs(...)` retains its existing `mode="symlink"` default for API compatibility.
 
 `run.json` records the effective injected backend and effective parallel or sequential scheduling policy.
 The active `WorkflowExecutionContext` run ID is used consistently in attempt diagnostics, transient invocation diagnostics, guarded selection provenance, and run views, but never in result-key or record-ID material.

@@ -493,25 +493,15 @@ class _RuntimeMixin:
         scope: Literal["latest", "runs", "both"] = "latest",
         run_id: str | None = None,
     ) -> list[Path]:
-        """Materialize human-facing output files from the portable JSON views."""
-        if scope not in {"latest", "runs", "both"}:
-            raise ValueError(
-                "Invalid output_view scope. Expected 'latest', 'runs', or 'both'."
-            )
-        from bioimageflow.storage import CacheCorruptionError, Storage
+        """Materialize assets, dataframes, and provenance from portable run views."""
+        from bioimageflow.storage import export_outputs
 
-        storage = Storage(self.storage_path)
-        materialized: list[Path] = []
-        if scope in {"latest", "both"}:
-            materialized.extend(storage.materialize_latest_outputs(mode))
-        if scope in {"runs", "both"}:
-            selected_run_id = run_id or storage.latest_success_run_id()
-            if selected_run_id is None:
-                raise CacheCorruptionError(
-                    "No successful run view is available for output export."
-                )
-            materialized.extend(storage.materialize_run_outputs(selected_run_id, mode))
-        return materialized
+        return export_outputs(
+            self.storage_path,
+            mode=mode,
+            scope=scope,
+            run_id=run_id,
+        )
 
     def _auto_export_outputs(
         self,
@@ -519,6 +509,7 @@ class _RuntimeMixin:
         *,
         latest_node: str | None = None,
         runs: bool,
+        latest_all: bool = False,
     ) -> None:
         output_view = self.output_view
         if output_view is None or output_view.mode == "none":
@@ -529,6 +520,8 @@ class _RuntimeMixin:
         try:
             if latest_node is not None and output_view.scope in {"latest", "both"}:
                 storage.materialize_latest_node_outputs(latest_node, output_view.mode)
+            if latest_all and output_view.scope in {"latest", "both"}:
+                storage.materialize_latest_outputs(output_view.mode)
             if runs and output_view.scope in {"runs", "both"}:
                 storage.materialize_run_outputs(run_id, output_view.mode)
         except Exception:
@@ -607,8 +600,12 @@ class _RuntimeMixin:
         )
         if update_latest_success:
             storage.update_latest_success_run(run_id)
-        if status == "succeeded":
-            self._auto_export_outputs(run_id, latest_node=None, runs=True)
+        self._auto_export_outputs(
+            run_id,
+            latest_node=None,
+            runs=status == "succeeded",
+            latest_all=True,
+        )
 
     def _workflow_identity(self, target_nodes: list[str]) -> str:
         payload = {

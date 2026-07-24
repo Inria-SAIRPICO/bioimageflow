@@ -168,6 +168,26 @@ make html
 open build/html/index.html
 ```
 
+## Exporting Results
+
+Every reusable node record stores its complete DataFrame and declared assets.
+To create a self-contained copy of the latest human-facing results after a workflow has run:
+
+```bash
+bioimageflow export-outputs ./bif_data
+```
+
+The same operation is available without reconstructing the workflow:
+
+```python
+from bioimageflow import export_outputs
+
+paths = export_outputs("./bif_data", mode="copy", scope="latest")
+```
+
+Each node directory includes the declared assets, canonical `dataframe.parquet`, readable `dataframe.csv` and `dataframe.json` exports, and a `provenance.json` explanation containing the tool/version, parameters, selected upstream records, cache identities, and run metadata.
+Use `--scope runs --run-id <run-id>` to export a particular run, or `--scope both` to export both the latest node view and a run view.
+
 ## Development
 
 The full test workflow is documented in `docs/source/reference/testing.md`.

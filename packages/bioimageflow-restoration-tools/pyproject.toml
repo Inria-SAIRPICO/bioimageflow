@@ -22,8 +22,8 @@ classifiers = [
 ]
 dependencies = [
     "bioimageflow-core>=0.1.6,<0.2",
-    "imageio",
-    "numpy",
+    "imageio>=2.31.0",
+    "numpy>=1.23.5",
 ]
 
 [project.urls]

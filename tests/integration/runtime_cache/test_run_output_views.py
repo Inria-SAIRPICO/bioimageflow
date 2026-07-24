@@ -10,7 +10,7 @@ import pandas as pd
 
 import pytest
 
-from bioimageflow import ProgressEvent, Workflow
+from bioimageflow import ProgressEvent, Workflow, export_outputs
 
 from bioimageflow.storage import (
     Storage,
@@ -18,6 +18,7 @@ from bioimageflow.storage import (
 
 from tests.testkit.runtime_cache import (
     CountingTable,
+    DoubleValue,
     FailingDataFrameTool,
     SourceAssetWriter,
     _current_pointer_files,
@@ -212,6 +213,9 @@ def test_compute_with_output_view_materializes_latest_outputs(tmp_path: Path) ->
 
     assert latest_output.read_text() == "visible"
     assert not latest_output.is_symlink()
+    provenance = json.loads((latest_output.parent / "provenance.json").read_text())
+    assert provenance["run"]["status"] == "succeeded"
+    assert provenance["run"]["completed_at"] is not None
     assert (
         storage_path / "views" / "latest" / f"{node_name}.bioimageflow-link.json"
     ).exists()
@@ -257,8 +261,44 @@ def test_export_outputs_materializes_after_compute(tmp_path: Path) -> None:
         materialized = wf.export_outputs(mode="copy", scope="latest")
 
     output_path = storage_path / "outputs" / "latest" / node_name / "mask_0.txt"
-    assert materialized == [output_path]
+    assert materialized == [
+        output_path,
+        output_path.parent / "dataframe.parquet",
+        output_path.parent / "dataframe.csv",
+        output_path.parent / "dataframe.json",
+        output_path.parent / "provenance.json",
+    ]
     assert output_path.read_text() == "manual"
+    exported = json.loads((output_path.parent / "dataframe.json").read_text())
+    assert exported["columns"] == ["mask", "count"]
+    assert exported["data"][0][0] == "mask_0.txt"
+    provenance = json.loads((output_path.parent / "provenance.json").read_text())
+    assert provenance["computation"]["tool"]["class"] == "SourceAssetWriter"
+
+
+def test_exported_provenance_identifies_selected_upstream_record(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        source = CountingTable()(value=9)
+        derived = DoubleValue()(source)
+        wf.compute(derived)
+        wf.export_outputs(mode="copy", scope="latest")
+
+    provenance = json.loads(
+        (
+            storage_path
+            / "outputs"
+            / "latest"
+            / derived.name
+            / "provenance.json"
+        ).read_text()
+    )
+    [provider] = provenance["computation"]["inputs"]["argument_0"]["providers"]
+    assert provider["provider"]["node_key"] == source.name
+    assert provider["provider"]["result_key"].startswith("rk_")
+    assert provider["provider"]["record_id"].startswith("rec_")
 
 
 def test_export_run_outputs_uses_latest_success_pointer(tmp_path: Path) -> None:
@@ -269,8 +309,7 @@ def test_export_run_outputs_uses_latest_success_pointer(tmp_path: Path) -> None:
         wf.compute(node)
         node_name = node.name
 
-    exporter = Workflow(engine="direct", storage_path=storage_path)
-    materialized = exporter.export_outputs(mode="copy", scope="runs")
+    materialized = export_outputs(storage_path, mode="copy", scope="runs")
 
     [run_dir] = _run_dirs(storage_path)
     output_path = (
@@ -284,7 +323,13 @@ def test_export_run_outputs_uses_latest_success_pointer(tmp_path: Path) -> None:
         / "assets"
         / "mask_0.txt"
     )
-    assert materialized == [output_path]
+    assert materialized == [
+        output_path,
+        output_path.parents[1] / "dataframe.parquet",
+        output_path.parents[1] / "dataframe.csv",
+        output_path.parents[1] / "dataframe.json",
+        output_path.parents[1] / "provenance.json",
+    ]
     assert output_path.read_text() == "latest-success"
 
 

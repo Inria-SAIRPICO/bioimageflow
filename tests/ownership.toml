@@ -124,10 +124,13 @@ precommit_suites = ["unit", "integration"]
 name = "platform-foundation"
 sources = [
     "packages/bioimageflow/bioimageflow/__init__.py",
+    "packages/bioimageflow/bioimageflow/cli.py",
     "packages/bioimageflow/bioimageflow/logging_config.py",
     "packages/bioimageflow/bioimageflow/paths.py",
 ]
 edit_tests = [
+    "tests/unit/test_cli.py",
+    "tests/unit/test_dependency_metadata.py",
     "tests/unit/test_logging_config.py",
     "tests/unit/test_workflow_clean_api.py",
     "tests/unit/test_worker_safe_tool_imports.py",

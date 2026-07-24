@@ -35,6 +35,7 @@ RECORD_SCHEMA = "bioimageflow.cache.record.v1"
 LINK_SCHEMA = "bioimageflow.link.v1"
 RUN_SCHEMA = "bioimageflow.run.v1"
 RUN_NODE_RESULT_SCHEMA = "bioimageflow.run.node_result.v1"
+OUTPUT_PROVENANCE_SCHEMA = "bioimageflow.output_provenance.v1"
 
 _RESERVED_NAMES = {
     "con",

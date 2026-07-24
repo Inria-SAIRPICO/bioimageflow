@@ -66,6 +66,7 @@ class _RunViewsMixin:
         result_key: str,
         record_id: str,
         cache_hit: bool,
+        provenance: dict[str, Any] | None = None,
     ) -> Path:
         """Write a run-local view over one immutable record."""
         safe_run_id = _validate_path_segment(run_id, label="Run ID")
@@ -86,6 +87,8 @@ class _RunViewsMixin:
             "canonical": canonical,
             "outputs": list(manifest.outputs),
         }
+        if provenance is not None:
+            payload["provenance"] = provenance
         result_path = node_dir / "result.json"
         _atomic_write_json(result_path, payload, stem="result")
         self._write_link(
@@ -182,6 +185,9 @@ class _RunViewsMixin:
             raise CacheCorruptionError(
                 "Run node result outputs do not match the selected record manifest."
             )
+        provenance = payload.get("provenance")
+        if provenance is not None and not isinstance(provenance, dict):
+            raise CacheCorruptionError("Run node provenance must be a JSON object.")
         expected_canonical = self._relative_target(result_path, record_dir)
         if payload.get("canonical") != expected_canonical:
             raise CacheCorruptionError("Run node result canonical path mismatch.")

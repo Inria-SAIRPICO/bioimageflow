@@ -3,39 +3,39 @@ name = "bioimageflow-workspace"
 version = "0.0.1"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core==0.1.7",
+    "bioimageflow-core>=0.1.7,<0.2",
 ]
 
 [dependency-groups]
 dev = [
-    "bioimageflow",
-    "bioimageflow-common-tools",
-    "bioimageflow-io-tools",
-    "bioimageflow-measurement-tools",
-    "bioimageflow-segmentation-tools",
-    "bioimageflow-sairpico-tools",
-    "bioimageflow-restoration-tools",
-    "bioimageflow-spot-tools",
-    "bioimageflow-tracking-tools",
+    "bioimageflow>=0.1.8",
+    "bioimageflow-common-tools>=0.1.6",
+    "bioimageflow-io-tools>=0.1.6",
+    "bioimageflow-measurement-tools>=0.1.6",
+    "bioimageflow-segmentation-tools>=0.1.6",
+    "bioimageflow-sairpico-tools>=0.1.6",
+    "bioimageflow-restoration-tools>=0.1.6",
+    "bioimageflow-spot-tools>=0.1.6",
+    "bioimageflow-tracking-tools>=0.1.6",
     "furo>=2025.12.19",
-    "imageio",
-    "numpy",
-    "packaging",
+    "imageio>=2.31.0",
+    "numpy>=1.23.5",
+    "packaging>=24.0",
     "parsl>=2026.5.25,<2026.6",
-    "pytest",
-    "tifffile",
+    "pytest>=8.0",
+    "tifffile>=2023.7.10",
     "sphinx>=8.1.3",
     "sphinx-autobuild>=2024.10.3",
     "sphinx-autodoc-typehints>=3.0.1",
     "sphinx-copybutton>=0.5.2",
     "myst-parser>=4.0.0",
-    "tomli; python_version < '3.11'",
+    "tomli>=2.0.1; python_version < '3.11'",
     "ruff>=0.15.7",
     "pyright>=1.1.410",
     "pyyaml>=6.0.3",
-    "scikit-image",
+    "scikit-image>=0.21.0",
     "ipython>=8.38.0",
-    "wetlands",
+    "wetlands>=1.1.4",
 ]
 
 [tool.uv.workspace]

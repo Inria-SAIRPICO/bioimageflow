@@ -14,8 +14,10 @@ from .common import (
     _shared_array_output_columns,
     canonical_dataframe_digest,
     compute_env_hash,
+    deterministic_serialize,
     dataframe_lookup,
     dataframe_result_key,
+    json,
     pd,
     processing_lookup,
     processing_result_key,
@@ -57,17 +59,89 @@ class _CacheRuntimeMixin:
             return
         run_id = str(context["run_id"])
         node_key = node.name
+        provenance = self._node_output_provenance(
+            workflow,
+            node,
+            sig_hash,
+            run_id=run_id,
+            storage=storage,
+        )
         storage.write_run_node_result(
             run_id,
             node_key,
             result_key=result_key,
             record_id=pointer.record_id,
             cache_hit=cache_hit,
+            provenance=provenance,
         )
         storage.update_latest_node(node_key, run_id)
         auto_export = getattr(workflow, "_auto_export_outputs", None)
         if auto_export is not None:
             auto_export(run_id, latest_node=node_key, runs=False)
+
+    def _node_output_provenance(
+        self,
+        workflow: Any,
+        node: Node,
+        sig_hash: str,
+        *,
+        run_id: str,
+        storage: Storage,
+    ) -> dict[str, Any]:
+        """Describe a node computation and its selected input records."""
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.engine.provenance import resolve_provenance_recipe
+        from bioimageflow.validation import get_tool_version
+
+        environment_hash = ""
+        if isinstance(node.tool, DataFrameTool):
+            _arguments, parameters = self._resolve_constant_arguments(node)
+            for index, argument in enumerate(node._args):
+                if isinstance(argument, pd.DataFrame):
+                    parameters[f"workflow_dataframe_input_{index}"] = (
+                        canonical_dataframe_digest(argument)
+                    )
+            input_recipes = self._dataframe_upstream_recipes(node)
+            kind = "dataframe_tool"
+        elif isinstance(node.tool, ProcessingTool):
+            environment_hash = compute_env_hash(node.tool.environment.dependencies)
+            input_recipes = self._processing_upstream_recipes(node)
+            if node._column_bindings:
+                parameters = self._processing_signature_params(
+                    node,
+                    node.tool.Inputs._get_all_annotations(),
+                )
+            else:
+                parameters = source_processing_signature_material(node)
+            kind = "processing_tool"
+        else:
+            raise TypeError(f"Unsupported provenance tool: {type(node.tool).__name__}")
+
+        def select_provider(provider: Node) -> dict[str, str] | None:
+            selected = storage._validate_run_node_view(run_id, provider.name)
+            return {
+                "node_key": provider.name,
+                "result_key": str(selected["result_key"]),
+                "record_id": str(selected["record_id"]),
+            }
+
+        inputs: dict[str, Any] = {}
+        for binding, recipe in input_recipes:
+            resolved = resolve_provenance_recipe(recipe, select_provider)
+            if resolved is not None:
+                inputs[binding] = resolved
+        return {
+            "kind": kind,
+            "tool": {
+                "module": type(node.tool).__module__,
+                "class": type(node.tool).__qualname__,
+                "version": get_tool_version(node.tool),
+            },
+            "logical_digest": sig_hash,
+            "environment_hash": environment_hash,
+            "parameters": json.loads(deterministic_serialize(parameters)),
+            "inputs": inputs,
+        }
 
     def _selected_record_id(self, workflow: Any, result_key: str) -> str | None:
         pointer = Storage(workflow.storage_path).load_current(result_key)

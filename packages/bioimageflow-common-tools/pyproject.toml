@@ -23,10 +23,10 @@ classifiers = [
 dependencies = [
     "bioimageflow-core>=0.1.6,<0.2",
     "bioimageflow>=0.1.6,<0.2",
-    "imageio",
-    "numpy",
-    "pandas",
-    "pillow",
+    "imageio>=2.31.0",
+    "numpy>=1.23.5",
+    "pandas>=2.0.0",
+    "pillow>=9.5.0",
 ]
 
 [project.urls]

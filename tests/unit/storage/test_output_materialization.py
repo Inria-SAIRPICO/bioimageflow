@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-
 import json
 
-
 from pathlib import Path
-
 
 import pytest
 
@@ -22,6 +19,20 @@ from tests.testkit.storage import (
     _file_digest,
     _write_record,
 )
+
+
+def _metadata_paths(root: Path, mode: str = "copy") -> list[Path]:
+    parquet_name = (
+        "dataframe.parquet.bioimageflow-link.json"
+        if mode == "pointer"
+        else "dataframe.parquet"
+    )
+    return [
+        root / parquet_name,
+        root / "dataframe.csv",
+        root / "dataframe.json",
+        root / "provenance.json",
+    ]
 
 
 def test_materialize_latest_outputs_copies_owned_assets(tmp_path: Path) -> None:
@@ -59,10 +70,18 @@ def test_materialize_latest_outputs_copies_owned_assets(tmp_path: Path) -> None:
 
     materialized = storage.materialize_latest_outputs("copy")
 
-    output_path = tmp_path / "outputs" / "latest" / "Segment_1" / "mask.tif"
-    assert materialized == [output_path]
+    output_root = tmp_path / "outputs" / "latest" / "Segment_1"
+    output_path = output_root / "mask.tif"
+    assert materialized == [output_path, *_metadata_paths(output_root)]
     assert output_path.read_bytes() == b"mask"
     assert not output_path.is_symlink()
+    assert json.loads((output_root / "dataframe.json").read_text())["schema"] == (
+        "bioimageflow.dataframe_export.v1"
+    )
+    provenance = json.loads((output_root / "provenance.json").read_text())
+    assert provenance["schema"] == "bioimageflow.output_provenance.v1"
+    assert provenance["result_key"] == result_key
+    assert provenance["record_id"] == record_id
 
 
 def test_latest_output_mapping_preserves_nested_manifest_and_scoped_paths(
@@ -109,8 +128,9 @@ def test_latest_output_mapping_preserves_nested_manifest_and_scoped_paths(
     assert materialized == [
         latest_node / "masks" / "nuclei" / "t051.tiff",
         latest_node / "reports" / "results" / "table.csv",
+        *_metadata_paths(latest_node),
     ]
-    assert all(path.read_bytes() == b"mask" for path in materialized)
+    assert all(path.read_bytes() == b"mask" for path in materialized[:2])
 
 
 def test_latest_output_mapping_rejects_collisions_before_replacement(
@@ -218,8 +238,10 @@ def test_pointer_mode_uses_simplified_latest_and_unchanged_run_paths(
         / "masks"
         / "t051.tiff.bioimageflow-link.json"
     )
-    assert latest == [latest_path]
-    assert runs == [run_path]
+    latest_root = tmp_path / "outputs" / "latest" / "Segment_1"
+    run_root = run_path.parents[2]
+    assert latest == [latest_path, *_metadata_paths(latest_root, "pointer")]
+    assert runs == [run_path, *_metadata_paths(run_root, "pointer")]
     for pointer_path in [latest_path, run_path]:
         pointer = json.loads(pointer_path.read_text())
         assert pointer["schema"] == "bioimageflow.link.v1"
@@ -269,7 +291,8 @@ def test_latest_link_and_copy_modes_use_simplified_path(
     )
     storage.update_latest_node("Segment_1", f"run_{mode}")
 
-    [output_path] = storage.materialize_latest_outputs(mode)
+    [output_path, *metadata] = storage.materialize_latest_outputs(mode)
+    assert metadata == _metadata_paths(output_path.parents[1], mode)
 
     assert (
         output_path
@@ -337,7 +360,7 @@ def test_materialize_run_outputs_symlinks_owned_assets(tmp_path: Path) -> None:
         / "assets"
         / "mask.tif"
     )
-    assert materialized == [output_path]
+    assert materialized == [output_path, *_metadata_paths(output_path.parents[1], "symlink")]
     assert output_path.is_symlink()
     assert output_path.read_bytes() == b"mask"
 
@@ -393,7 +416,7 @@ def test_materialize_run_outputs_hardlinks_owned_files(tmp_path: Path) -> None:
     source_path = (
         storage.result_dir(result_key) / "records" / record_id / "assets" / "mask.tif"
     )
-    assert materialized == [output_path]
+    assert materialized == [output_path, *_metadata_paths(output_path.parents[1], "hardlink")]
     assert output_path.read_bytes() == b"mask"
     assert output_path.stat().st_ino == source_path.stat().st_ino
 
@@ -436,7 +459,8 @@ def test_materialize_latest_outputs_supports_directory_assets(
     )
     storage.update_latest_node("Directory_1", "run_directory")
 
-    [materialized] = storage.materialize_latest_outputs(mode)
+    [materialized, *metadata] = storage.materialize_latest_outputs(mode)
+    assert metadata == _metadata_paths(materialized.parent, mode)
 
     if mode == "pointer":
         payload = json.loads(materialized.read_text())

@@ -28,6 +28,7 @@ from bioimageflow_core.environment import EnvironmentMismatchError
 from bioimageflow.cache import (
     compute_env_hash,
     compute_signature_hash,
+    deterministic_serialize,
     dataframe_lookup,
     dataframe_publish,
     dataframe_result_key,
