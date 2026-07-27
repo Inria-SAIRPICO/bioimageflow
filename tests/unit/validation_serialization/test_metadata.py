@@ -119,7 +119,7 @@ class TestSerializeToolMetadata:
 
 
 class TestSerializeResolvedOutputs:
-    def test_unresolved_when_inputs_missing(self) -> None:
+    def test_unresolved_when_inputs_missing(self, tmp_path) -> None:
         from bioimageflow import Workflow
         from bioimageflow.dataframe_tool import DataFrameTool
 
@@ -133,26 +133,26 @@ class TestSerializeResolvedOutputs:
             def resolve_outputs(cls, inputs=None):
                 return None
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             n = Unconfigured()()
             out = serialize_resolved_outputs(n)
             assert out == {"resolved": False, "columns": {}}
 
-    def test_resolved_after_inputs_set(self) -> None:
+    def test_resolved_after_inputs_set(self, tmp_path) -> None:
         from bioimageflow import Workflow
         from bioimageflow_common_tools import Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             g = Generate()(column_name="sensitivity", values=[1, 2])
             out = serialize_resolved_outputs(g)
             assert out["resolved"] is True
             assert "sensitivity" in out["columns"]
 
-    def test_json_safe(self) -> None:
+    def test_json_safe(self, tmp_path) -> None:
         from bioimageflow import Workflow
         from bioimageflow_common_tools import Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             g = Generate()(column_name="x", values=[1])
             json.dumps(serialize_resolved_outputs(g))
 

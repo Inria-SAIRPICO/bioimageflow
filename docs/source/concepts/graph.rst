@@ -14,7 +14,7 @@ Every tool call creates a :class:`~bioimageflow.Node`:
 
    segment = Segment()  # tool instance
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        masks = segment(image=raw["image"])
        # masks is a Node, not a DataFrame
 
@@ -96,7 +96,7 @@ this as the recommended source pattern. The companion package
    files = Files()
    sigmas = Generate()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        images = files(path="/data", pattern="*.tif")
        sweep = sigmas(column_name="sigma", values=[0.5, 1.0, 2.0])
 

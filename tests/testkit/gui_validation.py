@@ -46,7 +46,6 @@ from tests.testkit.integration_tools import (
 
 
 def _graph(
-    tmp_path: Path,
     *,
     nodes: list[dict[str, Any]] | None = None,
     edges: list[dict[str, Any]] | None = None,
@@ -59,7 +58,6 @@ def _graph(
         "nodes": nodes or [],
         "edges": edges or [],
         "config": {
-            "storage_path": str(tmp_path),
             "engine": "direct",
             "execution": "parallel",
         },

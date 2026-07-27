@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 class _InterfacesMixin:
     def __init__(
         self,
-        storage_path: str | Path = "./bif_data",
+        storage_path: str | Path,
         *,
         name: str = "workflow",
         display_name: str | None = None,
@@ -59,7 +59,6 @@ class _InterfacesMixin:
             )
         self.name = name
         self.display_name = display_name if display_name is not None else name
-        self._storage_path_config = str(storage_path)
         self.storage_path = _absolute_runtime_path(storage_path)
         self.engine_type = engine
         self.execution = execution
@@ -317,7 +316,7 @@ class _InterfacesMixin:
         snapshot = type(self)(
             name=self.name,
             display_name=self.display_name,
-            storage_path=self._storage_path_config,
+            storage_path=self.storage_path,
             engine=self.engine_type,
             execution=self.execution,
             wetlands_config=copy.deepcopy(self.wetlands_config),

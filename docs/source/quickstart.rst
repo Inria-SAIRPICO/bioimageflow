@@ -10,9 +10,8 @@ Files created by BioImageFlow
 Before running a workflow, choose where BioImageFlow should write its
 state. There are three separate locations:
 
-- ``Workflow(storage_path=...)`` stores workflow outputs, cache
-  metadata, and generated assets. If omitted, it defaults to
-  ``./bif_data``.
+- ``Workflow(storage_path=...)`` stores workflow outputs, cache metadata, and generated assets.
+  The path is required runtime state; it is never serialized into workflow definitions.
 - ``configure_wetlands(wetlands_instance_path=...)`` stores Wetlands'
   environment state: logs, debug port metadata, the bundled Pixi or
   Micromamba installation, and the isolated tool environments. Call it
@@ -30,7 +29,7 @@ For a project-local run, start scripts like this:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        ...
 
 If ``configure_wetlands()`` is not called, the Wetlands instance path
@@ -113,15 +112,15 @@ Wire tools together inside a :class:`~bioimageflow.Workflow` context manager:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)
 
    print(result)
    #    inverted
-   # 0  /.../bif_data/cache/v1/results/.../records/rec_.../assets/image1_inv.tif
-   # 1  /.../bif_data/cache/v1/results/.../records/rec_.../assets/image2_inv.tif
+   # 0  /.../results/cache/v1/results/.../records/rec_.../assets/image1_inv.tif
+   # 1  /.../results/cache/v1/results/.../records/rec_.../assets/image2_inv.tif
 
 What happens:
 
@@ -132,10 +131,10 @@ What happens:
 
 The result is a pandas DataFrame with one column per output field.
 Owned output assets are stored in immutable records under
-``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/`` and the
-JSON run view under ``./bif_data/views/runs/`` points back to the selected record.
+``./results/cache/v1/results/.../<result-key>/records/<record-id>/`` and the
+JSON run view under ``./results/views/runs/`` points back to the selected record.
 Pass ``output_view="symlink"`` or ``output_view="copy"`` to ``Workflow`` when
-you also want browseable files under ``./bif_data/outputs/latest/``.
+you also want browseable files under ``./results/outputs/latest/``.
 :doc:`concepts/caching` covers the cache lifecycle, ``plan()`` and
 ``invalidate()``. Wetlands environments for this run are kept under
 ``./wetlands`` because the script called ``configure_wetlands()``.
@@ -148,7 +147,7 @@ that input references, parameters, and tool versions haven't changed:
 
 .. code-block:: python
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        images = files(path="/data/raw", pattern="*.tif")
        inverted = invert(image=images["path"], name="invert")
        result = wf.compute(inverted)  # cache hit, no recomputation

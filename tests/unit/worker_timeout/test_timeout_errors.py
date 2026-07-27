@@ -43,10 +43,10 @@ class TestWorkerTimeoutErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
         return engine, stub
 
-    def test_row_path_raises_worker_timeout_error(self):
+    def test_row_path_raises_worker_timeout_error(self, tmp_path):
         engine, stub = self._make_engine_with_stub()
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 10.0
         # Engine will call _resolve_worker_config → (1, None, 10.0)
         # Then map_processing_tasks → hanging tasks → WorkerTimeoutError
@@ -70,7 +70,7 @@ class TestWorkerTimeoutErrorRaised:
         # worker_timeout should have been passed through
         assert stub.last_worker_timeout == 10.0
 
-    def test_batch_path_raises_worker_timeout_error(self):
+    def test_batch_path_raises_worker_timeout_error(self, tmp_path):
         engine, stub = self._make_engine_with_stub()
 
         class _BatchTool(_StubTool):
@@ -78,7 +78,7 @@ class TestWorkerTimeoutErrorRaised:
                 return []
 
         tool = _BatchTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 5.0
 
         with pytest.raises(WorkerTimeoutError, match="Batch"):
@@ -98,7 +98,7 @@ class TestWorkerTimeoutErrorRaised:
         assert stub.hanging_tasks[0].cancel_called
         assert stub.last_worker_timeout == 5.0
 
-    def test_no_timeout_when_worker_timeout_none(self):
+    def test_no_timeout_when_worker_timeout_none(self, tmp_path):
         """When worker_timeout is None, engine passes timeout=None.
 
         _HangingTask.wait_for still raises TimeoutError for any timeout,
@@ -159,7 +159,7 @@ class TestWorkerTimeoutErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
 
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         # No worker_timeout configured → None flows through
 
         row_contexts, batch_context = _execution_contexts(1)

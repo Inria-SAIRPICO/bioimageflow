@@ -23,8 +23,7 @@ from bioimageflow_spot_tools import AtlasSpotDetection
 from parameter_tools.download_images import DownloadImages
 from parameter_tools.metrics import ParameterSweepResults, SpotMaskMetrics
 
-EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "parameter_space_exploration"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 CIL_URL = "https://cildata.crbs.ucsd.edu/media/images/13432/13432.tif"
 
 

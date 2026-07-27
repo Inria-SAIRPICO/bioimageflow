@@ -168,15 +168,20 @@ def test_partial_recursive_load_reports_nested_error_path(tmp_path: Path) -> Non
         parent.output("result", nested["result"], id="parent-output")
     graph = parent.to_dict()
     graph["nodes"][0]["workflow"]["nodes"][0]["tool_module"] = "missing.module"
-    _, errors = Workflow.from_dict(graph, validate_only=True, partial=True)
+    _, errors = Workflow.from_dict(
+        graph,
+        storage_path=tmp_path,
+        validate_only=True,
+        partial=True,
+    )
     assert any(
         error.kind == "unknown_tool" and error.path == ("nested",)
         for error in errors
     )
 
 
-def test_recursive_wire_object_containment_is_rejected() -> None:
-    graph = Workflow(name="recursive").to_dict()
+def test_recursive_wire_object_containment_is_rejected(tmp_path: Path) -> None:
+    graph = Workflow(name="recursive", storage_path=tmp_path).to_dict()
     graph["nodes"].append({
         "name": "self",
         "type": "workflow",
@@ -184,7 +189,7 @@ def test_recursive_wire_object_containment_is_rejected() -> None:
         "bindings": {},
     })
     with pytest.raises(ValueError, match="Recursive workflow graph containment"):
-        Workflow.from_dict(graph)
+        Workflow.from_dict(graph, storage_path=tmp_path)
 
 
 def test_root_inputs_share_nested_binding_semantics(tmp_path: Path) -> None:
@@ -212,7 +217,7 @@ def test_exposed_input_preserves_local_constant_as_fallback(tmp_path: Path) -> N
     assert workflow.compute().loc["row", "result"] == 5
     graph = workflow.to_dict()
     assert "value" in graph["nodes"][0]["constants"]
-    loaded = Workflow.from_dict(graph)
+    loaded = Workflow.from_dict(graph, storage_path=tmp_path)
     assert loaded.compute().loc["row", "result"] == 5
     assert loaded.compute(inputs={"value": 8}).loc["row", "result"] == 8
 
@@ -252,13 +257,18 @@ def test_recursive_graph_round_trip_is_canonical(tmp_path: Path) -> None:
     graph = parent.to_dict()
     assert graph["schema_version"] == 1
     assert graph["nodes"][0]["type"] == "workflow"
-    assert Workflow.from_dict(graph).to_dict() == graph
-    assert Workflow.from_dict(graph).compute().loc["row", "answer"] == 13
+    assert Workflow.from_dict(graph, storage_path=tmp_path).to_dict() == graph
+    assert (
+        Workflow.from_dict(graph, storage_path=tmp_path)
+        .compute()
+        .loc["row", "answer"]
+        == 13
+    )
 
     malformed = dict(graph)
     malformed["unknown"] = True
     with pytest.raises(ValueError, match="fields must be exactly"):
-        Workflow.from_dict(malformed)
+        Workflow.from_dict(malformed, storage_path=tmp_path)
 
 
 @pytest.mark.parametrize("mutation", ["node_variant", "node_extra", "edge_variant", "config_extra"])
@@ -286,7 +296,7 @@ def test_recursive_parser_rejects_unknown_variants_and_fields(
     else:
         graph["config"]["extra"] = True
     with pytest.raises(ValueError):
-        Workflow.from_dict(graph)
+        Workflow.from_dict(graph, storage_path=tmp_path)
 
 
 def test_all_internal_terminals_run_but_boundary_hash_uses_published_values(tmp_path: Path) -> None:
@@ -422,22 +432,56 @@ def test_from_python_is_fresh_and_calls_exact_factory_once(tmp_path: Path) -> No
         "from bioimageflow_common_tools import Generate\n"
         "from helper import VALUE\n"
         "calls = 0\n"
-        "def build_workflow():\n"
+        "def build_workflow(*, storage_path):\n"
         "    global calls\n"
         "    calls += 1\n"
-        "    workflow = Workflow(name=f'loaded_{calls}', engine='direct')\n"
+        "    workflow = Workflow(name=f'loaded_{calls}', storage_path=storage_path, engine='direct')\n"
         "    with workflow:\n"
         "        node = Generate()(column_name='value', values=[VALUE], name='value')\n"
         "        workflow.output('value', node['value'], id='output-value')\n"
         "    return workflow\n"
     )
 
-    first = Workflow.from_python(definition)
+    first = Workflow.from_python(definition, storage_path=tmp_path / "first")
     helper.write_text("VALUE = 8\n")
-    second = Workflow.from_python(definition)
+    second = Workflow.from_python(definition, storage_path=tmp_path / "second")
     assert first.name == second.name == "loaded_1"
     assert first.to_dict()["nodes"][0]["constants"]["values"]["value"] == [3]
     assert second.to_dict()["nodes"][0]["constants"]["values"]["value"] == [8]
+
+
+@pytest.mark.parametrize("suffix", [".json", ".zip"])
+def test_load_uses_explicit_runtime_storage(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    definition = build_child(storage_path=tmp_path / "build")
+    exported = tmp_path / f"workflow{suffix}"
+    definition.export(exported)
+    runtime_storage = tmp_path / "loaded-results"
+
+    loaded = Workflow.load(exported, storage_path=runtime_storage)
+
+    assert loaded.storage_path == runtime_storage.resolve()
+    assert "storage_path" not in loaded.to_dict()["config"]
+
+
+def test_import_archive_uses_explicit_runtime_storage(tmp_path: Path) -> None:
+    definition = build_child(storage_path=tmp_path / "build")
+    archive = tmp_path / "workflow.zip"
+    definition.export(archive)
+    destination = tmp_path / "imported"
+    runtime_storage = destination / "results"
+
+    loaded = Workflow.import_archive(
+        archive,
+        destination,
+        storage_path=runtime_storage,
+    )
+
+    assert (destination / "workflow.json").exists()
+    assert loaded.storage_path == runtime_storage.resolve()
+    assert "storage_path" not in loaded.to_dict()["config"]
 
 
 @pytest.mark.parametrize(
@@ -454,9 +498,8 @@ def test_golden_recursive_fixtures_round_trip(
 ) -> None:
     path = Path("tests/fixtures") / fixture_name
     source = json.loads(path.read_text())
-    workflow = Workflow.from_dict(source)
+    workflow = Workflow.from_dict(source, storage_path=tmp_path / "runtime")
     assert workflow.to_dict(include_custom_tools=include_custom_tools) == source
-    workflow.storage_path = tmp_path / "runtime"
 
     result = workflow.compute()
     if include_custom_tools:

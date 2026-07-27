@@ -56,7 +56,7 @@ can discover those tools for that specific workflow:
 
    reg = ToolRegistry()
 
-   wf = Workflow.load("workflow.json")
+   wf = Workflow.load("workflow.json", storage_path="./results")
    metas = reg.register_workflow(wf)
 
    # Or register directly from the exported dict before materializing it.

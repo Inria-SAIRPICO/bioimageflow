@@ -11,8 +11,7 @@ from bioimageflow_core import Category, GUIMeta, IOModel
 from bioimageflow_common_tools import Concat
 from bioimageflow_tracking_tools import BTrackLink, LabelsToObjects, TrackMetrics, UltrackLink
 
-EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "live_cell_tracking"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 
 
 class AddTrackerName(DataFrameTool):

@@ -20,10 +20,13 @@ WORKFLOW_DEFINITION_MODULES = (
 
 
 @pytest.mark.parametrize("relative_path", WORKFLOW_DEFINITION_MODULES)
-def test_workflow_definition_factory_contract(relative_path: str) -> None:
+def test_workflow_definition_factory_contract(
+    relative_path: str,
+    tmp_path: Path,
+) -> None:
     path = Path(relative_path)
-    first = Workflow.from_python(path)
-    second = Workflow.from_python(path)
+    first = Workflow.from_python(path, storage_path=tmp_path / "first")
+    second = Workflow.from_python(path, storage_path=tmp_path / "second")
 
     assert isinstance(first, Workflow)
     assert isinstance(second, Workflow)
@@ -61,8 +64,12 @@ def test_platform_demo_factories_are_self_contained(
     relative_path: str,
     expected_display_name: str,
     expected_inputs: list[str],
+    tmp_path: Path,
 ) -> None:
-    exported = Workflow.from_python(Path(relative_path)).to_dict(
+    exported = Workflow.from_python(
+        Path(relative_path),
+        storage_path=tmp_path,
+    ).to_dict(
         include_custom_tools=True
     )
     graph = exported["workflow"]

@@ -288,7 +288,10 @@ class TestSerializationRoundTrip:
             masks.disable()
             wf.export(tmp_workspace / "workflow.json")
 
-        wf2 = Workflow.load(tmp_workspace / "workflow.json")
+        wf2 = Workflow.load(
+            tmp_workspace / "workflow.json",
+            storage_path=tmp_workspace / "results",
+        )
         assert wf2.nodes["seg"].enabled is False
         assert wf2.nodes["FileLoader_1"].enabled is True
 

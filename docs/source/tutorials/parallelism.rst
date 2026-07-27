@@ -22,14 +22,14 @@ DataFrameTools always run in the orchestrator process; their ``transform`` and `
 Workflow-level Wetlands baseline
 --------------------------------
 
-``Workflow(max_workers=N)`` sets the default Wetlands per-environment worker
+``Workflow(storage_path="./results", max_workers=N)`` sets the default Wetlands per-environment worker
 count for tools that don't override it:
 
 .. code-block:: python
 
    from bioimageflow import Workflow
 
-   with Workflow(max_workers=4) as wf:
+   with Workflow(storage_path="./results", max_workers=4) as wf:
        ...
 
 The default is ``max_workers=1`` — a single worker per Wetlands environment.
@@ -52,7 +52,7 @@ that environment:
    cellpose = Cellpose3()                    # has its own EnvironmentSpec
    filter_tool = FilterByArea()              # uses GENERAL_ENV
 
-   with Workflow(max_workers=4) as wf:
+   with Workflow(storage_path="./results", max_workers=4) as wf:
        wf.get_environment(cellpose).max_workers = 1   # GPU tool — keep serial
        wf.get_environment(GENERAL_ENV).max_workers = 8
 
@@ -70,7 +70,7 @@ worker-specific configuration:
 .. code-block:: python
 
    gpu_tool = MyGPUTool()
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        env = wf.get_environment(gpu_tool)
        env.max_workers = 4
        env.worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
@@ -127,7 +127,7 @@ gives deterministic, single-threaded execution that is easier to debug:
 
 .. code-block:: python
 
-   with Workflow(execution="sequential", max_workers=1) as wf:
+   with Workflow(storage_path="./results", execution="sequential", max_workers=1) as wf:
        ...
 
 Use it when chasing a non-deterministic bug; switch back to the default
@@ -159,7 +159,7 @@ each pinned to a distinct GPU:
            ...
 
    segment = Segment()
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        wf.get_environment(segment).max_workers = 4    # 4 worker processes
        images = files(path="/data", pattern="*.tif")
        masks = segment(image=images["path"])

@@ -353,7 +353,7 @@ class _InspectionMixin:
 
         Usage::
 
-            wf = Workflow()
+            wf = Workflow(storage_path="./results")
             with wf, wf.capture_errors() as errors:
                 MyTool()(input=upstream["bad_col"])
             # errors: list[ValidationError]

@@ -61,11 +61,16 @@ class TestIntegration:
         # export → load
         p = tmp_path / "wf.json"
         wf.export(p)
-        wf_loaded = Workflow.load(p)
+        wf_loaded = Workflow.load(p, storage_path=tmp_path / "results")
 
         # to_dict → from_dict(validate_only=True, partial=True)
         data = wf_loaded.to_dict()
-        wf_collect, errs = Workflow.from_dict(data, validate_only=True, partial=True)
+        wf_collect, errs = Workflow.from_dict(
+            data,
+            storage_path=tmp_path / "results",
+            validate_only=True,
+            partial=True,
+        )
         assert errs == []
         assert isinstance(wf_collect, Workflow)
         assert set(wf.to_dict()["nodes"][0].keys()) == set(
@@ -75,7 +80,6 @@ class TestIntegration:
     def test_I2_broken_graph_survey(self, tmp_path: Path) -> None:
         # Build a dict with: unknown_tool + missing edge + bad constant + type-mismatch
         data = _graph(
-            tmp_path,
             nodes=[
                 _tool_node(
                     "load",
@@ -104,7 +108,12 @@ class TestIntegration:
                 }
             ],
         )
-        wf, errs = Workflow.from_dict(data, validate_only=True, partial=True)
+        wf, errs = Workflow.from_dict(
+            data,
+            storage_path=tmp_path / "results",
+            validate_only=True,
+            partial=True,
+        )
         assert any(e.kind == "unknown_tool" for e in errs)
 
         # validate() now runs on the partial wf

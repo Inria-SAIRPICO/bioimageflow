@@ -22,7 +22,7 @@
           "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},
           "nodes": [{"name": "collision", "type": "tool", "tool_module": "custom.first", "tool_class": "CollisionTool", "tool_package": null, "tool_package_version": null, "source_module": "m_272191d99b8f8fe5", "constants": {}}],
           "edges": [],
-          "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+          "config": {"engine": "direct", "execution": "parallel"}
         },
         "bindings": {}
       },
@@ -36,13 +36,13 @@
           "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},
           "nodes": [{"name": "collision", "type": "tool", "tool_module": "custom.second", "tool_class": "CollisionTool", "tool_package": null, "tool_package_version": null, "source_module": "m_ca4fead0130de3b3", "constants": {}}],
           "edges": [],
-          "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+          "config": {"engine": "direct", "execution": "parallel"}
         },
         "bindings": {}
       }
     ],
     "edges": [],
-    "config": {"storage_path": "./bif_data", "engine": "direct", "execution": "parallel"}
+    "config": {"engine": "direct", "execution": "parallel"}
   },
   "custom_sources": [
     {

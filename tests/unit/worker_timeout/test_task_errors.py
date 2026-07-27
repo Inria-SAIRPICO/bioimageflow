@@ -46,11 +46,11 @@ class TestWorkerTaskErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
         return engine, stub
 
-    def test_row_path_wraps_failed_task_with_node_context(self):
+    def test_row_path_wraps_failed_task_with_node_context(self, tmp_path):
         original = RuntimeError("native command crashed")
         engine, _stub = self._make_engine_with_failure(original)
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)
@@ -79,7 +79,7 @@ class TestWorkerTaskErrorRaised:
         assert exc_info.value.tool_class == "_StubTool"
         assert exc_info.value.environment_name == "stub_wt_env"
 
-    def test_batch_path_wraps_failed_task_with_batch_context(self):
+    def test_batch_path_wraps_failed_task_with_batch_context(self, tmp_path):
         original = ValueError("batch worker failed")
         engine, _stub = self._make_engine_with_failure(original)
 
@@ -88,7 +88,7 @@ class TestWorkerTaskErrorRaised:
                 return []
 
         tool = _BatchTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)

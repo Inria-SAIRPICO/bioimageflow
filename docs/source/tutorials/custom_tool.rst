@@ -36,7 +36,7 @@ tools:
    from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
    from tools.download_images import DownloadImages
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        images = DownloadImages()(dataset="demo")
        stats = AverageSpotsPerNucleus()(images)
        wf.export("workflow.json")
@@ -303,7 +303,7 @@ Use it in a pipeline:
    measure = MeasureRegions()
    filter_tool = FilterByArea()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        stats = measure(mask=masks["mask"])
        filtered = filter_tool(stats, min_area=200.0)
        result = wf.compute(filtered)

@@ -198,7 +198,7 @@ class TestMergeSchemaPropagation:
     def test_inner_join_schema(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_workspace / "results", engine="direct"):
             files = Files()(path=str(tmp_workspace / "data"))
             seg = StubSegmenter()(input_image=files["path"])
             joined = InnerJoin()(files, seg)
@@ -208,11 +208,11 @@ class TestMergeSchemaPropagation:
             # wins on duplicate keys.
             assert set(schema.keys()) >= {"path", "mask", "cell_count"}
 
-    def test_cross_join_schema_parameter_space_pattern(self):
+    def test_cross_join_schema_parameter_space_pattern(self, tmp_path):
         """The exact pattern from example_workflows/parameter_space_exploration."""
         from bioimageflow_common_tools import Files, Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             files = Files()(path="/tmp")
             sens = Generate()(column_name="sensitivity", values=[1, 2])
             size = Generate()(column_name="size", values=[10, 20])
@@ -221,10 +221,10 @@ class TestMergeSchemaPropagation:
             assert schema is not None
             assert set(schema.keys()) == {"path", "sensitivity", "size"}
 
-    def test_join_on_column_schema(self):
+    def test_join_on_column_schema(self, tmp_path):
         from bioimageflow_common_tools import Files
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             mri = Files()(path="/tmp/mri", name="mri")
             ct = Files()(path="/tmp/ct", name="ct")
             joined = JoinOnColumn()(
@@ -234,10 +234,10 @@ class TestMergeSchemaPropagation:
             assert schema is not None
             assert set(schema.keys()) == {"path"}
 
-    def test_concat_schema(self):
+    def test_concat_schema(self, tmp_path):
         from bioimageflow_common_tools import Files
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             mri = Files()(path="/tmp/mri", name="mri")
             ct = Files()(path="/tmp/ct", name="ct")
             stacked = Concat()(mri, ct)
@@ -262,10 +262,10 @@ class TestMergeSchemaPropagation:
         assert merged is not None
         assert merged["shared"] == a["shared"]
 
-    def test_collect_schema_renames_duplicates(self):
+    def test_collect_schema_renames_duplicates(self, tmp_path):
         from bioimageflow_common_tools import Files
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             a = Files()(path="/tmp/a", name="a")
             b = Files()(path="/tmp/b", name="b")
             collected = Collect()(a, b)
@@ -275,7 +275,7 @@ class TestMergeSchemaPropagation:
             assert "path" in schema
             assert "path_1" in schema
 
-    def test_merge_unresolvable_when_upstream_unresolvable(self):
+    def test_merge_unresolvable_when_upstream_unresolvable(self, tmp_path):
         """If any upstream returns None, merge propagates None."""
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow_common_tools import Files
@@ -291,17 +291,17 @@ class TestMergeSchemaPropagation:
             def resolve_outputs(cls, inputs=None):
                 return None  # always unresolvable
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             files = Files()(path="/tmp")
             unk = Unknown()()
             joined = InnerJoin()(files, unk)
             assert joined.get_output_schema() is None
 
-    def test_construction_time_columnref_after_merge(self):
+    def test_construction_time_columnref_after_merge(self, tmp_path):
         """node['col'] validates against the merged schema."""
         from bioimageflow_common_tools import Files, Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             files = Files()(path="/tmp")
             sens = Generate()(column_name="sensitivity", values=[1, 2])
             grid = CrossJoin()(files, sens)

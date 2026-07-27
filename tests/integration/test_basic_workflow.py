@@ -105,17 +105,33 @@ class TestNodeNaming:
 
 class TestImplicitWorkflow:
 
-    def test_node_compute_creates_default_workflow(self, tmp_workspace):
-        """Node.compute() works without an explicit Workflow."""
+    def test_node_compute_creates_workflow_with_explicit_storage(
+        self,
+        tmp_workspace,
+    ):
+        """Node.compute() accepts runtime storage without an active Workflow."""
         load = FileLoader()
         segment = StubSegmenter()
 
         raw = load(path=str(tmp_workspace / "data"))
         masks = segment(input_image=raw["path"])
-        df = masks.compute(engine=SequentialEngine(use_wetlands=False))
+        df = masks.compute(
+            storage_path=tmp_workspace / "results",
+            engine=SequentialEngine(use_wetlands=False),
+        )
 
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 3
+
+    def test_node_compute_requires_storage_without_active_workflow(
+        self,
+        tmp_workspace,
+    ):
+        load = FileLoader()
+        raw = load(path=str(tmp_workspace / "data"))
+
+        with pytest.raises(TypeError, match="storage_path"):
+            raw.compute(engine=SequentialEngine(use_wetlands=False))
 
     def test_explicit_workflow_without_context_manager(self, tmp_workspace):
         wf = Workflow(engine="direct", storage_path=tmp_workspace / "results")

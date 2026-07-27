@@ -33,7 +33,7 @@ from bioimageflow_segmentation_tools import (
 
 EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = EXAMPLE_WORKFLOWS_DIR / "bbbc038_segmentation_benchmark" / "data"
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "bbbc038_segmentation_benchmark"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 
 
 class BBBC038Samples(DataFrameTool):

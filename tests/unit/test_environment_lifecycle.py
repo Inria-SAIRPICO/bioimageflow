@@ -283,6 +283,7 @@ def test_sequential_engine_honors_engine_lifetime() -> None:
 
 def test_workflow_public_factory_preserves_configuration(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     created: list[dict[str, Any]] = []
 
@@ -293,6 +294,7 @@ def test_workflow_public_factory_preserves_configuration(
 
     monkeypatch.setattr("bioimageflow.env_manager.WetlandsEnvManager", FakeManager)
     workflow = Workflow(
+        storage_path=tmp_path,
         execution="sequential",
         wetlands_config={"debug": True},
         max_workers=4,
@@ -309,9 +311,9 @@ def test_workflow_public_factory_preserves_configuration(
     engine.close()
 
 
-def test_workflow_factory_injects_external_manager() -> None:
+def test_workflow_factory_injects_external_manager(tmp_path) -> None:
     manager = _TrackingManager()
-    workflow = Workflow()
+    workflow = Workflow(storage_path=tmp_path)
 
     engine = workflow.create_engine(
         env_manager=cast(WetlandsEnvManager, manager),

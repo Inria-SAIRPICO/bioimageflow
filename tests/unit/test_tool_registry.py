@@ -25,8 +25,8 @@ def tool_store(tmp_path):
     (pkg_dir / "__init__.py").write_text(
         "from .alpha import AlphaTool\n"
         "from bioimageflow import Workflow\n"
-        "def build_workflow():\n"
-        "    return Workflow(name='packaged_definition')\n"
+        "def build_workflow(*, storage_path):\n"
+        "    return Workflow(name='packaged_definition', storage_path=storage_path)\n"
     )
     (pkg_dir / "alpha.py").write_text(
         "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"

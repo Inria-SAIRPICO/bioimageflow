@@ -96,7 +96,12 @@ from bioimageflow import configure_wetlands
 
 configure_wetlands(wetlands_instance_path="./wetlands")
 
-def build_workflow(*, storage_path="./bif_data") -> Workflow:
+WORKFLOW_DIRECTORY = Path(__file__).resolve().parent
+
+def build_workflow(
+    *,
+    storage_path: str | Path = WORKFLOW_DIRECTORY / "results",
+) -> Workflow:
     workflow = Workflow(
         name="threshold_images",
         display_name="Threshold Images",
@@ -174,7 +179,7 @@ Every reusable node record stores its complete DataFrame and declared assets.
 To create a self-contained copy of the latest human-facing results after a workflow has run:
 
 ```bash
-bioimageflow export-outputs ./bif_data
+bioimageflow export-outputs ./results
 ```
 
 The same operation is available without reconstructing the workflow:
@@ -182,7 +187,7 @@ The same operation is available without reconstructing the workflow:
 ```python
 from bioimageflow import export_outputs
 
-paths = export_outputs("./bif_data", mode="copy", scope="latest")
+paths = export_outputs("./results", mode="copy", scope="latest")
 ```
 
 Each node directory includes the declared assets, canonical `dataframe.parquet`, readable `dataframe.csv` and `dataframe.json` exports, and a `provenance.json` explanation containing the tool/version, parameters, selected upstream records, cache identities, and run metadata.

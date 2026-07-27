@@ -88,7 +88,7 @@ Workflow factory and injection
    result = workflow.compute(engine=engine)
 
 Passing an explicit engine to ``compute()`` or ``compute_steps()`` overrides the stored workflow engine preference.
-A bare ``Workflow(engine="parsl").compute()`` fails with an attached-engine construction error because a workflow file cannot carry live Config, executor, provider, credential, or DataFlowKernel objects.
+A bare ``Workflow(storage_path="./results", engine="parsl").compute()`` fails with an attached-engine construction error because a workflow file cannot carry live Config, executor, provider, credential, or DataFlowKernel objects.
 
 Bindings, routes, and preflight
 -------------------------------

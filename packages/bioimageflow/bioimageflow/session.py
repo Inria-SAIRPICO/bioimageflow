@@ -20,6 +20,7 @@ and matches what GUIs actually want to send over the wire.
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from bioimageflow.engine import NodePlan
@@ -39,9 +40,10 @@ class WorkflowSession:
         self,
         data: dict[str, Any] | None = None,
         *,
+        storage_path: str | Path,
         registry: Any | None = None,
-        storage_path: str | None = None,
     ) -> None:
+        """Create an editing session with runtime storage kept outside its graph."""
         if data is None:
             data = {
                 "schema_version": 1,
@@ -54,10 +56,9 @@ class WorkflowSession:
             }
         else:
             data = deepcopy(data)
-        if storage_path is not None:
-            data.setdefault("config", {})["storage_path"] = storage_path
 
         self._data: dict[str, Any] = data
+        self.storage_path = storage_path
         self._registry = registry
 
         # Cached materialization. `_workflow_cache` is invalidated on
@@ -225,6 +226,7 @@ class WorkflowSession:
             return self._workflow_cache
         wf, _errors = Workflow.from_dict(
             self._data,
+            storage_path=self.storage_path,
             validate_only=True,
             partial=True,
             auto_install=False,
@@ -267,6 +269,7 @@ class WorkflowSession:
         cls,
         data: dict[str, Any],
         *,
+        storage_path: str | Path,
         registry: Any | None = None,
     ) -> "WorkflowSession":
-        return cls(data, registry=registry)
+        return cls(data, storage_path=storage_path, registry=registry)

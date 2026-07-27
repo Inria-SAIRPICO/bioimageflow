@@ -28,7 +28,7 @@ Use explicit project-local paths while learning:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        ...
 
 ``configure_wetlands()`` must run before Wetlands is first initialized:
@@ -132,7 +132,7 @@ Wire the tools together in a :class:`~bioimageflow.Workflow`:
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        stats = measure(mask=masks["mask"])
@@ -153,11 +153,11 @@ Each arrow represents a column binding --- ``raw["image"]`` feeds into the
 ``image`` input of ``Segment``, and ``masks["mask"]`` feeds into ``Measure``.
 
 During execution, generated masks are stored as record-owned assets under
-``./bif_data/cache/v1/results/.../<result-key>/records/<record-id>/assets/``.
-The JSON run view under ``./bif_data/views/runs/`` points to the selected
+``./results/cache/v1/results/.../<result-key>/records/<record-id>/assets/``.
+The JSON run view under ``./results/views/runs/`` points to the selected
 record. If you construct the workflow with ``output_view="symlink"`` or
 ``output_view="copy"``, browseable latest outputs are materialized under
-``./bif_data/outputs/latest/``. The Cellpose environment for ``Segment`` is
+``./results/outputs/latest/``. The Cellpose environment for ``Segment`` is
 created under ``./wetlands``.
 
 Computing multiple targets
@@ -168,7 +168,7 @@ targets to get a dictionary:
 
 .. code-block:: python
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        stats = measure(mask=masks["mask"])
@@ -193,7 +193,7 @@ Track execution progress with a callback:
        elif event.status == "completed":
            print(f"Done: {event.node_name}")
 
-   with Workflow(storage_path="./bif_data", on_progress=on_progress) as wf:
+   with Workflow(storage_path="./results", on_progress=on_progress) as wf:
        raw = loader(folder="/data/experiment_01")
        masks = segment(image=raw["image"])
        result = wf.compute(masks)

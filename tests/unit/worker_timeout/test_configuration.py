@@ -47,9 +47,9 @@ class TestWorkflowEnvironmentField:
         env = WorkflowEnvironment(name="test", worker_timeout=None)
         assert env.worker_timeout is None
 
-    def test_via_get_environment(self):
+    def test_via_get_environment(self, tmp_path):
         spec = EnvironmentSpec(name="test_env", dependencies={})
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         cfg = wf.get_environment(spec)
         assert cfg.worker_timeout is None
         cfg.worker_timeout = 30.0
@@ -74,25 +74,25 @@ class TestComputeEngineTimeout:
 
 
 class TestResolveWorkerConfig:
-    def test_default_engine_returns_none_when_not_configured(self):
+    def test_default_engine_returns_none_when_not_configured(self, tmp_path):
         engine = DefaultEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert wt is None
 
-    def test_default_engine_returns_configured_timeout(self):
+    def test_default_engine_returns_configured_timeout(self, tmp_path):
         engine = DefaultEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 45.0
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert wt == 45.0
 
-    def test_sequential_engine_respects_timeout(self):
+    def test_sequential_engine_respects_timeout(self, tmp_path):
         engine = SequentialEngine(use_wetlands=False)
         tool = _StubTool()
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 15.0
         mw, we, wt = engine._resolve_worker_config(tool, wf)
         assert mw == 1

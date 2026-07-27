@@ -7,7 +7,7 @@ The golden examples are `tests/fixtures/unified_workflow_graph.json` and `tests/
 
 ```python
 Workflow(
-    storage_path: str | Path = "./bif_data",
+    storage_path: str | Path,
     *,
     name: str = "workflow",
     display_name: str | None = None,
@@ -61,13 +61,25 @@ Workflow.compute_steps(
     run_context: WorkflowExecutionContext | None = None,
     ...
 ) -> Iterator[NodeStep]
-Workflow.from_python(path_or_module: str | Path | ModuleType) -> Workflow
-Workflow.from_dict(data: dict[str, Any], ...) -> Workflow
+Workflow.from_python(
+    path_or_module: str | Path | ModuleType,
+    *,
+    storage_path: str | Path,
+) -> Workflow
+Workflow.from_dict(data: dict[str, Any], *, storage_path: str | Path, ...) -> Workflow
 Workflow.to_dict(*, include_custom_tools: bool = False) -> dict[str, Any]
-Workflow.load(path: str | Path) -> Workflow
+Workflow.load(path: str | Path, *, storage_path: str | Path) -> Workflow
+Workflow.import_archive(
+    path: str | Path,
+    destination: str | Path,
+    *,
+    storage_path: str | Path,
+) -> Workflow
 Workflow.export(path: str | Path) -> None
 ```
 
+`storage_path` is required runtime state and never enters the recursive graph or portable archive.
+Hosts choose it when constructing, loading, importing, or editing a workflow.
 `WorkflowNode` is exported from `bioimageflow` and is the only public composite node type.
 `WorkflowNode.workflow` is the captured, editable definition for that invocation.
 `WorkflowNode[output_name]` returns a `ColumnRef` whose `column` is the stable output-port ID.
@@ -178,8 +190,9 @@ A DataFrame edge has `type`, `id`, `source_node`, and `target_node`, plus exactl
 Edge IDs are unique and stable.
 Unknown variants and malformed endpoint combinations are rejected.
 
-`config` accepts `storage_path`, `engine`, `execution`, and `output_view`.
-Nested configuration is retained as definition metadata, but root execution storage, engine, cancellation, progress, output-view, and environment-manager context take precedence.
+`config` accepts `engine`, `execution`, and `output_view`.
+Nested configuration is retained as definition metadata, but root execution engine, cancellation, progress, output-view, and environment-manager context take precedence.
+Storage is supplied separately at materialization time and inherited by nested workflows.
 The serialized `engine` value is only a preference string and accepts `direct`, `wetlands`, or `parsl`.
 Live engine objects, Parsl Config/DFK objects, executor bindings, routes, task policy, credentials, and `WorkflowExecutionContext` never enter graph or archive data.
 An explicit engine passed to a root compute call has precedence over the stored preference.

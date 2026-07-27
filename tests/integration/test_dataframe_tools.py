@@ -182,20 +182,20 @@ class TestGenerateResolveOutputs:
 
         assert Generate.resolve_outputs(None) is None
 
-    def test_construction_time_columnref_validates(self):
+    def test_construction_time_columnref_validates(self, tmp_path):
         """Generate(column_name="x")["x"] succeeds with no deferral."""
         from bioimageflow_common_tools import Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             g = Generate()(column_name="sensitivity", values=[1, 2])
             ref = g["sensitivity"]
             assert ref.column == "sensitivity"
 
-    def test_construction_time_unknown_column_raises(self):
+    def test_construction_time_unknown_column_raises(self, tmp_path):
         """Generate(column_name="x")["y"] raises ColumnNotFoundError."""
         from bioimageflow_common_tools import Generate
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             g = Generate()(column_name="x", values=[1])
             with pytest.raises(ColumnNotFoundError):
                 _ = g["nope"]
@@ -224,7 +224,7 @@ class TestGenerateResolveOutputs:
             def resolve_outputs(cls, inputs=None):
                 return None
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_workspace / "results", engine="direct"):
             n = DynamicNoSchema()()
             # No schema → no construction-time validation → succeeds.
             ref = n["any_column"]
@@ -237,14 +237,14 @@ class TestNodeGetOutputSchema:
     def test_files_node_schema(self, tmp_workspace):
         from bioimageflow_common_tools import Files
 
-        with Workflow(engine="direct"):
+        with Workflow(storage_path=tmp_workspace / "results", engine="direct"):
             f = Files()(path=str(tmp_workspace / "data"))
             schema = f.get_output_schema()
             assert schema is not None
             assert set(schema.keys()) == {"path"}
 
-    def test_processing_tool_static_schema(self):
-        with Workflow(engine="direct"):
+    def test_processing_tool_static_schema(self, tmp_path):
+        with Workflow(storage_path=tmp_path, engine="direct"):
             from tests.testkit.integration_tools import FileLoader, StubSegmenter
 
             load = FileLoader()(path="/tmp/x")

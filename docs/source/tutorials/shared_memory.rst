@@ -94,7 +94,7 @@ Wiring it together
    preprocess = Preprocess()
    segment = Segment()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        raw = loader(folder="/data")
        preprocessed = preprocess(image=raw["image"])
        masks = segment(image=preprocessed["result"])

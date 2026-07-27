@@ -46,7 +46,7 @@ class _MaterializationMixin:
         custom_modules: dict[str, Any],
         source_records: list[dict[str, Any]],
         auto_install: bool,
-        storage_path_override: str | Path | None = None,
+        storage_path: str | Path,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -96,7 +96,6 @@ class _MaterializationMixin:
             raise ValueError("Workflow interface inputs and outputs must be arrays.")
         config = graph["config"]
         if not isinstance(config, dict) or not set(config) <= {
-            "storage_path",
             "engine",
             "execution",
             "output_view",
@@ -105,8 +104,7 @@ class _MaterializationMixin:
         wf = cls(
             name=graph["name"],
             display_name=graph["display_name"],
-            storage_path=storage_path_override
-            or config.get("storage_path", "./bif_data"),
+            storage_path=storage_path,
             engine=engine or config.get("engine", "wetlands"),
             execution=execution or config.get("execution", "parallel"),
             output_view=config.get("output_view"),
@@ -369,6 +367,7 @@ class _MaterializationMixin:
                                 custom_modules=custom_modules,
                                 source_records=source_records,
                                 auto_install=auto_install,
+                                storage_path=storage_path,
                                 partial=partial,
                                 errors=child_errors,
                                 graph_stack=graph_stack,

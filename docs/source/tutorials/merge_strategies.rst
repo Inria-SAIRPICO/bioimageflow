@@ -19,7 +19,7 @@ nodes.
 
    join = InnerJoin()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        images = loader(folder="/data")
        masks = segment(image=images["image"])
        # Explicitly join two DataFrames
@@ -38,7 +38,7 @@ DataFrames. Useful for applying every parameter combination to every image:
 
    cross = CrossJoin()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        images = loader(folder="/data")         # 10 images
        params = param_source()                  # 3 parameter sets
        combos = cross(images, params)           # 30 rows
@@ -64,7 +64,7 @@ index:
 
    join = JoinOnColumn()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        images = loader(folder="/data")
        metadata = csv_source(path="metadata.csv")
        merged = join(images, metadata, join_column="sample_id", how="left")
@@ -89,7 +89,7 @@ results from parallel branches:
 
    concat = Concat()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        batch_a = loader(folder="/data/batch_a")
        batch_b = loader(folder="/data/batch_b", name="loader_b")
        all_images = concat(batch_a, batch_b)
@@ -108,7 +108,7 @@ nodes into a single DataFrame. Its output uses
 
    collect = Collect()
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        raw = loader(folder="/data")
        masks = segment(image=raw["image"])
        stats = measure(mask=masks["mask"])
@@ -141,7 +141,7 @@ nodes resolves to the union of their declared column names:
 
    from bioimageflow_common_tools import CrossJoin, Files, Generate
 
-   with Workflow():
+   with Workflow(storage_path="./results"):
        files = Files()(path="./data")
        sens = Generate()(column_name="sensitivity", values=[0.1, 0.2])
        size = Generate()(column_name="size", values=[1, 2])

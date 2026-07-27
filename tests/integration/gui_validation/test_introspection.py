@@ -46,8 +46,8 @@ from tests.testkit.integration_tools import (
 
 
 class TestIntrospectionHelpers:
-    def test_topological_order_method(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_topological_order_method(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])
@@ -56,8 +56,8 @@ class TestIntrospectionHelpers:
         assert order.index("FileLoader_1") < order.index("StubSegmenter_1")
         assert order.index("StubSegmenter_1") < order.index("StubStats_1")
 
-    def test_downstream_of(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_downstream_of(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])
@@ -65,8 +65,8 @@ class TestIntrospectionHelpers:
         assert wf.downstream_of("FileLoader_1") == {"StubSegmenter_1", "StubStats_1"}
         assert wf.downstream_of("StubStats_1") == set()
 
-    def test_downstream_of_unknown(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_downstream_of_unknown(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with pytest.raises(KeyError):
             wf.downstream_of("nope")
 

@@ -46,7 +46,7 @@ construction pass:
 
 .. code-block:: python
 
-   wf = Workflow()
+   wf = Workflow(storage_path="./results")
    with wf, wf.capture_errors() as errors:
        loaded = files(path="/data")
        seg    = MyTool()(image=loaded["does_not_exist"])    # column_not_found

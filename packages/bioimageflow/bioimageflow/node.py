@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import threading
 from dataclasses import dataclass
 from difflib import get_close_matches
+from pathlib import Path
 from typing import Any
 
 from bioimageflow_core.tool import ProcessingTool, BaseTool
@@ -515,10 +516,23 @@ class Node:
         """Re-enable this node for execution."""
         self.enabled = True
 
-    def compute(self, **kwargs: Any) -> Any:
-        """Shorthand: create/use a Workflow and compute this node."""
+    def compute(
+        self,
+        *,
+        storage_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Compute in the active workflow or create one with explicit storage."""
         wf = get_active_workflow()
         if wf is None:
             from bioimageflow.workflow import Workflow
-            wf = Workflow()
+            if storage_path is None:
+                raise TypeError(
+                    "Node.compute() requires storage_path when no Workflow is active."
+                )
+            wf = Workflow(storage_path=storage_path)
+        elif storage_path is not None:
+            raise TypeError(
+                "Node.compute() cannot replace the active Workflow storage_path."
+            )
         return wf.compute(self, **kwargs)

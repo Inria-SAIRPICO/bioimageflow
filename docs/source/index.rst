@@ -50,7 +50,7 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
 
    configure_wetlands(wetlands_instance_path="./wetlands")
 
-   with Workflow(storage_path="./bif_data") as wf:
+   with Workflow(storage_path="./results") as wf:
        raw = files(path="/data/images", pattern="*.tif")
        masks = threshold(image=raw["path"], cutoff=100.0, name="threshold")
        result = wf.compute(masks)

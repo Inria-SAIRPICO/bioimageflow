@@ -24,13 +24,14 @@ Construction
 
    from bioimageflow import WorkflowSession
 
-   sess = WorkflowSession()                  # empty graph
-   sess = WorkflowSession(data)              # load existing wire format
-   sess = WorkflowSession(data, registry=reg, storage_path="./bif_data")
+   results = workflow_directory / "results"
+   sess = WorkflowSession(storage_path=results)                    # empty graph
+   sess = WorkflowSession(data, storage_path=results)              # existing graph
+   sess = WorkflowSession(data, storage_path=results, registry=reg)
 
 The ``registry`` argument is stored with the session for host-side tool resolution.
-The ``storage_path`` argument injects (or overrides)
-``data["config"]["storage_path"]`` without mutating the input dict.
+The required ``storage_path`` is runtime state held separately from the wire-format dictionary.
+Session snapshots never serialize it.
 
 Mutating operations
 -------------------
@@ -94,9 +95,9 @@ The materialized workflow is reused across non-structural edits, validation is c
 
 - :meth:`~bioimageflow.WorkflowSession.to_workflow` — returns the
   built :class:`Workflow`. Internally calls
-  ``Workflow.from_dict(partial=True, validate_only=True,
-  auto_install=False)`` so per-node failures are captured rather than
-  raised.
+  ``Workflow.from_dict(storage_path=sess.storage_path, partial=True,
+  validate_only=True, auto_install=False)`` so per-node failures are
+  captured rather than raised.
 - :meth:`~bioimageflow.WorkflowSession.validate` — returns
   ``list[ValidationError]``: the union of build-time errors
   (``wf.errors``) and ``wf.validate()`` results, deduplicated.
@@ -137,11 +138,10 @@ install. Trigger installs from a separate, user-initiated action — the
 Round-trip identity
 -------------------
 
-For any input ``data``, ``WorkflowSession(data).to_dict()`` returns a
-deep copy of ``data`` byte-for-byte (modulo the clean-form rule for
-``enabled``). After a sequence of mutations, the resulting dict reflects
-exactly the edits applied — no re-ordering, no re-keyed envelopes. Hosts
-can rely on this for diff-driven undo / redo.
+For any input ``data``, ``WorkflowSession(data, storage_path=results).to_dict()`` returns a deep copy of ``data`` byte-for-byte (modulo the clean-form rule for ``enabled``).
+The runtime storage path is not added to the dictionary.
+After a sequence of mutations, the resulting dict reflects exactly the edits applied — no re-ordering, no re-keyed envelopes.
+Hosts can rely on this for diff-driven undo / redo.
 
 Worked example: editor loop
 ---------------------------
@@ -151,7 +151,10 @@ each user action:
 
 .. code-block:: python
 
-   sess = WorkflowSession(initial_data)
+   sess = WorkflowSession(
+       initial_data,
+       storage_path=workflow_directory / "results",
+   )
 
    def on_constant_changed(node_name, field, new_value):
        sess.set_constant(node_name, field, new_value)

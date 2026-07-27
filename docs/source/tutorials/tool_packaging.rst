@@ -137,11 +137,22 @@ They use relative imports for tools owned by the same package:
 .. code-block:: python
 
    # my_tools/pipeline.py
+   from pathlib import Path
+
    from bioimageflow import Workflow
    from .segmenter import MySegmenter       # relative import
 
-   def build_workflow() -> Workflow:
-       workflow = Workflow(name="segment_pipeline", display_name="Segment Pipeline")
+   WORKFLOW_DIRECTORY = Path(__file__).resolve().parent
+
+   def build_workflow(
+       *,
+       storage_path: str | Path = WORKFLOW_DIRECTORY / "results",
+   ) -> Workflow:
+       workflow = Workflow(
+           name="segment_pipeline",
+           display_name="Segment Pipeline",
+           storage_path=storage_path,
+       )
        with workflow:
            image = workflow.input("image", str, id="input-image")
            threshold = workflow.input("threshold", float, default=0.5, id="input-threshold")
@@ -214,7 +225,7 @@ and registers canonical names so standard imports work:
    # Normal imports work after require_tool_packages
    from my_tools import MySegmenter
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        result = MySegmenter()(image=raw["path"])
        wf.compute(result)
 
@@ -239,7 +250,7 @@ versions of the same package simultaneously:
 
    assert SegV1 is not SegV2  # different classes
 
-   with Workflow() as wf:
+   with Workflow(storage_path="./results") as wf:
        result_v1 = SegV1()(image=raw["path"])
        result_v2 = SegV2()(image=raw["path"])
        merged = Concat()(result_v1, result_v2)

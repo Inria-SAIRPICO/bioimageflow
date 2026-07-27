@@ -47,7 +47,11 @@ def test_parsl_factory_validates_and_forwards_exact_runtime_values(
 ) -> None:
     config = object()
     policy = ParslTaskPolicy(row_chunk_size=3, max_in_flight=7)
-    workflow = Workflow(engine="parsl", execution="sequential")
+    workflow = Workflow(
+        storage_path=tmp_path,
+        engine="parsl",
+        execution="sequential",
+    )
 
     engine = workflow.create_engine(
         parsl_config=config,
@@ -71,9 +75,9 @@ def test_parsl_factory_validates_and_forwards_exact_runtime_values(
     assert engine.resource_lifetime is ResourceLifetime.ENGINE
 
 
-def test_parsl_factory_forwards_external_dfk() -> None:
+def test_parsl_factory_forwards_external_dfk(tmp_path) -> None:
     dfk = object()
-    engine = Workflow(engine="parsl").create_engine(
+    engine = Workflow(storage_path=tmp_path, engine="parsl").create_engine(
         dfk=dfk,
         executor_bindings={"cpu": _binding()},
         resource_lifetime="external",
@@ -102,13 +106,14 @@ def test_parsl_factory_forwards_external_dfk() -> None:
 def test_non_parsl_factory_rejects_every_parsl_argument(
     backend: str,
     kwargs: dict[str, Any],
+    tmp_path,
 ) -> None:
     with pytest.raises(ValueError, match="Parsl arguments"):
-        Workflow(engine=backend).create_engine(**kwargs)
+        Workflow(storage_path=tmp_path, engine=backend).create_engine(**kwargs)
 
 
-def test_direct_factory_rejects_resource_ownership_and_manager() -> None:
-    workflow = Workflow(engine="direct")
+def test_direct_factory_rejects_resource_ownership_and_manager(tmp_path) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
 
     with pytest.raises(ValueError, match="only resource_lifetime='execution'"):
         workflow.create_engine(resource_lifetime="engine")
@@ -116,8 +121,10 @@ def test_direct_factory_rejects_resource_ownership_and_manager() -> None:
         workflow.create_engine(env_manager=object())
 
 
-def test_parsl_factory_rejects_wetlands_manager_and_missing_runtime() -> None:
-    workflow = Workflow(engine="parsl")
+def test_parsl_factory_rejects_wetlands_manager_and_missing_runtime(
+    tmp_path,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="parsl")
 
     with pytest.raises(ValueError, match="env_manager"):
         workflow.create_engine(

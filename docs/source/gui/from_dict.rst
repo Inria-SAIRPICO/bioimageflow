@@ -69,9 +69,9 @@ Other parameters
   paths** (sessions, validators) to keep keystroke latency low; an
   unknown tool then surfaces as an ``unknown_tool`` error rather than a
   network round-trip.
-- ``storage_path_override`` — overrides ``data["config"]["storage_path"]``
-  without mutating the dict. Useful when validating a graph against a
-  specific cache path (e.g., a sandboxed scratch directory).
+- ``storage_path`` — required runtime storage for cache records,
+  provenance, run views, transient workspaces, and materialized outputs.
+  It is not read from or written to the workflow dictionary.
 - ``on_progress`` / ``engine`` / ``execution`` / ``wetlands_config`` — passed
   through to the constructed :class:`Workflow`. ``None`` means "use the
   values from ``data['config']`` (or defaults)".
@@ -92,6 +92,7 @@ crash:
 
    wf, errors = Workflow.from_dict(
        data,
+       storage_path=workflow_directory / "results",
        validate_only=True,
        partial=True,
        auto_install=False,        # don't try to install on the hot path

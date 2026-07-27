@@ -431,7 +431,7 @@ def test_sphinx_quickstart_declares_imported_processing_dependencies() -> None:
     quickstart = (ROOT / "docs" / "source" / "quickstart.rst").read_text()
 
     assert "environment = GENERAL_ENV" in quickstart
-    assert 'Workflow(storage_path="./bif_data")' in quickstart
+    assert 'Workflow(storage_path="./results")' in quickstart
     assert "from skimage.io import imread, imsave" not in quickstart
     assert re.search(r"import imageio\.v3 as iio", quickstart) is not None
 

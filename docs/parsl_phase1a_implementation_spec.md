@@ -647,7 +647,7 @@ The factory resolves its default `parsl_execution="workflow"` to the workflow's 
 An explicitly constructed reusable engine may retain `execution="workflow"` and resolve it separately for each executed root workflow.
 
 Remove the private alternate engine-factory path and keep one final factory implementation.
-Bare `Workflow(engine="parsl").compute(...)` has no implicit cluster configuration and fails before graph execution with an actionable construction example.
+Bare `Workflow(storage_path="./results", engine="parsl").compute(...)` has no implicit cluster configuration and fails before graph execution with an actionable construction example.
 
 ### 13.4 Public value validation
 

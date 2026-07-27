@@ -265,7 +265,10 @@ class TestVersionedSerialization:
         from bioimageflow.tool_loader import unload_versioned_package
         unload_versioned_package("dummy_tools", "1.0.0")
 
-        loaded = Workflow.load(data_dir.parent / "workflow.json")
+        loaded = Workflow.load(
+            data_dir.parent / "workflow.json",
+            storage_path=data_dir.parent / "results",
+        )
         terminal = loaded.nodes["AlphaTool_1"]
         assert getattr(type(terminal.tool), "_bif_package_version", None) == "1.0.0"
 
@@ -286,7 +289,10 @@ class TestVersionedSerialization:
         from bioimageflow.tool_loader import unload_versioned_package
         unload_versioned_package("dummy_tools", "1.0.0")
 
-        loaded = Workflow.load(data_dir.parent / "workflow.json")
+        loaded = Workflow.load(
+            data_dir.parent / "workflow.json",
+            storage_path=data_dir.parent / "results",
+        )
         terminal = loaded.nodes["AlphaTool_1"]
         df2 = loaded.compute(terminal)
         pd.testing.assert_frame_equal(df1, df2)

@@ -29,9 +29,16 @@ NucleiLabels = Annotated[
 ]
 
 
-def build_workflow() -> Workflow:
+def build_workflow(
+    *,
+    storage_path: str | Path = Path(__file__).resolve().parent / "results",
+) -> Workflow:
     """Return a fresh marker extraction, detection, and overlap workflow."""
-    workflow = Workflow(name="marker_spot_analysis", display_name="Marker Spot Analysis")
+    workflow = Workflow(
+        name="marker_spot_analysis",
+        display_name="Marker Spot Analysis",
+        storage_path=storage_path,
+    )
     with workflow:
         input_image = workflow.input("input_image", MarkerImage, id="input-image")
         nuclei_labels = workflow.input("nuclei_labels", NucleiLabels, id="input-nuclei-labels")

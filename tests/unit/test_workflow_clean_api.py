@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import inspect
 
 import pytest
 import bioimageflow
@@ -80,8 +81,24 @@ def test_public_exports_match_explicit_allowlist() -> None:
     assert set(bioimageflow.__all__) == PUBLIC_EXPORTS
 
 
-def test_workflow_defaults_to_wetlands_parallel_engine() -> None:
-    wf = Workflow()
+def test_executable_workflow_apis_require_storage_path() -> None:
+    callables = (
+        Workflow,
+        Workflow.from_dict,
+        Workflow.load,
+        Workflow.import_archive,
+        Workflow.from_python,
+        bioimageflow.WorkflowSession,
+        bioimageflow.WorkflowSession.from_dict,
+    )
+
+    for callable_ in callables:
+        parameter = inspect.signature(callable_).parameters["storage_path"]
+        assert parameter.default is inspect.Parameter.empty
+
+
+def test_workflow_defaults_to_wetlands_parallel_engine(tmp_path) -> None:
+    wf = Workflow(storage_path=tmp_path)
     engine = wf.create_engine()
 
     assert wf.engine_type == "wetlands"
@@ -106,13 +123,18 @@ def test_workflow_defaults_to_wetlands_parallel_engine() -> None:
 def test_workflow_rejects_removed_constructor_arguments(
     kwargs: dict[str, object],
     message: str,
+    tmp_path,
 ) -> None:
     with pytest.raises(TypeError, match=message):
-        Workflow(**kwargs)
+        Workflow(storage_path=tmp_path, **kwargs)
 
 
-def test_workflow_builds_direct_parallel_engine() -> None:
-    engine = Workflow(engine="direct", execution="parallel").create_engine()
+def test_workflow_builds_direct_parallel_engine(tmp_path) -> None:
+    engine = Workflow(
+        storage_path=tmp_path,
+        engine="direct",
+        execution="parallel",
+    ).create_engine()
 
     assert isinstance(engine, DefaultEngine)
     assert not isinstance(engine, SequentialEngine)
@@ -120,22 +142,25 @@ def test_workflow_builds_direct_parallel_engine() -> None:
     assert engine._force_sequential is False
 
 
-def test_workflow_builds_wetlands_sequential_engine() -> None:
-    engine = Workflow(execution="sequential").create_engine()
+def test_workflow_builds_wetlands_sequential_engine(tmp_path) -> None:
+    engine = Workflow(
+        storage_path=tmp_path,
+        execution="sequential",
+    ).create_engine()
 
     assert isinstance(engine, SequentialEngine)
     assert engine._use_wetlands is True
     assert engine._force_sequential is True
 
 
-def test_workflow_accepts_parsl_and_rejects_unknown_values() -> None:
-    assert Workflow(engine="parsl").engine_type == "parsl"
+def test_workflow_accepts_parsl_and_rejects_unknown_values(tmp_path) -> None:
+    assert Workflow(storage_path=tmp_path, engine="parsl").engine_type == "parsl"
 
     with pytest.raises(ValueError, match="engine"):
-        Workflow(engine="unknown")
+        Workflow(storage_path=tmp_path, engine="unknown")
 
     with pytest.raises(ValueError, match="execution"):
-        Workflow(execution="serial")
+        Workflow(storage_path=tmp_path, execution="serial")
 
 
 def test_workflow_to_dict_uses_clean_config(tmp_path) -> None:
@@ -145,6 +170,7 @@ def test_workflow_to_dict_uses_clean_config(tmp_path) -> None:
 
     assert config["engine"] == "direct"
     assert config["execution"] == "sequential"
+    assert "storage_path" not in config
     assert "use_wetlands" not in config
     assert "max_age" not in config
     assert "max_executions" not in config
@@ -161,15 +187,18 @@ def test_workflow_output_view_normalizes_and_round_trips(tmp_path) -> None:
     config = wf.to_dict()["config"]
     assert config["output_view"] == {"mode": "copy", "scope": "both"}
 
-    graph = Workflow(output_view={"mode": "copy", "scope": "both"}).to_dict()
+    graph = Workflow(
+        storage_path=tmp_path,
+        output_view={"mode": "copy", "scope": "both"},
+    ).to_dict()
     graph["config"] = config
-    loaded = Workflow.from_dict(graph)
+    loaded = Workflow.from_dict(graph, storage_path=tmp_path)
 
     assert loaded.output_view == OutputView(mode="copy", scope="both")
 
 
-def test_workflow_output_view_string_shorthand() -> None:
-    wf = Workflow(output_view="symlink")
+def test_workflow_output_view_string_shorthand(tmp_path) -> None:
+    wf = Workflow(storage_path=tmp_path, output_view="symlink")
 
     assert wf.output_view == OutputView(mode="symlink", scope="latest")
 
@@ -182,7 +211,7 @@ def test_workflow_pointer_output_view_round_trips(tmp_path) -> None:
     )
 
     graph = wf.to_dict()
-    loaded = Workflow.from_dict(graph)
+    loaded = Workflow.from_dict(graph, storage_path=tmp_path)
 
     assert loaded.output_view == OutputView(mode="pointer", scope="both")
     assert graph["config"]["output_view"] == {"mode": "pointer", "scope": "both"}
@@ -199,23 +228,26 @@ def test_workflow_pointer_output_view_round_trips(tmp_path) -> None:
         {"mode": "copy", "scope": "invalid"},
     ],
 )
-def test_workflow_rejects_invalid_output_view(output_view: dict[str, str]) -> None:
+def test_workflow_rejects_invalid_output_view(
+    output_view: dict[str, str],
+    tmp_path,
+) -> None:
     with pytest.raises(ValueError, match="output_view"):
-        Workflow(output_view=output_view)
+        Workflow(storage_path=tmp_path, output_view=output_view)
 
 
-def test_workflow_from_dict_defaults_to_wetlands_engine() -> None:
-    graph = Workflow().to_dict()
+def test_workflow_from_dict_defaults_to_wetlands_engine(tmp_path) -> None:
+    graph = Workflow(storage_path=tmp_path).to_dict()
     graph["config"] = {}
-    wf = Workflow.from_dict(graph)
+    wf = Workflow.from_dict(graph, storage_path=tmp_path)
 
     assert wf.engine_type == "wetlands"
     assert wf.execution == "parallel"
 
 
-def test_active_workflow_is_context_local_across_threads() -> None:
+def test_active_workflow_is_context_local_across_threads(tmp_path) -> None:
     def active_inside_context() -> Workflow:
-        with Workflow() as wf:
+        with Workflow(storage_path=tmp_path) as wf:
             assert get_active_workflow() is wf
             return wf
 

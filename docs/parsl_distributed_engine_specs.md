@@ -224,7 +224,7 @@ The workflow constructor accepts `"parsl"` as a serializable engine preference:
 
 ```python
 Workflow(
-    storage_path: str | Path = "./bif_data",
+    storage_path: str | Path,
     *,
     name: str = "workflow",
     display_name: str | None = None,
@@ -324,7 +324,7 @@ Rules:
 - For `engine="parsl"`, `env_manager` is rejected, `executor_bindings` is required, `resource_lifetime` controls owned Parsl resources, and the Parsl arguments are forwarded to `ParslEngine`.
 - `Workflow.create_engine()` resolves the default `parsl_execution="workflow"` to the workflow's configured `execution` value; an explicitly constructed engine may retain `"workflow"` for reuse across workflows.
 - Explicit `engine=` passed to `compute()` or `compute_steps()` remains highest precedence.
-- Bare `Workflow(engine="parsl").compute(...)` without runtime arguments MUST fail before graph execution with a clear message showing how to construct and pass a `ParslEngine`.
+- Bare `Workflow(storage_path="./results", engine="parsl").compute(...)` without runtime arguments MUST fail before graph execution with a clear message showing how to construct and pass a `ParslEngine`.
 
 ### 5.4 Optional dependency behavior
 

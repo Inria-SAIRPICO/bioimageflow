@@ -17,8 +17,7 @@ from bioimageflow_sairpico_tools import (
     RichardsonLucyDeconvolution,
 )
 
-EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "sairpico_deconvolution"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 
 
 class DeconvolutionMetrics(DataFrameTool):

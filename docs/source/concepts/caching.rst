@@ -38,7 +38,7 @@ Results are stored under the ``storage_path`` you pass to
 
 .. code-block:: text
 
-   bif_data/
+   results/
    └── cache/
        └── v1/
            └── results/

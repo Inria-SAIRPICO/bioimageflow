@@ -19,7 +19,7 @@ workflow construction:
    def on_progress(ev: ProgressEvent):
        print(ev.node_name, ev.status, ev.row, ev.total_rows)
 
-   wf = Workflow(on_progress=on_progress)
+   wf = Workflow(storage_path="./results", on_progress=on_progress)
 
 Fields:
 

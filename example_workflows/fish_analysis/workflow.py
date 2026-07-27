@@ -49,8 +49,7 @@ https://cildata.crbs.ucsd.edu/media/images/13434/13434.tif
 https://cildata.crbs.ucsd.edu/media/images/13436/13436.tif
 https://cildata.crbs.ucsd.edu/media/images/13438/13438.tif"""
 
-EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "fish_analysis"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 
 
 def build_workflow(
@@ -95,7 +94,7 @@ def build_workflow(
         )
 
         # -- 4. Marker spot analysis branches --
-        marker_workflow = build_marker_workflow()
+        marker_workflow = build_marker_workflow(storage_path=storage_path)
         overlaps_fols2 = marker_workflow(
             input_image=download["path"],
             nuclei_labels=nuclei["mask"],

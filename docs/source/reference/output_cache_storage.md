@@ -773,7 +773,7 @@ Pointer targets should use normalized relative paths when possible.
 Output pointer targets resolve to the selected canonical record's owned assets, not to attempt staging directories or a separate run-local record copy.
 The canonical run view preserves the record-relative asset path from the selected manifest, so a manifest asset at `assets/mask.tif` is exposed as `outputs/assets/mask.tif.bioimageflow-link.json` beneath `views/runs/<run-id>/nodes/<node-key>/`.
 
-`Workflow(output_view=...)`, `Workflow.export_outputs(...)`, and `bioimageflow.export_outputs(...)` may materialize complete node exports under `outputs/runs/` and `outputs/latest/`.
+`Workflow(storage_path=..., output_view=...)`, `Workflow.export_outputs(...)`, and `bioimageflow.export_outputs(...)` may materialize complete node exports under `outputs/runs/` and `outputs/latest/`.
 `OutputView.mode` supports `none`, `pointer`, `symlink`, `copy`, and `hardlink`.
 `none` creates no disposable `outputs/` projection and leaves only the canonical portable JSON pointers under `views/`.
 `pointer` creates portable `*.bioimageflow-link.json` files under `outputs/`; their relative targets are validated and confined to the workflow storage root.

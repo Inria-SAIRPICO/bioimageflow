@@ -123,15 +123,15 @@ Data flow
    └─────────┘               └─────────┘               └─────────┘
        │                          │                          │
        ▼                          ▼                          ▼
-   bif_data/cache/v1/results/.../<result-key-a>/records/<record-id-a>/
+   results/cache/v1/results/.../<result-key-a>/records/<record-id-a>/
    ├── dataframe.parquet
    └── assets/
 
-   bif_data/cache/v1/results/.../<result-key-b>/records/<record-id-b>/
+   results/cache/v1/results/.../<result-key-b>/records/<record-id-b>/
    ├── dataframe.parquet
    └── assets/
 
-   bif_data/cache/v1/results/.../<result-key-c>/records/<record-id-c>/
+   results/cache/v1/results/.../<result-key-c>/records/<record-id-c>/
    ├── dataframe.parquet
    └── assets/
 

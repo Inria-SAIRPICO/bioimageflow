@@ -215,7 +215,6 @@ class _SerializationMixin:
             "nodes": nodes_data,
             "edges": edges_data,
             "config": {
-                "storage_path": self._storage_path_config,
                 "engine": self.engine_type,
                 "execution": self.execution,
             },

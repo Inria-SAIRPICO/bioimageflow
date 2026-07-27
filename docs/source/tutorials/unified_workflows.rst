@@ -2,14 +2,25 @@ Reusable and Nested Workflows
 =============================
 
 A reusable workflow is an ordinary :class:`~bioimageflow.Workflow` with a public interface.
-Put the definition in a no-argument ``build_workflow`` factory so each materialization is fresh.
+Put the definition in a ``build_workflow(storage_path=...)`` factory so each materialization is fresh and receives its runtime storage explicitly.
 
 .. code-block:: python
 
+   from pathlib import Path
+
    from bioimageflow import Workflow
 
-   def build_workflow() -> Workflow:
-       workflow = Workflow(name="segment", display_name="Segment")
+   WORKFLOW_DIRECTORY = Path(__file__).resolve().parent
+
+   def build_workflow(
+       *,
+       storage_path: str | Path = WORKFLOW_DIRECTORY / "results",
+   ) -> Workflow:
+       workflow = Workflow(
+           name="segment",
+           display_name="Segment",
+           storage_path=storage_path,
+       )
        with workflow:
            image = workflow.input("image", ImagePath, id="input-image")
            masks = Segment()(input_image=image, name="segment")
@@ -21,7 +32,7 @@ Calling a workflow inside a distinct active parent captures an independent :clas
 .. code-block:: python
 
    child = build_workflow()
-   parent = Workflow(name="parent")
+   parent = Workflow(name="parent", storage_path="./parent-results")
    with parent:
        source = Files()(path="images", name="files")
        nested = child(image=source["path"], name="segment-images")

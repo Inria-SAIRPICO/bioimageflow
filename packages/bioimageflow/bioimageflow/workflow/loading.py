@@ -36,24 +36,29 @@ if TYPE_CHECKING:
 
 class _LoadingMixin:
     @classmethod
-    def load(cls, path: str | Path) -> "Workflow":
-        """Deserialize a workflow from a JSON file.
-
-        Thin wrapper around :meth:`from_dict`. Preserves the original
-        behavior: raises on the first error, auto-installs missing
-        versioned packages.
-        """
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        storage_path: str | Path,
+    ) -> "Workflow":
+        """Deserialize a JSON file or portable archive for runtime execution."""
         path = Path(path)
         if path.suffix == ".zip":
-            return cls._load_archive(path)
+            return cls._load_archive(path, storage_path=storage_path)
         data = json.loads(path.read_text())
-        result = cls.from_dict(data)
+        result = cls.from_dict(data, storage_path=storage_path)
         assert isinstance(result, cls)  # strict mode
         return result
 
     @classmethod
-    def from_python(cls, path_or_module: str | Path | Any) -> "Workflow":
-        """Execute a trusted module's exact ``build_workflow`` factory once."""
+    def from_python(
+        cls,
+        path_or_module: str | Path | Any,
+        *,
+        storage_path: str | Path,
+    ) -> "Workflow":
+        """Call a trusted module's ``build_workflow(storage_path=...)`` once."""
         import types
 
         cleanup_callback: Callable[[], None] | None
@@ -134,7 +139,7 @@ class _LoadingMixin:
             factory = getattr(module, "build_workflow")
             if not callable(factory):
                 raise TypeError("build_workflow must be callable.")
-            workflow = factory()
+            workflow = factory(storage_path=storage_path)
             if not isinstance(workflow, cls):
                 raise TypeError(
                     "build_workflow must return a Workflow and nothing else."
@@ -154,7 +159,12 @@ class _LoadingMixin:
                 cleanup_callback()
 
     @classmethod
-    def _load_archive(cls, path: Path) -> "Workflow":
+    def _load_archive(
+        cls,
+        path: Path,
+        *,
+        storage_path: str | Path,
+    ) -> "Workflow":
         temp_root = Path(tempfile.mkdtemp(prefix="bioimageflow_workflow_archive_"))
         _extract_workflow_archive(path, temp_root)
         workflow_path = temp_root / "workflow.json"
@@ -162,13 +172,19 @@ class _LoadingMixin:
             raise ValueError("Workflow archive is missing workflow.json")
         with _workflow_import_scope(temp_root):
             data = json.loads(workflow_path.read_text(encoding="utf-8"))
-            result = cls.from_dict(data)
+            result = cls.from_dict(data, storage_path=storage_path)
             assert isinstance(result, cls)  # strict mode
             return result
 
     @classmethod
-    def import_archive(cls, path: str | Path, destination: str | Path) -> "Workflow":
-        """Extract a BioImageFlow zip archive to ``destination`` and load it."""
+    def import_archive(
+        cls,
+        path: str | Path,
+        destination: str | Path,
+        *,
+        storage_path: str | Path,
+    ) -> "Workflow":
+        """Extract a portable archive and load it with explicit runtime storage."""
         path = Path(path)
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
@@ -178,7 +194,7 @@ class _LoadingMixin:
             raise ValueError("Workflow archive is missing workflow.json")
         with _workflow_import_scope(destination):
             data = json.loads(workflow_path.read_text(encoding="utf-8"))
-            result = cls.from_dict(data)
+            result = cls.from_dict(data, storage_path=storage_path)
             assert isinstance(result, cls)  # strict mode
             return result
 
@@ -188,10 +204,10 @@ class _LoadingMixin:
         cls,
         data: dict[str, Any],
         *,
+        storage_path: str | Path,
         validate_only: Literal[True],
         partial: bool = False,
         auto_install: bool = True,
-        storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -204,10 +220,10 @@ class _LoadingMixin:
         cls,
         data: dict[str, Any],
         *,
+        storage_path: str | Path,
         validate_only: Literal[False] = False,
         partial: bool = False,
         auto_install: bool = True,
-        storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -219,10 +235,10 @@ class _LoadingMixin:
         cls,
         data: dict[str, Any],
         *,
+        storage_path: str | Path,
         validate_only: bool = False,
         partial: bool = False,
         auto_install: bool = True,
-        storage_path_override: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -250,10 +266,9 @@ class _LoadingMixin:
             When True (default), missing versioned packages are installed
             automatically. When False, missing packages produce an
             ``unknown_tool`` error (when captured) or raise.
-        storage_path_override
-            Override ``data["config"]["storage_path"]`` without mutating
-            the dict. Useful for GUIs that validate a graph against a
-            specific cache path.
+        storage_path
+            Runtime storage root for cache records, provenance, run views,
+            transient workspaces, and materialized outputs.
         on_progress, engine, execution, wetlands_config
             Passed to :class:`Workflow`. ``None`` means "use the values
             from ``data['config']`` (or defaults)".
@@ -270,7 +285,7 @@ class _LoadingMixin:
             wf = cls._from_recursive_dict(
                 data,
                 auto_install=auto_install,
-                storage_path_override=storage_path_override,
+                storage_path=storage_path,
                 on_progress=on_progress,
                 engine=engine,
                 execution=execution,
@@ -287,7 +302,7 @@ class _LoadingMixin:
                 raise
             errors.append(ValidationError(kind="construction_failed", message=str(exc)))
             wf = cls(
-                storage_path=storage_path_override or "./bif_data",
+                storage_path=storage_path,
                 engine=engine or "wetlands",
                 execution=execution or "parallel",
             )
@@ -306,7 +321,7 @@ class _LoadingMixin:
         data: dict[str, Any],
         *,
         auto_install: bool,
-        storage_path_override: str | Path | None,
+        storage_path: str | Path,
         on_progress: Callable[[ProgressEvent], None] | None,
         engine: str | None,
         execution: str | None,
@@ -333,7 +348,7 @@ class _LoadingMixin:
             custom_modules=custom_modules,
             source_records=source_records,
             auto_install=auto_install,
-            storage_path_override=storage_path_override,
+            storage_path=storage_path,
             on_progress=on_progress,
             engine=engine,
             execution=execution,

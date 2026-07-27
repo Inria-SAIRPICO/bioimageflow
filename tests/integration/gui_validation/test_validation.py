@@ -51,8 +51,8 @@ from tests.testkit.gui_validation import (
 
 
 class TestValidate:
-    def test_empty_workflow(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_empty_workflow(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         assert wf.validate() == []
 
     def test_valid_workflow(self, tmp_path: Path) -> None:
@@ -63,16 +63,16 @@ class TestValidate:
             StubStats()(image=load["path"], mask=seg["mask"])
         assert wf.validate() == []
 
-    def test_missing_required_after_capture(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_missing_required_after_capture(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             with wf.capture_errors():
                 StubSegmenter()()
         errs = wf.validate()
         assert any(e.kind == "missing_input" and e.field == "input_image" for e in errs)
 
-    def test_parameter_invalid_via_pydantic_constraint(self) -> None:
-        wf = Workflow(engine="direct")
+    def test_parameter_invalid_via_pydantic_constraint(self, tmp_path) -> None:
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             _BadConstraintTool()(diameter=-1)  # gt=0 violated
         errs = wf.validate()
@@ -89,9 +89,9 @@ class TestValidate:
         errs = validate_parameters(_BadConstraintTool, {})
         assert errs == []
 
-    def test_topological_order_raises_on_cycle(self) -> None:
+    def test_topological_order_raises_on_cycle(self, tmp_path) -> None:
         # A cycle is only constructible by mutating upstream_nodes after the fact.
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])
@@ -104,10 +104,10 @@ class TestValidate:
         errs = wf.validate()
         assert any(e.kind == "cycle" for e in errs)
 
-    def test_plan_raises_cycle_in_workflow_error(self) -> None:
+    def test_plan_raises_cycle_in_workflow_error(self, tmp_path) -> None:
         from bioimageflow import CycleInWorkflowError
 
-        wf = Workflow(engine="direct")
+        wf = Workflow(storage_path=tmp_path, engine="direct")
         with wf:
             load = FileLoader()(path="/tmp/x")
             seg = StubSegmenter()(input_image=load["path"])

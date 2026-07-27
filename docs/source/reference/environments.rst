@@ -79,7 +79,7 @@ tool needs per row:
    * - ``max_concurrent``
      - ``0``
      - Parsl bound on unfinished row or chunk tasks for one processing node.
-       Direct and Wetlands do not enforce it; use ``Workflow(max_workers=...)`` or ``Workflow.get_environment(...).max_workers`` for Wetlands worker pool sizing.
+       Direct and Wetlands do not enforce it; use ``Workflow(storage_path="./results", max_workers=...)`` or ``Workflow.get_environment(...).max_workers`` for Wetlands worker pool sizing.
    * - ``memory``
      - ``None``
      - Optional string hint for system memory.
@@ -174,7 +174,7 @@ Applications that execute repeatedly can create and retain an engine explicitly:
 
    from bioimageflow import Workflow
 
-   wf = Workflow.load("workflow.json")
+   wf = Workflow.load("workflow.json", storage_path="./results")
    with wf.create_engine(resource_lifetime="engine") as engine:
        first = wf.compute(engine=engine)
        second = wf.compute(engine=engine)

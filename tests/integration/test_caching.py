@@ -337,12 +337,16 @@ class TestDeterministicSerialize:
 
 class TestCacheRetention:
 
-    def test_max_executions_is_removed_from_workflow_api(self):
+    def test_max_executions_is_removed_from_workflow_api(self, tmp_path):
         """Published-record pruning is no longer a Workflow constructor policy."""
         with pytest.raises(TypeError, match="max_executions"):
-            Workflow(engine="direct", max_executions=3)
+            Workflow(
+                storage_path=tmp_path,
+                engine="direct",
+                max_executions=3,
+            )
 
-    def test_max_age_is_removed_from_workflow_api(self):
+    def test_max_age_is_removed_from_workflow_api(self, tmp_path):
         """Age-based cache cleanup belongs to an explicit maintenance API."""
         with pytest.raises(TypeError, match="max_age"):
-            Workflow(engine="direct", max_age="7d")
+            Workflow(storage_path=tmp_path, engine="direct", max_age="7d")

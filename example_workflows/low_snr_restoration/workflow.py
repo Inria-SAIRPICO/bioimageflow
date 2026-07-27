@@ -19,8 +19,7 @@ from bioimageflow_core import (
 )
 from bioimageflow_restoration_tools import CAREamicsPredict, RestorationMetrics
 
-EXAMPLE_WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_STORAGE_PATH = EXAMPLE_WORKFLOWS_DIR / "outputs" / "low_snr_restoration"
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 
 
 class RestorationPreview(ProcessingTool):
