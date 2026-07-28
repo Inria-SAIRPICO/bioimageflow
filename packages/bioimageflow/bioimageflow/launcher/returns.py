@@ -27,7 +27,20 @@ from .errors import (
     LauncherProtocolError,
     WorkflowRunResultUnavailableError,
 )
-from .schemas import RETURN_SCHEMA, validate_return, validate_run_id
+from .return_assets import (
+    base_locator,
+    catalog_run_assets,
+    confined_path,
+    locate_path_cell,
+    locate_shared_array_cell,
+)
+from .return_schema import validate_return_manifest_structure
+from .return_routes import (
+    DeclaredReturnColumn,
+    ReturnProviderRoute,
+    ReturnRoutePlan,
+)
+from .schemas import RETURN_SCHEMA, validate_run_id
 
 
 def _missing(value: Any) -> bool:
@@ -43,16 +56,6 @@ def _missing(value: Any) -> bool:
         except ValueError:
             return False
     return type(missing) is bool and missing
-
-
-def _confined(path: Path, root: Path, *, label: str) -> Path:
-    if path.is_symlink():
-        raise LauncherProtocolError(f"{label} must not be a symlink.")
-    try:
-        path.resolve(strict=False).relative_to(root.resolve())
-    except ValueError as exc:
-        raise LauncherProtocolError(f"{label} escapes its assigned root.") from exc
-    return path
 
 
 def _sync_file(path: Path) -> None:
@@ -125,292 +128,55 @@ def _normalize_root_outputs(values: Sequence[Any] | None) -> list[dict[str, str]
     return outputs
 
 
-def _catalog_for_run(
-    storage: Storage,
-    run_id: str,
-    outcomes: Iterable[Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    assets: list[dict[str, Any]] = []
-    transients: list[dict[str, Any]] = []
-    for outcome in outcomes:
-        if outcome.result_key is not None:
-            manifest = storage.load_record_manifest(
-                outcome.result_key,
-                outcome.record_id,
+def _route_maps(
+    routes: Iterable[ReturnProviderRoute],
+) -> tuple[
+    dict[tuple[str | None, str], tuple[ReturnProviderRoute, ...]],
+    dict[tuple[str | None, str], DeclaredReturnColumn],
+]:
+    route_values = tuple(routes)
+    candidates: dict[
+        tuple[str | None, str],
+        list[ReturnProviderRoute],
+    ] = {}
+    declared: dict[tuple[str | None, str], DeclaredReturnColumn] = {}
+    for route in route_values:
+        if not isinstance(route, ReturnProviderRoute):
+            raise TypeError(
+                "provider_routes must contain ReturnProviderRoute values."
             )
-            for output in manifest.outputs:
-                if output.get("kind") != "owned_asset":
-                    continue
-                relative = validate_relative_posix_path(str(output["path"]))
-                assets.append(
-                    {
-                        "node_key": outcome.node_key,
-                        "result_key": outcome.result_key,
-                        "record_id": outcome.record_id,
-                        "asset_path": relative,
-                        "path": storage.resolve_record_asset(
-                            outcome.result_key,
-                            outcome.record_id,
-                            relative,
-                        ),
-                        "metadata": output,
-                    }
-                )
-        if outcome.transient_invocation_id is not None:
-            root = (
-                storage.transient_invocation_dir(
-                    run_id,
-                    outcome.node_key,
-                    outcome.transient_invocation_id,
-                )
-                / "assets"
-            )
-            _confined(root, storage.cache_root, label="Transient asset root")
-            transients.append(
-                {
-                    "node_key": outcome.node_key,
-                    "invocation_id": outcome.transient_invocation_id,
-                    "root": root,
-                }
-            )
-    return assets, transients
-
-
-def _base_locator(
-    *,
-    frame_id: str,
-    mapping_key: str | None,
-    row_position: int,
-    row_index: Any,
-    column: str,
-) -> dict[str, Any]:
-    return {
-        "frame_id": frame_id,
-        "mapping_key": mapping_key,
-        "row_position": row_position,
-        "row_index": str(row_index),
-        "column": column,
-        "kind": None,
-        "result_key": None,
-        "record_id": None,
-        "asset_path": None,
-        "path": None,
-        "asset_type": None,
-        "digest": None,
-        "shared_array": None,
-    }
-
-
-def _record_path_locator(
-    path: Path,
-    *,
-    catalog: list[dict[str, Any]],
-    base: dict[str, Any],
-) -> dict[str, Any] | None:
-    resolved = path.resolve(strict=False)
-    matches = [
-        item for item in catalog if item["path"].resolve(strict=False) == resolved
-    ]
-    if not matches:
-        return None
-    if len(matches) != 1:
-        identities = {
-            (item["result_key"], item["record_id"], item["asset_path"])
-            for item in matches
-        }
-        if len(identities) != 1:
-            raise LauncherProtocolError(
-                "Public return path matches multiple immutable record assets."
-            )
-    match = matches[0]
-    metadata = match["metadata"]
-    locator = dict(base)
-    locator.update(
-        {
-            "kind": "record_asset",
-            "result_key": match["result_key"],
-            "record_id": match["record_id"],
-            "asset_path": match["asset_path"],
-            "asset_type": metadata["asset_type"],
-            "digest": metadata["digest"],
-            "shared_array": metadata.get("array"),
-        }
-    )
-    return locator
-
-
-def _record_shared_locator(
-    value: Any,
-    *,
-    catalog: list[dict[str, Any]],
-    base: dict[str, Any],
-) -> dict[str, Any] | None:
-    from bioimageflow_core.types import SharedArray
-
-    if not isinstance(value, SharedArray):
-        return None
-    candidates = [
-        item
-        for item in catalog
-        if item["metadata"].get("asset_role") == "shared_array"
-        and item["metadata"].get("array", {}).get("row_index")
-        == base["row_index"]
-    ]
-    exact_column = [
-        item
-        for item in candidates
-        if item["metadata"].get("array", {}).get("column") == base["column"]
-    ]
-    if exact_column:
-        candidates = exact_column
-    if not candidates:
-        return None
-    if len(candidates) != 1:
-        raise LauncherProtocolError(
-            "Public shared-array return has ambiguous provider provenance."
+        key = (route.mapping_key, route.public_column)
+        if route not in candidates.setdefault(key, []):
+            candidates[key].append(route)
+        current = declared.get(key)
+        declared[key] = DeclaredReturnColumn(
+            mapping_key=route.mapping_key,
+            public_column=route.public_column,
+            path=(not route.shared_array)
+            or (current.path if current is not None else False),
+            shared_array=route.shared_array
+            or (current.shared_array if current is not None else False),
         )
-    match = candidates[0]
-    metadata = match["metadata"]
-    locator = dict(base)
-    locator.update(
-        {
-            "kind": "record_asset",
-            "result_key": match["result_key"],
-            "record_id": match["record_id"],
-            "asset_path": match["asset_path"],
-            "asset_type": "file",
-            "digest": metadata["digest"],
-            "shared_array": metadata["array"],
-        }
-    )
-    return locator
-
-
-def _copy_return_asset(
-    source: Path,
-    *,
-    candidate: Path,
-) -> tuple[str, str, str]:
-    size, digest = asset_digest_and_size(source)
-    del size
-    token = digest.removeprefix("sha256:")
-    name = source.name or "asset"
-    relative = validate_relative_posix_path(
-        f"assets/{token[:2]}/{token}/{name}"
-    )
-    destination = candidate / relative
-    if destination.exists():
-        existing_size, existing_digest = asset_digest_and_size(destination)
-        del existing_size
-        if existing_digest != digest:
-            raise LauncherProtocolError("Return asset digest collision.")
-    else:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, destination)
-        else:
-            shutil.copy2(source, destination)
-    asset_type = "directory" if source.is_dir() else "file"
-    return f"return/{relative}", digest, asset_type
-
-
-def _transient_locator(
-    path: Path,
-    *,
-    transients: list[dict[str, Any]],
-    candidate: Path,
-    base: dict[str, Any],
-) -> dict[str, Any] | None:
-    matches: list[Path] = []
-    resolved = path.resolve(strict=False)
-    for transient in transients:
-        root = transient["root"]
-        if root.is_symlink() or not root.is_dir():
-            continue
-        try:
-            resolved.relative_to(root.resolve())
-        except ValueError:
-            continue
-        if path.is_symlink() or not (path.is_file() or path.is_dir()):
-            raise LauncherProtocolError(
-                "Transient public return asset is missing or unsafe."
+    if isinstance(routes, ReturnRoutePlan):
+        for column in routes.declared_columns:
+            if not isinstance(column, DeclaredReturnColumn):
+                raise TypeError(
+                    "ReturnRoutePlan declarations must be DeclaredReturnColumn values."
+                )
+            key = (column.mapping_key, column.public_column)
+            current = declared.get(key)
+            declared[key] = DeclaredReturnColumn(
+                mapping_key=column.mapping_key,
+                public_column=column.public_column,
+                path=column.path
+                or (current.path if current is not None else False),
+                shared_array=column.shared_array
+                or (current.shared_array if current is not None else False),
             )
-        matches.append(path)
-    if not matches:
-        return None
-    if len(matches) > 1:
-        raise LauncherProtocolError(
-            "Public return path matches multiple transient invocations."
-        )
-    relative, digest, asset_type = _copy_return_asset(
-        matches[0],
-        candidate=candidate,
+    return (
+        {key: tuple(values) for key, values in candidates.items()},
+        declared,
     )
-    locator = dict(base)
-    locator.update(
-        {
-            "kind": "return_asset",
-            "path": relative,
-            "asset_type": asset_type,
-            "digest": digest,
-        }
-    )
-    return locator
-
-
-def _snapshot_shared_array(
-    value: Any,
-    *,
-    candidate: Path,
-    base: dict[str, Any],
-) -> tuple[str, dict[str, Any]]:
-    import numpy as np
-    from bioimageflow_core.shm import open_shared_array
-    from bioimageflow_core.types import SharedArray
-
-    if not isinstance(value, SharedArray):
-        raise TypeError("value must be a SharedArray.")
-    temporary = candidate / f".shared.{uuid.uuid4().hex}.npy"
-    with open_shared_array(value) as source:
-        array = np.array(source, copy=True, order="C")
-    np.save(temporary, array, allow_pickle=False)
-    relative, digest, asset_type = _copy_return_asset(
-        temporary,
-        candidate=candidate,
-    )
-    temporary.unlink(missing_ok=True)
-    locator = dict(base)
-    locator.update(
-        {
-            "kind": "return_asset",
-            "path": relative,
-            "asset_type": asset_type,
-            "digest": digest,
-            "shared_array": {
-                "dtype": str(array.dtype),
-                "format": "npy",
-                "order": "C",
-                "shape": list(array.shape),
-            },
-        }
-    )
-    return relative.removeprefix("return/"), locator
-
-
-def _external_locator(path: Path, *, base: dict[str, Any]) -> dict[str, Any]:
-    normalized = path.expanduser()
-    if not normalized.is_absolute():
-        normalized = Path.cwd() / normalized
-    normalized = normalized.resolve(strict=False)
-    locator = dict(base)
-    locator.update(
-        {
-            "kind": "external_reference",
-            "path": normalized.as_posix(),
-            "asset_type": "external",
-        }
-    )
-    return locator
 
 
 def persist_public_return(
@@ -421,6 +187,7 @@ def persist_public_return(
     *,
     outcomes: Iterable[Any],
     root_outputs: Sequence[Any] | None = None,
+    provider_routes: Iterable[ReturnProviderRoute] | ReturnRoutePlan = (),
 ) -> dict[str, Any]:
     """Stage, validate, and atomically install the exact public return."""
     validate_run_id(run_id)
@@ -431,11 +198,16 @@ def persist_public_return(
         )
     installed = control_dir / "return"
     if installed.exists():
-        return load_return_manifest(control_dir, expected_run_id=run_id)
+        return load_return_manifest(
+            control_dir,
+            expected_run_id=run_id,
+            storage_path=storage_path,
+        )
 
     shape, mapping_keys, frames = _normalize_frames(value)
     storage = Storage(storage_path)
-    record_assets, transients = _catalog_for_run(storage, run_id, outcomes)
+    record_assets, transients = catalog_run_assets(storage, run_id, outcomes)
+    routes, declarations = _route_maps(provider_routes)
     candidate = control_dir / f".return.{uuid.uuid4().hex}.tmp"
     candidate.mkdir()
     (candidate / "dataframes").mkdir()
@@ -443,6 +215,8 @@ def persist_public_return(
     manifest_frames: list[dict[str, Any]] = []
     locators: list[dict[str, Any]] = []
     try:
+        from bioimageflow_core.types import SharedArray
+
         for frame_position, (mapping_key, frame) in enumerate(frames):
             frame_id = f"frame_{frame_position:04d}"
             stored = frame.copy(deep=True)
@@ -452,59 +226,62 @@ def persist_public_return(
                     value_at_cell = frame.iat[row_position, column_position]
                     if _missing(value_at_cell):
                         continue
-                    base = _base_locator(
+                    base = base_locator(
                         frame_id=frame_id,
                         mapping_key=mapping_key,
                         row_position=row_position,
                         row_index=row_index,
                         column=column,
                     )
-                    from bioimageflow_core.types import SharedArray
-
+                    key = (mapping_key, column)
+                    route_candidates = routes.get(key, ())
+                    declaration = declarations.get(key)
                     if isinstance(value_at_cell, SharedArray):
-                        locator = _record_shared_locator(
+                        if (
+                            declaration is None
+                            or not declaration.shared_array
+                            or not route_candidates
+                        ):
+                            raise LauncherProtocolError(
+                                "Shared-array return cell has no declared provider route."
+                            )
+                        stored_value, locator = locate_shared_array_cell(
                             value_at_cell,
                             catalog=record_assets,
+                            candidate=candidate,
                             base=base,
+                            routes=route_candidates,
                         )
-                        if locator is None:
-                            stored_value, locator = _snapshot_shared_array(
-                                value_at_cell,
-                                candidate=candidate,
-                                base=base,
-                            )
-                        else:
-                            stored_value = locator["asset_path"]
                         stored.iat[row_position, column_position] = stored_value
                         locators.append(locator)
                         continue
-                    if not isinstance(value_at_cell, Path):
+                    if declaration is None:
+                        if isinstance(value_at_cell, Path):
+                            raise LauncherProtocolError(
+                                "Path return cell has no declared provider route."
+                            )
                         continue
-                    locator = _record_path_locator(
+                    if (
+                        not declaration.path
+                        or not route_candidates
+                        or not isinstance(value_at_cell, (str, Path))
+                    ):
+                        raise LauncherProtocolError(
+                            "Declared path return cell has an invalid value."
+                        )
+                    locator = locate_path_cell(
                         value_at_cell,
                         catalog=record_assets,
-                        base=base,
-                    )
-                    if locator is not None:
-                        stored.iat[row_position, column_position] = locator[
-                            "asset_path"
-                        ]
-                        locators.append(locator)
-                        continue
-                    locator = _transient_locator(
-                        value_at_cell,
                         transients=transients,
                         candidate=candidate,
                         base=base,
+                        routes=route_candidates,
                     )
-                    if locator is not None:
-                        stored.iat[row_position, column_position] = str(
-                            locator["path"]
-                        ).removeprefix("return/")
-                        locators.append(locator)
-                        continue
-                    locator = _external_locator(value_at_cell, base=base)
-                    stored.iat[row_position, column_position] = locator["path"]
+                    stored.iat[row_position, column_position] = (
+                        locator["asset_path"]
+                        if locator["kind"] == "record_asset"
+                        else str(locator["path"]).removeprefix("return/")
+                    )
                     locators.append(locator)
 
             destination = candidate / "dataframes" / f"{frame_id}.parquet"
@@ -528,7 +305,7 @@ def persist_public_return(
             "root_outputs": _normalize_root_outputs(root_outputs),
             "locators": locators,
         }
-        validate_return(manifest)
+        validate_return_manifest_structure(manifest)
         manifest_path = candidate / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False)
@@ -537,7 +314,12 @@ def persist_public_return(
         _sync_dir(candidate / "dataframes")
         _sync_dir(candidate / "assets")
         _sync_dir(candidate)
-        _validate_return_tree(candidate, manifest, control_dir=control_dir)
+        _validate_return_tree(
+            candidate,
+            manifest,
+            control_dir=control_dir,
+            storage=storage,
+        )
         try:
             os.rename(candidate, installed)
         except FileExistsError:
@@ -545,6 +327,7 @@ def persist_public_return(
             existing = load_return_manifest(
                 control_dir,
                 expected_run_id=run_id,
+                storage_path=storage_path,
             )
             if existing != manifest:
                 raise LauncherProtocolError(
@@ -564,9 +347,11 @@ def _validate_return_tree(
     manifest: Mapping[str, Any],
     *,
     control_dir: Path,
+    storage: Storage | None,
 ) -> None:
-    validate_return(manifest)
+    manifest = validate_return_manifest_structure(manifest)
     candidate_mode = return_dir.name.startswith(".return.")
+    loaded_frames: dict[str, pd.DataFrame] = {}
     for frame in manifest["frames"]:
         if not isinstance(frame, Mapping):
             raise LauncherProtocolError("Return frame metadata must be an object.")
@@ -580,7 +365,7 @@ def _validate_return_tree(
             if candidate_mode
             else control_dir / relative
         )
-        _confined(source, return_dir, label="Return DataFrame")
+        confined_path(source, return_dir, label="Return DataFrame")
         metadata = {
             key: frame[key]
             for key in (
@@ -591,13 +376,82 @@ def _validate_return_tree(
                 "transport_digest",
             )
         }
-        read_dataframe_transport(source, metadata)
+        loaded_frames[frame["id"]] = read_dataframe_transport(source, metadata)
+
+    for locator in manifest["locators"]:
+        frame = loaded_frames[locator["frame_id"]]
+        row_position = locator["row_position"]
+        column = locator["column"]
+        if row_position >= len(frame) or column not in frame.columns:
+            raise LauncherProtocolError(
+                "Return locator addresses an unknown DataFrame cell."
+            )
+        if str(frame.index[row_position]) != locator["row_index"]:
+            raise LauncherProtocolError(
+                "Return locator row identity does not match its DataFrame."
+            )
+        column_position = list(frame.columns).index(column)
+        stored_value = frame.iat[row_position, column_position]
+        kind = locator["kind"]
+        if kind == "record_asset":
+            expected_value = locator["asset_path"]
+            if storage is not None:
+                try:
+                    path = storage.resolve_record_asset(
+                        locator["result_key"],
+                        locator["record_id"],
+                        locator["asset_path"],
+                    )
+                    _size, digest = asset_digest_and_size(path)
+                except (CacheCorruptionError, OSError, ValueError) as exc:
+                    raise WorkflowRunResultUnavailableError(
+                        "Immutable record required by the submitted result is unavailable.",
+                        details={
+                            "result_key": locator["result_key"],
+                            "record_id": locator["record_id"],
+                        },
+                    ) from exc
+                if digest != locator["digest"]:
+                    raise LauncherProtocolError(
+                        "Return record asset digest does not match."
+                    )
+                asset_type = "directory" if path.is_dir() else "file"
+                if asset_type != locator["asset_type"]:
+                    raise LauncherProtocolError(
+                        "Return record asset type does not match."
+                    )
+        elif kind == "return_asset":
+            relative = validate_relative_posix_path(locator["path"])
+            path = (
+                return_dir / Path(relative).relative_to("return")
+                if candidate_mode
+                else control_dir / relative
+            )
+            confined_path(path, return_dir, label="Return asset")
+            _size, digest = asset_digest_and_size(path)
+            if digest != locator["digest"]:
+                raise LauncherProtocolError(
+                    "Self-contained return asset digest does not match."
+                )
+            asset_type = "directory" if path.is_dir() else "file"
+            if asset_type != locator["asset_type"]:
+                raise LauncherProtocolError(
+                    "Self-contained return asset type does not match."
+                )
+            expected_value = relative.removeprefix("return/")
+        else:
+            expected_value = locator["path"]
+        if str(stored_value) != expected_value:
+            raise LauncherProtocolError(
+                "Return locator does not match its stored DataFrame cell."
+            )
 
 
 def load_return_manifest(
     control_dir: Path,
     *,
     expected_run_id: str | None = None,
+    storage_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Load and verify an installed return manifest."""
     control_dir = Path(control_dir)
@@ -613,10 +467,17 @@ def load_return_manifest(
             "Submitted return manifest is unavailable."
         )
     try:
-        manifest = validate_return(json.loads(manifest_path.read_text()))
+        manifest = validate_return_manifest_structure(
+            json.loads(manifest_path.read_text())
+        )
         if expected_run_id is not None and manifest["run_id"] != expected_run_id:
             raise LauncherProtocolError("Return manifest run ID mismatch.")
-        _validate_return_tree(return_dir, manifest, control_dir=control_dir)
+        _validate_return_tree(
+            return_dir,
+            manifest,
+            control_dir=control_dir,
+            storage=None if storage_path is None else Storage(storage_path),
+        )
     except WorkflowRunResultUnavailableError:
         raise
     except Exception as exc:
@@ -659,8 +520,12 @@ def load_public_return(
     run_id: str,
 ) -> Any:
     """Rehydrate a successful public return without consulting current pointers."""
-    manifest = load_return_manifest(control_dir, expected_run_id=run_id)
     storage = Storage(storage_path)
+    manifest = load_return_manifest(
+        control_dir,
+        expected_run_id=run_id,
+        storage_path=storage_path,
+    )
     frames: dict[str, pd.DataFrame] = {}
     for frame in manifest["frames"]:
         source = Path(control_dir) / validate_relative_posix_path(frame["path"])
@@ -706,7 +571,7 @@ def load_public_return(
             relative = validate_relative_posix_path(locator["path"])
             path = Path(control_dir) / relative
             try:
-                _confined(path, Path(control_dir), label="Return asset")
+                confined_path(path, Path(control_dir), label="Return asset")
                 _size, digest = asset_digest_and_size(path)
             except Exception as exc:
                 raise WorkflowRunResultUnavailableError(
