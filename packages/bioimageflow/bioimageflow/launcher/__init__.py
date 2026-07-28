@@ -10,6 +10,8 @@ from .errors import (
     WorkflowRunNotReadyError,
     WorkflowRunResultUnavailableError,
 )
+from .run import WorkflowRun
+from .submission import submit_workflow
 from .types import OrchestratorLaunchConfig, ParslConfigRef
 
 __all__ = [
@@ -19,8 +21,10 @@ __all__ = [
     "LauncherStateConflictError",
     "OrchestratorLaunchConfig",
     "ParslConfigRef",
+    "WorkflowRun",
     "WorkflowRunFailedError",
     "WorkflowRunLostError",
     "WorkflowRunNotReadyError",
     "WorkflowRunResultUnavailableError",
+    "submit_workflow",
 ]

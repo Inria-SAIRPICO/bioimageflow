@@ -6,6 +6,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,8 @@ from .types import OrchestratorLaunchConfig
 
 
 _UNIMPLEMENTED_BACKENDS = frozenset({"slurm", "pbs", "lsf", "oar"})
+_LOCAL_PROCESS_LOCK = threading.RLock()
+_LOCAL_PROCESSES: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +172,47 @@ def _open_exclusive_log(path: Path) -> Any:
     return os.fdopen(descriptor, "wb")
 
 
+def _local_process_key(
+    control: LauncherRunControl,
+) -> tuple[str, str]:
+    return str(control.repository.storage_root), control.run_id
+
+
+def _track_local_process(
+    control: LauncherRunControl,
+    process: subprocess.Popen[bytes],
+) -> None:
+    key = _local_process_key(control)
+    with _LOCAL_PROCESS_LOCK:
+        _LOCAL_PROCESSES[key] = process
+    if not callable(getattr(process, "wait", None)):
+        return
+
+    def reap() -> None:
+        try:
+            process.wait()
+        finally:
+            with _LOCAL_PROCESS_LOCK:
+                if _LOCAL_PROCESSES.get(key) is process:
+                    _LOCAL_PROCESSES.pop(key, None)
+
+    threading.Thread(
+        target=reap,
+        name=f"bioimageflow-reaper-{control.run_id}",
+        daemon=True,
+    ).start()
+
+
+def terminate_local_orchestrator(control: LauncherRunControl) -> bool:
+    """Terminate a local orchestrator tracked by this launcher process."""
+    with _LOCAL_PROCESS_LOCK:
+        process = _LOCAL_PROCESSES.get(_local_process_key(control))
+    if process is None or process.poll() is not None:
+        return False
+    process.terminate()
+    return True
+
+
 def _launch_local(
     control: LauncherRunControl,
     launch: OrchestratorLaunchConfig,
@@ -212,6 +256,7 @@ def _launch_local(
     finally:
         stdout.close()
         stderr.close()
+    _track_local_process(control, process)
     return LocalLaunch(
         argv=argv,
         process=process,

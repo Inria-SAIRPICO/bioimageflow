@@ -6,3 +6,19 @@ def build(*, workers: int, credential: str | None = None) -> dict[str, object]:
 
 
 not_callable = 3
+
+
+def build_threads(*, max_threads: int = 1):
+    """Return a minimal real Parsl config for launcher integration tests."""
+    from parsl import Config
+    from parsl.executors.threads import ThreadPoolExecutor
+
+    return Config(
+        executors=[
+            ThreadPoolExecutor(
+                label="threads",
+                max_threads=max_threads,
+            )
+        ],
+        retries=0,
+    )

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
 from bioimageflow.engine import WorkflowCancelledError
+from bioimageflow.storage import Storage
 
-from .artifacts import read_error
+from .artifacts import read_error, write_error
 from .errors import (
     WorkflowRunFailedError,
     WorkflowRunLostError,
@@ -16,6 +18,80 @@ from .errors import (
 from .repository import LauncherRepository, LauncherRunControl
 from .returns import load_public_return
 from .state import RevisionConflictError
+from .types import OrchestratorLaunchConfig
+
+
+def _hard_terminate_after_grace(
+    control: LauncherRunControl,
+    *,
+    storage_path: Path,
+    grace_seconds: float,
+) -> None:
+    if threading.Event().wait(grace_seconds):
+        return
+    status = control.read_status()
+    if status["state"] != "cancel_requested" or status["backend"] != "local":
+        return
+    from .backends import terminate_local_orchestrator
+
+    if not terminate_local_orchestrator(control):
+        return
+    error = WorkflowRunLostError(
+        "The local orchestrator was terminated after its cancellation grace period.",
+        details={"run_id": control.run_id, "grace_seconds": grace_seconds},
+    )
+    try:
+        write_error(
+            control,
+            code="orchestrator-hard-terminated",
+            error=error,
+            backend={"name": "local"},
+        )
+    except BaseException:
+        return
+    status = control.read_status()
+    if status["state"] != "cancel_requested":
+        return
+    canonical = storage_path / "views" / "runs" / control.run_id / "run.json"
+    if canonical.is_file() and not canonical.is_symlink():
+        try:
+            Storage(storage_path).finalize_run_metadata(
+                control.run_id,
+                status="failed",
+                update_latest_success=False,
+            )
+        except BaseException:
+            pass
+    try:
+        control.transition(
+            expected_revision=status["revision"],
+            expected_claim_epoch=status["claim_epoch"],
+            new_state="lost",
+            updates={
+                "hard_termination_requested": True,
+                "error": "error.json",
+            },
+        )
+    except RevisionConflictError:
+        return
+
+
+def _schedule_hard_termination(
+    control: LauncherRunControl,
+    *,
+    storage_path: Path,
+    grace_seconds: float,
+) -> None:
+    threading.Thread(
+        target=_hard_terminate_after_grace,
+        kwargs={
+            "control": control,
+            "storage_path": storage_path,
+            "grace_seconds": grace_seconds,
+        },
+        name=f"bioimageflow-hard-cancel-{control.run_id}",
+        daemon=True,
+    ).start()
 
 
 class WorkflowRun:
@@ -27,6 +103,7 @@ class WorkflowRun:
         self.control_dir = control.control_dir
         submission = control.read_submission()
         self._storage_path = Path(submission["storage_root"])
+        self._launch = OrchestratorLaunchConfig.from_dict(submission["launch"])
         self.view_dir = self._storage_path / submission["canonical_view"]
         self._status = control.read_status()
 
@@ -86,6 +163,16 @@ class WorkflowRun:
                     expected_revision=status["revision"],
                     expected_claim_epoch=status["claim_epoch"],
                 )
+                if (
+                    self._status["state"] == "cancel_requested"
+                    and self._launch.backend == "local"
+                    and self._launch.hard_cancel_after is not None
+                ):
+                    _schedule_hard_termination(
+                        self._control,
+                        storage_path=self._storage_path,
+                        grace_seconds=self._launch.hard_cancel_after,
+                    )
                 return
             except RevisionConflictError:
                 continue

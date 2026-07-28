@@ -57,7 +57,10 @@ sys.meta_path.insert(0, BlockParsl())
 from bioimageflow import (
     ExecutorBinding,
     ExecutorCapabilities,
+    OrchestratorLaunchConfig,
     ParslEngine,
+    ParslConfigRef,
+    WorkflowRun,
     WorkerEnvironmentAttestation,
     WorkerSlotCapacity,
 )
@@ -79,6 +82,9 @@ binding = ExecutorBinding(
     ),
 )
 ParslEngine(parsl_config=object(), executor_bindings={"cpu": binding})
+assert OrchestratorLaunchConfig().backend == "local"
+assert ParslConfigRef("example.module:factory", {}).factory == "example.module:factory"
+assert WorkflowRun.__name__ == "WorkflowRun"
 assert "parsl" not in sys.modules
 """
     result = subprocess.run(
