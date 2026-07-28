@@ -183,6 +183,96 @@ A diagnostic records task correlation, executor label, mode, retry, row position
 It becomes terminal only after BioImageFlow observes the future.
 Attempt and task diagnostics do not contribute to result keys or record IDs.
 
+Submitted workflows
+-------------------
+
+Use :func:`~bioimageflow.submit_workflow` when execution must continue in a separate orchestrator process and remain reconnectable after the submitting client exits.
+The workflow keeps its explicit ``storage_path`` as the runtime storage root; that path is launcher metadata and is not inserted into the serialized workflow graph or archive.
+
+Submitted mode refers to Parsl configuration through an importable factory instead of serializing live Config, executor, provider, callable, or credential objects.
+For example, an application module can expose:
+
+.. code-block:: python
+
+   from parsl import Config
+   from parsl.executors.threads import ThreadPoolExecutor
+
+   def build_parsl_config(*, max_threads: int) -> Config:
+       return Config(
+           executors=[
+               ThreadPoolExecutor(
+                   label="local-threads",
+                   max_threads=max_threads,
+               )
+           ],
+           retries=0,
+       )
+
+The client submits the workflow with JSON-safe factory arguments and the same strict executor bindings used by attached execution:
+
+.. code-block:: python
+
+   from bioimageflow import (
+       OrchestratorLaunchConfig,
+       ParslConfigRef,
+       submit_workflow,
+   )
+
+   run = submit_workflow(
+       workflow,
+       inputs={"folder": "/data/images"},
+       parsl_config=ParslConfigRef(
+           "my_application.parsl_config:build_parsl_config",
+           {"max_threads": 4},
+       ),
+       executor_bindings={"local-threads": binding},
+       launch=OrchestratorLaunchConfig(backend="local"),
+   )
+
+``kwargs`` accepts finite JSON-safe values.
+Literal credentials must not be supplied, and secret-looking field names are rejected.
+``secret_refs`` maps factory argument names to opaque environment-variable names that the launch host verifies before starting the orchestrator and resolves inside that process.
+
+The invocation uses exactly one mode.
+Omit ``targets`` to call ``workflow.compute(inputs=...)`` through the public root interface.
+Alternatively, pass immediate registered node names in ``targets`` and omit ``inputs`` to reproduce the single-target or ordered multi-target return contract of ``workflow.compute(*targets)``.
+Root DataFrame inputs are externalized beneath the launcher control directory and verified by both Parquet transport digest and canonical logical DataFrame digest before Parsl acquisition.
+
+The local backend starts ``python -m bioimageflow.launcher.orchestrator`` as a separate process with confined stdout and stderr logs.
+The manual backend writes a shell-free ``command.json`` descriptor and leaves the run in ``prepared`` until an external actor executes that command.
+The ``slurm``, ``pbs``, ``lsf``, and ``oar`` launch values are reserved and currently raise :class:`~bioimageflow.BackendNotSupportedError` before run allocation.
+Parsl providers remain responsible for allocating worker resources; a launcher backend starts only the orchestrator.
+
+Reconnect and observe a run through :class:`~bioimageflow.WorkflowRun`:
+
+.. code-block:: python
+
+   from bioimageflow import WorkflowRun
+
+   run = WorkflowRun.open(workflow.storage_path, run.id)
+   run.refresh()
+   events = run.progress(after_sequence=0)
+   text = run.logs()
+
+   if run.status == "succeeded":
+       result = run.result()
+
+The launcher states are ``prepared``, ``starting``, ``running``, ``finalizing``, ``cancel_requested``, ``succeeded``, ``failed``, ``cancelled``, and ``lost``.
+``status.json`` beneath ``launcher/v1/runs/<run-id>/`` is authoritative for reconnection.
+The portable canonical view uses the same ID beneath ``views/runs/<run-id>/``.
+Mutable launcher state, logs, externalized inputs, and return transports never enter the canonical view or cache identity.
+
+``WorkflowRun.cancel()`` directly cancels an unclaimed prepared run or commits ``cancel_requested`` for an active run.
+The orchestrator watches durable status and the optional wake-up marker, calls ``Workflow.cancel()``, drains its Parsl work, and finishes as ``cancelled``.
+If a local launch config supplies ``hard_cancel_after``, any reconnected run handle can verify and terminate the exact persisted orchestrator process that remains unresponsive after that grace period; a terminated run becomes ``lost`` rather than claiming normal cleanup.
+
+Submitted success installs a complete public return before the canonical run and launcher become successful.
+The return preserves the single DataFrame or ordered mapping shape, exact root output IDs and names, immutable-record asset locations, declared external paths, and self-contained copies of transient owned assets.
+Historical loading addresses exact record IDs and never consults ``current.json``.
+If an explicitly pruned or corrupted immutable record is required, :meth:`~bioimageflow.WorkflowRun.result` raises :class:`~bioimageflow.WorkflowRunResultUnavailableError`.
+
+The complete launcher storage and retention contract is documented in :doc:`output_cache_storage`.
+
 API
 ---
 
@@ -208,3 +298,30 @@ API
 
 .. autoclass:: ParslTaskError
    :members:
+
+.. autoclass:: ParslConfigRef
+   :members:
+
+.. autoclass:: OrchestratorLaunchConfig
+   :members:
+
+.. autofunction:: submit_workflow
+
+.. autoclass:: WorkflowRun
+   :members:
+
+.. autoclass:: BackendNotSupportedError
+
+.. autoclass:: WorkflowRunFailedError
+
+.. autoclass:: WorkflowRunLostError
+
+.. autoclass:: WorkflowRunNotReadyError
+
+.. autoclass:: WorkflowRunResultUnavailableError
+
+.. autoclass:: LauncherError
+
+.. autoclass:: LauncherProtocolError
+
+.. autoclass:: LauncherStateConflictError

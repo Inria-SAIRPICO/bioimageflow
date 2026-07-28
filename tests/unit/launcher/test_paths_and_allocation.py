@@ -17,6 +17,7 @@ from bioimageflow.launcher.schemas import (
     validate_run_id,
     validate_submission,
 )
+from bioimageflow.storage import CacheCorruptionError, Storage
 from tests.unit.launcher.helpers import launcher_submission
 
 
@@ -32,6 +33,25 @@ def _allocate_worker(
     try:
         LauncherRepository(storage_root).allocate(submission, backend="local")
     except RunAlreadyExistsError:
+        queue.put("collision")
+    else:
+        queue.put("created")
+
+
+def _canonical_worker(
+    storage_root: str,
+    run_id: str,
+    queue: multiprocessing.Queue,
+) -> None:
+    try:
+        Storage(storage_root).start_run_metadata(
+            run_id,
+            workflow_identity="workflow:collision",
+            engine="direct:parallel",
+            target_nodes=[],
+            launcher_reserved=False,
+        )
+    except CacheCorruptionError:
         queue.put("collision")
     else:
         queue.put("created")
@@ -137,6 +157,39 @@ def test_concurrent_allocation_has_one_winner(tmp_path: Path) -> None:
 
     assert sorted(results) == ["collision", "created"]
     assert repository.open(run_id).read_status()["revision"] == 0
+
+
+def test_launcher_and_canonical_creation_share_one_run_id_guard(
+    tmp_path: Path,
+) -> None:
+    repository = LauncherRepository(tmp_path)
+    run_id = repository.new_run_id()
+    submission = _submission(repository.storage_root, run_id)
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_allocate_worker,
+            args=(str(repository.storage_root), submission, queue),
+        ),
+        context.Process(
+            target=_canonical_worker,
+            args=(str(repository.storage_root), run_id, queue),
+        ),
+    ]
+
+    for process in processes:
+        process.start()
+    results = [queue.get(timeout=15) for _ in processes]
+    for process in processes:
+        process.join(timeout=15)
+        assert process.exitcode == 0
+
+    assert sorted(results) == ["collision", "created"]
+    assert (
+        repository.run_control_path(run_id).exists()
+        != repository.canonical_run_path(run_id).exists()
+    )
 
 
 @pytest.mark.skipif(

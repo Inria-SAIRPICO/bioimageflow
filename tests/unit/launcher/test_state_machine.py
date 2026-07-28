@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+import bioimageflow.launcher.control as control_module
+from bioimageflow.launcher.artifacts import (
+    build_error_payload,
+    read_error,
+    write_error,
+)
 from bioimageflow.launcher.repository import (
     LauncherCorruptionError,
     LauncherRepository,
@@ -232,3 +238,118 @@ def test_progress_rejects_malformed_complete_lines(tmp_path: Path) -> None:
 
     with pytest.raises(LauncherCorruptionError, match="Invalid progress"):
         control.read_progress()
+
+
+def test_terminal_error_retry_converges_after_status_write_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = _control(tmp_path)
+    claimed = control.claim_start(
+        expected_revision=0,
+        owner="orchestrator-a",
+        backend="local",
+        lease_seconds=30,
+    )
+    running = control.transition(
+        expected_revision=claimed.status["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="running",
+    )
+    error = RuntimeError("deterministic failure")
+    payload = build_error_payload(
+        control.run_id,
+        code="workflow-execution-failed",
+        error=error,
+        backend={"name": "local"},
+    )
+    original = control_module._atomic_write_json
+    failed_once = False
+
+    def fail_terminal_status(path, value):
+        nonlocal failed_once
+        if (
+            path == control.status_path
+            and value.get("state") == "failed"
+            and not failed_once
+        ):
+            failed_once = True
+            raise OSError("injected status install failure")
+        original(path, value)
+
+    monkeypatch.setattr(
+        control_module,
+        "_atomic_write_json",
+        fail_terminal_status,
+    )
+    with pytest.raises(OSError, match="injected"):
+        control.commit_terminal(
+            expected_revision=running["revision"],
+            expected_claim_epoch=claimed.claim["epoch"],
+            new_state="failed",
+            error_payload=payload,
+        )
+
+    assert read_error(control) == payload
+    assert control.read_status()["state"] == "running"
+
+    monkeypatch.setattr(
+        control_module,
+        "_atomic_write_json",
+        original,
+    )
+    terminal = control.commit_terminal(
+        expected_revision=running["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="failed",
+        error_payload=payload,
+    )
+
+    assert terminal["state"] == "failed"
+    assert read_error(control) == payload
+
+
+def test_existing_terminal_error_discards_conflicting_terminal_updates(
+    tmp_path: Path,
+) -> None:
+    control = _control(tmp_path)
+    claimed = control.claim_start(
+        expected_revision=0,
+        owner="orchestrator-a",
+        backend="local",
+        lease_seconds=30,
+    )
+    running = control.transition(
+        expected_revision=claimed.status["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="running",
+    )
+    cancelled = control.request_cancel(
+        expected_revision=running["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+    )
+    installed = write_error(
+        control,
+        code="workflow-execution-failed",
+        error=RuntimeError("failure won before its status write"),
+    )
+    competing = build_error_payload(
+        control.run_id,
+        code="orchestrator-hard-terminated",
+        error=RuntimeError("hard cancellation raced"),
+    )
+
+    terminal = control.commit_terminal(
+        expected_revision=cancelled["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="lost",
+        error_payload=competing,
+        updates={
+            "hard_termination_requested": True,
+            "cancel_requested_at": None,
+        },
+    )
+
+    assert terminal["state"] == "failed"
+    assert terminal["hard_termination_requested"] is False
+    assert read_error(control) == installed

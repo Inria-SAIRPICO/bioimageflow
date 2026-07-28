@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 from collections.abc import Generator, Iterator, Mapping
 from typing import TYPE_CHECKING, Literal
@@ -315,6 +316,9 @@ class _RuntimeMixin:
                 output_view=self.output_view,
             )
             parent._accept_root_dataframes = True
+            parent._captured_custom_sources = copy.deepcopy(
+                self._captured_custom_sources
+            )
             with parent:
                 boundary = self(name=self.name, **supplied)
             boundary._is_root_boundary = True
@@ -571,13 +575,15 @@ class _RuntimeMixin:
                 else getattr(engine, "execution", self.execution)
             ),
         }
-        storage.write_run_metadata(
+        storage.start_run_metadata(
             run_id,
             workflow_identity=self._workflow_identity(target_nodes),
             engine=f"{self._run_view_context['engine']}:{self._run_view_context['execution']}",
-            status="running",
             target_nodes=target_nodes,
             started_at=started_at,
+            launcher_reserved=run_context._uses_launcher_reservation(
+                self.storage_path
+            ),
         )
 
     def _finish_run_view(self, status: str, *, update_latest_success: bool) -> None:

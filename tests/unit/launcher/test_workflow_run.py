@@ -1,5 +1,7 @@
-from pathlib import Path
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -132,7 +134,7 @@ def test_local_hard_cancel_terminates_tracked_process_and_marks_lost(
             self.terminated = False
 
         def poll(self) -> int | None:
-            return None
+            return -15 if self.terminated else None
 
         def terminate(self) -> None:
             self.terminated = True
@@ -183,3 +185,65 @@ def test_local_hard_cancel_terminates_tracked_process_and_marks_lost(
     assert status["hard_termination_requested"] is True
     assert status["error"] == "error.json"
     assert Storage(tmp_path)._load_run_metadata(RUN_ID)["status"] == "failed"
+
+
+def test_reconnected_hard_cancel_uses_persisted_process_identity(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow.launcher.artifacts import write_local_process_identity
+    from bioimageflow.launcher.backends import _process_start_token
+
+    control = LauncherRepository(tmp_path).allocate(
+        _submission(
+            tmp_path,
+            backend="local",
+            hard_cancel_after=0.01,
+        ),
+        backend="local",
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True,
+    )
+    try:
+        token = _process_start_token(process.pid)
+        assert token is not None
+        write_local_process_identity(
+            control,
+            pid=process.pid,
+            start_token=token,
+        )
+        claimed = control.claim_start(
+            expected_revision=0,
+            owner="detached-local-owner",
+            backend="local",
+            lease_seconds=30,
+        )
+        control.transition(
+            expected_revision=claimed.status["revision"],
+            expected_claim_epoch=claimed.claim["epoch"],
+            new_state="running",
+        )
+        Storage(tmp_path).write_run_metadata(
+            RUN_ID,
+            workflow_identity="workflow:test",
+            engine="parsl:parallel",
+            status="running",
+            target_nodes=[],
+        )
+
+        reconnected = WorkflowRun.open(tmp_path, RUN_ID)
+        reconnected.cancel()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            reconnected.refresh()
+            if reconnected.status == "lost":
+                break
+            time.sleep(0.01)
+
+        assert reconnected.status == "lost"
+        assert process.wait(timeout=2) != 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=2)

@@ -20,13 +20,10 @@ from .repository import (
     _assert_directory,
     _atomic_create_json,
     _atomic_write_json,
-    _canonical_json_bytes,
     _CrossProcessLock,
-    _decode_json,
     _is_symlink,
     _normalized_now,
     _path_exists,
-    _read_bytes,
     _read_json,
     _require_positive_lease,
     _sync_directory,
@@ -34,12 +31,12 @@ from .repository import (
 )
 from .schemas import (
     CLAIM_SCHEMA,
-    PROGRESS_SCHEMA,
+    ERROR_SCHEMA,
     LauncherSchemaError,
     parse_utc_timestamp,
     utc_timestamp,
     validate_claim,
-    validate_progress,
+    validate_error,
     validate_run_id,
     validate_status,
     validate_submission,
@@ -51,12 +48,13 @@ from .state import (
     revise_status_metadata,
     transition_status,
 )
+from .control_progress import _ProgressControlMixin
 
 if TYPE_CHECKING:
     from .repository import LauncherRepository
 
 
-class LauncherRunControl:
+class LauncherRunControl(_ProgressControlMixin):
     """Guarded operations for one durable launcher control directory."""
 
     def __init__(self, repository: LauncherRepository, run_id: str) -> None:
@@ -174,6 +172,95 @@ class LauncherRunControl:
             _atomic_write_json(self.status_path, next_status)
             return next_status
 
+    def commit_terminal(
+        self,
+        *,
+        expected_revision: int,
+        expected_claim_epoch: int | None,
+        new_state: str,
+        error_payload: Mapping[str, Any] | None = None,
+        updates: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Install an optional error and its terminal status under one guard."""
+        if new_state not in {"succeeded", "failed", "cancelled", "lost"}:
+            raise ValueError("commit_terminal requires a terminal launcher state.")
+        merged_updates: dict[str, Any] = dict(updates or {})
+        error: dict[str, Any] | None = None
+        if error_payload is not None:
+            error = validate_error(error_payload)
+            if error["schema"] != ERROR_SCHEMA or error["run_id"] != self.run_id:
+                raise LauncherSchemaError(
+                    "Terminal error does not match its launcher run."
+                )
+            merged_updates["error"] = "error.json"
+        with self.guard():
+            status = self._read_status_unlocked()
+            if status["claim_epoch"] is not None:
+                self._require_active_claim_epoch(status["claim_epoch"])
+            if error is not None:
+                error_path = self.confined_path("error.json")
+                if _path_exists(error_path):
+                    try:
+                        installed_error = validate_error(
+                            _read_json(error_path)
+                        )
+                    except LauncherSchemaError as schema_error:
+                        raise LauncherCorruptionError(
+                            "Existing terminal error is invalid."
+                        ) from schema_error
+                    if installed_error != error:
+                        state_by_code = {
+                            "orchestrator-hard-terminated": "lost",
+                            "orchestrator-lost": "lost",
+                            "orchestrator-exited-before-claim": "failed",
+                            "orchestrator-launch-failed": "failed",
+                            "workflow-cancelled": "failed",
+                            "workflow-execution-failed": "failed",
+                        }
+                        installed_state = state_by_code.get(
+                            installed_error["code"]
+                        )
+                        if installed_state is None:
+                            raise LauncherStorageError(
+                                "A different terminal error is already installed."
+                            )
+                        error = installed_error
+                        new_state = installed_state
+                        merged_updates = {"error": "error.json"}
+                        if (
+                            installed_error["code"]
+                            == "orchestrator-hard-terminated"
+                        ):
+                            merged_updates.update(
+                                {
+                                    "hard_termination_requested": True,
+                                    "cancel_requested_at": None,
+                                }
+                            )
+            next_status = transition_status(
+                status,
+                expected_revision=expected_revision,
+                new_state=new_state,
+                expected_claim_epoch=expected_claim_epoch,
+                updates=merged_updates,
+            )
+            if error is not None:
+                try:
+                    _atomic_create_json(error_path, error)
+                except FileExistsError as exc:
+                    try:
+                        existing = validate_error(_read_json(error_path))
+                    except LauncherSchemaError as schema_error:
+                        raise LauncherCorruptionError(
+                            "Existing terminal error is invalid."
+                        ) from schema_error
+                    if existing != error:
+                        raise LauncherStorageError(
+                            "A different terminal error is already installed."
+                        ) from exc
+            _atomic_write_json(self.status_path, next_status)
+            return next_status
+
     def request_cancel(
         self,
         *,
@@ -247,83 +334,6 @@ class LauncherRunControl:
         if _is_symlink(marker) or not marker.is_file():
             raise LauncherCorruptionError("Cancellation marker is not a regular file.")
         return True
-
-    def append_progress(
-        self,
-        *,
-        kind: str,
-        payload: Mapping[str, Any],
-        timestamp: str | None = None,
-    ) -> dict[str, Any]:
-        """Allocate and durably append the next global progress sequence."""
-        with self.guard():
-            entries, complete_length = self._read_progress_unlocked()
-            sequence = entries[-1]["sequence"] + 1 if entries else 1
-            entry = validate_progress(
-                {
-                    "schema": PROGRESS_SCHEMA,
-                    "run_id": self.run_id,
-                    "sequence": sequence,
-                    "timestamp": timestamp or utc_timestamp(),
-                    "kind": kind,
-                    "payload": dict(payload),
-                }
-            )
-            encoded = _canonical_json_bytes(entry) + b"\n"
-            self.confined_path("progress.jsonl", must_exist=True)
-            flags = os.O_RDWR
-            if hasattr(os, "O_CLOEXEC"):
-                flags |= os.O_CLOEXEC
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            descriptor = os.open(self.progress_path, flags)
-            try:
-                os.ftruncate(descriptor, complete_length)
-                os.lseek(descriptor, 0, os.SEEK_END)
-                written = os.write(descriptor, encoded)
-                if written != len(encoded):
-                    raise LauncherStorageError("Short launcher progress write.")
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            return entry
-
-    def read_progress(self) -> list[dict[str, Any]]:
-        """Read complete progress entries, ignoring one incomplete tail."""
-        self.confined_path("progress.jsonl", must_exist=True)
-        entries, _ = self._read_progress_unlocked()
-        return entries
-
-    def _read_progress_unlocked(self) -> tuple[list[dict[str, Any]], int]:
-        encoded = _read_bytes(self.progress_path)
-        last_newline = encoded.rfind(b"\n")
-        complete_length = last_newline + 1
-        complete = encoded[:complete_length]
-        entries: list[dict[str, Any]] = []
-        for line_number, line in enumerate(complete.splitlines(), start=1):
-            if not line:
-                raise LauncherCorruptionError(
-                    f"Blank complete progress line {line_number}."
-                )
-            try:
-                entry = validate_progress(
-                    _decode_json(line, path=self.progress_path)
-                )
-            except LauncherSchemaError as error:
-                raise LauncherCorruptionError(
-                    f"Invalid progress entry on line {line_number}."
-                ) from error
-            if entry["run_id"] != self.run_id:
-                raise LauncherCorruptionError(
-                    f"Progress line {line_number} has the wrong run ID."
-                )
-            expected = entries[-1]["sequence"] + 1 if entries else 1
-            if entry["sequence"] != expected:
-                raise LauncherCorruptionError(
-                    f"Progress line {line_number} has non-monotonic sequence."
-                )
-            entries.append(entry)
-        return entries, complete_length
 
     def read_claim(self) -> dict[str, Any] | None:
         """Read the current execution lease, if one exists."""
@@ -477,14 +487,20 @@ class LauncherRunControl:
             if (
                 previous["epoch"] == expected_claim_epoch + 1
                 and status["claim_epoch"] == expected_claim_epoch
-                and previous["owner"] == owner
-                and previous["backend"] == backend
             ):
                 expires = parse_utc_timestamp(
                     previous["expires_at"],
                     field="expires_at",
                 )
-                if expires <= current_time:
+                if expires > current_time:
+                    if (
+                        previous["owner"] != owner
+                        or previous["backend"] != backend
+                    ):
+                        raise ClaimConflictError(
+                            "A one-ahead recovery claim is still live."
+                        )
+                else:
                     self._archive_claim_unlocked(previous)
                     epoch = self._next_claim_epoch_unlocked(previous)
                     previous = self._new_claim(

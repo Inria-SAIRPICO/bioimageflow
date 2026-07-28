@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from bioimageflow.storage.allocation import RunAllocationLock
+
 from .errors import LauncherProtocolError, LauncherStateConflictError
 from .schemas import (
     STATUS_SCHEMA,
@@ -415,7 +417,7 @@ class LauncherRepository:
     def allocation_guard(self) -> Iterator[None]:
         """Hold the short storage-root allocation guard."""
         _ensure_secure_directory(self.storage_root, self.runs_root)
-        with _CrossProcessLock(self.allocation_guard_path):
+        with RunAllocationLock(self.storage_root):
             yield
 
     def new_run_id(self) -> str:
@@ -478,6 +480,12 @@ class LauncherRepository:
                 "execution.claim",
                 "claims",
                 "cancel_requested",
+                "error.json",
+                "command.json",
+                "local_process.json",
+                "local_process_exit.json",
+                "logs",
+                "return",
                 ".control.guard",
             ):
                 if _path_exists(candidate / protected):

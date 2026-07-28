@@ -1,14 +1,26 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from bioimageflow import Workflow
+from bioimageflow import DataFrameTool, Workflow
 from bioimageflow.launcher.errors import LauncherProtocolError
 from bioimageflow.launcher.payload import (
     load_workflow_payload,
     serialize_workflow_payload,
 )
 from bioimageflow.validation import ValidationError
+from bioimageflow_core import IOModel
+
+
+class _ArchiveSource(DataFrameTool):
+    accepts_upstream = False
+
+    class Outputs(IOModel):
+        value: int
+
+    def transform(self, df, arguments):
+        return pd.DataFrame({"value": [1]})
 
 
 def test_graph_payload_round_trip_uses_explicit_runtime_storage(tmp_path: Path) -> None:
@@ -52,3 +64,22 @@ def test_unknown_payload_fields_are_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(LauncherProtocolError, match="exactly"):
         load_workflow_payload(payload, storage_path=tmp_path)
+
+
+def test_archive_payload_includes_custom_source_once_and_round_trips(
+    tmp_path: Path,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path / "original", engine="direct")
+    with workflow:
+        _ArchiveSource()(name="source")
+
+    payload = serialize_workflow_payload(workflow)
+    restored = load_workflow_payload(
+        payload,
+        storage_path=tmp_path / "assigned",
+    )
+
+    assert payload["kind"] == "archive_v1"
+    assert len(payload["payload"]["custom_sources"]) == 1
+    assert restored.storage_path == (tmp_path / "assigned").absolute()
+    assert restored.to_dict(include_custom_tools=True) == payload["payload"]

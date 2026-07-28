@@ -18,12 +18,10 @@ from bioimageflow import (
 )
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.launcher.inputs import LoadedInvocation
-from bioimageflow.launcher.orchestrator import (
-    _PreparedExecution,
-    run_orchestrator,
-)
+from bioimageflow.launcher.orchestrator import _PreparedExecution, run_orchestrator
+from bioimageflow.launcher.orchestrator_monitor import CancellationWatcher
+from bioimageflow.launcher.control import LauncherRunControl
 from bioimageflow.launcher.repository import LauncherCorruptionError
-from bioimageflow.launcher.returns import persist_public_return
 from bioimageflow.launcher.submission import submit_workflow
 from bioimageflow.launcher.types import (
     OrchestratorLaunchConfig,
@@ -118,6 +116,34 @@ def test_invalid_invocation_is_rejected_before_canonical_workflow_start(
     assert not (run.control_dir / "error.json").exists()
 
 
+def test_configuration_failure_never_persists_secret_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "literal-orchestrator-secret"
+    monkeypatch.setenv("BIF_TEST_CREDENTIAL", secret)
+    run = submit_workflow(
+        Workflow(storage_path=tmp_path, engine="direct"),
+        parsl_config=ParslConfigRef(
+            "tests.unit.launcher.config_factories:fail_with_credential",
+            {},
+            secret_refs={"credential": "BIF_TEST_CREDENTIAL"},
+        ),
+        executor_bindings={"threads": _binding()},
+        launch=OrchestratorLaunchConfig(backend="manual"),
+    )
+
+    terminal = run_orchestrator(
+        tmp_path,
+        run.id,
+        lease_seconds=2,
+        poll_seconds=0.01,
+    )
+
+    assert terminal == "failed"
+    assert secret not in (run.control_dir / "error.json").read_text()
+
+
 def test_cancellation_marker_reaches_active_workflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -194,6 +220,88 @@ def test_cancellation_marker_reaches_active_workflow(
     assert (run.control_dir / "cancel_requested").is_file()
 
 
+def test_cancellation_marker_without_status_does_not_cancel(
+    tmp_path: Path,
+) -> None:
+    run = _submit_manual(tmp_path)
+    claimed = run._control.claim_start(
+        expected_revision=0,
+        owner="marker-test",
+        backend="manual",
+        lease_seconds=30,
+    )
+    run._control.transition(
+        expected_revision=claimed.status["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="running",
+    )
+    (run.control_dir / "cancel_requested").touch()
+
+    class WorkflowProbe:
+        cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    workflow = WorkflowProbe()
+    context = WorkflowExecutionContext(run.id)
+    watcher = CancellationWatcher(
+        run._control,
+        workflow,
+        context,
+        poll_seconds=0.01,
+    )
+    watcher.start()
+    watcher.stop()
+
+    assert workflow.cancelled is False
+    assert context.cancel_requested is False
+
+
+@pytest.mark.parametrize("raced_transition", ["running", "finalizing"])
+def test_cancellation_cas_race_remains_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raced_transition: str,
+) -> None:
+    run = _submit_manual(tmp_path)
+    original = LauncherRunControl.transition
+    raced = False
+
+    def racing_transition(
+        control: LauncherRunControl,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal raced
+        if (
+            control.run_id == run.id
+            and kwargs.get("new_state") == raced_transition
+            and not raced
+        ):
+            raced = True
+            run.cancel()
+        return original(control, **kwargs)
+
+    monkeypatch.setattr(
+        LauncherRunControl,
+        "transition",
+        racing_transition,
+    )
+
+    terminal = run_orchestrator(
+        tmp_path,
+        run.id,
+        lease_seconds=2,
+        poll_seconds=0.01,
+    )
+
+    run.refresh()
+    assert raced is True
+    assert terminal == "cancelled"
+    assert run.status == "cancelled"
+    assert not (run.control_dir / "error.json").exists()
+
+
 def test_cancel_wins_after_return_install_but_before_success_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,98 +343,3 @@ def test_cancel_wins_after_return_install_but_before_success_claim(
     assert run.status == "cancelled"
     assert (run.control_dir / "return" / "manifest.json").is_file()
     assert Storage(tmp_path).latest_success_run_id() is None
-
-
-def _expired_post_start(
-    tmp_path: Path,
-    *,
-    finalizing: bool,
-) -> Any:
-    run = _submit_manual(tmp_path)
-    control = run._control
-    status = control.read_status()
-    claimed = control.claim_start(
-        expected_revision=status["revision"],
-        owner="dead-owner",
-        backend="manual",
-        lease_seconds=0.01,
-    )
-    status = control.transition(
-        expected_revision=claimed.status["revision"],
-        expected_claim_epoch=claimed.claim["epoch"],
-        new_state="running",
-    )
-    if finalizing:
-        Storage(tmp_path).write_run_metadata(
-            run.id,
-            workflow_identity="workflow:test",
-            engine="parsl:parallel",
-            status="running",
-            target_nodes=[],
-        )
-        persist_public_return(
-            control.control_dir,
-            tmp_path,
-            run.id,
-            pd.DataFrame(),
-            outcomes=(),
-        )
-        control.transition(
-            expected_revision=status["revision"],
-            expected_claim_epoch=claimed.claim["epoch"],
-            new_state="finalizing",
-        )
-    time.sleep(0.02)
-    return run
-
-
-def test_recovery_completes_installed_finalization_without_rerun(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run = _expired_post_start(tmp_path, finalizing=True)
-    monkeypatch.setattr(
-        "bioimageflow.launcher.orchestrator._prepare_execution",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("recovery must not execute workflow code")
-        ),
-    )
-
-    terminal = run_orchestrator(
-        tmp_path,
-        run.id,
-        lease_seconds=2,
-        recover=True,
-        backend_absent_confirmed=True,
-    )
-
-    run.refresh()
-    assert terminal == "succeeded"
-    assert run.status == "succeeded"
-    assert Storage(tmp_path).latest_success_run_id() == run.id
-
-
-def test_post_start_recovery_marks_missing_outcome_lost_without_rerun(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run = _expired_post_start(tmp_path, finalizing=False)
-    monkeypatch.setattr(
-        "bioimageflow.launcher.orchestrator._prepare_execution",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("recovery must not execute workflow code")
-        ),
-    )
-
-    terminal = run_orchestrator(
-        tmp_path,
-        run.id,
-        lease_seconds=2,
-        recover=True,
-        backend_absent_confirmed=True,
-    )
-
-    run.refresh()
-    assert terminal == "lost"
-    assert run.status == "lost"
-    assert (run.control_dir / "error.json").is_file()

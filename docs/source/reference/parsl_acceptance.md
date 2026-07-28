@@ -1,10 +1,9 @@
 # Parsl Acceptance Traceability
 
-This reference maps the attached Parsl engine acceptance contract to maintained pytest node IDs.
+This reference maps the Parsl engine and submitted-run acceptance contract to maintained pytest node IDs.
 The real-runtime tests use local Parsl thread and process executors and do not require an external scheduler.
-Section 21.7 of the distributed-engine specification is outside this matrix and is not claimed here.
 
-## 21.1 API, lifecycle, and planning
+## 20.1 API, lifecycle, and planning
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -24,7 +23,7 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | Failure, cancellation, and close drain all submitted futures before reuse or cleanup. | `tests/unit/parsl/test_submission.py::test_collector_stops_submission_cancels_and_drains_after_failure`; `tests/unit/parsl/test_submission.py::test_cancellation_stops_partial_window_and_drains_running_futures`; `tests/unit/parsl/test_engine_lifecycle.py::test_close_waits_for_noncancellable_writer_before_owned_cleanup` |
 | All five `NodePlanStatus` values remain available without Parsl startup. | `tests/integration/test_node_plan_status.py::TestNodePlanStatusValues::test_str_enum`; `tests/unit/parsl/test_optional_dependency.py::test_public_import_and_engine_construction_do_not_import_external_parsl` |
 
-## 21.2 Recursive workflows and scheduling
+## 20.2 Recursive workflows and scheduling
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -45,7 +44,7 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | Sequential scheduling permits one node and one in-flight row task at a time. | `tests/integration/parsl/test_semantics.py::test_parallel_and_sequential_policies_bound_worker_overlap`; `tests/unit/parsl/test_engine_lifecycle.py::test_effective_execution_uses_root_policy_only_for_workflow_mode` |
 | `DataFrameTool` runs in the orchestrator. | `tests/integration/parsl/test_semantics.py::test_dataframe_tool_runs_on_orchestrator_thread`; `tests/integration/parsl/test_thread_executor.py::test_recursive_processing_dispatches_with_scoped_name_and_local_boundary` |
 
-## 21.3 Dispatch semantics
+## 20.3 Dispatch semantics
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -66,7 +65,7 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | Reusable and transient tasks echo exact task, invocation, and optional attempt correlation. | `tests/unit/worker_protocol/test_codecs.py::test_result_correlation_must_match_exactly`; `tests/integration/runtime_cache/test_recursive_provenance.py::test_reusable_processing_dispatch_correlates_invocation_and_attempt`; `tests/integration/runtime_cache/test_recursive_provenance.py::test_missing_provider_selection_propagates_non_reusable_execution` |
 | Malformed, missing, extra, duplicated, wrongly typed, and future-version protocol fields fail closed. | `tests/unit/worker_protocol/test_codecs.py::test_processing_task_malformed_payloads_fail_closed`; `tests/unit/worker_protocol/test_codecs.py::test_processing_result_malformed_payloads_fail_closed`; `tests/unit/worker_protocol/test_execution.py::test_malformed_payload_fails_before_tool_module_executes` |
 
-## 21.4 Executor and tool origins
+## 20.4 Executor and tool origins
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -84,7 +83,7 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | Equal class names from different origins retain separate worker instances. | `tests/unit/worker_protocol/test_loading.py::test_complete_origin_separates_equal_class_names`; `tests/unit/worker_protocol/test_loading.py::test_two_archive_origins_load_separate_instances`; `tests/integration/parsl/test_process_executor.py::test_local_htex_process_serialization_imports_and_shared_paths` |
 | Processing tasks neither install packages nor start Wetlands workers. | `tests/unit/worker_protocol/test_imports.py::test_core_worker_modules_import_without_orchestrator_dependencies`; `tests/unit/worker_protocol/test_imports.py::test_worker_exposes_only_the_canonical_processing_entry_point`; `tests/unit/worker_protocol/test_execution.py::test_malformed_payload_fails_before_tool_module_executes` |
 
-## 21.5 Cache, paths, and views
+## 20.5 Cache, paths, and views
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -108,7 +107,7 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | Run IDs and launcher paths do not enter result-key or record-ID material. | `tests/unit/storage/test_manifests.py::test_make_record_id_excludes_execution_metadata`; `tests/unit/storage/test_identity.py::test_result_key_and_shard_are_deterministic` |
 | Attempts remain while a late task can still write. | `tests/unit/parsl/test_engine_lifecycle.py::test_close_waits_for_noncancellable_writer_before_owned_cleanup`; `tests/unit/parsl/test_submission.py::test_cancellation_stops_partial_window_and_drains_running_futures` |
 
-## 21.6 Progress, errors, and cancellation
+## 20.6 Progress, errors, and cancellation
 
 | Acceptance item | Test node ID(s) |
 |---|---|
@@ -124,3 +123,34 @@ Section 21.7 of the distributed-engine specification is outside this matrix and 
 | A non-cancellable writer leaves an unselected attempt and is drained before reuse or cleanup eligibility. | `tests/unit/parsl/test_engine_lifecycle.py::test_close_waits_for_noncancellable_writer_before_owned_cleanup`; `tests/integration/parsl/test_thread_executor.py::test_cancellation_after_local_dataframe_work_prevents_publication` |
 | Idle cancellation does not affect the next compute. | `tests/unit/test_workflow_execution_context.py::test_idle_cancel_does_not_affect_next_execution` |
 | Root and stepped execution share the active cancellation context without a stale token. | `tests/unit/test_workflow_execution_context.py::test_root_input_wrapper_uses_exact_context`; `tests/unit/test_workflow_execution_context.py::test_steps_reserve_workflow_before_first_iteration`; `tests/integration/parsl/test_thread_executor.py::test_real_thread_executor_compute_steps_uses_attached_lifecycle` |
+
+## 20.7 Submitted runs
+
+| Acceptance item | Test node ID(s) |
+|---|---|
+| Local submission uses one run ID for launcher state and the canonical library view. | `tests/integration/parsl/test_launcher.py::test_local_launcher_runs_in_separate_process_and_reconnects`; `tests/unit/launcher/test_orchestrator.py::test_manual_orchestrator_executes_and_reconnects_zero_output_run` |
+| Launcher artifacts and portable canonical views stay in their distinct storage namespaces. | `tests/integration/parsl/test_launcher.py::test_local_launcher_runs_in_separate_process_and_reconnects`; `tests/unit/launcher/test_paths_and_allocation.py::test_candidate_inputs_install_with_control_metadata_atomically` |
+| Launcher schemas, confinement, collisions, and retention-sensitive artifacts follow the normative storage contract. | `tests/unit/launcher/test_paths_and_allocation.py`; `tests/unit/launcher/test_state_machine.py`; `tests/unit/launcher/test_returns.py` |
+| Manual submission writes a reproducible command and remains reconnectable. | `tests/unit/launcher/test_backends.py::test_manual_backend_persists_shell_free_descriptor_and_stays_prepared`; `tests/unit/launcher/test_submission_api.py::test_manual_submission_persists_runtime_storage_outside_graph` |
+| Root constants round-trip through the strict typed codec and execute in submitted mode. | `tests/unit/launcher/test_inputs.py::test_typed_constants_round_trip_without_losing_paths`; `tests/unit/launcher/test_inputs.py::test_typed_constant_decoder_fails_closed`; `tests/integration/parsl/test_launcher.py::test_submitted_root_inputs_execute_and_reconnect` |
+| Root DataFrame inputs round-trip through transport and logical-digest verification, then execute in submitted mode. | `tests/unit/launcher/test_inputs.py::test_root_invocation_round_trips_constants_and_dataframe`; `tests/unit/launcher/test_inputs.py::test_root_loader_rejects_transport_and_logical_tampering`; `tests/integration/parsl/test_launcher.py::test_submitted_root_inputs_execute_and_reconnect` |
+| Archive custom sources are captured once, materialized with assigned runtime storage, and execute in a separate submitted process. | `tests/unit/launcher/test_payload.py::test_archive_payload_includes_custom_source_once_and_round_trips`; `tests/integration/parsl/test_launcher.py::test_submitted_archive_custom_source_executes` |
+| Multiple ad-hoc targets preserve requested return order. | `tests/integration/parsl/test_launcher.py::test_submitted_ad_hoc_targets_preserve_requested_order` |
+| Partial workflows and unresolved definitions fail before launch. | `tests/unit/launcher/test_payload.py::test_partial_workflow_is_rejected_before_serialization`; `tests/unit/launcher/test_orchestrator.py::test_invalid_invocation_is_rejected_before_canonical_workflow_start` |
+| Allocation and execution claims reject collisions and concurrent orchestrators across launcher and canonical namespaces. | `tests/unit/launcher/test_paths_and_allocation.py::test_concurrent_allocation_has_one_winner`; `tests/unit/launcher/test_paths_and_allocation.py::test_launcher_and_canonical_creation_share_one_run_id_guard`; `tests/unit/launcher/test_claims.py::test_concurrent_orchestrators_have_one_claim_winner` |
+| Expired startup claims and one-ahead claim-write crashes recover under a new owner, while post-start recovery does not rerun workflow code. | `tests/unit/launcher/test_claims.py::test_start_claim_resumes_after_claim_write_crash`; `tests/unit/launcher/test_claims.py::test_takeover_resumes_after_claim_write_crash`; `tests/unit/launcher/test_orchestrator_recovery.py::test_post_start_recovery_marks_missing_outcome_lost_without_rerun` |
+| Guarded status revisions and persisted progress sequences remain monotonic. | `tests/unit/launcher/test_state_machine.py::test_revision_and_claim_epoch_are_compare_and_swap_guards`; `tests/unit/launcher/test_state_machine.py::test_progress_sequence_is_global_across_processes` |
+| A client reconnects from only the explicit storage root and run ID. | `tests/integration/parsl/test_launcher.py::test_local_launcher_runs_in_separate_process_and_reconnects`; `tests/unit/launcher/test_workflow_run.py::test_open_refresh_progress_and_prepared_cancel` |
+| Durable cancellation reaches the active workflow context and remains authoritative across startup and finalization CAS races. | `tests/unit/launcher/test_orchestrator.py::test_cancellation_marker_reaches_active_workflow`; `tests/unit/launcher/test_orchestrator.py::test_cancellation_cas_race_remains_cancelled`; `tests/unit/launcher/test_state_machine.py::test_prepared_and_running_cancellation_semantics` |
+| Prepared cancellation terminates directly and a marker without authoritative status does not cancel work. | `tests/unit/launcher/test_workflow_run.py::test_open_refresh_progress_and_prepared_cancel`; `tests/unit/launcher/test_orchestrator.py::test_cancellation_marker_without_status_does_not_cancel` |
+| Cancellation and success race through finalizing, and optional hard termination records lost through both original and reconnected handles. | `tests/unit/launcher/test_orchestrator.py::test_cancel_wins_after_return_install_but_before_success_claim`; `tests/unit/launcher/test_state_machine.py::test_existing_terminal_error_discards_conflicting_terminal_updates`; `tests/unit/launcher/test_workflow_run.py::test_local_hard_cancel_terminates_tracked_process_and_marks_lost`; `tests/unit/launcher/test_workflow_run.py::test_reconnected_hard_cancel_uses_persisted_process_identity` |
+| Public return shapes, ordered mapping keys, and zero-output frames reload exactly. | `tests/unit/launcher/test_returns.py::test_single_external_path_return_round_trips`; `tests/unit/launcher/test_returns.py::test_mapping_shape_and_key_order_round_trip`; `tests/unit/launcher/test_orchestrator.py::test_manual_orchestrator_executes_and_reconnects_zero_output_run` |
+| Boundary results persist independently of an aggregate cache record. | `tests/unit/launcher/test_returns.py::test_single_external_path_return_round_trips`; `tests/unit/launcher/test_execution_outcomes.py::test_scoped_record_outcome_loads_exact_record_without_current` |
+| Historical loading addresses exact immutable records without current selection. | `tests/unit/launcher/test_returns.py::test_record_asset_return_uses_exact_immutable_record`; `tests/unit/launcher/test_execution_outcomes.py::test_scoped_record_outcome_loads_exact_record_without_current` |
+| Atomic return installation records exact locators and reports pruned records. | `tests/unit/launcher/test_returns.py::test_record_asset_return_uses_exact_immutable_record`; `tests/unit/launcher/test_returns.py::test_pruned_record_raises_result_unavailable` |
+| Run-transient owned return assets become self-contained. | `tests/unit/launcher/test_returns.py::test_transient_return_asset_is_self_contained`; `tests/unit/launcher/test_execution_outcomes.py::test_transient_processing_outcome_records_exact_invocation` |
+| Recovery completes installed success or cancellation finalization without rerunning workflow code. | `tests/unit/launcher/test_orchestrator_recovery.py::test_recovery_completes_installed_finalization_without_rerun`; `tests/unit/launcher/test_orchestrator_recovery.py::test_recovery_converges_canonical_cancellation_after_status_crash`; `tests/unit/storage/test_run_finalization.py` |
+| Local launch waits for durable parent tracking and reaps a child when tracking or identity persistence fails; exit before claim fails durably, and post-claim disappearance invokes recovery. | `tests/unit/launcher/test_backends.py::test_local_orchestrator_waits_for_durable_parent_identity`; `tests/unit/launcher/test_backends.py::test_local_backend_reaps_process_when_tracking_registration_fails`; `tests/unit/launcher/test_backends.py::test_local_backend_reaps_process_when_identity_persistence_fails`; `tests/unit/launcher/test_backends.py::test_local_child_exit_before_claim_is_durably_failed`; `tests/unit/launcher/test_backends.py::test_local_child_disappearance_after_claim_is_recovered_as_lost` |
+| Submitted remote failures and normalized public progress remain available after process exit. | `tests/integration/parsl/test_launcher.py::test_submitted_remote_failure_and_progress_are_persisted` |
+| Configuration factories resolve opaque secret references without persisting or exposing secret values in structured errors or process logs. | `tests/unit/launcher/test_configuration.py::test_factory_failure_does_not_leak_resolved_secret`; `tests/integration/parsl/test_launcher.py::test_submitted_factory_secret_is_redacted_from_error_and_logs` |
+| Unsupported scheduler launcher adapters fail with the stable public error. | `tests/unit/launcher/test_backends.py::test_unsupported_backends_fail_before_process_or_artifact_action`; `tests/unit/launcher/test_submission_api.py::test_unsupported_backend_fails_before_allocation` |

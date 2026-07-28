@@ -98,8 +98,8 @@ from bioimageflow.launcher import (
 )
 
 __all__ = [
-    "BindingError",
     "BackendNotSupportedError",
+    "BindingError",
     "ColumnNotFoundError",
     "ColumnRef",
     "CycleInWorkflowError",
@@ -116,9 +116,9 @@ __all__ = [
     "NodePlan",
     "NodePlanStatus",
     "NodeStep",
+    "OrchestratorLaunchConfig",
     "OutputView",
     "OutputViewCapability",
-    "OrchestratorLaunchConfig",
     "ParslConfigRef",
     "ParslEngine",
     "ParslTaskError",

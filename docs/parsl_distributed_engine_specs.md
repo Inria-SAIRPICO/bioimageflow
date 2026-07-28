@@ -1623,21 +1623,26 @@ The library run metadata records the effective engine supplied at execution time
 Phase 1b uses a separate launcher control directory with the same run ID:
 
 ```text
-<storage_path>/launcher/v1/runs/<run-id>/
-  submission.json                # immutable launcher request
-  status.json                    # launcher/orchestrator state
-  progress.jsonl                 # append-only normalized and backend events
-  execution.claim                # guarded execution/recovery lease after startup
-  claims/                        # append-only superseded claim epochs
-  cancel_requested               # optional marker
-  error.json                     # terminal structured failure/lost error when applicable
-  command.json                   # manual-mode command descriptor when applicable
-  logs/orchestrator.out
-  logs/orchestrator.err
-  inputs/
-  return/manifest.json
-  return/dataframes/
-  return/assets/
+<storage_path>/launcher/v1/
+  .allocation.guard              # storage-wide run-ID allocation lock
+  runs/<run-id>/
+    .control.guard               # per-run state/progress lock
+    submission.json              # immutable launcher request
+    status.json                  # launcher/orchestrator state
+    progress.jsonl               # append-only normalized and backend events
+    execution.claim              # guarded execution/recovery lease after startup
+    claims/                      # append-only superseded claim epochs
+    cancel_requested             # optional marker
+    error.json                   # terminal structured failure/lost error when applicable
+    command.json                 # manual-mode command descriptor when applicable
+    local_process.json           # reconnectable local process identity when applicable
+    local_process_exit.json      # observed local process exit when applicable
+    logs/orchestrator.out
+    logs/orchestrator.err
+    inputs/
+    return/manifest.json
+    return/dataframes/
+    return/assets/
 ```
 
 Canonical node and latest views remain the public provenance views.
@@ -1645,10 +1650,10 @@ The launcher metadata records the confined relative canonical view path.
 The launcher MUST NOT put logs, Parquet inputs, return DataFrames, mutable status, or cancellation markers under `views/`.
 It MUST NOT create a second result cache or a second run identity.
 
-Before Phase 1b implementation, `docs/source/reference/output_cache_storage.md` MUST reserve `launcher/v1/` and define its schemas, confinement rules, and retention behavior.
+`docs/source/reference/output_cache_storage.md` defines the normative launcher schemas, confinement rules, and retention behavior.
 
 Required control artifacts are immutable `submission.json`, mutable guarded `status.json`, and append-only `progress.jsonl`.
-`execution.claim` is required once startup is claimed; input files, return files, manual command, error, cancellation marker, and logs are conditional on their corresponding modes and states.
+`execution.claim` is required once startup is claimed; input files, return files, manual command, error, cancellation marker, local-process identity and exit observations, and logs are conditional on their corresponding modes and states.
 
 Every persisted relative path is normalized and confined beneath either the control directory or the explicitly named canonical run view.
 Readers reject absolute paths, empty or dot segments, `..`, symlink escapes, and targets outside those roots.
@@ -1666,6 +1671,9 @@ The control protocol has these exact schema names:
 - `bioimageflow.launcher.claim.v1` for `execution.claim`,
 - `bioimageflow.launcher.progress.v1` for every `progress.jsonl` entry,
 - `bioimageflow.launcher.error.v1` for `error.json`,
+- `bioimageflow.launcher.command.v1` for `command.json`,
+- `bioimageflow.launcher.local_process.v1` for `local_process.json`,
+- `bioimageflow.launcher.local_process_exit.v1` for `local_process_exit.json`,
 - `bioimageflow.launcher.return.v1` for `return/manifest.json`.
 
 The immutable submission records the run ID, creation time, canonical storage root, confined canonical-view path, normalized shared runtime root when present, workflow payload kind/digest and payload, invocation variant, serialized inputs, Parsl config reference, bindings, routes, task policy, launch backend, and protocol versions.
@@ -1894,57 +1902,9 @@ A future streaming specification must define partial accumulators, row readiness
 
 ---
 
-## 20. Implementation Plan
+## 20. Acceptance Tests
 
-### 20.1 Shared prerequisites
-
-Before adding Parsl dispatch:
-
-1. Finalize the public platform, worker protocol, and storage contracts.
-2. Implement the strict backend-neutral `ProcessingTaskV1`, `ProcessingTaskResultV1`, and `WorkerToolOriginV1` protocol in `bioimageflow-core`.
-3. Replace workflow-boundary diagnostic hashes with compiled provider/selector provenance recipes, runtime selected-record resolution, and an optional reusable result key.
-4. Refactor lifecycle validation/cleanup, compiled startup, `NodeStep.prepare()`, processing dispatch, cross-node failure aggregation, effective-engine run metadata, and active-run publication metadata into backend-neutral hooks.
-5. Add `WorkflowExecutionContext` and propagate it through synthetic root wrappers and stepped execution.
-6. Extract shared output reconstruction, validation, and batch cardinality checks for direct, Wetlands, and Parsl.
-7. Apply canonical logical DataFrame identity, explicit transport integrity, directory assets, and run-scoped non-reusable transients through the shared storage layer.
-8. Add shared archive-source materialization under a verified runtime root.
-
-### 20.2 Phase 1a implementation order
-
-1. Add the bounded optional dependency, public value types, lazy imports, and final exports.
-2. Add `ParslEngine` lifecycle with no constructor side effects.
-3. Extend `Workflow.create_engine()` and engine selection.
-4. Add explicit execution-policy precedence, executor bindings, and static route validation.
-5. Add six-stage startup, DFK acquisition without global-kernel destruction, archive materialization, and preflight.
-6. Add one-row task dispatch with bounded submission and deterministic collection.
-7. Add whole-node `process_batch`, explicit row chunking, exact empty-batch parity, and ordered progress.
-8. Integrate single-active-execution enforcement, cancellation, future draining, errors, and cleanup.
-9. Verify recursive workflows, run views, output views, and cache parity.
-
-### 20.3 Phase 1b implementation order
-
-1. Extend `output_cache_storage.md` with the versioned launcher namespace, schemas, confinement, and retention contract.
-2. Add collision-safe run allocation, immutable submission metadata, atomic execution claims, guarded state transitions, and progress sequencing.
-3. Add preallocated public run-context injection and deferred canonical success finalization.
-4. Add root and ad hoc invocation serializers and canonical Parquet DataFrame input externalization.
-5. Add the orchestrator entry point and local/manual launcher backends.
-6. Add progress/status/log persistence, graceful cancellation watching, and optional hard termination.
-7. Add atomically installed canonical public return snapshots and strict `WorkflowRun.result()` rehydration.
-8. Add `WorkflowRun.open()` and crash-recovery tests across every finalization boundary.
-
-### 20.4 Later implementation order
-
-1. Add `ArtifactStager` and no-shared-filesystem path mapping.
-2. Add transferable archive sources and provisioning adapters.
-3. Add scheduler-specific orchestrator launch adapters as demanded.
-4. Consider remote DataFrameTool only after a separate contract is approved.
-5. Consider streaming only after node-finalized execution is stable.
-
----
-
-## 21. Acceptance Tests
-
-### 21.1 API, lifecycle, and planning
+### 20.1 API, lifecycle, and planning
 
 - Parsl is not imported by ordinary package import, validation, serialization, or `plan()`.
 - Missing Parsl produces a clear optional-extra error.
@@ -1962,7 +1922,7 @@ Before adding Parsl dispatch:
 - Failure, cancellation, and `close()` drain every submitted future before engine reuse or owned-resource cleanup.
 - All five `NodePlanStatus` values remain available without Parsl startup.
 
-### 21.2 Recursive workflows and scheduling
+### 20.2 Recursive workflows and scheduling
 
 - Nested `WorkflowNode` internals dispatch with stable scoped names.
 - A WorkflowNode boundary is never submitted remotely and owns no cache record.
@@ -1981,7 +1941,7 @@ Before adding Parsl dispatch:
 - Sequential policy permits one node and one in-flight row task at a time.
 - DataFrameTool always runs in the orchestrator.
 
-### 21.3 Dispatch semantics
+### 20.3 Dispatch semantics
 
 - Source ProcessingTool uses row index `"0"`.
 - Out-of-order futures produce input-ordered DataFrames.
@@ -2000,7 +1960,7 @@ Before adding Parsl dispatch:
 - Reusable and transient tasks echo exact task, invocation, and optional cache-attempt correlation.
 - Malformed, missing, extra, duplicated, wrongly typed, or future-version task and result fields fail closed.
 
-### 21.4 Executor and tool origins
+### 20.4 Executor and tool origins
 
 - Missing, ambiguous, and unattested routes fail before processing tasks.
 - Every ResourceSpec fits the attested homogeneous worker slot or is rejected.
@@ -2016,7 +1976,7 @@ Before adding Parsl dispatch:
 - Equal class names from different origins retain separate worker instances.
 - No task installs a package or starts a Wetlands worker.
 
-### 21.5 Cache, paths, and views
+### 20.5 Cache, paths, and views
 
 - Direct, Wetlands, and Parsl produce the same result keys for equivalent selected inputs.
 - Attached and submitted root DataFrame inputs produce the same result key from one canonical logical digest regardless of transport path or Parquet bytes.
@@ -2038,7 +1998,7 @@ Before adding Parsl dispatch:
 - Run IDs and launcher paths appear in no result-key or record-ID material.
 - Attempts are not removed while a late task can write.
 
-### 21.6 Progress, errors, and cancellation
+### 20.6 Progress, errors, and cancellation
 
 - Only public BioImageFlow statuses appear in `ProgressEvent.status`.
 - Scoped names and result/record identities are correct.
@@ -2053,7 +2013,7 @@ Before adding Parsl dispatch:
 - Idle cancellation does not cancel the next compute.
 - Root interface and stepped execution share the active cancellation context and do not inherit a stale token.
 
-### 21.7 Submitted runs
+### 20.7 Submitted runs
 
 - Local submission allocates one run ID used by launcher state and library views.
 - Launcher control artifacts remain under `launcher/v1/runs/<run-id>` and canonical portable views remain under `views/runs/<run-id>`.
@@ -2080,7 +2040,7 @@ Before adding Parsl dispatch:
 
 ---
 
-## 22. Resolved Design Decisions
+## 21. Resolved Design Decisions
 
 1. BioImageFlow has one distributed task engine: `ParslEngine`.
 2. Parsl providers allocate workers; launcher adapters start only orchestrators.
@@ -2112,7 +2072,7 @@ Before adding Parsl dispatch:
 
 ---
 
-## 23. External Parsl Assumptions
+## 22. External Parsl Assumptions
 
 Phase 1a supports `parsl>=2026.5.25,<2026.6`.
 The development lock selects a release in that range and the complete Parsl matrix runs against it.

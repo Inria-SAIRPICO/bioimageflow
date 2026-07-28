@@ -18,6 +18,7 @@ from .common import (
 from .models import (
     CacheCorruptionError,
 )
+from .allocation import RunAllocationLock
 from .identity import (
     _atomic_write_json,
     _bioimageflow_version,
@@ -30,6 +31,74 @@ from .identity import (
 
 
 class _RunViewsMixin:
+    def start_run_metadata(
+        self,
+        run_id: str,
+        *,
+        workflow_identity: str,
+        engine: str,
+        target_nodes: Sequence[str],
+        launcher_reserved: bool,
+        started_at: str | None = None,
+    ) -> Path:
+        """Create one canonical running view under the global run-ID guard."""
+        safe_run_id = _validate_path_segment(run_id, label="Run ID")
+        launcher_dir = (
+            self.storage_path / "launcher" / "v1" / "runs" / safe_run_id
+        )
+        run_dir = self.run_dir(safe_run_id)
+        with RunAllocationLock(self.storage_path):
+            if launcher_reserved:
+                submission_path = launcher_dir / "submission.json"
+                if (
+                    launcher_dir.is_symlink()
+                    or not launcher_dir.is_dir()
+                    or submission_path.is_symlink()
+                    or not submission_path.is_file()
+                ):
+                    raise CacheCorruptionError(
+                        "Submitted canonical run has no matching launcher reservation."
+                    )
+                try:
+                    submission = json.loads(submission_path.read_text())
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise CacheCorruptionError(
+                        "Launcher reservation metadata is invalid."
+                    ) from exc
+                if (
+                    not isinstance(submission, dict)
+                    or submission.get("run_id") != safe_run_id
+                    or submission.get("storage_root")
+                    != str(self.storage_path.resolve(strict=False))
+                ):
+                    raise CacheCorruptionError(
+                        "Launcher reservation does not match the canonical run."
+                    )
+            elif launcher_dir.exists() or launcher_dir.is_symlink():
+                raise CacheCorruptionError(
+                    "Run ID is already reserved by a submitted workflow."
+                )
+            if run_dir.exists() or run_dir.is_symlink():
+                raise CacheCorruptionError(
+                    f"Run ID {safe_run_id!r} already has a canonical view."
+                )
+            run_dir.mkdir(parents=True)
+            try:
+                return self.write_run_metadata(
+                    safe_run_id,
+                    workflow_identity=workflow_identity,
+                    engine=engine,
+                    status="running",
+                    target_nodes=target_nodes,
+                    started_at=started_at,
+                )
+            except BaseException:
+                try:
+                    run_dir.rmdir()
+                except OSError:
+                    pass
+                raise
+
     def write_run_metadata(
         self,
         run_id: str,

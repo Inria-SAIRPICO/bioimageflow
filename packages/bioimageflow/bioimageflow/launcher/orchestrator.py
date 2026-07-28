@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
-import socket
 import sys
-import threading
+import time
 import traceback
-import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,20 +19,29 @@ from bioimageflow.parsl import ExecutorBinding, ParslEngine, ParslTaskPolicy
 from bioimageflow.storage import Storage
 from bioimageflow.workflow import WorkflowExecutionContext
 
-from .artifacts import write_error
+from .artifacts import build_error_payload, read_local_process_identity
 from .configuration import build_parsl_config
 from .errors import LauncherProtocolError
 from .inputs import LoadedInvocation, load_invocation
+from .orchestrator_monitor import (
+    CancellationWatcher,
+    ClaimHeartbeat,
+    append_backend_event,
+    owner_identity,
+    public_progress_payload,
+)
 from .payload import load_workflow_payload
-from .repository import LauncherRepository, LauncherRunControl
+from .control import LauncherRunControl
+from .repository import LauncherRepository
+from .return_routes import build_return_provider_routes
 from .returns import load_return_manifest, persist_public_return
+from .state import ClaimEpochMismatchError, RevisionConflictError
 from .types import OrchestratorLaunchConfig, ParslConfigRef
 
 
 _DEFAULT_LEASE_SECONDS = 30.0
 _DEFAULT_POLL_SECONDS = 0.1
-_PUBLIC_PROGRESS_SCHEMA = "bioimageflow.progress_event.v1"
-_BACKEND_PROGRESS_SCHEMA = "bioimageflow.launcher.backend_event.v1"
+_LOCAL_IDENTITY_WAIT_SECONDS = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,145 +52,31 @@ class _PreparedExecution:
     launch: OrchestratorLaunchConfig
 
 
-class _ClaimHeartbeat:
-    def __init__(
-        self,
-        control: LauncherRunControl,
-        *,
-        claim: Mapping[str, Any],
-        workflow: Any | None,
-        lease_seconds: float,
-        poll_seconds: float,
-    ) -> None:
-        self._control = control
-        self._claim = dict(claim)
-        self._workflow = workflow
-        self._lease_seconds = lease_seconds
-        self._interval = min(poll_seconds, lease_seconds / 3)
-        self._stop = threading.Event()
-        self._failure: BaseException | None = None
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"bioimageflow-heartbeat-{control.run_id}",
-            daemon=True,
+class _StaleOrchestrator(RuntimeError):
+    """Raised internally when a newer claim owns all further mutations."""
+
+
+class _RedactingTextStream:
+    """Replace known resolved secrets before Python text reaches launcher logs."""
+
+    def __init__(self, stream: Any, redactions: Collection[str]) -> None:
+        self._stream = stream
+        self._redactions = tuple(
+            value for value in redactions if isinstance(value, str) and value
         )
 
-    def start(self) -> None:
-        self._thread.start()
+    def write(self, text: str) -> int:
+        redacted = text
+        for secret in self._redactions:
+            redacted = redacted.replace(secret, "[REDACTED]")
+        self._stream.write(redacted)
+        return len(text)
 
-    def attach_workflow(self, workflow: Any) -> None:
-        self._workflow = workflow
+    def flush(self) -> None:
+        self._stream.flush()
 
-    def stop(self) -> None:
-        self._stop.set()
-        self._thread.join()
-
-    def raise_if_failed(self) -> None:
-        if self._failure is not None:
-            raise LauncherProtocolError(
-                "The orchestrator lost its execution claim.",
-                details={"run_id": self._control.run_id},
-            ) from self._failure
-
-    def _run(self) -> None:
-        while not self._stop.wait(self._interval):
-            try:
-                self._claim = self._control.heartbeat_claim(
-                    expected_epoch=self._claim["epoch"],
-                    expected_nonce=self._claim["nonce"],
-                    lease_seconds=self._lease_seconds,
-                )
-            except BaseException as exc:
-                self._failure = exc
-                if self._workflow is not None:
-                    self._workflow.cancel()
-                return
-
-
-class _CancellationWatcher:
-    def __init__(
-        self,
-        control: LauncherRunControl,
-        workflow: Any,
-        *,
-        poll_seconds: float,
-    ) -> None:
-        self._control = control
-        self._workflow = workflow
-        self._poll_seconds = poll_seconds
-        self._stop = threading.Event()
-        self._failure: BaseException | None = None
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"bioimageflow-cancel-{control.run_id}",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        self._thread.join()
-
-    def raise_if_failed(self) -> None:
-        if self._failure is not None:
-            raise LauncherProtocolError(
-                "The orchestrator cancellation watcher failed.",
-                details={"run_id": self._control.run_id},
-            ) from self._failure
-
-    def _run(self) -> None:
-        while not self._stop.wait(self._poll_seconds):
-            try:
-                status = self._control.read_status()
-                marker = self._control.cancellation_marker_exists()
-            except BaseException as exc:
-                self._failure = exc
-                self._workflow.cancel()
-                return
-            if status["state"] == "cancel_requested" or marker:
-                self._workflow.cancel()
-            if status["state"] in {"finalizing", "succeeded", "failed", "cancelled", "lost"}:
-                return
-
-
-def _owner_identity() -> str:
-    return (
-        f"{socket.gethostname()}:{os.getpid()}:"
-        f"{uuid.uuid4().hex}"
-    )
-
-
-def _public_progress_payload(event: ProgressEvent) -> dict[str, Any]:
-    return {
-        "schema": _PUBLIC_PROGRESS_SCHEMA,
-        "node_name": event.node_name,
-        "status": event.status,
-        "row": event.row,
-        "total_rows": event.total_rows,
-        "message": event.message,
-        "current": event.current,
-        "maximum": event.maximum,
-        "timestamp": event.timestamp,
-        "result_key": event.result_key,
-        "record_id": event.record_id,
-    }
-
-
-def _append_backend_event(
-    control: LauncherRunControl,
-    event: str,
-    **details: Any,
-) -> None:
-    control.append_progress(
-        kind="backend",
-        payload={
-            "schema": _BACKEND_PROGRESS_SCHEMA,
-            "event": event,
-            **details,
-        },
-    )
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
 
 
 def _prepare_execution(
@@ -190,6 +84,8 @@ def _prepare_execution(
     submission: Mapping[str, Any],
     *,
     trusted_factories: Collection[str] | None,
+    claim_epoch: int,
+    claim_nonce: str,
 ) -> _PreparedExecution:
     storage_root = Path(submission["storage_root"])
     workflow = load_workflow_payload(
@@ -219,7 +115,9 @@ def _prepare_execution(
     def on_progress(event: ProgressEvent) -> None:
         control.append_progress(
             kind="public",
-            payload=_public_progress_payload(event),
+            payload=public_progress_payload(event),
+            expected_claim_epoch=claim_epoch,
+            expected_claim_nonce=claim_nonce,
         )
 
     workflow.on_progress = on_progress
@@ -262,6 +160,48 @@ def _execute_workflow(
     )
 
 
+def _transition_or_observe_cancel(
+    control: LauncherRunControl,
+    *,
+    expected_revision: int,
+    claim_epoch: int,
+    new_state: str,
+    context: WorkflowExecutionContext,
+    workflow: Any,
+) -> dict[str, Any] | None:
+    try:
+        return control.transition(
+            expected_revision=expected_revision,
+            expected_claim_epoch=claim_epoch,
+            new_state=new_state,
+        )
+    except (RevisionConflictError, ClaimEpochMismatchError):
+        current = control.read_status()
+        if current["state"] in {"cancel_requested", "cancelled"}:
+            context.request_cancel()
+            workflow.cancel()
+            return None
+        if current["claim_epoch"] != claim_epoch:
+            raise _StaleOrchestrator(
+                "A newer recovery claim owns the submitted run."
+            ) from None
+        raise
+
+
+def _observe_durable_cancellation(
+    control: LauncherRunControl,
+    *,
+    context: WorkflowExecutionContext,
+    workflow: Any,
+) -> bool:
+    status = control.read_status()
+    if status["state"] not in {"cancel_requested", "cancelled"}:
+        return False
+    context.request_cancel()
+    workflow.cancel()
+    return True
+
+
 def _task_error_details(
     error: BaseException,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
@@ -282,27 +222,57 @@ def _task_error_details(
     return node, task, remote if isinstance(remote, str) else None
 
 
-def _write_terminal_error(
+def _secret_redactions(submission: Mapping[str, Any]) -> tuple[str, ...]:
+    config = submission.get("parsl_config")
+    if not isinstance(config, Mapping):
+        return ()
+    references = config.get("secret_refs")
+    if not isinstance(references, Mapping):
+        return ()
+    values: list[str] = []
+    for reference in references.values():
+        if isinstance(reference, str):
+            value = os.environ.get(reference)
+            if value:
+                values.append(value)
+    return tuple(values)
+
+
+def _terminal_error_payload(
     control: LauncherRunControl,
     *,
     code: str,
     error: BaseException,
-) -> None:
+    redactions: Collection[str] = (),
+) -> dict[str, Any]:
     node, task, remote_traceback = _task_error_details(error)
-    write_error(
-        control,
+    return build_error_payload(
+        control.run_id,
         code=code,
         error=error,
         traceback_text=remote_traceback,
         node=node,
         task=task,
         backend={"name": control.read_status()["backend"]},
+        redactions=tuple(redactions),
     )
 
 
 def _canonical_run_exists(storage_root: Path, run_id: str) -> bool:
     path = storage_root / "views" / "runs" / run_id / "run.json"
     return path.is_file() and not path.is_symlink()
+
+
+def _canonical_run_status(storage_root: Path, run_id: str) -> str | None:
+    path = storage_root / "views" / "runs" / run_id / "run.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    status = payload.get("status") if isinstance(payload, dict) else None
+    return status if isinstance(status, str) else None
 
 
 def _finalize_canonical_failure(
@@ -324,23 +294,25 @@ def _finalize_canonical_failure(
     )
 
 
-def _transition_terminal(
+def _commit_terminal(
     control: LauncherRunControl,
     *,
     state: str,
     claim_epoch: int,
-    error_path: str | None,
+    error_payload: Mapping[str, Any] | None = None,
+    updates: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = control.read_status()
     if status["state"] == state:
         return status
     if status["state"] in {"succeeded", "failed", "cancelled", "lost"}:
         return status
-    return control.transition(
+    return control.commit_terminal(
         expected_revision=status["revision"],
         expected_claim_epoch=claim_epoch,
         new_state=state,
-        updates={"error": error_path},
+        error_payload=error_payload,
+        updates=updates,
     )
 
 
@@ -352,6 +324,8 @@ def _recover_post_start(
     lease_seconds: float,
 ) -> str:
     status = control.read_status()
+    if status["state"] in {"succeeded", "failed", "cancelled", "lost"}:
+        return str(status["state"])
     if status["claim_epoch"] is None:
         raise LauncherProtocolError("Post-start recovery requires a claim epoch.")
     takeover = control.takeover_claim(
@@ -364,6 +338,16 @@ def _recover_post_start(
     )
     status = takeover.status
     storage_root = control.repository.storage_root
+    if (
+        status["state"] == "cancel_requested"
+        and _canonical_run_status(storage_root, control.run_id) == "cancelled"
+    ):
+        terminal = _commit_terminal(
+            control,
+            state="cancelled",
+            claim_epoch=takeover.claim["epoch"],
+        )
+        return str(terminal["state"])
     if status["state"] == "finalizing":
         try:
             load_return_manifest(
@@ -375,8 +359,13 @@ def _recover_post_start(
                 status="succeeded",
                 update_latest_success=True,
             )
-        except BaseException:
-            pass
+        except BaseException as exc:
+            if _canonical_run_status(storage_root, control.run_id) == "succeeded":
+                raise LauncherProtocolError(
+                    "Canonical success is durable but its latest-success index "
+                    "has not converged.",
+                    details={"run_id": control.run_id},
+                ) from exc
         else:
             control.transition(
                 expected_revision=status["revision"],
@@ -390,18 +379,43 @@ def _recover_post_start(
         details={"run_id": control.run_id, "state": status["state"]},
     )
     _finalize_canonical_failure(storage_root, control.run_id, lost)
-    _write_terminal_error(
+    error_payload = _terminal_error_payload(
         control,
         code="orchestrator-lost",
         error=lost,
     )
-    control.transition(
-        expected_revision=status["revision"],
-        expected_claim_epoch=takeover.claim["epoch"],
-        new_state="lost",
-        updates={"error": "error.json"},
+    terminal = _commit_terminal(
+        control,
+        state="lost",
+        claim_epoch=takeover.claim["epoch"],
+        error_payload=error_payload,
     )
-    return "lost"
+    return str(terminal["state"])
+
+
+def _await_local_process_identity(control: LauncherRunControl) -> None:
+    """Do not claim a local launch until its parent has installed tracking."""
+    identity_path = control.confined_path("local_process.json")
+    deadline = time.monotonic() + _LOCAL_IDENTITY_WAIT_SECONDS
+    while not identity_path.exists():
+        status = control.read_status()
+        if status["state"] != "prepared":
+            raise LauncherProtocolError(
+                "Local launch left prepared state before identity installation.",
+                details={"run_id": control.run_id, "state": status["state"]},
+            )
+        if time.monotonic() >= deadline:
+            raise LauncherProtocolError(
+                "Local process identity was not installed before startup.",
+                details={"run_id": control.run_id},
+            )
+        time.sleep(0.01)
+    identity = read_local_process_identity(control)
+    if identity["pid"] != os.getpid():
+        raise LauncherProtocolError(
+            "Local process identity does not match the orchestrator process.",
+            details={"run_id": control.run_id},
+        )
 
 
 def run_orchestrator(
@@ -419,8 +433,10 @@ def run_orchestrator(
         raise ValueError("Lease and poll intervals must be positive.")
     control = LauncherRepository(storage_root).open(run_id)
     submission = control.read_submission()
+    if submission["launch"]["backend"] == "local" and not recover:
+        _await_local_process_identity(control)
     status = control.read_status()
-    owner = _owner_identity()
+    owner = owner_identity()
 
     if status["state"] != "prepared":
         if not recover:
@@ -444,7 +460,7 @@ def run_orchestrator(
     )
     claim = claimed.claim
     claim_epoch = claim["epoch"]
-    heartbeat = _ClaimHeartbeat(
+    heartbeat = ClaimHeartbeat(
         control,
         claim=claim,
         workflow=None,
@@ -457,46 +473,89 @@ def run_orchestrator(
         run_id=run_id,
         defer_success_finalization=True,
     )
-    watcher: _CancellationWatcher | None = None
+    context._authorize_launcher_reservation(submission["storage_root"])
+    redactions = _secret_redactions(submission)
+    watcher: CancellationWatcher | None = None
+    durable_result = "failed"
     try:
-        _append_backend_event(control, "orchestrator_starting", owner=owner)
+        append_backend_event(
+            control,
+            "orchestrator_starting",
+            owner=owner,
+            claim_epoch=claim_epoch,
+            claim_nonce=claim["nonce"],
+        )
         prepared = _prepare_execution(
             control,
             submission,
             trusted_factories=trusted_factories,
+            claim_epoch=claim_epoch,
+            claim_nonce=claim["nonce"],
         )
         heartbeat.attach_workflow(prepared.workflow)
         status = control.read_status()
         if status["state"] == "cancel_requested":
+            context.request_cancel()
             prepared.workflow.cancel()
-            control.transition(
-                expected_revision=status["revision"],
-                expected_claim_epoch=claim_epoch,
-                new_state="cancelled",
+            _commit_terminal(
+                control,
+                state="cancelled",
+                claim_epoch=claim_epoch,
             )
             return "cancelled"
-        status = control.transition(
+        status = _transition_or_observe_cancel(
+            control,
             expected_revision=status["revision"],
-            expected_claim_epoch=claim_epoch,
+            claim_epoch=claim_epoch,
             new_state="running",
+            context=context,
+            workflow=prepared.workflow,
         )
-        _append_backend_event(control, "orchestrator_running", owner=owner)
-        watcher = _CancellationWatcher(
+        if status is None:
+            _commit_terminal(
+                control,
+                state="cancelled",
+                claim_epoch=claim_epoch,
+            )
+            return "cancelled"
+        append_backend_event(
+            control,
+            "orchestrator_running",
+            owner=owner,
+            claim_epoch=claim_epoch,
+            claim_nonce=claim["nonce"],
+        )
+        watcher = CancellationWatcher(
             control,
             prepared.workflow,
+            context,
             poll_seconds=poll_seconds,
         )
         watcher.start()
+        if _observe_durable_cancellation(
+            control,
+            context=context,
+            workflow=prepared.workflow,
+        ):
+            raise WorkflowCancelledError(
+                "Cancellation won before submitted workflow execution."
+            )
         result = _execute_workflow(prepared, context)
         watcher.raise_if_failed()
         heartbeat.raise_if_failed()
+        outcomes = context.execution_outcomes
         persist_public_return(
             control.control_dir,
             Path(submission["storage_root"]),
             run_id,
             result,
-            outcomes=context.execution_outcomes,
+            outcomes=outcomes,
             root_outputs=prepared.invocation.outputs,
+            provider_routes=build_return_provider_routes(
+                prepared.workflow,
+                prepared.invocation,
+                outcomes,
+            ),
         )
         status = control.read_status()
         if status["state"] == "cancel_requested":
@@ -504,50 +563,64 @@ def run_orchestrator(
                 "Cancellation won before submitted success finalization."
             )
             context.finalize_failure(cancellation)
-            control.transition(
-                expected_revision=status["revision"],
-                expected_claim_epoch=claim_epoch,
-                new_state="cancelled",
+            _commit_terminal(
+                control,
+                state="cancelled",
+                claim_epoch=claim_epoch,
             )
             return "cancelled"
-        status = control.transition(
+        status = _transition_or_observe_cancel(
+            control,
             expected_revision=status["revision"],
-            expected_claim_epoch=claim_epoch,
+            claim_epoch=claim_epoch,
             new_state="finalizing",
+            context=context,
+            workflow=prepared.workflow,
         )
-        context.finalize_success()
-        control.transition(
+        if status is None:
+            cancellation = WorkflowCancelledError(
+                "Cancellation won before submitted success finalization."
+            )
+            context.finalize_failure(cancellation)
+            _commit_terminal(
+                control,
+                state="cancelled",
+                claim_epoch=claim_epoch,
+            )
+            return "cancelled"
+        try:
+            context.finalize_success()
+        except BaseException:
+            if (
+                _canonical_run_status(
+                    Path(submission["storage_root"]),
+                    run_id,
+                )
+                == "succeeded"
+            ):
+                return "finalizing"
+            raise
+        control.commit_terminal(
             expected_revision=status["revision"],
             expected_claim_epoch=claim_epoch,
             new_state="succeeded",
         )
-        _append_backend_event(control, "orchestrator_succeeded", owner=owner)
-        return "succeeded"
-    except WorkflowCancelledError as exc:
-        if context.terminal_status is None:
-            _finalize_canonical_failure(Path(submission["storage_root"]), run_id, exc)
-        status = control.read_status()
-        if status["state"] not in {"cancel_requested", "cancelled"}:
-            _write_terminal_error(
+        durable_result = "succeeded"
+        try:
+            append_backend_event(
                 control,
-                code="workflow-cancelled",
-                error=exc,
-            )
-            _transition_terminal(
-                control,
-                state="failed",
+                "orchestrator_succeeded",
+                owner=owner,
                 claim_epoch=claim_epoch,
-                error_path="error.json",
+                claim_nonce=claim["nonce"],
+                allow_terminal_claim=True,
             )
-            return "failed"
-        _transition_terminal(
-            control,
-            state="cancelled",
-            claim_epoch=claim_epoch,
-            error_path=None,
-        )
-        return "cancelled"
-    except BaseException as exc:
+        except BaseException:
+            pass
+        return "succeeded"
+    except _StaleOrchestrator:
+        return str(control.read_status()["state"])
+    except WorkflowCancelledError as exc:
         if context.terminal_status is None:
             try:
                 context.finalize_failure(exc)
@@ -557,19 +630,77 @@ def run_orchestrator(
                     run_id,
                     exc,
                 )
-        try:
-            _write_terminal_error(
+        status = control.read_status()
+        if status["state"] not in {"cancel_requested", "cancelled"}:
+            error_payload = _terminal_error_payload(
                 control,
-                code="workflow-execution-failed",
+                code="workflow-cancelled",
                 error=exc,
+                redactions=redactions,
             )
-        except BaseException:
-            pass
-        _transition_terminal(
+            _commit_terminal(
+                control,
+                state="failed",
+                claim_epoch=claim_epoch,
+                error_payload=error_payload,
+            )
+            return "failed"
+        _commit_terminal(
+            control,
+            state="cancelled",
+            claim_epoch=claim_epoch,
+        )
+        return "cancelled"
+    except BaseException as exc:
+        status = control.read_status()
+        if status["state"] in {"cancel_requested", "cancelled"}:
+            cancellation = WorkflowCancelledError(
+                "Cancellation won during submitted workflow execution."
+            )
+            if context.terminal_status is None:
+                try:
+                    context.finalize_failure(cancellation)
+                except RuntimeError:
+                    _finalize_canonical_failure(
+                        Path(submission["storage_root"]),
+                        run_id,
+                        cancellation,
+                    )
+            _commit_terminal(
+                control,
+                state="cancelled",
+                claim_epoch=claim_epoch,
+            )
+            return "cancelled"
+        if status["claim_epoch"] != claim_epoch:
+            return str(status["state"])
+        if context.terminal_status is None:
+            try:
+                context.finalize_failure(exc)
+            except BaseException:
+                if (
+                    _canonical_run_status(
+                        Path(submission["storage_root"]),
+                        run_id,
+                    )
+                    != "succeeded"
+                ):
+                    _finalize_canonical_failure(
+                        Path(submission["storage_root"]),
+                        run_id,
+                        exc,
+                    )
+        error_payload = _terminal_error_payload(
+            control,
+            code="workflow-execution-failed",
+            error=exc,
+            redactions=redactions,
+        )
+        _commit_terminal(
             control,
             state="failed",
             claim_epoch=claim_epoch,
-            error_path="error.json",
+            error_payload=error_payload,
         )
         return "failed"
     finally:
@@ -579,7 +710,16 @@ def run_orchestrator(
         if prepared is not None:
             close = getattr(prepared.engine, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except BaseException:
+                    if durable_result not in {
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "lost",
+                    }:
+                        raise
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -596,6 +736,16 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run the detached orchestrator command."""
     arguments = _parser().parse_args(argv)
+    try:
+        submission = LauncherRepository(arguments.storage_root).open(
+            arguments.run_id
+        ).read_submission()
+        redactions = _secret_redactions(submission)
+    except BaseException:
+        redactions = ()
+    if redactions:
+        sys.stdout = _RedactingTextStream(sys.stdout, redactions)
+        sys.stderr = _RedactingTextStream(sys.stderr, redactions)
     try:
         state = run_orchestrator(
             arguments.storage_root,

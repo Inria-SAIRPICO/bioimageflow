@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from .artifacts import write_manual_command
+from .artifacts import (
+    build_error_payload,
+    read_local_process_identity,
+    write_local_process_exit,
+    write_local_process_identity,
+    write_manual_command,
+)
 from .errors import BackendNotSupportedError, LauncherProtocolError
 from .control import LauncherRunControl
 from .types import OrchestratorLaunchConfig
@@ -178,6 +186,114 @@ def _local_process_key(
     return str(control.repository.storage_root), control.run_id
 
 
+def _terminate_process_handle(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout: float = 5.0,
+) -> None:
+    """Stop and reap a newly spawned process before it becomes reconnectable."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        process.wait(timeout=timeout)
+        return
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=timeout)
+
+
+def _process_start_token(pid: int) -> str | None:
+    """Return an OS process-birth token suitable for PID-reuse checks."""
+    proc_stat = Path("/proc") / str(pid) / "stat"
+    try:
+        encoded = proc_stat.read_text()
+    except OSError:
+        pass
+    else:
+        closing = encoded.rfind(")")
+        fields = encoded[closing + 2 :].split()
+        if closing >= 0 and len(fields) > 19:
+            if fields[0] == "Z":
+                return None
+            return f"proc:{fields[19]}"
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=,stat=", "-p", str(pid)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    output = result.stdout.strip()
+    if result.returncode != 0 or not output:
+        return None
+    start, separator, process_state = output.rpartition(" ")
+    if not separator or process_state.startswith("Z"):
+        return None
+    return f"ps:{start.strip()}"
+
+
+def _reconcile_local_exit(
+    control: LauncherRunControl,
+    *,
+    returncode: int,
+) -> None:
+    status = control.read_status()
+    if status["state"] in {"succeeded", "failed", "cancelled", "lost"}:
+        return
+    if status["state"] == "prepared":
+        error = LauncherProtocolError(
+            "The local orchestrator exited before acquiring its execution claim.",
+            details={"run_id": control.run_id, "returncode": returncode},
+        )
+        control.commit_terminal(
+            expected_revision=status["revision"],
+            expected_claim_epoch=None,
+            new_state="failed",
+            error_payload=build_error_payload(
+                control.run_id,
+                code="orchestrator-exited-before-claim",
+                error=error,
+                backend={"name": "local", "returncode": returncode},
+            ),
+        )
+        return
+    claim = control.read_claim()
+    if claim is None:
+        return
+    from .schemas import parse_utc_timestamp
+
+    remaining = (
+        parse_utc_timestamp(claim["expires_at"], field="expires_at").timestamp()
+        - time.time()
+    )
+    if remaining > 0:
+        threading.Event().wait(remaining + 0.01)
+    status = control.read_status()
+    if status["state"] in {"succeeded", "failed", "cancelled", "lost"}:
+        return
+    try:
+        from .orchestrator import run_orchestrator
+
+        run_orchestrator(
+            control.repository.storage_root,
+            control.run_id,
+            recover=True,
+            backend_absent_confirmed=True,
+        )
+    except BaseException:
+        return
+
+
 def _track_local_process(
     control: LauncherRunControl,
     process: subprocess.Popen[bytes],
@@ -190,27 +306,93 @@ def _track_local_process(
 
     def reap() -> None:
         try:
-            process.wait()
+            returncode = process.wait()
+            try:
+                write_local_process_exit(
+                    control,
+                    returncode=returncode,
+                )
+            except BaseException:
+                pass
+            try:
+                _reconcile_local_exit(
+                    control,
+                    returncode=returncode,
+                )
+            except BaseException:
+                pass
         finally:
             with _LOCAL_PROCESS_LOCK:
                 if _LOCAL_PROCESSES.get(key) is process:
                     _LOCAL_PROCESSES.pop(key, None)
 
-    threading.Thread(
+    reaper = threading.Thread(
         target=reap,
         name=f"bioimageflow-reaper-{control.run_id}",
         daemon=True,
-    ).start()
+    )
+    try:
+        reaper.start()
+    except BaseException:
+        with _LOCAL_PROCESS_LOCK:
+            if _LOCAL_PROCESSES.get(key) is process:
+                _LOCAL_PROCESSES.pop(key, None)
+        raise
 
 
-def terminate_local_orchestrator(control: LauncherRunControl) -> bool:
-    """Terminate a local orchestrator tracked by this launcher process."""
+def terminate_local_orchestrator(
+    control: LauncherRunControl,
+    *,
+    timeout: float = 5.0,
+) -> bool:
+    """Terminate a local orchestrator and confirm that exact process exited."""
     with _LOCAL_PROCESS_LOCK:
         process = _LOCAL_PROCESSES.get(_local_process_key(control))
-    if process is None or process.poll() is not None:
+    if process is not None and process.poll() is None:
+        process.terminate()
+        wait = getattr(process, "wait", None)
+        if callable(wait):
+            try:
+                wait(timeout=timeout)
+            except TypeError:
+                wait()
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    return False
+        else:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None and time.monotonic() < deadline:
+                threading.Event().wait(0.01)
+        return process.poll() is not None
+    try:
+        identity = read_local_process_identity(control)
+    except LauncherProtocolError:
         return False
-    process.terminate()
-    return True
+    pid = identity["pid"]
+    if _process_start_token(pid) != identity["start_token"]:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _process_start_token(pid) != identity["start_token"]:
+            return True
+        threading.Event().wait(0.02)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _process_start_token(pid) != identity["start_token"]:
+            return True
+        threading.Event().wait(0.02)
+    return False
 
 
 def _launch_local(
@@ -256,7 +438,32 @@ def _launch_local(
     finally:
         stdout.close()
         stderr.close()
-    _track_local_process(control, process)
+    identity_written = False
+    try:
+        start_token = _process_start_token(process.pid)
+        if start_token is None:
+            raise LauncherProtocolError(
+                "Could not persist a reconnectable local orchestrator identity.",
+                details={"run_id": control.run_id},
+            )
+        _track_local_process(control, process)
+        write_local_process_identity(
+            control,
+            pid=process.pid,
+            start_token=start_token,
+        )
+        identity_written = True
+    except BaseException:
+        _terminate_process_handle(process)
+        if identity_written and process.returncode is not None:
+            try:
+                write_local_process_exit(
+                    control,
+                    returncode=process.returncode,
+                )
+            except BaseException:
+                pass
+        raise
     return LocalLaunch(
         argv=argv,
         process=process,

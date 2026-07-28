@@ -21,4 +21,5 @@ Workflow scripts and tool authors should read the
    planning_and_cache
    disabled_nodes
    progress_and_cancel
+   submitted_parsl
    tool_schemas

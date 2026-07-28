@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import bioimageflow.launcher.backends as backend_module
-from bioimageflow.launcher.artifacts import read_manual_command
+from bioimageflow.launcher.artifacts import (
+    read_manual_command,
+    write_local_process_identity,
+)
 from bioimageflow.launcher.backends import (
     LocalLaunch,
     ManualLaunch,
     build_orchestrator_argv,
     launch_orchestrator,
+    _reconcile_local_exit,
 )
 from bioimageflow.launcher.control import LauncherRunControl
 from bioimageflow.launcher.errors import (
@@ -20,12 +27,38 @@ from bioimageflow.launcher.errors import (
     LauncherProtocolError,
 )
 from bioimageflow.launcher.repository import LauncherRepository
+from bioimageflow.launcher.orchestrator import _await_local_process_identity
 from bioimageflow.launcher.types import OrchestratorLaunchConfig
+from bioimageflow.storage import Storage
 from tests.unit.launcher.helpers import launcher_submission
 
 
 class _FakeProcess:
     pid = 4321
+
+
+class _TerminableFakeProcess:
+    pid = 4312
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.terminated = False
+        self.reaped = False
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.reaped = True
+        assert self.returncode is not None
+        return self.returncode
+
+    def kill(self) -> None:
+        self.returncode = -9
 
 
 def _submission(
@@ -83,6 +116,11 @@ def test_local_backend_starts_detached_process_with_confined_logs(
         return _FakeProcess()
 
     monkeypatch.setattr(backend_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        backend_module,
+        "_process_start_token",
+        lambda pid: f"test:{pid}",
+    )
 
     result = launch_orchestrator(
         control,
@@ -122,6 +160,11 @@ def test_local_backend_never_persists_inherited_secret_values(
         "Popen",
         lambda *args, **kwargs: _FakeProcess(),
     )
+    monkeypatch.setattr(
+        backend_module,
+        "_process_start_token",
+        lambda pid: f"test:{pid}",
+    )
 
     result = launch_orchestrator(
         control,
@@ -130,6 +173,7 @@ def test_local_backend_never_persists_inherited_secret_values(
     )
 
     assert isinstance(result, LocalLaunch)
+    assert (control.control_dir / "local_process.json").is_file()
     for path in control.control_dir.rglob("*"):
         if path.is_file():
             assert b"literal-super-secret" not in path.read_bytes()
@@ -249,6 +293,108 @@ def test_unsupported_backends_fail_before_process_or_artifact_action(
     assert control.read_status()["state"] == "prepared"
 
 
+def test_local_backend_reaps_process_when_identity_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = _control(tmp_path, backend="local")
+    process = _TerminableFakeProcess()
+    monkeypatch.setattr(
+        backend_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "_process_start_token",
+        lambda pid: f"test:{pid}",
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "_track_local_process",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "write_local_process_identity",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            OSError("identity persistence failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match="identity persistence failed"):
+        launch_orchestrator(
+            control,
+            OrchestratorLaunchConfig(backend="local"),
+        )
+
+    assert process.terminated is True
+    assert process.reaped is True
+    assert not (control.control_dir / "local_process.json").exists()
+
+
+def test_local_backend_reaps_process_when_tracking_registration_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = _control(tmp_path, backend="local")
+    process = _TerminableFakeProcess()
+    monkeypatch.setattr(
+        backend_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "_process_start_token",
+        lambda pid: f"test:{pid}",
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "_track_local_process",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("tracking registration failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="tracking registration failed"):
+        launch_orchestrator(
+            control,
+            OrchestratorLaunchConfig(backend="local"),
+        )
+
+    assert process.terminated is True
+    assert process.reaped is True
+    assert not (control.control_dir / "local_process.json").exists()
+
+
+def test_local_orchestrator_waits_for_durable_parent_identity(
+    tmp_path: Path,
+) -> None:
+    control = _control(tmp_path, backend="local")
+    completed = threading.Event()
+
+    def await_identity() -> None:
+        _await_local_process_identity(control)
+        completed.set()
+
+    thread = threading.Thread(target=await_identity)
+    thread.start()
+    time.sleep(0.02)
+    assert completed.is_set() is False
+    assert control.read_status()["state"] == "prepared"
+
+    write_local_process_identity(
+        control,
+        pid=os.getpid(),
+        start_token="test-parent-tracking-complete",
+    )
+    thread.join(timeout=2)
+
+    assert completed.is_set() is True
+    assert control.read_status()["state"] == "prepared"
+
+
 def test_backend_must_match_allocated_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -271,6 +417,51 @@ def test_backend_must_match_allocated_run(
 
     assert invoked is False
     assert not (control.control_dir / "logs").exists()
+
+
+def test_local_child_exit_before_claim_is_durably_failed(
+    tmp_path: Path,
+) -> None:
+    control = _control(tmp_path, backend="local")
+
+    _reconcile_local_exit(control, returncode=17)
+
+    status = control.read_status()
+    assert status["state"] == "failed"
+    assert status["error"] == "error.json"
+
+
+def test_local_child_disappearance_after_claim_is_recovered_as_lost(
+    tmp_path: Path,
+) -> None:
+    control = _control(tmp_path, backend="local")
+    claimed = control.claim_start(
+        expected_revision=0,
+        owner="dead-local-child",
+        backend="local",
+        lease_seconds=0.01,
+    )
+    control.transition(
+        expected_revision=claimed.status["revision"],
+        expected_claim_epoch=claimed.claim["epoch"],
+        new_state="running",
+    )
+    Storage(tmp_path).write_run_metadata(
+        control.run_id,
+        workflow_identity="workflow:test",
+        engine="parsl:parallel",
+        status="running",
+        target_nodes=[],
+    )
+    threading.Event().wait(0.02)
+
+    _reconcile_local_exit(control, returncode=9)
+
+    assert control.read_status()["state"] == "lost"
+    assert (
+        Storage(tmp_path)._load_run_metadata(control.run_id)["status"]
+        == "failed"
+    )
 
 
 @pytest.mark.parametrize(

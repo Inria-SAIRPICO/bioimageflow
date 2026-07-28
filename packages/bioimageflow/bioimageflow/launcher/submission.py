@@ -10,7 +10,7 @@ from typing import Any
 from bioimageflow.parsl import ExecutorBinding, ParslTaskPolicy
 from bioimageflow.workflow import Workflow
 
-from .artifacts import write_error
+from .artifacts import build_error_payload
 from .configuration import import_config_factory, verify_secret_references
 from .errors import BackendNotSupportedError
 from .inputs import serialize_invocation
@@ -98,19 +98,19 @@ def _protocol_versions() -> dict[str, int]:
 
 
 def _mark_launch_failed(control: Any, error: BaseException) -> None:
-    persisted = write_error(
-        control,
+    payload = build_error_payload(
+        control.run_id,
         code="orchestrator-launch-failed",
         error=error,
     )
     status = control.read_status()
     if status["state"] == "prepared":
-        control.transition(
+        control.commit_terminal(
             expected_revision=status["revision"],
+            expected_claim_epoch=None,
             new_state="failed",
-            updates={"error": "error.json"},
+            error_payload=payload,
         )
-    del persisted
 
 
 def submit_workflow(

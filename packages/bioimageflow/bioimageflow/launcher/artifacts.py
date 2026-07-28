@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 import traceback as traceback_module
-import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .errors import LauncherProtocolError
-from .repository import LauncherRunControl
+from .control import LauncherRunControl
+from .repository import _atomic_create_json, _atomic_write_json
 from .schemas import (
     ERROR_SCHEMA,
+    parse_utc_timestamp,
+    utc_timestamp,
     validate_error,
     validate_versioned_payload,
 )
@@ -32,37 +33,18 @@ def _write_json(
         raise LauncherProtocolError(
             f"Launcher artifact parent for {relative!r} must not be a symlink."
         )
-    encoded = json.dumps(
-        dict(payload),
-        indent=2,
-        sort_keys=True,
-        allow_nan=False,
-    ).encode("utf-8")
     if immutable:
         try:
-            descriptor = os.open(
-                path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
+            _atomic_create_json(path, payload)
         except FileExistsError as exc:
-            raise LauncherProtocolError(
-                f"Immutable launcher artifact {relative!r} already exists."
-            ) from exc
-        try:
-            os.write(descriptor, encoded)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+            existing = read_json(control, relative)
+            if existing != dict(payload):
+                raise LauncherProtocolError(
+                    f"Immutable launcher artifact {relative!r} already exists "
+                    "with different content."
+                ) from exc
         return path
-    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
-    try:
-        temporary.write_bytes(encoded)
-        with temporary.open("rb") as handle:
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    _atomic_write_json(path, payload)
     return path
 
 
@@ -89,6 +71,52 @@ def read_json(
     return value
 
 
+def build_error_payload(
+    run_id: str,
+    *,
+    code: str,
+    error: BaseException,
+    traceback_text: str | None = None,
+    node: Mapping[str, Any] | None = None,
+    task: Mapping[str, Any] | None = None,
+    backend: Mapping[str, Any] | None = None,
+    redactions: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Build one validated structured terminal error without literal secrets."""
+    message = str(error)
+    formatted_traceback = (
+        traceback_text
+        if traceback_text is not None
+        else "".join(
+            traceback_module.format_exception(
+                type(error),
+                error,
+                error.__traceback__,
+            )
+        )
+    )
+    for secret in redactions:
+        if type(secret) is str and secret:
+            message = message.replace(secret, "[REDACTED]")
+            formatted_traceback = formatted_traceback.replace(
+                secret,
+                "[REDACTED]",
+            )
+    return validate_error(
+        {
+            "schema": ERROR_SCHEMA,
+            "run_id": run_id,
+            "code": code,
+            "exception_type": type(error).__name__,
+            "message": message,
+            "traceback": formatted_traceback,
+            "node": None if node is None else dict(node),
+            "task": None if task is None else dict(task),
+            "backend": None if backend is None else dict(backend),
+        }
+    )
+
+
 def write_error(
     control: LauncherRunControl,
     *,
@@ -98,30 +126,18 @@ def write_error(
     node: Mapping[str, Any] | None = None,
     task: Mapping[str, Any] | None = None,
     backend: Mapping[str, Any] | None = None,
+    redactions: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Persist one immutable structured terminal error without secrets."""
-    payload = validate_error(
-        {
-            "schema": ERROR_SCHEMA,
-            "run_id": control.run_id,
-            "code": code,
-            "exception_type": type(error).__name__,
-            "message": str(error),
-            "traceback": (
-                traceback_text
-                if traceback_text is not None
-                else "".join(
-                    traceback_module.format_exception(
-                        type(error),
-                        error,
-                        error.__traceback__,
-                    )
-                )
-            ),
-            "node": None if node is None else dict(node),
-            "task": None if task is None else dict(task),
-            "backend": None if backend is None else dict(backend),
-        }
+    payload = build_error_payload(
+        control.run_id,
+        code=code,
+        error=error,
+        traceback_text=traceback_text,
+        node=node,
+        task=task,
+        backend=backend,
+        redactions=redactions,
     )
     _write_json(control, "error.json", payload, immutable=True)
     return payload
@@ -185,4 +201,83 @@ def read_manual_command(control: LauncherRunControl) -> dict[str, Any]:
         raise LauncherProtocolError(
             "Manual command work_dir must be absolute or null."
         )
+    return payload
+
+
+def write_local_process_identity(
+    control: LauncherRunControl,
+    *,
+    pid: int,
+    start_token: str,
+) -> dict[str, Any]:
+    """Persist the reconnectable identity of one local orchestrator."""
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(start_token) is not str
+        or not start_token
+    ):
+        raise ValueError("Local process identity is invalid.")
+    payload = {
+        "schema": "bioimageflow.launcher.local_process.v1",
+        "run_id": control.run_id,
+        "pid": pid,
+        "start_token": start_token,
+        "started_at": utc_timestamp(),
+    }
+    _write_json(control, "local_process.json", payload, immutable=True)
+    return payload
+
+
+def read_local_process_identity(
+    control: LauncherRunControl,
+) -> dict[str, Any]:
+    """Read and validate one persisted local orchestrator identity."""
+    payload = read_json(control, "local_process.json")
+    if set(payload) != {
+        "schema",
+        "run_id",
+        "pid",
+        "start_token",
+        "started_at",
+    }:
+        raise LauncherProtocolError("Local process identity fields are invalid.")
+    if (
+        payload["schema"] != "bioimageflow.launcher.local_process.v1"
+        or payload["run_id"] != control.run_id
+        or type(payload["pid"]) is not int
+        or payload["pid"] <= 0
+        or type(payload["start_token"]) is not str
+        or not payload["start_token"]
+        or type(payload["started_at"]) is not str
+        or not payload["started_at"]
+    ):
+        raise LauncherProtocolError("Local process identity is invalid.")
+    try:
+        parse_utc_timestamp(
+            payload["started_at"],
+            field="local_process.started_at",
+        )
+    except Exception as exc:
+        raise LauncherProtocolError(
+            "Local process identity timestamp is invalid."
+        ) from exc
+    return payload
+
+
+def write_local_process_exit(
+    control: LauncherRunControl,
+    *,
+    returncode: int,
+) -> dict[str, Any]:
+    """Persist a complete local child exit observation."""
+    if type(returncode) is not int:
+        raise TypeError("Local process returncode must be an integer.")
+    payload = {
+        "schema": "bioimageflow.launcher.local_process_exit.v1",
+        "run_id": control.run_id,
+        "returncode": returncode,
+        "observed_at": utc_timestamp(),
+    }
+    _write_json(control, "local_process_exit.json", payload, immutable=True)
     return payload

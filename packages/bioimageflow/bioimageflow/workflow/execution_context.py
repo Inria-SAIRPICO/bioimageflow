@@ -7,6 +7,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 
 _RUN_ID_RE = re.compile(r"^run_[0-9a-f]{32}$")
@@ -60,6 +61,7 @@ class WorkflowExecutionContext:
         self._failure_callback: Callable[[BaseException], None] | None = None
         self._state = "new"
         self._execution_outcomes: dict[str, ExecutionProviderOutcome] = {}
+        self._launcher_storage_path: Path | None = None
 
     @property
     def cancel_requested(self) -> bool:
@@ -86,6 +88,21 @@ class WorkflowExecutionContext:
     def request_cancel(self) -> None:
         """Request cancellation without affecting any other execution."""
         self._cancel_event.set()
+
+    def _authorize_launcher_reservation(self, storage_path: str | Path) -> None:
+        """Authorize canonical creation for an already reserved submitted run."""
+        normalized = Path(storage_path).expanduser().resolve(strict=False)
+        with self._lock:
+            if self._state != "new":
+                raise RuntimeError(
+                    "Launcher reservation must be authorized before execution."
+                )
+            self._launcher_storage_path = normalized
+
+    def _uses_launcher_reservation(self, storage_path: str | Path) -> bool:
+        normalized = Path(storage_path).expanduser().resolve(strict=False)
+        with self._lock:
+            return self._launcher_storage_path == normalized
 
     def finalize_success(self) -> None:
         """Finalize a successfully computed run."""

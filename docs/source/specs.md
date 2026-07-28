@@ -1942,6 +1942,60 @@ An injected DFK requires `resource_lifetime="external"`.
 Live Config, DFK, executor/provider objects, routes, credentials, and secrets remain runtime-only.
 `ParslTaskError` is the public structured remote-error subtype.
 
+#### 4.5.3 Submitted Parsl Execution
+
+`submit_workflow()` is the public separate-process launcher above `ParslEngine`.
+It allocates a run ID and complete control directory before starting or describing an orchestrator:
+
+```python
+run = submit_workflow(
+    workflow,
+    inputs=inputs,
+    parsl_config=ParslConfigRef(
+        "my_application.parsl_config:build_config",
+        {"queue": "analysis"},
+        secret_refs={"credential": "BIF_CLUSTER_CREDENTIAL"},
+    ),
+    executor_bindings=bindings,
+    node_routes=node_routes,
+    environment_routes=environment_routes,
+    shared_runtime_root=shared_runtime_root,
+    task_policy=ParslTaskPolicy(),
+    launch=OrchestratorLaunchConfig(backend="local"),
+)
+```
+
+`ParslConfigRef.factory` is an importable `module:callable` configuration factory.
+Its keyword arguments are finite JSON-safe values and its optional secret references are opaque environment-variable names resolved by the orchestrator host.
+Literal credentials must not be supplied, secret-looking field names are rejected, and arbitrary callables, pickle payloads, Config, DFK, executor, and provider objects are rejected.
+
+The submitted workflow definition is exactly the recursive graph-v1 payload or archive-v1 envelope.
+Runtime storage stays outside that definition: `workflow.storage_path` is normalized into launcher metadata and passed explicitly to `Workflow.from_dict(..., storage_path=...)` in the detached process.
+Partial workflows, unresolved tools, invalid routes, unsupported launch backends, and unavailable secret references fail before allocation or process launch as applicable.
+
+The invocation is either the root interface with serialized `inputs`, or ordered immediate node names in `targets`.
+The two forms are mutually exclusive.
+Typed constants preserve Python scalar, collection, and absolute Path values without pickle.
+Root DataFrames are stored under the control directory and verified by transport and canonical logical digests before DFK acquisition.
+
+`OrchestratorLaunchConfig(backend="local")` starts a separate Python process.
+`backend="manual"` writes a reproducible shell-free command descriptor and remains prepared until that command is executed.
+Scheduler launch backends are reserved and fail with `BackendNotSupportedError` until an adapter exists.
+Launcher backends start only the orchestrator; Parsl providers allocate workers.
+
+`WorkflowRun.open(storage_path, run_id)` reconnects without process-local state.
+Its `status`, `refresh()`, `progress()`, `logs()`, `cancel()`, and `result()` methods read durable launcher artifacts.
+Status uses `prepared`, `starting`, `running`, `finalizing`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `lost`.
+Every state mutation is a guarded revision and claim-epoch compare-and-swap.
+
+Cancellation of an active run commits durable `cancel_requested` state before signaling the workflow.
+Successful return installation and cancellation race through the guarded `running -> finalizing` transition: cancellation wins before that transition, while finalizing is non-cancellable.
+An optional local hard-cancellation grace may terminate the exact orchestrator identified by persisted process identity, including through a reconnected run handle; this records `lost` because provider and writer cleanup cannot be proven.
+
+A successful submitted run persists its exact public DataFrame or ordered mapping beneath `launcher/v1/runs/<run-id>/return/` before canonical and launcher success.
+Record-backed path cells address exact immutable record IDs, external paths remain typed external references, and transient owned assets are copied into the return.
+Historical result loading never consults `current.json`.
+
 ### 4.6 Input Binding Logic (Graph Construction)
 
 At graph construction time, the engine builds an **input binding plan** for each tool call. The binding rules differ by tool type, reflecting their different relationships with upstream data.

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
 
-from .artifacts import read_error, write_error
+from .artifacts import build_error_payload, read_error
 from .errors import (
     WorkflowRunFailedError,
     WorkflowRunLostError,
@@ -28,7 +29,23 @@ def _hard_terminate_after_grace(
     storage_path: Path,
     grace_seconds: float,
 ) -> None:
-    if threading.Event().wait(grace_seconds):
+    status = control.read_status()
+    requested_at = status.get("cancel_requested_at")
+    if status["state"] != "cancel_requested" or not isinstance(
+        requested_at,
+        str,
+    ):
+        return
+    try:
+        requested = datetime.fromisoformat(
+            requested_at.replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+    except ValueError:
+        return
+    remaining = (
+        requested.timestamp() + grace_seconds - datetime.now(timezone.utc).timestamp()
+    )
+    if remaining > 0 and threading.Event().wait(remaining):
         return
     status = control.read_status()
     if status["state"] != "cancel_requested" or status["backend"] != "local":
@@ -41,15 +58,6 @@ def _hard_terminate_after_grace(
         "The local orchestrator was terminated after its cancellation grace period.",
         details={"run_id": control.run_id, "grace_seconds": grace_seconds},
     )
-    try:
-        write_error(
-            control,
-            code="orchestrator-hard-terminated",
-            error=error,
-            backend={"name": "local"},
-        )
-    except BaseException:
-        return
     status = control.read_status()
     if status["state"] != "cancel_requested":
         return
@@ -64,16 +72,22 @@ def _hard_terminate_after_grace(
         except BaseException:
             pass
     try:
-        control.transition(
+        control.commit_terminal(
             expected_revision=status["revision"],
             expected_claim_epoch=status["claim_epoch"],
             new_state="lost",
+            error_payload=build_error_payload(
+                control.run_id,
+                code="orchestrator-hard-terminated",
+                error=error,
+                backend={"name": "local"},
+            ),
             updates={
                 "hard_termination_requested": True,
-                "error": "error.json",
+                "cancel_requested_at": None,
             },
         )
-    except RevisionConflictError:
+    except (RevisionConflictError, RuntimeError):
         return
 
 
@@ -107,6 +121,16 @@ class WorkflowRun:
         self._launch = OrchestratorLaunchConfig.from_dict(submission["launch"])
         self.view_dir = self._storage_path / submission["canonical_view"]
         self._status = control.read_status()
+        if (
+            self._status["state"] == "cancel_requested"
+            and self._launch.backend == "local"
+            and self._launch.hard_cancel_after is not None
+        ):
+            _schedule_hard_termination(
+                self._control,
+                storage_path=self._storage_path,
+                grace_seconds=self._launch.hard_cancel_after,
+            )
 
     @classmethod
     def open(

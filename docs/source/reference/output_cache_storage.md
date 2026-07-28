@@ -672,27 +672,32 @@ The allocation guard is held only for path claims and is never held while a proc
 The complete control tree is:
 
 ```text
-launcher/v1/runs/<run-id>/
-  submission.json
-  status.json
-  progress.jsonl
-  execution.claim
-  claims/
-    <epoch>.json
-  cancel_requested
-  error.json
-  command.json
-  logs/
-    orchestrator.out
-    orchestrator.err
-  inputs/
-    <input-id>.parquet
-  return/
-    manifest.json
-    dataframes/
-      <frame-id>.parquet
-    assets/
-      <digest-shard>/<digest>/...
+launcher/v1/
+  .allocation.guard
+  runs/<run-id>/
+    .control.guard
+    submission.json
+    status.json
+    progress.jsonl
+    execution.claim
+    claims/
+      <epoch>.json
+    cancel_requested
+    error.json
+    command.json
+    local_process.json
+    local_process_exit.json
+    logs/
+      orchestrator.out
+      orchestrator.err
+    inputs/
+      <input-id>.parquet
+    return/
+      manifest.json
+      dataframes/
+        <frame-id>.parquet
+      assets/
+        <digest-shard>/<digest>/...
 ```
 
 `submission.json`, revision-zero `status.json`, and an empty `progress.jsonl` are created before `submit_workflow()` returns.
@@ -701,7 +706,10 @@ launcher/v1/runs/<run-id>/
 `progress.jsonl` is append-only and contains complete newline-terminated canonical JSON objects; readers ignore one unterminated final line left by a crashed writer and reject malformed complete lines.
 `execution.claim` exists after an orchestrator claims startup, and each superseded claim is copied to `claims/<epoch>.json` before replacement.
 The cancellation marker is a wake-up hint only; `status.json` is authoritative.
-`error.json`, `command.json`, logs, externalized inputs, and return data exist only for the states or launcher modes that require them.
+`error.json`, `command.json`, local-process identity and exit observations, logs, externalized inputs, and return data exist only for the states or launcher modes that require them.
+Immutable JSON artifacts are staged, synchronized where supported, and installed atomically; an exact retry is idempotent and different content is rejected.
+`local_process.json` records the PID and operating-system process-birth token required to reconnect safely without signaling a reused PID.
+`local_process_exit.json` records the observed exit code and time.
 The `return/` directory does not exist until a complete staged sibling has been validated and atomically installed.
 
 The control schemas and exact required fields are:
@@ -711,6 +719,9 @@ The control schemas and exact required fields are:
 - `bioimageflow.launcher.claim.v1`: `schema`, `run_id`, `owner`, `backend`, `nonce`, `epoch`, `created_at`, `heartbeat_at`, and `expires_at`.
 - `bioimageflow.launcher.progress.v1`: `schema`, `run_id`, `sequence`, `timestamp`, `kind`, and `payload`.
 - `bioimageflow.launcher.error.v1`: `schema`, `run_id`, `code`, `exception_type`, `message`, `traceback`, `node`, `task`, and `backend`.
+- `bioimageflow.launcher.command.v1`: `schema`, `run_id`, `argv`, `work_dir`, and `secret_refs`.
+- `bioimageflow.launcher.local_process.v1`: `schema`, `run_id`, `pid`, `start_token`, and `started_at`.
+- `bioimageflow.launcher.local_process_exit.v1`: `schema`, `run_id`, `returncode`, and `observed_at`.
 - `bioimageflow.launcher.return.v1`: `schema`, `run_id`, `shape`, `mapping_keys`, `frames`, `root_outputs`, and `locators`.
 
 Schema readers require exactly the versioned fields defined above and reject unknown or missing fields.
@@ -757,7 +768,8 @@ Submission metadata, inputs, terminal status and error, claim history, and succe
 Prepared/manual and failed runs are not removed automatically.
 Logs and progress may be pruned only by an explicit operation that retains submission, status, terminal error, return, and canonical provenance metadata.
 Temporary sibling directories may be removed only after their writer is known dead.
-Deleting a submitted run is explicit and removes its launcher control tree; canonical records and portable run views follow their own storage retention operations.
+Deleting a submitted run is an operator-owned retention action, not a library API.
+It removes the launcher control tree only after the run is terminal and no reader or backend monitor is active; canonical records and portable run views follow their own separately coordinated retention operations.
 
 ## Human-Facing Run Views
 
