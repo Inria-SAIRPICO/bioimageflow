@@ -1605,7 +1605,7 @@ No package auto-install field or side effect is part of the launcher protocol.
 
 The launcher allocates the BioImageFlow run ID before starting the orchestrator.
 
-Run IDs use the path-safe, lexicographically sortable format required by the storage contract.
+Run IDs use the path-safe UUID4 format required by the storage contract.
 Allocation atomically claims a new control directory and rejects a collision with either the launcher control path or canonical run-view path.
 
 The launcher constructs `WorkflowExecutionContext(run_id=...)` and passes it through the public `run_context` argument.
@@ -1669,6 +1669,7 @@ The control protocol has these exact schema names:
 - `bioimageflow.launcher.return.v1` for `return/manifest.json`.
 
 The immutable submission records the run ID, creation time, canonical storage root, confined canonical-view path, normalized shared runtime root when present, workflow payload kind/digest and payload, invocation variant, serialized inputs, Parsl config reference, bindings, routes, task policy, launch backend, and protocol versions.
+The canonical storage root is launcher runtime metadata, not workflow definition data: it remains absent from the recursive graph and portable archive, and the orchestrator passes it explicitly to `Workflow.from_dict(..., storage_path=...)`.
 The status records the run ID, exact state, monotonically increasing revision, created/updated timestamps, backend identifier, orchestrator identity, cancellation and hard-termination flags, and terminal error reference when present.
 Each progress entry records schema, run ID, globally monotonic sequence, timestamp, `public` or `backend` kind, and a versioned payload.
 The error records a stable public error code, exception type/message, optional traceback, and available node/task/backend metadata without secret values.

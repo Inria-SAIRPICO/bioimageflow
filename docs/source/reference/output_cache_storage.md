@@ -63,6 +63,26 @@ All paths below are rooted at `Workflow.storage_path`.
               <invocation-id>/
                 tasks/
                   <task-id>.json
+  launcher/
+    v1/
+      runs/
+        <run-id>/
+          submission.json
+          status.json
+          progress.jsonl
+          execution.claim
+          claims/
+          cancel_requested
+          error.json
+          command.json
+          logs/
+            orchestrator.out
+            orchestrator.err
+          inputs/
+          return/
+            manifest.json
+            dataframes/
+            assets/
   views/
     runs/
       <run-id>/
@@ -82,6 +102,7 @@ All paths below are rooted at `Workflow.storage_path`.
 
 `cache/v1/` is private machine-readable storage.
 `diagnostics/v1/` contains mutable backend-task execution metadata that is separate from reusable result identity.
+`launcher/v1/` contains submitted-run control state and durable public return snapshots.
 `views/` contains portable JSON provenance and pointer views.
 `outputs/` contains optional materialized files for human browsing.
 
@@ -637,6 +658,107 @@ It records:
 Conflict reports are best-effort diagnostics.
 Failure to write a conflict report must not make a non-current candidate record selected.
 
+## Submitted-Run Launcher Namespace
+
+`launcher/v1/` is the only submitted-run control namespace.
+It does not contain cache records and is never consulted for result-key or record-ID identity.
+One submitted run uses the same run ID beneath `launcher/v1/runs/` and `views/runs/`.
+
+The launcher allocates a UUID4 run ID under a storage-root allocation guard before starting an orchestrator.
+Allocation rejects an existing launcher control directory or canonical run view with that ID.
+Attached and submitted run-view creation use the same allocation guard when claiming a preallocated ID, so neither namespace can race into a duplicate execution identity.
+The allocation guard is held only for path claims and is never held while a process, task, or filesystem transfer is awaited.
+
+The complete control tree is:
+
+```text
+launcher/v1/runs/<run-id>/
+  submission.json
+  status.json
+  progress.jsonl
+  execution.claim
+  claims/
+    <epoch>.json
+  cancel_requested
+  error.json
+  command.json
+  logs/
+    orchestrator.out
+    orchestrator.err
+  inputs/
+    <input-id>.parquet
+  return/
+    manifest.json
+    dataframes/
+      <frame-id>.parquet
+    assets/
+      <digest-shard>/<digest>/...
+```
+
+`submission.json`, revision-zero `status.json`, and an empty `progress.jsonl` are created before `submit_workflow()` returns.
+`submission.json` is immutable after allocation.
+`status.json` is guarded, revisioned mutable state.
+`progress.jsonl` is append-only and contains complete newline-terminated canonical JSON objects; readers ignore one unterminated final line left by a crashed writer and reject malformed complete lines.
+`execution.claim` exists after an orchestrator claims startup, and each superseded claim is copied to `claims/<epoch>.json` before replacement.
+The cancellation marker is a wake-up hint only; `status.json` is authoritative.
+`error.json`, `command.json`, logs, externalized inputs, and return data exist only for the states or launcher modes that require them.
+The `return/` directory does not exist until a complete staged sibling has been validated and atomically installed.
+
+The control schemas and exact required fields are:
+
+- `bioimageflow.launcher.submission.v1`: `schema`, `run_id`, `created_at`, `storage_root`, `canonical_view`, `workflow`, `invocation`, `parsl_config`, `executor_bindings`, `node_routes`, `environment_routes`, `shared_runtime_root`, `task_policy`, `launch`, and `protocol_versions`.
+- `bioimageflow.launcher.status.v1`: `schema`, `run_id`, `state`, `revision`, `created_at`, `updated_at`, `backend`, `orchestrator`, `claim_epoch`, `cancel_requested_at`, `hard_termination_requested`, and `error`.
+- `bioimageflow.launcher.claim.v1`: `schema`, `run_id`, `owner`, `backend`, `nonce`, `epoch`, `created_at`, `heartbeat_at`, and `expires_at`.
+- `bioimageflow.launcher.progress.v1`: `schema`, `run_id`, `sequence`, `timestamp`, `kind`, and `payload`.
+- `bioimageflow.launcher.error.v1`: `schema`, `run_id`, `code`, `exception_type`, `message`, `traceback`, `node`, `task`, and `backend`.
+- `bioimageflow.launcher.return.v1`: `schema`, `run_id`, `shape`, `mapping_keys`, `frames`, `root_outputs`, and `locators`.
+
+Schema readers require exactly the versioned fields defined above and reject unknown or missing fields.
+Optional values are represented by JSON `null`; fields are not conditionally omitted.
+All JSON is UTF-8, finite-value JSON with sorted object keys.
+Configuration mappings and ordered return keys preserve their explicitly recorded order where order is part of the public result.
+
+`submission.workflow` contains exactly `kind`, `digest`, and `payload`.
+The payload is the recursive graph-v1 object or archive-v1 envelope.
+`storage_root` is the normalized absolute runtime root assigned by the launcher and is deliberately outside the workflow payload.
+It never enters a recursive graph or portable archive, and the orchestrator supplies it explicitly when materializing the workflow.
+`canonical_view` is the confined relative path `views/runs/<run-id>`.
+
+Root scalar inputs use a strict recursive typed constant codec.
+Path values are normalized absolute paths at submission.
+Root DataFrame inputs are written beneath `inputs/` with their stable input-port ID, canonical logical schema and digest, Parquet transport digest, and confined relative path recorded in the invocation.
+The orchestrator verifies transport and logical digests before acquiring a DFK.
+
+The exact launcher states are `prepared`, `starting`, `running`, `finalizing`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `lost`.
+Legal transitions are `prepared` to `starting`, `cancelled`, or `failed`; `starting` to `running`, `cancel_requested`, `failed`, or `lost`; `running` to `cancel_requested`, `finalizing`, `failed`, or `lost`; `finalizing` to `succeeded`, `failed`, or `lost`; and `cancel_requested` to `cancelled`, `failed`, or `lost`.
+Terminal status and terminal metadata are immutable.
+Every mutation checks the expected revision and, after startup claim, the expected claim epoch under the control-directory guard before atomically replacing `status.json`.
+Progress sequence allocation and append occur under the same guard, producing globally monotonic sequences without duplicate allocation.
+
+An execution claim is a renewable lease, not a lock.
+Its timestamps are UTC and its expiry is evaluated against the reader's wall clock with backend-absence confirmation required before recovery.
+A live unexpired lease excludes another orchestrator.
+An expired claim may be replaced before `starting` commits only when the backend is confirmed absent.
+After `starting`, recovery never reruns workflow code; it may complete an already installed finalization or record `lost`.
+
+Every persisted relative path is normalized POSIX syntax and confined beneath the control directory or the explicitly named canonical run view.
+Readers reject absolute relative-path fields, empty or dot segments, `..`, backslashes, symlink components, and resolved targets outside the named root.
+The normalized absolute `storage_root`, `shared_runtime_root`, external input paths, and declared external return references are the only absolute path fields.
+
+The public return is staged as a unique sibling, fully written, synchronized where supported, validated, and atomically renamed to `return/`.
+`manifest.json` is its commit marker.
+Every frame records its confined Parquet path, canonical logical schema and digest, transport digest, and index metadata.
+Record-backed path cells name the exact result key, immutable record ID, and record-relative manifest asset.
+Declared external paths use external-reference locators.
+Run-transient owned paths and durable shared-array values are copied to content-digested `return/assets/` entries and use return-asset locators.
+Readers validate immutable record manifests directly and never consult `current.json`.
+
+Submission metadata, inputs, terminal status and error, claim history, and successful returns remain until explicit run deletion.
+Prepared/manual and failed runs are not removed automatically.
+Logs and progress may be pruned only by an explicit operation that retains submission, status, terminal error, return, and canonical provenance metadata.
+Temporary sibling directories may be removed only after their writer is known dead.
+Deleting a submitted run is explicit and removes its launcher control tree; canonical records and portable run views follow their own storage retention operations.
+
 ## Human-Facing Run Views
 
 Each workflow execution creates a run directory:
@@ -931,6 +1053,7 @@ cache/v1/results/<result-shard>/<result-key>/
   current.json
 
 cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/
+launcher/v1/runs/<run-id>/
 views/runs/<run-id>/
 views/latest/
 outputs/runs/
