@@ -311,12 +311,22 @@ class _InterfacesMixin:
                 if isinstance(value, Node):
                     node._upstream_nodes.add(value)
 
-    def _snapshot_definition(self, memo: dict[int, Any] | None = None) -> "Workflow":
+    def _snapshot_definition(
+        self,
+        memo: dict[int, Any] | None = None,
+        *,
+        storage_path: str | Path | None = None,
+    ) -> "Workflow":
         """Copy definition state without copying live execution state."""
+        runtime_storage = (
+            self.storage_path
+            if storage_path is None
+            else _absolute_runtime_path(storage_path)
+        )
         snapshot = type(self)(
             name=self.name,
             display_name=self.display_name,
-            storage_path=self.storage_path,
+            storage_path=runtime_storage,
             engine=self.engine_type,
             execution=self.execution,
             wetlands_config=copy.deepcopy(self.wetlands_config),
@@ -331,7 +341,25 @@ class _InterfacesMixin:
         snapshot._captured_custom_sources = copy.deepcopy(
             self._captured_custom_sources, memo
         )
+        snapshot._inherit_runtime_storage(runtime_storage)
         return snapshot
+
+    def _inherit_runtime_storage(
+        self,
+        storage_path: str | Path,
+        seen: set[int] | None = None,
+    ) -> None:
+        """Apply one root runtime storage path through nested snapshots."""
+        from bioimageflow.workflow_node import WorkflowNode
+
+        seen = seen if seen is not None else set()
+        if id(self) in seen:
+            return
+        seen.add(id(self))
+        self.storage_path = _absolute_runtime_path(storage_path)
+        for node in self._nodes.values():
+            if isinstance(node, WorkflowNode):
+                node.workflow._inherit_runtime_storage(self.storage_path, seen)
 
     def __call__(self, *, name: str | None = None, **bindings: Any) -> Any:
         """Capture this definition as a WorkflowNode in the active parent."""
@@ -344,8 +372,10 @@ class _InterfacesMixin:
                 f"Unknown workflow input(s) for '{self.name}': {sorted(unknown)}."
             )
         stable_bindings = {by_name[key].id: value for key, value in bindings.items()}
+        parent = get_active_workflow()
+        runtime_storage = self.storage_path if parent is None else parent.storage_path
         return WorkflowNode(
-            self._snapshot_definition(),
+            self._snapshot_definition(storage_path=runtime_storage),
             name=name,
             bindings=stable_bindings,
         )

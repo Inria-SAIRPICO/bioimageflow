@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .common import (
     Any,
     Node,
@@ -31,6 +33,13 @@ from .common import (
     processing_result_key,
     source_processing_signature_material,
 )
+
+
+@dataclass(frozen=True)
+class _ProviderExecutionResult:
+    dataframe: pd.DataFrame
+    signature_hash: str | None
+    transient_invocation_id: str | None = None
 
 
 def _reject_reserved_source_indexes(
@@ -61,26 +70,35 @@ class _NodeExecutionMixin:
         try:
             self._raise_if_cancelled(workflow)
             if isinstance(node, WorkflowNode):
-                outcome = self._execute_workflow_node(
+                dataframe, signature_hash = self._execute_workflow_node(
                     node, results, sig_hashes, workflow
                 )
             elif isinstance(node.tool, DataFrameTool):
-                outcome = self._execute_dataframe_tool(
+                provider_result = self._execute_dataframe_tool(
                     node, results, sig_hashes, workflow
                 )
             elif isinstance(node.tool, ProcessingTool):
                 if not node._column_bindings:
-                    outcome = self._execute_source_processing_tool(
+                    provider_result = self._execute_source_processing_tool(
                         node, results, sig_hashes, workflow
                     )
                 else:
-                    outcome = self._execute_processing_tool_with_column_bindings(
-                        node, results, sig_hashes, workflow
+                    provider_result = (
+                        self._execute_processing_tool_with_column_bindings(
+                            node, results, sig_hashes, workflow
+                        )
                     )
             else:
                 raise RuntimeError(f"Unknown tool type: {type(node.tool)}")
             self._raise_if_cancelled(workflow)
-            return outcome
+            if isinstance(node, WorkflowNode):
+                return dataframe, signature_hash
+            self._record_provider_execution_outcome(
+                workflow,
+                node,
+                provider_result,
+            )
+            return provider_result.dataframe, provider_result.signature_hash
         except WorkflowCancelledError:
             self._emit_progress(workflow, node.name, "cancelled")
             raise
@@ -90,6 +108,40 @@ class _NodeExecutionMixin:
                 exc.args = (f"Node '{node.name}' failed: {exc}", *exc.args[1:])
             raise
 
+    def _record_provider_execution_outcome(
+        self,
+        workflow: Any,
+        node: Node,
+        outcome: _ProviderExecutionResult,
+    ) -> None:
+        context = getattr(workflow, "_active_run_context", None)
+        if context is None:
+            return
+
+        result_key: str | None = None
+        record_id: str | None = None
+        if outcome.signature_hash is not None:
+            result_key = self._node_result_key(node, outcome.signature_hash)
+            if result_key is None:
+                raise RuntimeError(
+                    f"Provider {node.name!r} has no canonical result key."
+                )
+            record_id = self._selected_record_id(workflow, result_key)
+            if record_id is None:
+                raise RuntimeError(
+                    f"Provider {node.name!r} has no selected immutable record."
+                )
+
+        context._record_provider_outcome(
+            node_key=node.name,
+            result_key=result_key,
+            record_id=record_id,
+            transient_invocation_id=outcome.transient_invocation_id,
+            path_columns=_path_output_columns(node.tool),
+            owned_path_columns=_explicit_template_output_columns(node),
+            shared_array_columns=_shared_array_output_columns(node.tool),
+        )
+
     # ── DataFrameTool execution ────────────────────────────────────────
 
     def _execute_dataframe_tool(
@@ -98,7 +150,7 @@ class _NodeExecutionMixin:
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str | None],
         workflow: Any,
-    ) -> tuple[pd.DataFrame, str | None]:
+    ) -> _ProviderExecutionResult:
         """Execute a DataFrameTool node."""
         from bioimageflow.dataframe_tool import DataFrameTool
 
@@ -155,7 +207,10 @@ class _NodeExecutionMixin:
                     record_id=self._selected_record_id(workflow, result_key),
                 )
                 df = self._coerce_numeric_columns(cached)
-                return self._normalize_path_output_columns(df, node.tool), sig_hash
+                return _ProviderExecutionResult(
+                    self._normalize_path_output_columns(df, node.tool),
+                    sig_hash,
+                )
 
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
 
@@ -206,7 +261,7 @@ class _NodeExecutionMixin:
         )
         df = self._normalize_path_output_columns(df, node.tool)
         self._set_node_cache_hit(node, False)
-        return df, sig_hash
+        return _ProviderExecutionResult(df, sig_hash)
 
     # ── ProcessingTool execution ───────────────────────────────────────
 
@@ -216,7 +271,7 @@ class _NodeExecutionMixin:
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str | None],
         workflow: Any,
-    ) -> tuple[pd.DataFrame, str | None]:
+    ) -> _ProviderExecutionResult:
         """Execute a ProcessingTool node that has no upstream column bindings (source node)."""
         assert isinstance(node.tool, ProcessingTool)
 
@@ -260,7 +315,10 @@ class _NodeExecutionMixin:
                 record_id=self._selected_record_id(workflow, result_key),
             )
             df = self._coerce_numeric_columns(cached)
-            return self._normalize_path_output_columns(df, node.tool), sig_hash
+            return _ProviderExecutionResult(
+                self._normalize_path_output_columns(df, node.tool),
+                sig_hash,
+            )
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
@@ -384,7 +442,7 @@ class _NodeExecutionMixin:
             record_id=self._selected_record_id(workflow, result_key),
         )
         self._set_node_cache_hit(node, False)
-        return df, sig_hash
+        return _ProviderExecutionResult(df, sig_hash)
 
     def _execute_processing_tool_with_column_bindings(
         self,
@@ -392,7 +450,7 @@ class _NodeExecutionMixin:
         results: dict[Node, pd.DataFrame],
         sig_hashes: dict[Node, str | None],
         workflow: Any,
-    ) -> tuple[pd.DataFrame, str | None]:
+    ) -> _ProviderExecutionResult:
         """Execute a ProcessingTool node that has upstream column bindings."""
         assert isinstance(node.tool, ProcessingTool)
 
@@ -445,7 +503,10 @@ class _NodeExecutionMixin:
                     record_id=self._selected_record_id(workflow, result_key),
                 )
                 df = self._coerce_numeric_columns(cached)
-                return self._normalize_path_output_columns(df, node.tool), sig_hash
+                return _ProviderExecutionResult(
+                    self._normalize_path_output_columns(df, node.tool),
+                    sig_hash,
+                )
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
@@ -634,6 +695,10 @@ class _NodeExecutionMixin:
             ),
         )
         self._set_node_cache_hit(node, False)
-        return df, sig_hash
+        return _ProviderExecutionResult(
+            df,
+            sig_hash,
+            transient_invocation_id=invocation_id if transient else None,
+        )
 
     # ── Argument resolution ────────────────────────────────────────────

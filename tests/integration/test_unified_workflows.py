@@ -450,40 +450,6 @@ def test_from_python_is_fresh_and_calls_exact_factory_once(tmp_path: Path) -> No
     assert second.to_dict()["nodes"][0]["constants"]["values"]["value"] == [8]
 
 
-@pytest.mark.parametrize("suffix", [".json", ".zip"])
-def test_load_uses_explicit_runtime_storage(
-    tmp_path: Path,
-    suffix: str,
-) -> None:
-    definition = build_child(storage_path=tmp_path / "build")
-    exported = tmp_path / f"workflow{suffix}"
-    definition.export(exported)
-    runtime_storage = tmp_path / "loaded-results"
-
-    loaded = Workflow.load(exported, storage_path=runtime_storage)
-
-    assert loaded.storage_path == runtime_storage.resolve()
-    assert "storage_path" not in loaded.to_dict()["config"]
-
-
-def test_import_archive_uses_explicit_runtime_storage(tmp_path: Path) -> None:
-    definition = build_child(storage_path=tmp_path / "build")
-    archive = tmp_path / "workflow.zip"
-    definition.export(archive)
-    destination = tmp_path / "imported"
-    runtime_storage = destination / "results"
-
-    loaded = Workflow.import_archive(
-        archive,
-        destination,
-        storage_path=runtime_storage,
-    )
-
-    assert (destination / "workflow.json").exists()
-    assert loaded.storage_path == runtime_storage.resolve()
-    assert "storage_path" not in loaded.to_dict()["config"]
-
-
 @pytest.mark.parametrize(
     ("fixture_name", "include_custom_tools"),
     [

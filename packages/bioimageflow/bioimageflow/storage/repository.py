@@ -523,6 +523,8 @@ class _RepositoryMixin:
             raise CacheCorruptionError(
                 "Record directory escapes records directory."
             ) from exc
+        if record_dir.is_symlink():
+            raise CacheCorruptionError("Record directory must not be a symlink.")
         manifest_path = record_dir / "manifest.json"
         if not manifest_path.exists():
             raise CacheCorruptionError("Record manifest is missing.")
@@ -532,6 +534,8 @@ class _RepositoryMixin:
             raise CacheCorruptionError(
                 "Record manifest escapes record directory."
             ) from exc
+        if manifest_path.is_symlink():
+            raise CacheCorruptionError("Record manifest must not be a symlink.")
         try:
             manifest = RecordManifest.from_dict(json.loads(manifest_path.read_text()))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
