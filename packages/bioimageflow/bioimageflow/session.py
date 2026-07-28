@@ -25,7 +25,7 @@ from typing import Any
 
 from bioimageflow.engine import NodePlan
 from bioimageflow.validation import ValidationError, serialize_constant
-from bioimageflow.workflow import Workflow
+from bioimageflow.workflow import Workflow, _absolute_runtime_path
 
 
 class WorkflowSession:
@@ -58,7 +58,6 @@ class WorkflowSession:
             data = deepcopy(data)
 
         self._data: dict[str, Any] = data
-        self.storage_path = storage_path
         self._registry = registry
 
         # Cached materialization. `_workflow_cache` is invalidated on
@@ -67,6 +66,21 @@ class WorkflowSession:
         # re-resolution.
         self._workflow_cache: Workflow | None = None
         self._validate_cache: list[ValidationError] | None = None
+        self.storage_path = storage_path
+
+    @property
+    def storage_path(self) -> Path:
+        """Return the normalized runtime storage root."""
+        return self._storage_path
+
+    @storage_path.setter
+    def storage_path(self, value: str | Path) -> None:
+        """Assign one runtime storage root to this session and its materialization."""
+        normalized = _absolute_runtime_path(value)
+        self._storage_path = normalized
+        if self._workflow_cache is not None:
+            self._workflow_cache._inherit_runtime_storage(normalized)
+        self._validate_cache = None
 
     # ------------------------------------------------------------------
     # Dict shape helpers
