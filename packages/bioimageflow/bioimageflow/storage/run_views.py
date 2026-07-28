@@ -58,6 +58,46 @@ class _RunViewsMixin:
         _atomic_write_json(run_path, payload, stem="run")
         return run_path
 
+    def finalize_run_metadata(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        update_latest_success: bool,
+        completed_at: str | None = None,
+    ) -> Path:
+        """Idempotently finalize one canonical run for launcher recovery."""
+        if status not in {"succeeded", "failed", "cancelled"}:
+            raise ValueError(
+                "Canonical run status must be succeeded, failed, or cancelled."
+            )
+        if update_latest_success != (status == "succeeded"):
+            raise ValueError(
+                "Only succeeded canonical runs update latest-success."
+            )
+        current = self._load_run_metadata(run_id)
+        current_status = current["status"]
+        if current_status == status:
+            run_path = self.run_dir(run_id) / "run.json"
+        elif current_status == "running":
+            run_path = self.write_run_metadata(
+                run_id,
+                workflow_identity=str(current["workflow_identity"]),
+                engine=str(current["engine"]),
+                status=status,
+                target_nodes=list(current["target_nodes"]),
+                started_at=str(current["started_at"]),
+                completed_at=completed_at
+                or datetime.now(timezone.utc).isoformat(),
+            )
+        else:
+            raise CacheCorruptionError(
+                f"Canonical run is already terminal as {current_status!r}."
+            )
+        if update_latest_success:
+            self.update_latest_success_run(run_id)
+        return run_path
+
     def write_run_node_result(
         self,
         run_id: str,

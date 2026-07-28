@@ -582,30 +582,25 @@ class _RuntimeMixin:
 
     def _finish_run_view(self, status: str, *, update_latest_success: bool) -> None:
         context = self._run_view_context
-        self._run_view_context = None
         if context is None:
             return
         from bioimageflow.storage import Storage
 
         storage = Storage(self.storage_path)
         run_id = str(context["run_id"])
-        storage.write_run_metadata(
+        storage.finalize_run_metadata(
             run_id,
-            workflow_identity=self._workflow_identity(list(context["target_nodes"])),
-            engine=f"{context['engine']}:{context['execution']}",
             status=status,
-            target_nodes=list(context["target_nodes"]),
-            started_at=str(context["started_at"]),
+            update_latest_success=update_latest_success,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        if update_latest_success:
-            storage.update_latest_success_run(run_id)
         self._auto_export_outputs(
             run_id,
             latest_node=None,
             runs=status == "succeeded",
             latest_all=True,
         )
+        self._run_view_context = None
 
     def _workflow_identity(self, target_nodes: list[str]) -> str:
         payload = {
