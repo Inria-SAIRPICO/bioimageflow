@@ -583,12 +583,3 @@ class LauncherRepository:
                     raise LauncherCorruptionError(
                         f"Staged candidate contains a symlink: {path}."
                     )
-
-
-def __getattr__(name: str) -> object:
-    """Lazily preserve ``repository.LauncherRunControl`` imports."""
-    if name == "LauncherRunControl":
-        from .control import LauncherRunControl
-
-        return LauncherRunControl
-    raise AttributeError(name)

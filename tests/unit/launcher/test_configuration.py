@@ -1,3 +1,5 @@
+import traceback
+
 import pytest
 
 from bioimageflow.launcher.configuration import (
@@ -39,9 +41,7 @@ def test_factory_allowlist_fails_closed() -> None:
 
 def test_factory_must_be_importable_and_callable() -> None:
     with pytest.raises(LauncherProtocolError, match="not callable"):
-        import_config_factory(
-            "tests.unit.launcher.config_factories:not_callable"
-        )
+        import_config_factory("tests.unit.launcher.config_factories:not_callable")
     with pytest.raises(LauncherProtocolError, match="Cannot import"):
         import_config_factory("tests.unit.launcher.config_factories:missing")
 
@@ -60,3 +60,27 @@ def test_secret_references_are_verified_without_persisting_values() -> None:
     )
 
     assert seen == ["opaque-ref"]
+
+
+def test_factory_failure_does_not_leak_resolved_secret() -> None:
+    secret = "resolved-secret-value"
+    reference = ParslConfigRef(
+        "tests.unit.launcher.config_factories:fail_with_credential",
+        {},
+        {"credential": "opaque-ref"},
+    )
+
+    with pytest.raises(LauncherProtocolError) as captured:
+        build_parsl_config(
+            reference,
+            resolver=lambda _name: secret,
+        )
+
+    error = captured.value
+    rendered_traceback = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    )
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
+    assert secret not in str(error)
+    assert secret not in rendered_traceback

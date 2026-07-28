@@ -91,8 +91,8 @@ def build_parsl_config(
         kwargs[argument] = resolver(opaque_name)
     try:
         return factory(**kwargs)
-    except Exception as exc:
+    except Exception:
         raise LauncherProtocolError(
             f"Parsl configuration factory {reference.factory!r} failed.",
             details={"factory": reference.factory},
-        ) from exc
+        ) from None

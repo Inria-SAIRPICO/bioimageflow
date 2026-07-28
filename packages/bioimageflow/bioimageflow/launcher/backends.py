@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from .artifacts import write_manual_command
 from .errors import BackendNotSupportedError, LauncherProtocolError
-from .repository import LauncherRunControl
+from .control import LauncherRunControl
 from .types import OrchestratorLaunchConfig
 
 

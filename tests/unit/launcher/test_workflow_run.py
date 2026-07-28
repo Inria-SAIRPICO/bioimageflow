@@ -13,8 +13,11 @@ from bioimageflow.launcher.errors import (
 from bioimageflow.launcher.repository import LauncherRepository
 from bioimageflow.launcher.returns import persist_public_return
 from bioimageflow.launcher.run import WorkflowRun
-from bioimageflow.launcher.schemas import SUBMISSION_SCHEMA, utc_timestamp
 from bioimageflow.storage import Storage
+from tests.unit.launcher.helpers import (
+    launcher_submission,
+    public_progress_payload,
+)
 
 
 RUN_ID = "run_1234567812344abc923456789abcdef0"
@@ -26,31 +29,12 @@ def _submission(
     backend: str = "manual",
     hard_cancel_after: float | None = None,
 ) -> dict[str, object]:
-    return {
-        "schema": SUBMISSION_SCHEMA,
-        "run_id": RUN_ID,
-        "created_at": utc_timestamp(),
-        "storage_root": str(tmp_path.resolve()),
-        "canonical_view": f"views/runs/{RUN_ID}",
-        "workflow": {
-            "kind": "graph_v1",
-            "digest": "sha256:" + "0" * 64,
-            "payload": {},
-        },
-        "invocation": {},
-        "parsl_config": {},
-        "executor_bindings": {},
-        "node_routes": None,
-        "environment_routes": None,
-        "shared_runtime_root": None,
-        "task_policy": {},
-        "launch": {
-            "backend": backend,
-            "work_dir": None,
-            "hard_cancel_after": hard_cancel_after,
-        },
-        "protocol_versions": {},
-    }
+    return launcher_submission(
+        tmp_path,
+        RUN_ID,
+        backend=backend,
+        hard_cancel_after=hard_cancel_after,
+    )
 
 
 def _run(tmp_path: Path) -> tuple[WorkflowRun, object]:
@@ -63,7 +47,7 @@ def _run(tmp_path: Path) -> tuple[WorkflowRun, object]:
 
 def test_open_refresh_progress_and_prepared_cancel(tmp_path: Path) -> None:
     run, control = _run(tmp_path)
-    control.append_progress(kind="public", payload={"status": "started"})
+    control.append_progress(kind="public", payload=public_progress_payload())
 
     assert run.status == "prepared"
     assert [event["sequence"] for event in run.progress()] == [1]

@@ -12,37 +12,16 @@ from bioimageflow.launcher.repository import (
     RunAlreadyExistsError,
 )
 from bioimageflow.launcher.schemas import (
-    SUBMISSION_SCHEMA,
     LauncherSchemaError,
     new_run_id,
-    utc_timestamp,
     validate_run_id,
     validate_submission,
 )
+from tests.unit.launcher.helpers import launcher_submission
 
 
 def _submission(storage_root: Path, run_id: str) -> dict[str, object]:
-    return {
-        "schema": SUBMISSION_SCHEMA,
-        "run_id": run_id,
-        "created_at": utc_timestamp(),
-        "storage_root": str(storage_root.resolve()),
-        "canonical_view": f"views/runs/{run_id}",
-        "workflow": {
-            "kind": "graph",
-            "digest": "sha256:" + "a" * 64,
-            "payload": {"schema_version": 1},
-        },
-        "invocation": {"kind": "root", "inputs": {}},
-        "parsl_config": {"factory": "tests:config"},
-        "executor_bindings": {},
-        "node_routes": None,
-        "environment_routes": None,
-        "shared_runtime_root": None,
-        "task_policy": {},
-        "launch": {"backend": "local"},
-        "protocol_versions": {"launcher": 1},
-    }
+    return launcher_submission(storage_root, run_id)
 
 
 def _allocate_worker(
@@ -104,10 +83,13 @@ def test_candidate_inputs_install_with_control_metadata_atomically(
     assert control.read_status()["state"] == "prepared"
     assert control.read_submission()["run_id"] == run_id
     assert control.progress_path.read_bytes() == b""
-    assert control.confined_path(
-        "inputs/root.parquet",
-        must_exist=True,
-    ).read_bytes() == b"parquet"
+    assert (
+        control.confined_path(
+            "inputs/root.parquet",
+            must_exist=True,
+        ).read_bytes()
+        == b"parquet"
+    )
     assert not candidate.exists()
 
 

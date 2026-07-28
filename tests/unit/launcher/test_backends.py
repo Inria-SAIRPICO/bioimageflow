@@ -14,16 +14,14 @@ from bioimageflow.launcher.backends import (
     build_orchestrator_argv,
     launch_orchestrator,
 )
+from bioimageflow.launcher.control import LauncherRunControl
 from bioimageflow.launcher.errors import (
     BackendNotSupportedError,
     LauncherProtocolError,
 )
-from bioimageflow.launcher.repository import (
-    LauncherRepository,
-    LauncherRunControl,
-)
-from bioimageflow.launcher.schemas import SUBMISSION_SCHEMA, utc_timestamp
+from bioimageflow.launcher.repository import LauncherRepository
 from bioimageflow.launcher.types import OrchestratorLaunchConfig
+from tests.unit.launcher.helpers import launcher_submission
 
 
 class _FakeProcess:
@@ -36,27 +34,7 @@ def _submission(
     *,
     backend: str,
 ) -> dict[str, object]:
-    return {
-        "schema": SUBMISSION_SCHEMA,
-        "run_id": run_id,
-        "created_at": utc_timestamp(),
-        "storage_root": str(storage_root.resolve()),
-        "canonical_view": f"views/runs/{run_id}",
-        "workflow": {
-            "kind": "graph",
-            "digest": "sha256:" + "a" * 64,
-            "payload": {"schema_version": 1},
-        },
-        "invocation": {"kind": "root", "inputs": {}},
-        "parsl_config": {"factory": "tests:config"},
-        "executor_bindings": {},
-        "node_routes": None,
-        "environment_routes": None,
-        "shared_runtime_root": None,
-        "task_policy": {},
-        "launch": {"backend": backend},
-        "protocol_versions": {"launcher": 1},
-    }
+    return launcher_submission(storage_root, run_id, backend=backend)
 
 
 def _control(tmp_path: Path, *, backend: str) -> LauncherRunControl:

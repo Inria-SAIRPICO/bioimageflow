@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 SUBMISSION_SCHEMA = "bioimageflow.launcher.submission.v1"
 STATUS_SCHEMA = "bioimageflow.launcher.status.v1"
 CLAIM_SCHEMA = "bioimageflow.launcher.claim.v1"
@@ -37,6 +36,16 @@ LAUNCHER_STATES = frozenset(
 )
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "lost"})
 PROGRESS_KINDS = frozenset({"public", "backend"})
+LAUNCHER_BACKENDS = frozenset({"local", "manual", "slurm", "pbs", "lsf", "oar"})
+PUBLIC_PROGRESS_SCHEMA = "bioimageflow.progress_event.v1"
+BACKEND_PROGRESS_SCHEMA = "bioimageflow.launcher.backend_event.v1"
+BACKEND_PROGRESS_EVENTS = frozenset(
+    {
+        "orchestrator_starting",
+        "orchestrator_running",
+        "orchestrator_succeeded",
+    }
+)
 
 SUBMISSION_FIELDS = frozenset(
     {
@@ -113,6 +122,33 @@ RETURN_FIELDS = frozenset(
         "locators",
     }
 )
+PUBLIC_PROGRESS_FIELDS = frozenset(
+    {
+        "schema",
+        "node_name",
+        "status",
+        "row",
+        "total_rows",
+        "message",
+        "current",
+        "maximum",
+        "timestamp",
+        "result_key",
+        "record_id",
+    }
+)
+BACKEND_PROGRESS_FIELDS = frozenset({"schema", "event", "owner"})
+ERROR_NODE_FIELDS = frozenset({"name"})
+ERROR_TASK_FIELDS = frozenset(
+    {
+        "task_id",
+        "invocation_id",
+        "cache_attempt_id",
+        "row_position",
+    }
+)
+ERROR_BACKEND_FIELDS = frozenset({"name"})
+ERROR_BACKEND_EXIT_FIELDS = frozenset({"name", "returncode"})
 
 
 class LauncherSchemaError(ValueError):
@@ -190,6 +226,30 @@ def _mapping(
     return result
 
 
+def _exact_object(
+    value: object,
+    *,
+    field: str,
+    fields: frozenset[str],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise LauncherSchemaError(f"{field} must be a JSON object.")
+    if not all(isinstance(key, str) for key in value):
+        raise LauncherSchemaError(f"{field} object keys must be strings.")
+    result = dict(value)
+    actual = frozenset(result)
+    if actual != fields:
+        missing = sorted(fields - actual)
+        unknown = sorted(actual - fields)
+        details: list[str] = []
+        if missing:
+            details.append(f"missing fields {missing}")
+        if unknown:
+            details.append(f"unknown fields {unknown}")
+        raise LauncherSchemaError(f"{field} has {' and '.join(details)}.")
+    return result
+
+
 def _validate_json_value(value: object, *, field: str) -> None:
     if value is None or isinstance(value, (str, bool, int)):
         return
@@ -223,6 +283,22 @@ def _require_string(value: object, *, field: str, nullable: bool = False) -> Non
         raise LauncherSchemaError(f"{field} must be a non-empty string{suffix}.")
 
 
+def _require_integer(
+    value: object,
+    *,
+    field: str,
+    minimum: int = 0,
+    nullable: bool = False,
+) -> None:
+    if nullable and value is None:
+        return
+    if type(value) is not int or value < minimum:
+        suffix = " or null" if nullable else ""
+        raise LauncherSchemaError(
+            f"{field} must be an integer greater than or equal to {minimum}{suffix}."
+        )
+
+
 def _require_mapping(
     value: object,
     *,
@@ -246,11 +322,15 @@ def _require_string_mapping(
         return
     _require_mapping(value, field=field)
     assert isinstance(value, Mapping)
-    if not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
+    if not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
         raise LauncherSchemaError(f"{field} must map strings to strings.")
 
 
-def _validate_absolute_path(value: object, *, field: str, nullable: bool = False) -> None:
+def _validate_absolute_path(
+    value: object, *, field: str, nullable: bool = False
+) -> None:
     if nullable and value is None:
         return
     _require_string(value, field=field)
@@ -272,60 +352,9 @@ def _validate_relative_posix_path(value: object, *, field: str) -> str:
 
 def validate_submission(payload: object) -> dict[str, Any]:
     """Validate and copy a submission-v1 payload."""
-    result = _mapping(
-        payload,
-        schema=SUBMISSION_SCHEMA,
-        fields=SUBMISSION_FIELDS,
-    )
-    run_id = validate_run_id(result["run_id"])
-    parse_utc_timestamp(result["created_at"], field="created_at")
-    _validate_absolute_path(result["storage_root"], field="storage_root")
-    canonical_view = _validate_relative_posix_path(
-        result["canonical_view"],
-        field="canonical_view",
-    )
-    if canonical_view != f"views/runs/{run_id}":
-        raise LauncherSchemaError(
-            "canonical_view must be the run's exact canonical view path."
-        )
-    workflow = result["workflow"]
-    _require_mapping(workflow, field="workflow")
-    assert isinstance(workflow, Mapping)
-    if frozenset(workflow) != {"kind", "digest", "payload"}:
-        raise LauncherSchemaError(
-            "workflow must contain exactly kind, digest, and payload."
-        )
-    _require_string(workflow["kind"], field="workflow.kind")
-    if (
-        not isinstance(workflow["digest"], str)
-        or SHA256_PATTERN.fullmatch(workflow["digest"]) is None
-    ):
-        raise LauncherSchemaError(
-            "workflow.digest must use 'sha256:' and a lowercase SHA-256 digest."
-        )
-    _require_mapping(workflow["payload"], field="workflow.payload")
-    _require_mapping(result["invocation"], field="invocation")
-    _require_mapping(result["parsl_config"], field="parsl_config")
-    _require_mapping(result["executor_bindings"], field="executor_bindings")
-    _require_string_mapping(
-        result["node_routes"],
-        field="node_routes",
-        nullable=True,
-    )
-    _require_string_mapping(
-        result["environment_routes"],
-        field="environment_routes",
-        nullable=True,
-    )
-    _validate_absolute_path(
-        result["shared_runtime_root"],
-        field="shared_runtime_root",
-        nullable=True,
-    )
-    _require_mapping(result["task_policy"], field="task_policy")
-    _require_mapping(result["launch"], field="launch")
-    _require_mapping(result["protocol_versions"], field="protocol_versions")
-    return result
+    from .submission_schema import validate_submission_payload
+
+    return validate_submission_payload(payload)
 
 
 def validate_status(payload: object) -> dict[str, Any]:
@@ -344,9 +373,9 @@ def validate_status(payload: object) -> dict[str, Any]:
     updated = parse_utc_timestamp(result["updated_at"], field="updated_at")
     if updated < created:
         raise LauncherSchemaError("updated_at must not precede created_at.")
-    _require_string(result["backend"], field="backend")
-    if result["orchestrator"] is not None:
-        _validate_json_value(result["orchestrator"], field="orchestrator")
+    if result["backend"] not in LAUNCHER_BACKENDS:
+        raise LauncherSchemaError(f"Invalid launcher backend {result['backend']!r}.")
+    _require_string(result["orchestrator"], field="orchestrator", nullable=True)
     epoch = result["claim_epoch"]
     if epoch is not None and (
         not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1
@@ -359,6 +388,50 @@ def validate_status(payload: object) -> dict[str, Any]:
         )
     if not isinstance(result["hard_termination_requested"], bool):
         raise LauncherSchemaError("hard_termination_requested must be a bool.")
+    if result["error"] not in {None, "error.json"}:
+        raise LauncherSchemaError("error must be 'error.json' or null.")
+
+    claimed = result["orchestrator"] is not None
+    if claimed != (epoch is not None):
+        raise LauncherSchemaError(
+            "orchestrator and claim_epoch must both be set or both be null."
+        )
+    state = result["state"]
+    if state in {
+        "starting",
+        "running",
+        "finalizing",
+        "cancel_requested",
+        "succeeded",
+        "lost",
+    }:
+        if not claimed:
+            raise LauncherSchemaError(f"{state} status requires an execution claim.")
+    if state == "prepared" and (
+        claimed
+        or result["cancel_requested_at"] is not None
+        or result["hard_termination_requested"]
+        or result["error"] is not None
+    ):
+        raise LauncherSchemaError(
+            "prepared status contains terminal or claim metadata."
+        )
+    if state in {"cancel_requested", "cancelled"}:
+        if result["cancel_requested_at"] is None:
+            raise LauncherSchemaError(f"{state} status requires cancel_requested_at.")
+    elif state not in {"failed", "lost"} and result["cancel_requested_at"] is not None:
+        raise LauncherSchemaError(
+            f"{state} status must not contain cancel_requested_at."
+        )
+    if state in {"failed", "lost"}:
+        if result["error"] != "error.json":
+            raise LauncherSchemaError(f"{state} status requires error.json.")
+    elif result["error"] is not None:
+        raise LauncherSchemaError(f"{state} status must not reference an error.")
+    if result["hard_termination_requested"] and state != "lost":
+        raise LauncherSchemaError(
+            "hard_termination_requested is valid only for lost status."
+        )
     return result
 
 
@@ -392,7 +465,50 @@ def validate_progress(payload: object) -> dict[str, Any]:
     parse_utc_timestamp(result["timestamp"], field="timestamp")
     if result["kind"] not in PROGRESS_KINDS:
         raise LauncherSchemaError("kind must be 'public' or 'backend'.")
-    _require_mapping(result["payload"], field="payload")
+    if result["kind"] == "public":
+        event = _exact_object(
+            result["payload"],
+            field="payload",
+            fields=PUBLIC_PROGRESS_FIELDS,
+        )
+        if event["schema"] != PUBLIC_PROGRESS_SCHEMA:
+            raise LauncherSchemaError(
+                f"payload.schema must be {PUBLIC_PROGRESS_SCHEMA!r}."
+            )
+        for field in ("node_name", "status"):
+            _require_string(event[field], field=f"payload.{field}")
+        for field in ("row", "total_rows"):
+            _require_integer(event[field], field=f"payload.{field}")
+        for field in ("current", "maximum"):
+            _require_integer(
+                event[field],
+                field=f"payload.{field}",
+                nullable=True,
+            )
+        for field in ("message", "result_key", "record_id"):
+            _require_string(
+                event[field],
+                field=f"payload.{field}",
+                nullable=True,
+            )
+        timestamp = event["timestamp"]
+        if type(timestamp) not in {int, float} or not math.isfinite(float(timestamp)):
+            raise LauncherSchemaError("payload.timestamp must be a finite number.")
+    else:
+        event = _exact_object(
+            result["payload"],
+            field="payload",
+            fields=BACKEND_PROGRESS_FIELDS,
+        )
+        if event["schema"] != BACKEND_PROGRESS_SCHEMA:
+            raise LauncherSchemaError(
+                f"payload.schema must be {BACKEND_PROGRESS_SCHEMA!r}."
+            )
+        if event["event"] not in BACKEND_PROGRESS_EVENTS:
+            raise LauncherSchemaError(
+                f"Unknown backend progress event {event['event']!r}."
+            )
+        _require_string(event["owner"], field="payload.owner")
     return result
 
 
@@ -405,6 +521,53 @@ def validate_error(payload: object) -> dict[str, Any]:
     for field in ("message", "traceback"):
         if result[field] is not None and not isinstance(result[field], str):
             raise LauncherSchemaError(f"{field} must be a string or null.")
+    node = result["node"]
+    if node is not None:
+        node_record = _exact_object(
+            node,
+            field="node",
+            fields=ERROR_NODE_FIELDS,
+        )
+        _require_string(node_record["name"], field="node.name")
+    task = result["task"]
+    if task is not None:
+        task_record = _exact_object(
+            task,
+            field="task",
+            fields=ERROR_TASK_FIELDS,
+        )
+        _require_string(task_record["task_id"], field="task.task_id")
+        for field in ("invocation_id", "cache_attempt_id"):
+            _require_string(
+                task_record[field],
+                field=f"task.{field}",
+                nullable=True,
+            )
+        _require_integer(
+            task_record["row_position"],
+            field="task.row_position",
+            nullable=True,
+        )
+    backend = result["backend"]
+    if backend is not None:
+        _require_mapping(backend, field="backend")
+        assert isinstance(backend, Mapping)
+        backend_record = _exact_object(
+            backend,
+            field="backend",
+            fields=(
+                ERROR_BACKEND_EXIT_FIELDS
+                if "returncode" in backend
+                else ERROR_BACKEND_FIELDS
+            ),
+        )
+        if backend_record["name"] not in LAUNCHER_BACKENDS:
+            raise LauncherSchemaError(
+                f"Invalid error backend {backend_record['name']!r}."
+            )
+        if "returncode" in backend_record:
+            if type(backend_record["returncode"]) is not int:
+                raise LauncherSchemaError("backend.returncode must be an integer.")
     return result
 
 

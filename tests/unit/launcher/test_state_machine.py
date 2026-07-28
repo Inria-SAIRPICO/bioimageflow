@@ -9,36 +9,20 @@ from bioimageflow.launcher.repository import (
     LauncherCorruptionError,
     LauncherRepository,
 )
-from bioimageflow.launcher.schemas import SUBMISSION_SCHEMA, utc_timestamp
 from bioimageflow.launcher.state import (
     ClaimEpochMismatchError,
     InvalidTransitionError,
     RevisionConflictError,
 )
+from tests.unit.launcher.helpers import (
+    backend_progress_payload,
+    launcher_submission,
+    public_progress_payload,
+)
 
 
 def _submission(storage_root: Path, run_id: str) -> dict[str, object]:
-    return {
-        "schema": SUBMISSION_SCHEMA,
-        "run_id": run_id,
-        "created_at": utc_timestamp(),
-        "storage_root": str(storage_root.resolve()),
-        "canonical_view": f"views/runs/{run_id}",
-        "workflow": {
-            "kind": "graph",
-            "digest": "sha256:" + "b" * 64,
-            "payload": {"schema_version": 1},
-        },
-        "invocation": {"kind": "root", "inputs": {}},
-        "parsl_config": {"factory": "tests:config"},
-        "executor_bindings": {},
-        "node_routes": None,
-        "environment_routes": None,
-        "shared_runtime_root": None,
-        "task_policy": {},
-        "launch": {"backend": "local"},
-        "protocol_versions": {"launcher": 1},
-    }
+    return launcher_submission(storage_root, run_id)
 
 
 def _progress_worker(
@@ -50,7 +34,7 @@ def _progress_worker(
     for value in range(count):
         control.append_progress(
             kind="backend",
-            payload={"schema": "test.backend.v1", "value": value},
+            payload=backend_progress_payload(owner=f"test-owner-{value}"),
         )
 
 
@@ -227,7 +211,7 @@ def test_progress_recovers_one_unterminated_tail(tmp_path: Path) -> None:
     control = _control(tmp_path)
     first = control.append_progress(
         kind="public",
-        payload={"schema": "test.public.v1"},
+        payload=public_progress_payload(),
     )
     with control.progress_path.open("ab") as stream:
         stream.write(b'{"schema":"incomplete"')
@@ -235,7 +219,7 @@ def test_progress_recovers_one_unterminated_tail(tmp_path: Path) -> None:
     assert control.read_progress() == [first]
     second = control.append_progress(
         kind="backend",
-        payload={"schema": "test.backend.v1"},
+        payload=backend_progress_payload(),
     )
 
     assert second["sequence"] == 2

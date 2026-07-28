@@ -22,6 +22,7 @@ from bioimageflow.launcher.orchestrator import (
     _PreparedExecution,
     run_orchestrator,
 )
+from bioimageflow.launcher.repository import LauncherCorruptionError
 from bioimageflow.launcher.returns import persist_public_return
 from bioimageflow.launcher.submission import submit_workflow
 from bioimageflow.launcher.types import (
@@ -88,7 +89,7 @@ def test_manual_orchestrator_executes_and_reconnects_zero_output_run(
     )
 
 
-def test_invalid_invocation_fails_before_canonical_workflow_start(
+def test_invalid_invocation_is_rejected_before_canonical_workflow_start(
     tmp_path: Path,
 ) -> None:
     run = _submit_manual(tmp_path)
@@ -100,18 +101,21 @@ def test_invalid_invocation_fails_before_canonical_workflow_start(
     }
     submission_path.write_text(json.dumps(submission, sort_keys=True))
 
-    terminal = run_orchestrator(
-        tmp_path,
-        run.id,
-        lease_seconds=2,
-        poll_seconds=0.01,
-    )
+    with pytest.raises(
+        LauncherCorruptionError,
+        match="Invalid launcher submission",
+    ):
+        run_orchestrator(
+            tmp_path,
+            run.id,
+            lease_seconds=2,
+            poll_seconds=0.01,
+        )
 
     run.refresh()
-    assert terminal == "failed"
-    assert run.status == "failed"
+    assert run.status == "prepared"
     assert not run.view_dir.exists()
-    assert (run.control_dir / "error.json").is_file()
+    assert not (run.control_dir / "error.json").exists()
 
 
 def test_cancellation_marker_reaches_active_workflow(

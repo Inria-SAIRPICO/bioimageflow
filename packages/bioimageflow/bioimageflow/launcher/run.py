@@ -15,7 +15,8 @@ from .errors import (
     WorkflowRunLostError,
     WorkflowRunNotReadyError,
 )
-from .repository import LauncherRepository, LauncherRunControl
+from .control import LauncherRunControl
+from .repository import LauncherRepository
 from .returns import load_public_return
 from .state import RevisionConflictError
 from .types import OrchestratorLaunchConfig
