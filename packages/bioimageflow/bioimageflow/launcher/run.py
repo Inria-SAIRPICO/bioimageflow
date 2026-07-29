@@ -20,7 +20,19 @@ from .control import LauncherRunControl
 from .repository import LauncherRepository
 from .returns import load_public_return
 from .state import RevisionConflictError
-from .types import OrchestratorLaunchConfig
+from .types import LaunchConfig, launch_config_from_dict
+
+
+def _terminate_backend(control: LauncherRunControl, backend: str) -> bool:
+    if backend == "local":
+        from .backends import terminate_local_orchestrator
+
+        return terminate_local_orchestrator(control)
+    if backend == "psij":
+        from .psij import cancel_psij
+
+        return cancel_psij(control)
+    return False
 
 
 def _hard_terminate_after_grace(
@@ -48,15 +60,21 @@ def _hard_terminate_after_grace(
     if remaining > 0 and threading.Event().wait(remaining):
         return
     status = control.read_status()
-    if status["state"] != "cancel_requested" or status["backend"] != "local":
+    if (
+        status["state"] != "cancel_requested"
+        or status["backend"] not in {"local", "psij"}
+    ):
         return
-    from .backends import terminate_local_orchestrator
-
-    if not terminate_local_orchestrator(control):
+    backend = status["backend"]
+    if not _terminate_backend(control, backend):
         return
     error = WorkflowRunLostError(
-        "The local orchestrator was terminated after its cancellation grace period.",
-        details={"run_id": control.run_id, "grace_seconds": grace_seconds},
+        "The orchestrator was terminated after its cancellation grace period.",
+        details={
+            "run_id": control.run_id,
+            "grace_seconds": grace_seconds,
+            "backend": backend,
+        },
     )
     status = control.read_status()
     if status["state"] != "cancel_requested":
@@ -80,7 +98,7 @@ def _hard_terminate_after_grace(
                 control.run_id,
                 code="orchestrator-hard-terminated",
                 error=error,
-                backend={"name": "local"},
+                backend={"name": backend},
             ),
             updates={
                 "hard_termination_requested": True,
@@ -118,12 +136,12 @@ class WorkflowRun:
         self.control_dir = control.control_dir
         submission = control.read_submission()
         self._storage_path = Path(submission["storage_root"])
-        self._launch = OrchestratorLaunchConfig.from_dict(submission["launch"])
+        self._launch: LaunchConfig = launch_config_from_dict(submission["launch"])
         self.view_dir = self._storage_path / submission["canonical_view"]
         self._status = control.read_status()
         if (
             self._status["state"] == "cancel_requested"
-            and self._launch.backend == "local"
+            and self._launch.backend in {"local", "psij"}
             and self._launch.hard_cancel_after is not None
         ):
             _schedule_hard_termination(
@@ -148,6 +166,15 @@ class WorkflowRun:
 
     def refresh(self) -> None:
         """Refresh guarded state from durable launcher metadata."""
+        status = self._control.read_status()
+        if (
+            self._launch.backend == "psij"
+            and status["state"]
+            not in {"succeeded", "failed", "cancelled", "lost"}
+        ):
+            from .psij import reconcile_psij
+
+            reconcile_psij(self._control)
         self._status = self._control.read_status()
 
     def progress(
@@ -188,9 +215,13 @@ class WorkflowRun:
                     expected_revision=status["revision"],
                     expected_claim_epoch=status["claim_epoch"],
                 )
+                if status["state"] == "prepared" and self._launch.backend == "psij":
+                    from .psij import cancel_psij
+
+                    cancel_psij(self._control)
                 if (
                     self._status["state"] == "cancel_requested"
-                    and self._launch.backend == "local"
+                    and self._launch.backend in {"local", "psij"}
                     and self._launch.hard_cancel_after is not None
                 ):
                     _schedule_hard_termination(

@@ -23,7 +23,6 @@ from bioimageflow.launcher.backends import (
 )
 from bioimageflow.launcher.control import LauncherRunControl
 from bioimageflow.launcher.errors import (
-    BackendNotSupportedError,
     LauncherProtocolError,
 )
 from bioimageflow.launcher.repository import LauncherRepository
@@ -266,31 +265,11 @@ def test_manual_backend_persists_shell_free_descriptor_and_stays_prepared(
 
 
 @pytest.mark.parametrize("backend", ["slurm", "pbs", "lsf", "oar"])
-def test_unsupported_backends_fail_before_process_or_artifact_action(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_direct_scheduler_backend_aliases_are_not_launch_configs(
     backend: str,
 ) -> None:
-    control = _control(tmp_path, backend=backend)
-
-    def forbidden(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("unsupported backend performed an action")
-
-    monkeypatch.setattr(backend_module.subprocess, "Popen", forbidden)
-    monkeypatch.setattr(backend_module, "write_manual_command", forbidden)
-
-    with pytest.raises(BackendNotSupportedError) as error:
-        launch_orchestrator(
-            control,
-            OrchestratorLaunchConfig(backend=backend),  # type: ignore[arg-type]
-        )
-
-    assert error.value.code == "backend-not-supported"
-    assert error.value.details == {"backend": backend}
-    assert list(control.control_dir.iterdir())
-    assert not (control.control_dir / "logs").exists()
-    assert not (control.control_dir / "command.json").exists()
-    assert control.read_status()["state"] == "prepared"
+    with pytest.raises(ValueError, match="Unknown launcher backend"):
+        OrchestratorLaunchConfig(backend=backend)  # type: ignore[arg-type]
 
 
 def test_local_backend_reaps_process_when_identity_persistence_fails(

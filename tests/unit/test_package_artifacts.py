@@ -225,7 +225,7 @@ def test_spot_tools_atlas_data_file_is_in_wheel_and_sdist(
     assert data_path in _sdist_members(_sdist_path(built_artifacts, distribution_name))
 
 
-def test_base_wheels_import_public_modules_without_optional_parsl(
+def test_base_wheels_import_public_modules_without_optional_runtimes(
     built_artifacts: Path,
     tmp_path: Path,
 ) -> None:
@@ -246,13 +246,15 @@ import importlib.abc
 import json
 import sys
 
-class BlockParsl(importlib.abc.MetaPathFinder):
+class BlockOptionalRuntimes(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname == "parsl" or fullname.startswith("parsl."):
             raise AssertionError(f"base wheel imported optional Parsl: {fullname}")
+        if fullname == "psij" or fullname.startswith("psij."):
+            raise AssertionError(f"base wheel imported optional PSI/J: {fullname}")
         return None
 
-sys.meta_path.insert(0, BlockParsl())
+sys.meta_path.insert(0, BlockOptionalRuntimes())
 
 modules = json.loads(sys.argv[1])
 wheel_paths = json.loads(sys.argv[2])
@@ -291,7 +293,7 @@ if failures:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_orchestrator_wheel_declares_bounded_parsl_extra(
+def test_orchestrator_wheel_declares_bounded_runtime_extras(
     built_artifacts: Path,
 ) -> None:
     if "bioimageflow" not in _distribution_names():
@@ -304,9 +306,18 @@ def test_orchestrator_wheel_declares_bounded_parsl_extra(
         for requirement in requirements
         if Requirement(requirement).name == "parsl"
     ]
+    psij_requirements = [
+        Requirement(requirement)
+        for requirement in requirements
+        if Requirement(requirement).name == "psij-python"
+    ]
 
-    assert metadata.get_all("Provides-Extra") == ["parsl"]
+    assert metadata.get_all("Provides-Extra") == ["parsl", "psij"]
     assert len(parsl_requirements) == 1
     [parsl_requirement] = parsl_requirements
     assert str(parsl_requirement.specifier) == "<2026.6,>=2026.5.25"
     assert str(parsl_requirement.marker) == 'extra == "parsl"'
+    assert len(psij_requirements) == 1
+    [psij_requirement] = psij_requirements
+    assert str(psij_requirement.specifier) == "<0.10,>=0.9.11"
+    assert str(psij_requirement.marker) == 'extra == "psij"'

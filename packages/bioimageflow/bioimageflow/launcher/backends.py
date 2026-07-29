@@ -12,7 +12,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from .artifacts import (
     build_error_payload,
@@ -21,12 +21,11 @@ from .artifacts import (
     write_local_process_identity,
     write_manual_command,
 )
-from .errors import BackendNotSupportedError, LauncherProtocolError
+from .errors import LauncherProtocolError
 from .control import LauncherRunControl
-from .types import OrchestratorLaunchConfig
+from .types import LaunchConfig, OrchestratorLaunchConfig, PSIJLaunchConfig
 
 
-_UNIMPLEMENTED_BACKENDS = frozenset({"slurm", "pbs", "lsf", "oar"})
 _LOCAL_PROCESS_LOCK = threading.RLock()
 _LOCAL_PROCESSES: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
 
@@ -57,7 +56,11 @@ class ManualLaunch:
     backend: Literal["manual"] = "manual"
 
 
-BackendLaunch = LocalLaunch | ManualLaunch
+class BackendLaunch(Protocol):
+    """Common observable result of every launcher adapter."""
+
+    @property
+    def backend(self) -> str: ...
 
 
 def build_orchestrator_argv(control: LauncherRunControl) -> tuple[str, ...]:
@@ -138,9 +141,10 @@ def _validate_local_work_dir(work_dir: Path | None) -> Path | None:
     return work_dir
 
 
-def _logs(
+def launcher_log_paths(
     control: LauncherRunControl,
 ) -> tuple[Path, Path]:
+    """Prepare and return the confined orchestrator stdout/stderr paths."""
     logs_dir = control.confined_path("logs")
     try:
         logs_dir.mkdir(mode=0o700)
@@ -401,7 +405,7 @@ def _launch_local(
     argv: tuple[str, ...],
 ) -> LocalLaunch:
     work_dir = _validate_local_work_dir(launch.work_dir)
-    stdout_path, stderr_path = _logs(control)
+    stdout_path, stderr_path = launcher_log_paths(control)
     stdout = _open_exclusive_log(stdout_path)
     try:
         stderr = _open_exclusive_log(stderr_path)
@@ -495,19 +499,18 @@ def _launch_manual(
 
 def launch_orchestrator(
     control: LauncherRunControl,
-    launch: OrchestratorLaunchConfig,
+    launch: LaunchConfig,
     *,
     secret_refs: Sequence[str] = (),
 ) -> BackendLaunch:
     """Start or describe an orchestrator without changing prepared state."""
-    if launch.backend in _UNIMPLEMENTED_BACKENDS:
-        raise BackendNotSupportedError(
-            f"Launcher backend {launch.backend!r} is not implemented.",
-            details={"backend": launch.backend},
-        )
     normalized = launch.normalized()
     refs = _normalized_secret_refs(secret_refs)
     _validate_prepared_control(control, backend=normalized.backend)
+    if isinstance(normalized, PSIJLaunchConfig):
+        from .psij import launch_psij
+
+        return launch_psij(control, normalized)
     argv = build_orchestrator_argv(control)
     if normalized.backend == "local":
         return _launch_local(control, normalized, argv)

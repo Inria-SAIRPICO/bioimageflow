@@ -327,7 +327,8 @@ def test_only_orchestrator_declares_bounded_parsl_extra() -> None:
     }
 
     assert extras.pop("packages/bioimageflow/pyproject.toml") == {
-        "parsl": ["parsl>=2026.5.25,<2026.6"]
+        "parsl": ["parsl>=2026.5.25,<2026.6"],
+        "psij": ["psij-python>=0.9.11,<0.10"],
     }
     assert extras and all(value == {} for value in extras.values())
 

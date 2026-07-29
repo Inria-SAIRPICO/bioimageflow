@@ -12,7 +12,7 @@ from bioimageflow.workflow import Workflow
 
 from .artifacts import build_error_payload
 from .configuration import import_config_factory, verify_secret_references
-from .errors import BackendNotSupportedError
+from .errors import PSIJSubmissionUncertainError
 from .inputs import serialize_invocation
 from .payload import serialize_workflow_payload
 from .repository import (
@@ -21,10 +21,12 @@ from .repository import (
 )
 from .run import WorkflowRun
 from .schemas import SUBMISSION_SCHEMA, utc_timestamp
-from .types import OrchestratorLaunchConfig, ParslConfigRef
-
-
-_SUPPORTED_BACKENDS = frozenset({"local", "manual"})
+from .types import (
+    LaunchConfig,
+    OrchestratorLaunchConfig,
+    PSIJLaunchConfig,
+    ParslConfigRef,
+)
 
 
 def _normalize_bindings(
@@ -124,19 +126,22 @@ def submit_workflow(
     environment_routes: Mapping[str, str] | None = None,
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
-    launch: OrchestratorLaunchConfig | None = None,
+    launch: LaunchConfig | None = None,
 ) -> WorkflowRun:
     """Persist and launch one reconnectable submitted Parsl workflow."""
     if not isinstance(workflow, Workflow):
         raise TypeError("workflow must be a Workflow.")
     if type(parsl_config) is not ParslConfigRef:
         raise TypeError("parsl_config must be a ParslConfigRef.")
-    selected_launch = (launch or OrchestratorLaunchConfig()).normalized()
-    if selected_launch.backend not in _SUPPORTED_BACKENDS:
-        raise BackendNotSupportedError(
-            f"Launcher backend {selected_launch.backend!r} is not implemented.",
-            details={"backend": selected_launch.backend},
+    if launch is not None and type(launch) not in {
+        OrchestratorLaunchConfig,
+        PSIJLaunchConfig,
+    }:
+        raise TypeError(
+            "launch must be an OrchestratorLaunchConfig, PSIJLaunchConfig, "
+            "or None."
         )
+    selected_launch = (launch or OrchestratorLaunchConfig()).normalized()
     if task_policy is not None and type(task_policy) is not ParslTaskPolicy:
         raise TypeError("task_policy must be a ParslTaskPolicy or None.")
 
@@ -222,6 +227,8 @@ def submit_workflow(
                 selected_launch,
                 secret_refs=tuple((parsl_config.secret_refs or {}).values()),
             )
+        except PSIJSubmissionUncertainError:
+            raise
         except BaseException as exc:
             _mark_launch_failed(control, exc)
             raise

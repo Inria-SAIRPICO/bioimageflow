@@ -240,8 +240,43 @@ Root DataFrame inputs are externalized beneath the launcher control directory an
 
 The local backend starts ``python -m bioimageflow.launcher.orchestrator`` as a separate process with confined stdout and stderr logs.
 The manual backend writes a shell-free ``command.json`` descriptor and leaves the run in ``prepared`` until an external actor executes that command.
-The ``slurm``, ``pbs``, ``lsf``, and ``oar`` launch values are reserved and currently raise :class:`~bioimageflow.BackendNotSupportedError` before run allocation.
+The PSI/J backend submits exactly one Slurm, PBS, or LSF scheduler job for that same orchestrator.
+Install it in the cluster environment with ``pip install "bioimageflow[parsl,psij]"``.
+Direct ``slurm``, ``pbs``, ``lsf``, and ``oar`` backend aliases are not accepted, and OAR is not a supported :class:`~bioimageflow.PSIJLaunchConfig` executor.
 Parsl providers remain responsible for allocating worker resources; a launcher backend starts only the orchestrator.
+
+For a caller already running on a cluster login node:
+
+.. code-block:: python
+
+   from datetime import timedelta
+   from pathlib import PurePosixPath
+
+   from bioimageflow import PSIJLaunchConfig, submit_workflow
+
+   run = submit_workflow(
+       workflow,
+       parsl_config=parsl_config,
+       executor_bindings=bindings,
+       launch=PSIJLaunchConfig(
+           executor="slurm",
+           walltime=timedelta(hours=2),
+           queue="cpu",
+           project="BIOIMAGE",
+           cpu_cores=4,
+           work_dir=PurePosixPath("/cluster/project/orchestrator"),
+       ),
+   )
+
+``PSIJLaunchConfig`` accepts only strict scheduler identifiers and a normalized absolute POSIX working path.
+It has no native directive, custom attribute, pre-launch script, environment, live PSI/J object, or shell-fragment field.
+``walltime`` is always explicit so PSI/J's default duration is never selected accidentally.
+The queue maps to ``JobAttributes.queue_name`` and the project maps to ``JobAttributes.account``.
+
+Before PSI/J submission, BioImageFlow persists an immutable submit intent.
+After PSI/J returns a native job ID, it immediately persists an immutable correlated receipt.
+The receipt is sufficient for a later process to reconstruct the same executor with the same confined shared executor work directory, attach to the native job, observe scheduler state, and cancel it.
+If submission may have succeeded but the receipt was not installed, the run remains ``prepared``, raises :class:`~bioimageflow.PSIJSubmissionUncertainError`, records scheduler uncertainty as backend progress, and is never submitted again automatically.
 
 Reconnect and observe a run through :class:`~bioimageflow.WorkflowRun`:
 
@@ -264,7 +299,7 @@ Mutable launcher state, logs, externalized inputs, and return transports never e
 
 ``WorkflowRun.cancel()`` directly cancels an unclaimed prepared run or commits ``cancel_requested`` for an active run.
 The orchestrator watches durable status and the optional wake-up marker, calls ``Workflow.cancel()``, drains its Parsl work, and finishes as ``cancelled``.
-If a local launch config supplies ``hard_cancel_after``, any reconnected run handle can verify and terminate the exact persisted orchestrator process that remains unresponsive after that grace period; a terminated run becomes ``lost`` rather than claiming normal cleanup.
+If a local or PSI/J launch config supplies ``hard_cancel_after``, any reconnected run handle can terminate the exact persisted orchestrator process or scheduler job that remains unresponsive after that grace period; confirmed termination becomes ``lost`` rather than claiming normal cleanup.
 
 Submitted success installs a complete public return before the canonical run and launcher become successful.
 The return preserves the single DataFrame or ordered mapping shape, exact root output IDs and names, immutable-record asset locations, declared external paths, and self-contained copies of transient owned assets.
@@ -282,6 +317,9 @@ API
    :members:
 
 .. autoclass:: ParslTaskPolicy
+   :members:
+
+.. autoclass:: PSIJLaunchConfig
    :members:
 
 .. autoclass:: WorkerSlotCapacity
@@ -311,6 +349,8 @@ API
    :members:
 
 .. autoclass:: BackendNotSupportedError
+
+.. autoclass:: PSIJSubmissionUncertainError
 
 .. autoclass:: WorkflowRunFailedError
 

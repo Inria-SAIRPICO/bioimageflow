@@ -36,7 +36,7 @@ from .repository import LauncherRepository
 from .return_routes import build_return_provider_routes
 from .returns import load_return_manifest, persist_public_return
 from .state import ClaimEpochMismatchError, RevisionConflictError
-from .types import OrchestratorLaunchConfig, ParslConfigRef
+from .types import LaunchConfig, ParslConfigRef, launch_config_from_dict
 
 
 _DEFAULT_LEASE_SECONDS = 30.0
@@ -49,7 +49,7 @@ class _PreparedExecution:
     workflow: Any
     invocation: LoadedInvocation
     engine: Any
-    launch: OrchestratorLaunchConfig
+    launch: LaunchConfig
 
 
 class _StaleOrchestrator(RuntimeError):
@@ -110,7 +110,7 @@ def _prepare_execution(
         for label, binding in raw_bindings.items()
     }
     task_policy = ParslTaskPolicy.from_dict(submission["task_policy"])
-    launch = OrchestratorLaunchConfig.from_dict(submission["launch"])
+    launch = launch_config_from_dict(submission["launch"])
 
     def on_progress(event: ProgressEvent) -> None:
         control.append_progress(

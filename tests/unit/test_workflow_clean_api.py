@@ -35,6 +35,8 @@ PUBLIC_EXPORTS = {
     "OutputView",
     "OutputViewCapability",
     "OrchestratorLaunchConfig",
+    "PSIJLaunchConfig",
+    "PSIJSubmissionUncertainError",
     "ParslConfigRef",
     "ParslEngine",
     "ParslTaskError",

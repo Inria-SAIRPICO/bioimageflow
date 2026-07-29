@@ -687,6 +687,10 @@ launcher/v1/
     command.json
     local_process.json
     local_process_exit.json
+    psij_intent.json
+    psij_job.json
+    psij/
+      executor/
     logs/
       orchestrator.out
       orchestrator.err
@@ -706,10 +710,14 @@ launcher/v1/
 `progress.jsonl` is append-only and contains complete newline-terminated canonical JSON objects; readers ignore one unterminated final line left by a crashed writer and reject malformed complete lines.
 `execution.claim` exists after an orchestrator claims startup, and each superseded claim is copied to `claims/<epoch>.json` before replacement.
 The cancellation marker is a wake-up hint only; `status.json` is authoritative.
-`error.json`, `command.json`, local-process identity and exit observations, logs, externalized inputs, and return data exist only for the states or launcher modes that require them.
+`error.json`, `command.json`, local-process identity and exit observations, PSI/J intent and native-job receipt, logs, externalized inputs, and return data exist only for the states or launcher modes that require them.
 Immutable JSON artifacts are staged, synchronized where supported, and installed atomically; an exact retry is idempotent and different content is rejected.
 `local_process.json` records the PID and operating-system process-birth token required to reconnect safely without signaling a reused PID.
 `local_process_exit.json` records the observed exit code and time.
+`psij_intent.json` is installed before the one external scheduler submission and contains the run-correlated submit token and exact safe semantic job description.
+`psij_job.json` is installed immediately after successful PSI/J submission and correlates that intent with the scheduler-native job ID.
+An intent without a receipt is a durable uncertain-submission boundary and is never automatically submitted again.
+`psij/executor/` is the fixed shared PSI/J executor work directory reused by submission and later attachment.
 The `return/` directory does not exist until a complete staged sibling has been validated and atomically installed.
 
 The control schemas and exact required fields are:
@@ -722,12 +730,17 @@ The control schemas and exact required fields are:
 - `bioimageflow.launcher.command.v1`: `schema`, `run_id`, `argv`, `work_dir`, and `secret_refs`.
 - `bioimageflow.launcher.local_process.v1`: `schema`, `run_id`, `pid`, `start_token`, and `started_at`.
 - `bioimageflow.launcher.local_process_exit.v1`: `schema`, `run_id`, `returncode`, and `observed_at`.
+- `bioimageflow.launcher.psij_intent.v1`: `schema`, `run_id`, `submit_token`, `created_at`, `executor`, `executor_work_dir`, and `job`.
+- `bioimageflow.launcher.psij_job.v1`: `schema`, `run_id`, `submit_token`, `executor`, `native_id`, `created_at`, and `executor_work_dir`.
 - `bioimageflow.launcher.return.v1`: `schema`, `run_id`, `shape`, `mapping_keys`, `frames`, `root_outputs`, and `locators`.
 
 Schema readers require exactly the versioned fields defined above and reject unknown or missing fields.
 Optional values are represented by JSON `null`; fields are not conditionally omitted.
 All JSON is UTF-8, finite-value JSON with sorted object keys.
 Configuration mappings and ordered return keys preserve their explicitly recorded order where order is part of the public result.
+PSI/J backend progress payloads contain exactly `schema`, `event`, `executor`, `native_id`, `state`, and `message`.
+Their event is one of `psij_queued`, `psij_active`, `psij_completed`, `psij_failed`, `psij_cancelled`, `psij_unknown`, or `psij_submission_uncertain`.
+Scheduler state and native ID remain secondary metadata and never extend the launcher state set or public workflow progress statuses.
 
 `submission.workflow` contains exactly `kind`, `digest`, and `payload`.
 The payload is the recursive graph-v1 object or archive-v1 envelope.
@@ -754,7 +767,7 @@ After `starting`, recovery never reruns workflow code; it may complete an alread
 
 Every persisted relative path is normalized POSIX syntax and confined beneath the control directory or the explicitly named canonical run view.
 Readers reject absolute relative-path fields, empty or dot segments, `..`, backslashes, symlink components, and resolved targets outside the named root.
-The normalized absolute `storage_root`, `shared_runtime_root`, external input paths, and declared external return references are the only absolute path fields.
+The normalized absolute `storage_root`, `shared_runtime_root`, external input paths, declared external return references, PSI/J semantic job paths, and fixed PSI/J executor work directory are the only absolute path fields.
 
 The public return is staged as a unique sibling, fully written, synchronized where supported, validated, and atomically renamed to `return/`.
 `manifest.json` is its commit marker.

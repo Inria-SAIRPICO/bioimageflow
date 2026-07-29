@@ -1980,7 +1980,12 @@ Root DataFrames are stored under the control directory and verified by transport
 
 `OrchestratorLaunchConfig(backend="local")` starts a separate Python process.
 `backend="manual"` writes a reproducible shell-free command descriptor and remains prepared until that command is executed.
-Scheduler launch backends are reserved and fail with `BackendNotSupportedError` until an adapter exists.
+`PSIJLaunchConfig` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator through the optional `bioimageflow[psij]` runtime.
+It requires an explicit positive walltime and supports strict queue, project/account, core-count, absolute cluster work-directory, and hard-cancel values without native scheduler directives, scripts, environment strings, or live PSI/J objects.
+Direct scheduler backend aliases and OAR are not supported.
+The PSI/J launcher persists immutable submit intent before external submission and a correlated native-job receipt immediately afterward.
+An intent without a receipt is never automatically resubmitted; it remains prepared with stable uncertain-submission metadata until explicitly cancelled.
+Receipt-backed clients reconstruct the same executor and fixed shared PSI/J work directory to observe or cancel the exact native job after restart.
 Launcher backends start only the orchestrator; Parsl providers allocate workers.
 
 `WorkflowRun.open(storage_path, run_id)` reconnects without process-local state.
@@ -1990,7 +1995,7 @@ Every state mutation is a guarded revision and claim-epoch compare-and-swap.
 
 Cancellation of an active run commits durable `cancel_requested` state before signaling the workflow.
 Successful return installation and cancellation race through the guarded `running -> finalizing` transition: cancellation wins before that transition, while finalizing is non-cancellable.
-An optional local hard-cancellation grace may terminate the exact orchestrator identified by persisted process identity, including through a reconnected run handle; this records `lost` because provider and writer cleanup cannot be proven.
+An optional local or PSI/J hard-cancellation grace may terminate the exact orchestrator process or scheduler job through a reconnected run handle; confirmed termination records `lost` because provider and writer cleanup cannot be proven.
 
 A successful submitted run persists its exact public DataFrame or ordered mapping beneath `launcher/v1/runs/<run-id>/return/` before canonical and launcher success.
 Record-backed path cells address exact immutable record IDs, external paths remain typed external references, and transient owned assets are copied into the return.

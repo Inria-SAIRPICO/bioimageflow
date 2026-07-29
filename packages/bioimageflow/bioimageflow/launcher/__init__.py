@@ -5,6 +5,7 @@ from .errors import (
     LauncherError,
     LauncherProtocolError,
     LauncherStateConflictError,
+    PSIJSubmissionUncertainError,
     WorkflowRunFailedError,
     WorkflowRunLostError,
     WorkflowRunNotReadyError,
@@ -12,7 +13,7 @@ from .errors import (
 )
 from .run import WorkflowRun
 from .submission import submit_workflow
-from .types import OrchestratorLaunchConfig, ParslConfigRef
+from .types import OrchestratorLaunchConfig, PSIJLaunchConfig, ParslConfigRef
 
 __all__ = [
     "BackendNotSupportedError",
@@ -20,6 +21,8 @@ __all__ = [
     "LauncherProtocolError",
     "LauncherStateConflictError",
     "OrchestratorLaunchConfig",
+    "PSIJLaunchConfig",
+    "PSIJSubmissionUncertainError",
     "ParslConfigRef",
     "WorkflowRun",
     "WorkflowRunFailedError",

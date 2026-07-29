@@ -21,6 +21,12 @@ class BackendNotSupportedError(LauncherError):
     code = "backend-not-supported"
 
 
+class PSIJSubmissionUncertainError(LauncherError):
+    """Raised when a PSI/J submit may have succeeded without a durable receipt."""
+
+    code = "psij-submission-uncertain"
+
+
 class WorkflowRunFailedError(LauncherError):
     """Raised when a submitted workflow terminated as failed."""
 

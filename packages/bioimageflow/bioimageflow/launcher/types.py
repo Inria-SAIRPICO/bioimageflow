@@ -7,13 +7,18 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
 
-LauncherBackend = Literal["local", "manual", "slurm", "pbs", "lsf", "oar"]
-_BACKENDS = frozenset({"local", "manual", "slurm", "pbs", "lsf", "oar"})
+LauncherBackend = Literal["local", "manual"]
+PSIJExecutor = Literal["slurm", "pbs", "lsf"]
+_BACKENDS = frozenset({"local", "manual"})
+_PSIJ_EXECUTORS = frozenset({"slurm", "pbs", "lsf"})
+_SCHEDULER_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+-]*$")
 _FACTORY_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_.]*$"
 )
@@ -213,3 +218,160 @@ class OrchestratorLaunchConfig:
             work_dir=None if value["work_dir"] is None else Path(value["work_dir"]),
             hard_cancel_after=value["hard_cancel_after"],
         ).normalized()
+
+
+def _scheduler_value(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if (
+        type(value) is not str
+        or value != value.strip()
+        or _SCHEDULER_VALUE_RE.fullmatch(value) is None
+    ):
+        raise ValueError(
+            f"{field} must be a non-empty scheduler identifier without whitespace "
+            "or shell syntax."
+        )
+    return value
+
+
+def _positive_finite(value: object, *, field: str) -> float:
+    if type(value) not in {int, float}:
+        raise ValueError(f"{field} must be a positive finite number.")
+    numeric = cast(float | int, value)
+    if not math.isfinite(numeric) or numeric <= 0:
+        raise ValueError(f"{field} must be a positive finite number.")
+    return float(numeric)
+
+
+def _cluster_work_dir(value: object) -> PurePosixPath | None:
+    if value is None:
+        return None
+    if not isinstance(value, (str, PurePosixPath)):
+        raise TypeError("work_dir must be a POSIX path-like value or None.")
+    encoded = str(value)
+    path = PurePosixPath(encoded)
+    if (
+        not encoded
+        or "\x00" in encoded
+        or not path.is_absolute()
+        or encoded.startswith("//")
+        or str(path) != encoded
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+    ):
+        raise ValueError("work_dir must be a normalized absolute POSIX path.")
+    return path
+
+
+@dataclass(frozen=True, slots=True)
+class PSIJLaunchConfig:
+    """Strict scheduler configuration for one PSI/J orchestrator job."""
+
+    executor: PSIJExecutor
+    walltime: timedelta
+    queue: str | None = None
+    project: str | None = None
+    cpu_cores: int = 1
+    work_dir: PurePosixPath | None = None
+    hard_cancel_after: float | None = None
+
+    @property
+    def backend(self) -> Literal["psij"]:
+        return "psij"
+
+    def __post_init__(self) -> None:
+        if type(self.executor) is not str or self.executor not in _PSIJ_EXECUTORS:
+            raise ValueError(
+                f"Unknown PSI/J executor {self.executor!r}; expected one of "
+                f"{sorted(_PSIJ_EXECUTORS)}."
+            )
+        object.__setattr__(self, "executor", cast(PSIJExecutor, self.executor))
+        if type(self.walltime) is not timedelta:
+            raise TypeError("walltime must be a datetime.timedelta.")
+        _positive_finite(self.walltime.total_seconds(), field="walltime")
+        object.__setattr__(
+            self,
+            "queue",
+            _scheduler_value(self.queue, field="queue"),
+        )
+        object.__setattr__(
+            self,
+            "project",
+            _scheduler_value(self.project, field="project"),
+        )
+        if type(self.cpu_cores) is not int or self.cpu_cores <= 0:
+            raise ValueError("cpu_cores must be a positive integer.")
+        object.__setattr__(self, "work_dir", _cluster_work_dir(self.work_dir))
+        if self.hard_cancel_after is not None:
+            object.__setattr__(
+                self,
+                "hard_cancel_after",
+                _positive_finite(
+                    self.hard_cancel_after,
+                    field="hard_cancel_after",
+                ),
+            )
+
+    def normalized(self) -> "PSIJLaunchConfig":
+        return self
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "backend": "psij",
+            "executor": self.executor,
+            "walltime_seconds": self.walltime.total_seconds(),
+            "queue": self.queue,
+            "project": self.project,
+            "cpu_cores": self.cpu_cores,
+            "work_dir": None if self.work_dir is None else str(self.work_dir),
+            "hard_cancel_after": self.hard_cancel_after,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "PSIJLaunchConfig":
+        fields = {
+            "backend",
+            "executor",
+            "walltime_seconds",
+            "queue",
+            "project",
+            "cpu_cores",
+            "work_dir",
+            "hard_cancel_after",
+        }
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ValueError(
+                "PSIJLaunchConfig requires exactly backend, executor, "
+                "walltime_seconds, queue, project, cpu_cores, work_dir, and "
+                "hard_cancel_after."
+            )
+        if value["backend"] != "psij":
+            raise ValueError("PSIJLaunchConfig backend must be 'psij'.")
+        seconds = _positive_finite(
+            value["walltime_seconds"],
+            field="walltime_seconds",
+        )
+        return cls(
+            executor=value["executor"],
+            walltime=timedelta(seconds=seconds),
+            queue=value["queue"],
+            project=value["project"],
+            cpu_cores=value["cpu_cores"],
+            work_dir=value["work_dir"],
+            hard_cancel_after=value["hard_cancel_after"],
+        )
+
+
+LaunchConfig = OrchestratorLaunchConfig | PSIJLaunchConfig
+
+
+def launch_config_from_dict(value: Any) -> LaunchConfig:
+    """Decode exactly one local, manual, or PSI/J launch configuration."""
+    if not isinstance(value, dict):
+        raise ValueError("Launch configuration must be a JSON object.")
+    backend = value.get("backend")
+    if backend in _BACKENDS:
+        return OrchestratorLaunchConfig.from_dict(value)
+    if backend == "psij":
+        return PSIJLaunchConfig.from_dict(value)
+    raise ValueError(f"Unknown launcher backend {backend!r}.")

@@ -26,7 +26,7 @@ from .schemas import (
     parse_utc_timestamp,
     validate_run_id,
 )
-from .types import OrchestratorLaunchConfig, ParslConfigRef
+from .types import ParslConfigRef, launch_config_from_dict
 
 
 WORKFLOW_FIELDS = frozenset({"kind", "digest", "payload"})
@@ -34,6 +34,18 @@ PARSL_CONFIG_FIELDS = frozenset({"factory", "kwargs", "secret_refs"})
 EXECUTOR_BINDING_FIELDS = frozenset({"schema", "label", "environments", "capabilities"})
 TASK_POLICY_FIELDS = frozenset({"schema", "row_chunk_size", "max_in_flight"})
 LAUNCH_FIELDS = frozenset({"backend", "work_dir", "hard_cancel_after"})
+PSIJ_LAUNCH_FIELDS = frozenset(
+    {
+        "backend",
+        "executor",
+        "walltime_seconds",
+        "queue",
+        "project",
+        "cpu_cores",
+        "work_dir",
+        "hard_cancel_after",
+    }
+)
 PROTOCOL_VERSION_FIELDS = frozenset(
     {
         "launcher",
@@ -277,13 +289,17 @@ def _validate_submission_records(result: Mapping[str, Any]) -> None:
     except (TypeError, ValueError) as error:
         raise LauncherSchemaError("task_policy is invalid.") from error
 
-    launch = _exact_object(
-        result["launch"],
-        field="launch",
-        fields=LAUNCH_FIELDS,
+    raw_launch = result["launch"]
+    _require_mapping(raw_launch, field="launch")
+    assert isinstance(raw_launch, Mapping)
+    launch_fields = (
+        PSIJ_LAUNCH_FIELDS
+        if raw_launch.get("backend") == "psij"
+        else LAUNCH_FIELDS
     )
+    launch = _exact_object(raw_launch, field="launch", fields=launch_fields)
     try:
-        OrchestratorLaunchConfig.from_dict(launch)
+        launch_config_from_dict(launch)
     except (TypeError, ValueError) as error:
         raise LauncherSchemaError("launch is invalid.") from error
 

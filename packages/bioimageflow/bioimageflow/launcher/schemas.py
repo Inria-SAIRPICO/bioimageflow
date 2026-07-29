@@ -36,7 +36,7 @@ LAUNCHER_STATES = frozenset(
 )
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "lost"})
 PROGRESS_KINDS = frozenset({"public", "backend"})
-LAUNCHER_BACKENDS = frozenset({"local", "manual", "slurm", "pbs", "lsf", "oar"})
+LAUNCHER_BACKENDS = frozenset({"local", "manual", "psij"})
 PUBLIC_PROGRESS_SCHEMA = "bioimageflow.progress_event.v1"
 BACKEND_PROGRESS_SCHEMA = "bioimageflow.launcher.backend_event.v1"
 BACKEND_PROGRESS_EVENTS = frozenset(
@@ -44,6 +44,17 @@ BACKEND_PROGRESS_EVENTS = frozenset(
         "orchestrator_starting",
         "orchestrator_running",
         "orchestrator_succeeded",
+    }
+)
+PSIJ_PROGRESS_EVENTS = frozenset(
+    {
+        "psij_queued",
+        "psij_active",
+        "psij_completed",
+        "psij_failed",
+        "psij_cancelled",
+        "psij_unknown",
+        "psij_submission_uncertain",
     }
 )
 
@@ -138,6 +149,9 @@ PUBLIC_PROGRESS_FIELDS = frozenset(
     }
 )
 BACKEND_PROGRESS_FIELDS = frozenset({"schema", "event", "owner"})
+PSIJ_PROGRESS_FIELDS = frozenset(
+    {"schema", "event", "executor", "native_id", "state", "message"}
+)
 ERROR_NODE_FIELDS = frozenset({"name"})
 ERROR_TASK_FIELDS = frozenset(
     {
@@ -495,20 +509,39 @@ def validate_progress(payload: object) -> dict[str, Any]:
         if type(timestamp) not in {int, float} or not math.isfinite(float(timestamp)):
             raise LauncherSchemaError("payload.timestamp must be a finite number.")
     else:
+        raw_event = result["payload"]
+        _require_mapping(raw_event, field="payload")
+        assert isinstance(raw_event, Mapping)
+        event_name = raw_event.get("event")
+        fields = (
+            PSIJ_PROGRESS_FIELDS
+            if event_name in PSIJ_PROGRESS_EVENTS
+            else BACKEND_PROGRESS_FIELDS
+        )
         event = _exact_object(
-            result["payload"],
+            raw_event,
             field="payload",
-            fields=BACKEND_PROGRESS_FIELDS,
+            fields=fields,
         )
         if event["schema"] != BACKEND_PROGRESS_SCHEMA:
             raise LauncherSchemaError(
                 f"payload.schema must be {BACKEND_PROGRESS_SCHEMA!r}."
             )
-        if event["event"] not in BACKEND_PROGRESS_EVENTS:
+        if event["event"] not in BACKEND_PROGRESS_EVENTS | PSIJ_PROGRESS_EVENTS:
             raise LauncherSchemaError(
                 f"Unknown backend progress event {event['event']!r}."
             )
-        _require_string(event["owner"], field="payload.owner")
+        if event["event"] in PSIJ_PROGRESS_EVENTS:
+            if event["executor"] not in {"slurm", "pbs", "lsf"}:
+                raise LauncherSchemaError("payload.executor is invalid.")
+            for field in ("native_id", "state", "message"):
+                _require_string(
+                    event[field],
+                    field=f"payload.{field}",
+                    nullable=True,
+                )
+        else:
+            _require_string(event["owner"], field="payload.owner")
     return result
 
 

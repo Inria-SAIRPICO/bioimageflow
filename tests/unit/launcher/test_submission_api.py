@@ -10,7 +10,6 @@ from bioimageflow import (
     WorkerSlotCapacity,
     Workflow,
 )
-from bioimageflow.launcher.errors import BackendNotSupportedError
 from bioimageflow.launcher.run import WorkflowRun
 from bioimageflow.launcher.submission import submit_workflow
 from bioimageflow.launcher.types import (
@@ -66,18 +65,12 @@ def test_manual_submission_persists_runtime_storage_outside_graph(
     assert (run.control_dir / "command.json").is_file()
 
 
-def test_unsupported_backend_fails_before_allocation(tmp_path: Path) -> None:
-    workflow = Workflow(storage_path=tmp_path, engine="direct")
+def test_direct_scheduler_backend_alias_is_rejected_before_allocation(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="Unknown launcher backend"):
+        OrchestratorLaunchConfig(backend="slurm")  # type: ignore[arg-type]
 
-    with pytest.raises(BackendNotSupportedError) as captured:
-        submit_workflow(
-            workflow,
-            parsl_config=_config_ref(),
-            executor_bindings={"threads": _binding()},
-            launch=OrchestratorLaunchConfig(backend="slurm"),
-        )
-
-    assert captured.value.code == "backend-not-supported"
     assert not (tmp_path / "launcher").exists()
 
 

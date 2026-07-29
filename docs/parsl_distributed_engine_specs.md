@@ -1510,8 +1510,18 @@ class ParslConfigRef:
 
 @dataclass(frozen=True)
 class OrchestratorLaunchConfig:
-    backend: Literal["local", "manual", "slurm", "pbs", "lsf", "oar"] = "local"
+    backend: Literal["local", "manual"] = "local"
     work_dir: Optional[Path] = None
+    hard_cancel_after: Optional[float] = None
+
+@dataclass(frozen=True)
+class PSIJLaunchConfig:
+    executor: Literal["slurm", "pbs", "lsf"]
+    walltime: timedelta
+    queue: Optional[str] = None
+    project: Optional[str] = None
+    cpu_cores: int = 1
+    work_dir: Optional[PurePosixPath] = None
     hard_cancel_after: Optional[float] = None
 
 def submit_workflow(
@@ -1525,7 +1535,7 @@ def submit_workflow(
     environment_routes: Mapping[str, str] | None = None,
     shared_runtime_root: Path | None = None,
     task_policy: ParslTaskPolicy | None = None,
-    launch: OrchestratorLaunchConfig | None = None,
+    launch: OrchestratorLaunchConfig | PSIJLaunchConfig | None = None,
 ) -> WorkflowRun: ...
 ```
 
@@ -1539,6 +1549,13 @@ Manual mode MUST fail if its host cannot resolve every required reference withou
 
 `hard_cancel_after`, when set, is a positive grace period in seconds before the launcher may terminate an unresponsive orchestrator after a cancellation request.
 It is disabled by default because graceful orchestrator cancellation is required for Parsl future draining and DFK cleanup.
+
+`PSIJLaunchConfig` is the scheduler launch configuration.
+Its executor is exactly `slurm`, `pbs`, or `lsf`; OAR is not supported.
+Its walltime is an explicit positive `timedelta`, its core count is a positive integer, and its optional queue, project/account, cluster working directory, and hard-cancel grace use strict JSON-safe codecs.
+Queue and project/account values are scheduler identifiers, not native directive or shell-fragment escape hatches.
+The cluster working directory is a normalized absolute POSIX path.
+Live PSI/J jobs, executors, configuration objects, scripts, native attributes, environment mappings, and literal secrets are not accepted.
 
 Live DFKs, live executor objects, open files, and non-importable callables are attached-mode values and are rejected by submitted mode.
 Submitted mode normalizes and persists `shared_runtime_root` as an absolute path and applies the same archive-origin requirement and preflight as attached mode.
@@ -1637,6 +1654,9 @@ Phase 1b uses a separate launcher control directory with the same run ID:
     command.json                 # manual-mode command descriptor when applicable
     local_process.json           # reconnectable local process identity when applicable
     local_process_exit.json      # observed local process exit when applicable
+    psij_intent.json              # immutable scheduler submit intent when applicable
+    psij_job.json                 # immutable native-job receipt when available
+    psij/executor/                # fixed shared PSI/J executor work directory
     logs/orchestrator.out
     logs/orchestrator.err
     inputs/
@@ -1674,6 +1694,8 @@ The control protocol has these exact schema names:
 - `bioimageflow.launcher.command.v1` for `command.json`,
 - `bioimageflow.launcher.local_process.v1` for `local_process.json`,
 - `bioimageflow.launcher.local_process_exit.v1` for `local_process_exit.json`,
+- `bioimageflow.launcher.psij_intent.v1` for `psij_intent.json`,
+- `bioimageflow.launcher.psij_job.v1` for `psij_job.json`,
 - `bioimageflow.launcher.return.v1` for `return/manifest.json`.
 
 The immutable submission records the run ID, creation time, canonical storage root, confined canonical-view path, normalized shared runtime root when present, workflow payload kind/digest and payload, invocation variant, serialized inputs, Parsl config reference, bindings, routes, task policy, launch backend, and protocol versions.
@@ -1827,15 +1849,55 @@ Killing an orchestrator does not prove that Parsl providers, workers, futures, o
 
 ### 17.10 Launcher backends
 
-Phase 1b requires:
+The launcher has three exact backend discriminators:
 
 - `local`: start a separate local orchestrator process,
-- `manual`: write state and a reproducible command for external submission.
+- `manual`: write state and a reproducible command for external submission,
+- `psij`: submit exactly one scheduler job for the orchestrator through PSI/J.
 
-Scheduler-specific launcher backends are later adapters.
-Until implemented, `slurm`, `pbs`, `lsf`, and `oar` fail early with `BackendNotSupportedError` and a stable `backend-not-supported` code.
+`OrchestratorLaunchConfig` accepts only `local` and `manual`.
+Direct `slurm`, `pbs`, `lsf`, and `oar` backend aliases do not exist.
+`PSIJLaunchConfig` selects a `slurm`, `pbs`, or `lsf` PSI/J executor.
+Selecting PSI/J without the `bioimageflow[psij]` extra or without the requested executor descriptor raises `BackendNotSupportedError` before submit intent or external action.
 
-Even when a scheduler launcher is implemented, it starts only the orchestrator job.
+The PSI/J adapter builds exactly one single-process `JobSpec` from the existing shell-free orchestrator argv.
+It requests one node, one process, one process per node, the configured cores per process, and an explicit positive walltime.
+It maps `queue` to `JobAttributes.queue_name` and `project` to `JobAttributes.account`.
+It directs standard output and error to the existing confined launcher logs.
+The job executable is the absolute cluster Python executable for the installed BioImageFlow environment, and the arguments contain only the orchestrator module, absolute storage root, and run ID.
+The optional job working directory is the configured normalized absolute cluster path.
+Pre-launch scripts, post-launch scripts, native scheduler directives, custom attributes, arbitrary environment values, relative executables, and shell evaluation are forbidden.
+
+The PSI/J `JobExecutor` uses a fixed shared work directory at `psij/executor/` beneath the run control directory.
+Submission, reattachment, observation, and cancellation reconstruct the requested executor with that same directory.
+The adapter verifies that the requested descriptor exists before creating submit intent.
+
+Immediately before the external `submit()` action, the launcher atomically installs immutable `psij_intent.json`.
+The intent records its exact schema, run ID, random submit token, creation time, executor name, fixed executor work directory, and the complete safe semantic job description.
+Immediately after successful submit returns a valid native job ID, the launcher atomically installs immutable `psij_job.json`.
+The receipt records its exact schema, run ID, submit token, executor, native ID, creation time, and executor work directory.
+Readers require exact intent/receipt correlation and reject unknown fields, unsafe paths, invalid native IDs, mismatched commands, and mismatched launch configuration.
+Neither artifact contains credentials, environment dumps, native scripts, or literal secret values.
+
+Intent installation is the idempotency boundary.
+If intent exists without a receipt, no recovery path may call PSI/J `submit()` again.
+A failure after the external submit action begins but before receipt installation leaves the run `prepared`, appends stable `psij_submission_uncertain` backend metadata, and raises `PSIJSubmissionUncertainError`.
+It does not invent a native ID, terminal outcome, or second scheduler job.
+Explicit cancellation may terminalize that prepared run; any late orchestrator job then fails to acquire the already-terminal execution claim and cannot execute workflow code.
+
+Receipt-backed monitoring reconstructs the configured executor, calls `attach(Job(), native_id)`, verifies native-ID correlation, and waits for a non-`NEW` observation for only a bounded interval.
+Queued and active scheduler observations are secondary backend progress metadata.
+A queued or active scheduler job remains launcher `prepared` until the orchestrator commits its normal startup claim.
+Scheduler rejection, failure, cancellation, or completion before an orchestrator claim transitions the run to structured `failed`.
+After the orchestrator claim, scheduler observations remain secondary; claim expiry and the existing recovery rules remain authoritative and workflow code is never rerun.
+An unavailable or purged scheduler observation is recorded as unknown and does not imply launcher success, failure, cancellation, or loss.
+
+Cancelling a receipt-backed `prepared` run first commits launcher `cancelled` and then best-effort cancels the exact PSI/J native job.
+Cancelling `starting` or `running` preserves the existing graceful `cancel_requested` protocol and does not immediately cancel the scheduler job.
+Only after `hard_cancel_after` may a controller attach and cancel an unresponsive PSI/J job.
+Confirmed scheduler termination after that hard-cancel request follows the existing `lost` semantics because normal Parsl draining and cleanup are no longer proven.
+
+The PSI/J launcher starts only the orchestrator job.
 Parsl providers still allocate worker blocks.
 
 ---
@@ -2036,7 +2098,10 @@ A future streaming specification must define partial accumulators, row readiness
 - Return installation is atomic before either success status, every record-backed path cell has an exact immutable-record locator, and missing pruned records raise the stable result-unavailable error.
 - Run-transient owned return assets are copied into self-contained return assets and retain no transient paths.
 - Recovery converges correctly after a crash at every return/canonical-status/launcher-status boundary.
-- Unsupported scheduler launcher adapters return the stable backend-not-supported error.
+- PSI/J submission constructs one exact scheduler job, persists intent before external submit and a correlated native receipt after success, and remains duplicate-safe across every crash boundary.
+- PSI/J reattachment observes and cancels by exact native ID after process restart; queued jobs remain `prepared`, early terminal jobs fail, and missing runtime or executor descriptors raise the stable backend-not-supported error.
+- Active PSI/J cancellation remains graceful until the hard-cancel boundary, after which confirmed termination records `lost`.
+- Direct Slurm, PBS, LSF, and OAR launcher backend aliases are rejected; PSI/J supports only its declared Slurm, PBS, and LSF executors.
 
 ---
 

@@ -33,6 +33,12 @@ Install the optional Parsl runtime for distributed processing:
 pip install "bioimageflow[parsl]"
 ```
 
+Install Parsl together with the PSI/J cluster orchestrator launcher:
+
+```bash
+pip install "bioimageflow[parsl,psij]"
+```
+
 For development:
 
 ```bash

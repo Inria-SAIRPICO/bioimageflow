@@ -145,8 +145,12 @@ Do not present launcher input Parquet files or return transport files as cache r
 `manual` persists the complete submission and a shell-free `command.json` descriptor while remaining `prepared`.
 A GUI may display or export that descriptor for an external submitter and later reconnect to the same run.
 
-`slurm`, `pbs`, `lsf`, and `oar` currently raise `BackendNotSupportedError` before run allocation.
-Do not expose them as working choices unless a launcher adapter is installed in the library.
+`psij` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator when the GUI is already running in the cluster environment.
+Represent it through `PSIJLaunchConfig` fields for executor, positive walltime, optional queue, optional project/account, positive core count, optional absolute cluster work directory, and optional hard-cancel grace.
+Do not offer arbitrary directives, scripts, custom attributes, environment values, or literal secrets.
+Direct `slurm`, `pbs`, `lsf`, and `oar` launch values do not exist, and OAR is not currently supported.
+Render PSI/J native job ID and scheduler state as secondary backend metadata while the existing launcher state remains authoritative.
+If `PSIJSubmissionUncertainError` occurs, retain the run ID, show the run as prepared with an uncertain scheduler outcome, and do not offer automatic resubmission.
 Parsl providers configured by the factory still allocate worker resources; launcher mode controls only the orchestrator process.
 
 ## GUI Verification Checklist
