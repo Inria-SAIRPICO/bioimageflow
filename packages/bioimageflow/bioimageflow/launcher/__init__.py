@@ -12,6 +12,7 @@ from .errors import (
     WorkflowRunResultUnavailableError,
 )
 from .run import WorkflowRun
+from .remote_run import RemoteWorkflowRun
 from .submission import submit_workflow
 from .types import (
     LocalUpload,
@@ -31,6 +32,7 @@ __all__ = [
     "PSIJLaunchConfig",
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
+    "RemoteWorkflowRun",
     "SSHSubmissionTransport",
     "WorkflowRun",
     "WorkflowRunFailedError",

@@ -18,7 +18,19 @@ MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_JSON_DEPTH = 64
 MAX_JSON_VALUES = 200_000
-MUTABLE_OPERATIONS = frozenset({"allocate-upload", "commit-upload", "submit"})
+OPERATIONS = frozenset(
+    {
+        "allocate-upload",
+        "cancel",
+        "commit-upload",
+        "inspect",
+        "prepare-result",
+        "read-logs",
+        "read-progress",
+        "refresh",
+        "submit",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +170,7 @@ def decode_request(encoded: bytes) -> dict[str, Any]:
             "invalid-request-id",
             "request_id must be a canonical UUID4 string.",
         )
-    if value["operation"] not in MUTABLE_OPERATIONS:
+    if value["operation"] not in OPERATIONS:
         raise ClusterProtocolFailure(
             "unsupported-operation",
             "Cluster operation is unsupported.",

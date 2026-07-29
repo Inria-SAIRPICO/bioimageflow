@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import base64
+import binascii
 import math
 import os
 import re
@@ -95,10 +97,151 @@ def _canonical_uuid4(value: Any, *, field: str) -> str:
     return canonical
 
 
+_OBSERVATION_FIELDS = {
+    "error",
+    "run_id",
+    "state",
+    "status_revision",
+    "storage_path",
+    "submission_schema",
+    "status_schema",
+    "terminal",
+    "updated_at",
+}
+_RUN_STATES = {
+    "prepared",
+    "starting",
+    "running",
+    "cancel_requested",
+    "finalizing",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "lost",
+}
+
+
+def _validate_observation(
+    result: Mapping[str, Any],
+    arguments: Mapping[str, Any],
+) -> None:
+    if (
+        not _OBSERVATION_FIELDS.issubset(result)
+        or result["run_id"] != arguments.get("run_id")
+        or result["storage_path"] != arguments.get("storage_path")
+        or result["state"] not in _RUN_STATES
+        or type(result["status_revision"]) is not int
+        or result["status_revision"] < 0
+        or type(result["terminal"]) is not bool
+        or result["terminal"]
+        != (result["state"] in {"succeeded", "failed", "cancelled", "lost"})
+        or result["submission_schema"] != "bioimageflow.launcher.submission.v1"
+        or result["status_schema"] != "bioimageflow.launcher.status.v1"
+        or type(result["updated_at"]) is not str
+        or not result["updated_at"]
+        or (
+            result["error"] is not None
+            and type(result["error"]) is not dict
+        )
+    ):
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster observation response is invalid.",
+            ambiguous=True,
+        )
+
+
+def _validate_progress_result(
+    result: Mapping[str, Any],
+    arguments: Mapping[str, Any],
+) -> None:
+    events = result["events"]
+    after = arguments.get("after_sequence")
+    limit = arguments.get("limit")
+    if (
+        type(events) is not list
+        or type(limit) is not int
+        or len(events) > limit
+        or type(result["has_more"]) is not bool
+        or type(result["next_sequence"]) is not int
+    ):
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster progress page is invalid.",
+            ambiguous=True,
+        )
+    previous = after
+    for event in events:
+        if (
+            type(event) is not dict
+            or type(event.get("sequence")) is not int
+            or event["sequence"] <= previous
+        ):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster progress sequence is invalid.",
+                ambiguous=True,
+            )
+        previous = event["sequence"]
+    if result["next_sequence"] != previous:
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster progress cursor is invalid.",
+            ambiguous=True,
+        )
+
+
+def _validate_log_result(
+    result: Mapping[str, Any],
+    arguments: Mapping[str, Any],
+) -> None:
+    if (
+        result["stream"] != arguments.get("stream")
+        or type(result["exists"]) is not bool
+        or type(result["eof"]) is not bool
+        or type(result["reset"]) is not bool
+        or type(result["next_offset"]) is not int
+        or result["next_offset"] < 0
+        or (
+            result["identity"] is not None
+            and (type(result["identity"]) is not str or not result["identity"])
+        )
+        or type(result["data"]) is not str
+    ):
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster log page is invalid.",
+            ambiguous=True,
+        )
+    try:
+        decoded = base64.b64decode(result["data"], validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster log page contains invalid base64.",
+            ambiguous=True,
+        ) from exc
+    requested_offset = arguments.get("offset")
+    if type(requested_offset) is not int:
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster log request offset is invalid.",
+            ambiguous=True,
+        )
+    expected_offset = 0 if result["reset"] else requested_offset
+    if result["next_offset"] != expected_offset + len(decoded):
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster log page offset is inconsistent.",
+            ambiguous=True,
+        )
+
+
 def _validate_success_result(
     operation: str,
     result: dict[str, Any],
     transport: SSHSubmissionTransport,
+    arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
     if operation == "allocate-upload":
         if set(result) != {"remote_root", "upload_id"}:
@@ -113,6 +256,95 @@ def _validate_success_result(
             raise SSHTransportError(
                 "remote-protocol",
                 "Cluster allocate response contains an unsafe upload path.",
+                ambiguous=True,
+            )
+        return result
+    if operation in {
+        "inspect",
+        "refresh",
+        "read-progress",
+        "read-logs",
+        "cancel",
+    }:
+        _validate_observation(result, arguments)
+        if operation in {"inspect", "refresh", "cancel"}:
+            if set(result) != _OBSERVATION_FIELDS:
+                raise SSHTransportError(
+                    "remote-protocol",
+                    "Cluster observation response schema is invalid.",
+                    ambiguous=True,
+                )
+            return result
+        if operation == "read-progress":
+            expected = _OBSERVATION_FIELDS | {
+                "events",
+                "has_more",
+                "next_sequence",
+            }
+            if set(result) != expected:
+                raise SSHTransportError(
+                    "remote-protocol",
+                    "Cluster progress response schema is invalid.",
+                    ambiguous=True,
+                )
+            _validate_progress_result(result, arguments)
+            return result
+        expected = _OBSERVATION_FIELDS | {
+            "data",
+            "eof",
+            "exists",
+            "identity",
+            "next_offset",
+            "reset",
+            "stream",
+        }
+        if set(result) != expected:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster log response schema is invalid.",
+                ambiguous=True,
+            )
+        _validate_log_result(result, arguments)
+        return result
+    if operation == "prepare-result":
+        if set(result) != {
+            "bundle_digest",
+            "remote_root",
+            "run_id",
+            "storage_path",
+        }:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster result response schema is invalid.",
+                ambiguous=True,
+            )
+        digest = result["bundle_digest"]
+        if type(digest) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster result digest is invalid.",
+                ambiguous=True,
+            )
+        if (
+            result["run_id"] != arguments.get("run_id")
+            or result["storage_path"] != arguments.get("storage_path")
+        ):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster result response changed the run binding.",
+                ambiguous=True,
+            )
+        expected_root = (
+            transport.staging_root
+            / "results"
+            / "sha256"
+            / digest.removeprefix("sha256:")
+            / "download"
+        )
+        if result["remote_root"] != str(expected_root):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster result response contains an unsafe object path.",
                 ambiguous=True,
             )
         return result
@@ -189,6 +421,7 @@ def _decode_response(
     request_id: str,
     operation: str,
     transport: SSHSubmissionTransport,
+    arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
     if len(encoded) > MAX_RESPONSE_BYTES:
         raise SSHTransportError(
@@ -235,7 +468,12 @@ def _decode_response(
             ambiguous=True,
         )
     if value["ok"] is True and value["error"] is None and type(value["result"]) is dict:
-        return _validate_success_result(operation, value["result"], transport)
+        return _validate_success_result(
+            operation,
+            value["result"],
+            transport,
+            arguments,
+        )
     error = value["error"]
     if (
         value["ok"] is not False
@@ -334,6 +572,7 @@ def execute_cluster_command(
         request_id,
         operation,
         transport,
+        arguments,
     )
 
 

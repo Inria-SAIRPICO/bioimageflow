@@ -1904,7 +1904,7 @@ Parsl providers still allocate worker blocks.
 
 Remote submission from a laptop uses the system OpenSSH `ssh` and `sftp` executables to reach an installed `bioimageflow-cluster-agent` command on the cluster login node.
 The command is one-shot: it reads exactly one bounded JSON request from standard input, writes exactly one protocol JSON response to standard output, writes diagnostics only to standard error, and runs no service.
-The protocol schema is `bioimageflow.cluster.command.v1` and supports only `allocate-upload`, `commit-upload`, and `submit` in this phase.
+The protocol schema is `bioimageflow.cluster.command.v1` and supports exactly `allocate-upload`, `commit-upload`, `submit`, `inspect`, `refresh`, `read-progress`, `read-logs`, `cancel`, and `prepare-result`.
 Every mutable request carries a canonical UUID4 request ID, has an exact argument schema and canonical request digest, and stores an operation-scoped durable receipt.
 Reusing a request ID with different arguments fails, while retrying the same request converges on the persisted result.
 Unknown fields, versions, operations, duplicate JSON keys, invalid UTF-8, non-finite JSON, excessive size, excessive nesting, and excessive value count fail closed.
@@ -1940,7 +1940,31 @@ Operators may remove abandoned partial uploads and unreferenced objects only aft
 Before launcher allocation it durably binds the submit request ID and digest to one preallocated UUID4 launcher run ID.
 A retry opens that run when it already exists or resumes allocation with the same ID; concurrent equal requests cannot launch twice and a conflicting digest fails.
 The existing PSI/J intent remains the external scheduler idempotency boundary, so response loss never authorizes a second orchestrator job.
-The laptop API that exposes transported `submit_workflow()` and remote run control is deliberately deferred to the next work package; this phase supplies only the package-private submission seam.
+`submit_workflow(..., transport=SSHSubmissionTransport(...))` requires an explicit `PSIJLaunchConfig`, uses the transport submission seam, and returns `RemoteWorkflowRun`.
+The absence of transport preserves the exact cluster-local behavior and `WorkflowRun` return type.
+`RemoteWorkflowRun.open()` accepts only the transport, normalized absolute cluster storage path, and run ID, validates the immutable submission and current status schemas, and claims no laptop-local `control_dir` or `view_dir`.
+Every response repeats and validates the exact storage/run binding.
+
+`inspect` is a read-only authoritative observation.
+`refresh` delegates to the cluster-local `WorkflowRun.refresh()` and therefore performs only its existing launcher recovery and PSI/J reconciliation.
+`read-progress` returns bounded pages after a global Phase 1b sequence and never creates client-side sequences.
+`read-logs` returns bounded base64 raw stdout or stderr bytes by byte offset plus a stable file identity, and explicitly reports replacement or truncation so the client restarts assembly before decoding with replacement.
+`wait()` runs as interruptible laptop-side polling with a monotonic deadline; no cluster agent survives a disconnected request.
+SSH or protocol loss is a transport error and does not change or guess launcher state.
+
+`cancel` is a receipt-backed idempotent mutation that invokes only cluster-local `WorkflowRun.cancel()`.
+Retries after response loss return the same durable mutation result, while later explicit observations remain authoritative across queued/start/finalizing/terminal races.
+
+`prepare-result` requires launcher `succeeded`, validates the installed Phase 1b return and every exact immutable record locator without consulting `current.json`, and atomically creates or reuses an immutable content-addressed download object beneath transport staging.
+Its final manifest binds schema, run ID, cluster storage path, public return shape, ordered mapping keys, root outputs, typed locators, record-asset mappings, every relative path, file kind, size, and SHA-256 digest.
+The object copies exact Parquet frames, self-contained return assets, and only immutable record assets explicitly named by the return locators.
+It copies no launcher control state, canonical cache record, current pointer, run view, or output view.
+
+The laptop downloads the manifest and its exact files through SFTP into a unique sibling candidate.
+It rejects absolute or traversing paths, symlinks, special files, missing or extra entries, digest mismatch, mutation, unsafe destination parents, and a pre-existing destination that is not the exact validated bundle for the same run.
+Only after complete validation does it atomically install the destination.
+The factored return loader resolves record-owned and return-owned cells beneath the verified download root, preserves declared external cluster Paths exactly, and reconstructs SharedArray values with fresh laptop-local owned backing.
+Zero-output, failed, cancelled, lost, not-ready, corrupt, and pruned-result semantics remain those of the cluster-local `WorkflowRun`.
 
 ---
 

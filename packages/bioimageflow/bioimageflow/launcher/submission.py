@@ -20,12 +20,14 @@ from .repository import (
     RunAlreadyExistsError,
 )
 from .run import WorkflowRun
+from .remote_run import RemoteWorkflowRun
 from .schemas import SUBMISSION_SCHEMA, utc_timestamp
 from .types import (
     LaunchConfig,
     OrchestratorLaunchConfig,
     PSIJLaunchConfig,
     ParslConfigRef,
+    SSHSubmissionTransport,
 )
 
 
@@ -267,8 +269,36 @@ def submit_workflow(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     launch: LaunchConfig | None = None,
-) -> WorkflowRun:
+    transport: SSHSubmissionTransport | None = None,
+) -> WorkflowRun | RemoteWorkflowRun:
     """Persist and launch one reconnectable submitted Parsl workflow."""
+    if transport is not None:
+        if type(transport) is not SSHSubmissionTransport:
+            raise TypeError("transport must be an SSHSubmissionTransport or None.")
+        if type(launch) is not PSIJLaunchConfig:
+            raise TypeError(
+                "Transported submission requires an explicit PSIJLaunchConfig."
+            )
+        from .ssh import submit_cluster_workflow
+
+        run_id = submit_cluster_workflow(
+            workflow,
+            transport=transport,
+            inputs=inputs,
+            targets=targets,
+            parsl_config=parsl_config,
+            executor_bindings=executor_bindings,
+            node_routes=node_routes,
+            environment_routes=environment_routes,
+            shared_runtime_root=shared_runtime_root,
+            task_policy=task_policy,
+            launch=launch,
+        )
+        return RemoteWorkflowRun._submitted(
+            transport,
+            workflow.storage_path.as_posix(),
+            run_id,
+        )
     return _submit_workflow(
         workflow,
         inputs=inputs,

@@ -1,0 +1,370 @@
+"""Validated atomic SFTP materialization of immutable result bundles."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import stat
+import subprocess
+import uuid
+from pathlib import Path, PurePosixPath
+from typing import Any, Mapping
+
+from bioimageflow.storage import canonical_json_bytes, validate_relative_posix_path
+from bioimageflow.storage.dataframe_transport import file_sha256
+
+from .return_schema import validate_return_manifest_structure
+from .returns import load_public_return_from_bundle
+from .ssh import (
+    SSHTransportError,
+    _sftp_quote,
+    _subprocess_environment,
+    _timeout_seconds,
+)
+from .types import SSHSubmissionTransport
+
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_EMPTY_DIGEST = f"sha256:{hashlib.sha256(b'').hexdigest()}"
+RESULT_BUNDLE_SCHEMA = "bioimageflow.cluster.result-bundle.v1"
+
+
+def _run_sftp(
+    transport: SSHSubmissionTransport,
+    commands: list[str],
+) -> None:
+    try:
+        completed = subprocess.run(
+            [
+                "sftp",
+                "-b",
+                "-",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                f"ConnectTimeout={_timeout_seconds(transport.connect_timeout)}",
+                "--",
+                transport.host,
+            ],
+            input=("\n".join(commands) + "\n").encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            shell=False,
+            timeout=transport.connect_timeout,
+            env=_subprocess_environment(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SSHTransportError(
+            "sftp-timeout",
+            "SFTP result download timed out.",
+        ) from exc
+    except OSError as exc:
+        raise SSHTransportError(
+            "sftp-unavailable",
+            "System SFTP executable could not be started.",
+        ) from exc
+    if completed.returncode != 0:
+        raise SSHTransportError(
+            "sftp-transfer-failed",
+            "SFTP result download did not complete.",
+        )
+
+
+def _load_manifest(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text())
+    except Exception as exc:
+        raise SSHTransportError(
+            "result-integrity",
+            "Downloaded result manifest is malformed.",
+        ) from exc
+    if type(value) is not dict or set(value) != {
+        "digest",
+        "entries",
+        "record_assets",
+        "return_manifest",
+        "run_id",
+        "schema",
+        "storage_path",
+    }:
+        raise SSHTransportError(
+            "result-integrity",
+            "Downloaded result manifest schema is invalid.",
+        )
+    if value["schema"] != RESULT_BUNDLE_SCHEMA:
+        raise SSHTransportError(
+            "result-integrity",
+            "Downloaded result manifest version is unsupported.",
+        )
+    body = {key: value[key] for key in value if key != "digest"}
+    expected = f"sha256:{hashlib.sha256(canonical_json_bytes(body)).hexdigest()}"
+    if value["digest"] != expected:
+        raise SSHTransportError(
+            "result-integrity",
+            "Downloaded result manifest digest is invalid.",
+        )
+    validate_return_manifest_structure(value["return_manifest"])
+    return value
+
+
+def _validate_entries(value: Any) -> list[dict[str, Any]]:
+    if type(value) is not list or len(value) > 100_000:
+        raise SSHTransportError(
+            "result-integrity",
+            "Result bundle file list is invalid.",
+        )
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total = 0
+    for raw in value:
+        if type(raw) is not dict or set(raw) != {"digest", "kind", "path", "size"}:
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle entry schema is invalid.",
+            )
+        try:
+            relative = validate_relative_posix_path(raw["path"])
+        except (TypeError, ValueError) as exc:
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle entry path is unsafe.",
+            ) from exc
+        if (
+            relative == "manifest.json"
+            or relative in seen
+            or raw["kind"] not in {"directory", "file"}
+            or type(raw["size"]) is not int
+            or raw["size"] < 0
+            or type(raw["digest"]) is not str
+            or _DIGEST.fullmatch(raw["digest"]) is None
+        ):
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle entry value is invalid.",
+            )
+        if raw["kind"] == "directory" and (
+            raw["size"] != 0 or raw["digest"] != _EMPTY_DIGEST
+        ):
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle directory entry is invalid.",
+            )
+        seen.add(relative)
+        total += raw["size"]
+        if total > 1 << 40:
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle exceeds the aggregate byte limit.",
+            )
+        result.append(dict(raw))
+    if [entry["path"] for entry in result] != sorted(seen):
+        raise SSHTransportError(
+            "result-integrity",
+            "Result bundle entries are not in canonical order.",
+        )
+    return result
+
+
+def _validate_record_assets(
+    value: Any,
+    return_manifest: Mapping[str, Any],
+    root: Path,
+) -> dict[int, Path]:
+    if type(value) is not list:
+        raise SSHTransportError(
+            "result-integrity",
+            "Result record-asset map is invalid.",
+        )
+    result: dict[int, Path] = {}
+    for item in value:
+        if type(item) is not dict or set(item) != {"locator_index", "path"}:
+            raise SSHTransportError(
+                "result-integrity",
+                "Result record-asset entry is invalid.",
+            )
+        index = item["locator_index"]
+        if (
+            type(index) is not int
+            or index < 0
+            or index >= len(return_manifest["locators"])
+            or return_manifest["locators"][index]["kind"] != "record_asset"
+            or index in result
+        ):
+            raise SSHTransportError(
+                "result-integrity",
+                "Result record-asset locator is invalid.",
+            )
+        try:
+            relative = validate_relative_posix_path(item["path"])
+        except (TypeError, ValueError) as exc:
+            raise SSHTransportError(
+                "result-integrity",
+                "Result record-asset path is unsafe.",
+            ) from exc
+        result[index] = root / relative
+    expected = {
+        index
+        for index, locator in enumerate(return_manifest["locators"])
+        if locator["kind"] == "record_asset"
+    }
+    if set(result) != expected:
+        raise SSHTransportError(
+            "result-integrity",
+            "Result record-asset map is incomplete.",
+        )
+    return result
+
+
+def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
+    entries = _validate_entries(manifest["entries"])
+    actual: set[str] = set()
+    for path in root.rglob("*"):
+        relative = path.relative_to(root).as_posix()
+        if relative == "manifest.json":
+            continue
+        actual.add(relative)
+        mode = path.lstat().st_mode
+        entry = next((item for item in entries if item["path"] == relative), None)
+        if entry is None or stat.S_ISLNK(mode):
+            raise SSHTransportError(
+                "result-integrity",
+                "Result bundle contains an unexpected or unsafe path.",
+            )
+        if entry["kind"] == "directory":
+            if not stat.S_ISDIR(mode):
+                raise SSHTransportError("result-integrity", "Result directory is invalid.")
+        elif (
+            not stat.S_ISREG(mode)
+            or path.stat().st_size != entry["size"]
+            or file_sha256(path) != entry["digest"]
+        ):
+            raise SSHTransportError("result-integrity", "Result file digest is invalid.")
+    expected = {entry["path"] for entry in entries}
+    if actual != expected:
+        raise SSHTransportError(
+            "result-integrity",
+            "Result bundle has missing or extra paths.",
+        )
+    return _validate_record_assets(
+        manifest["record_assets"],
+        manifest["return_manifest"],
+        root,
+    )
+
+
+def _validate_remote_root(
+    transport: SSHSubmissionTransport,
+    remote_root: str,
+    digest: str,
+) -> PurePosixPath:
+    expected = (
+        transport.staging_root
+        / "results"
+        / "sha256"
+        / digest.removeprefix("sha256:")
+        / "download"
+    )
+    if remote_root != str(expected):
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster returned an unsafe result download path.",
+        )
+    return expected
+
+
+def download_result(
+    transport: SSHSubmissionTransport,
+    response: Mapping[str, Any],
+    destination: Path,
+) -> Any:
+    """Download, validate, atomically install, and rehydrate one result."""
+    digest = response["bundle_digest"]
+    remote = _validate_remote_root(transport, response["remote_root"], digest)
+    destination = Path(destination).absolute()
+    parent = destination.parent
+    current = Path(parent.anchor)
+    unsafe_parent = False
+    for part in parent.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except OSError:
+            unsafe_parent = True
+            break
+        if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+            unsafe_parent = True
+            break
+    if unsafe_parent:
+        raise SSHTransportError(
+            "unsafe-destination",
+            "Every result destination parent must be a real non-symlink directory.",
+        )
+    if destination.exists():
+        if destination.is_symlink() or not destination.is_dir():
+            raise FileExistsError("Result destination already exists.")
+        manifest = _load_manifest(destination / "manifest.json")
+        if (
+            manifest["digest"] != digest
+            or manifest["run_id"] != response["run_id"]
+            or manifest["storage_path"] != response["storage_path"]
+        ):
+            raise FileExistsError("Result destination belongs to another bundle.")
+        assets = _verify_tree(destination, manifest)
+        return load_public_return_from_bundle(
+            destination,
+            manifest["return_manifest"],
+            assets,
+        )
+    candidate = parent / f".{destination.name}.{uuid.uuid4().hex}.partial"
+    candidate.mkdir(mode=0o700)
+    try:
+        _run_sftp(
+            transport,
+            [
+                f"get {_sftp_quote(str(remote / 'manifest.json'))} "
+                f"{_sftp_quote(str(candidate / 'manifest.json'))}"
+            ],
+        )
+        manifest = _load_manifest(candidate / "manifest.json")
+        if (
+            manifest["digest"] != digest
+            or manifest["run_id"] != response["run_id"]
+            or manifest["storage_path"] != response["storage_path"]
+        ):
+            raise SSHTransportError(
+                "result-integrity",
+                "Downloaded result does not match the requested run.",
+            )
+        entries = _validate_entries(manifest["entries"])
+        for entry in entries:
+            local = candidate / Path(entry["path"])
+            if entry["kind"] == "directory":
+                local.mkdir(parents=True, exist_ok=True)
+            else:
+                local.parent.mkdir(parents=True, exist_ok=True)
+        commands = [
+            f"get {_sftp_quote(str(remote / entry['path']))} "
+            f"{_sftp_quote(str(candidate / entry['path']))}"
+            for entry in entries
+            if entry["kind"] == "file"
+        ]
+        if commands:
+            _run_sftp(transport, commands)
+        assets = _verify_tree(candidate, manifest)
+        try:
+            os.rename(candidate, destination)
+        except FileExistsError:
+            raise FileExistsError("Result destination appeared during download.")
+        return load_public_return_from_bundle(
+            destination,
+            manifest["return_manifest"],
+            {index: destination / path.relative_to(candidate) for index, path in assets.items()},
+        )
+    except BaseException:
+        if candidate.exists() and not candidate.is_symlink():
+            import shutil
+
+            shutil.rmtree(candidate)
+        raise

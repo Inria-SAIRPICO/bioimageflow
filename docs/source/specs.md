@@ -2010,13 +2010,21 @@ Ordinary `Path` values remain explicit normalized absolute cluster paths without
 Root DataFrames use the existing logical/Parquet transport, reject `LocalUpload` cells and relative typed `Path` cells, and preserve string cells.
 The workflow's existing absolute cluster `storage_path` travels beside the graph/archive and remains the sole value passed to `Workflow.from_dict`.
 
-The one-shot `bioimageflow.cluster.command.v1` protocol implements `allocate-upload`, `commit-upload`, and `submit` with exact bounded JSON schemas and canonical UUID4 operation request IDs.
+The one-shot `bioimageflow.cluster.command.v1` protocol implements upload, submission, bounded observation, cancellation, and result preparation operations with exact JSON schemas and canonical UUID4 operation request IDs.
 Operation receipts make equal retries idempotent and reject request-ID digest conflicts.
 SFTP writes only beneath a server-issued partial upload path.
 Commit verifies a complete canonical manifest, rejects unsafe or tampered trees, atomically marks the upload ready, and installs a read-only content-addressed object.
 The staging root is disjoint from workflow storage and never changes launcher, cache, run-view, or output-view layouts.
 Before launcher allocation, submit durably binds the request to one preallocated launcher run ID and then reuses the cluster-local Phase 1b allocation and PSI/J dispatch path.
-Remote run observation, cancellation, and result retrieval are not part of this submission-only transport phase.
+Passing `transport=SSHSubmissionTransport(...)` to `submit_workflow()` requires `PSIJLaunchConfig` and returns `RemoteWorkflowRun`; omitting transport preserves the existing local `WorkflowRun` behavior and type.
+`RemoteWorkflowRun.open(transport, storage_path, run_id)` reconnects without local control/view path claims and validates the cluster storage/run binding before exposing state.
+Refresh delegates to the cluster-local `WorkflowRun.refresh()`, wait uses interruptible client polling with monotonic deadlines, progress retains the server's global sequences, and logs page raw bytes with file-identity and truncation detection before replacement decoding.
+Cancellation is a receipt-backed retry-safe delegation to cluster-local `WorkflowRun.cancel()`.
+
+Successful remote results are prepared as immutable content-addressed transport objects after validating the exact Phase 1b return.
+The object contains exact Parquet frames, self-contained return assets, and only the immutable record assets named by typed return locators; it never consults `current.json` or copies launcher state, cache records, run views, or output views.
+The laptop downloads into a unique sibling candidate, validates the final manifest, paths, file types, sizes, and SHA-256 digests, and atomically installs the requested destination.
+Only record-owned and return-owned cells are rebound to verified laptop-local assets; declared external cluster Paths remain cluster Paths, and SharedArray values receive fresh laptop-local backing.
 
 ### 4.6 Input Binding Logic (Graph Construction)
 

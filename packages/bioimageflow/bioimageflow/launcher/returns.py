@@ -514,21 +514,31 @@ def _load_shared_array(path: Path, metadata: Mapping[str, Any]) -> Any:
     return reference
 
 
-def load_public_return(
-    control_dir: Path,
-    storage_path: str | Path,
-    run_id: str,
+def load_public_return_from_bundle(
+    bundle_root: Path,
+    manifest: Mapping[str, Any],
+    record_assets: Mapping[int, Path],
 ) -> Any:
-    """Rehydrate a successful public return without consulting current pointers."""
-    storage = Storage(storage_path)
-    manifest = load_return_manifest(
-        control_dir,
-        expected_run_id=run_id,
-        storage_path=storage_path,
+    """Rehydrate a verified downloaded return using explicit owned asset roots."""
+    validated = validate_return_manifest_structure(manifest)
+    return _rehydrate_public_return(
+        Path(bundle_root),
+        validated,
+        storage=None,
+        record_assets=record_assets,
     )
+
+
+def _rehydrate_public_return(
+    asset_root: Path,
+    manifest: Mapping[str, Any],
+    *,
+    storage: Storage | None,
+    record_assets: Mapping[int, Path],
+) -> Any:
     frames: dict[str, pd.DataFrame] = {}
     for frame in manifest["frames"]:
-        source = Path(control_dir) / validate_relative_posix_path(frame["path"])
+        source = asset_root / validate_relative_posix_path(frame["path"])
         metadata = {
             key: frame[key]
             for key in (
@@ -541,7 +551,7 @@ def load_public_return(
         }
         frames[frame["id"]] = read_dataframe_transport(source, metadata)
 
-    for locator in manifest["locators"]:
+    for locator_position, locator in enumerate(manifest["locators"]):
         frame = frames[locator["frame_id"]]
         row_position = locator["row_position"]
         column = locator["column"]
@@ -551,27 +561,50 @@ def load_public_return(
             )
         kind = locator["kind"]
         if kind == "record_asset":
-            try:
-                path = storage.resolve_record_asset(
-                    locator["result_key"],
-                    locator["record_id"],
-                    locator["asset_path"],
-                )
-            except (CacheCorruptionError, OSError, ValueError) as exc:
-                raise WorkflowRunResultUnavailableError(
-                    "Immutable record required by the submitted result is unavailable.",
-                    details={
-                        "result_key": locator["result_key"],
-                        "record_id": locator["record_id"],
-                    },
-                ) from exc
+            if storage is None:
+                try:
+                    path = record_assets[locator_position]
+                except KeyError as exc:
+                    raise WorkflowRunResultUnavailableError(
+                        "Downloaded immutable record asset is unavailable."
+                    ) from exc
+                try:
+                    confined_path(path, asset_root, label="Downloaded record asset")
+                    _size, digest = asset_digest_and_size(path)
+                except Exception as exc:
+                    raise WorkflowRunResultUnavailableError(
+                        "Downloaded immutable record asset is unavailable."
+                    ) from exc
+                if (
+                    digest != locator["digest"]
+                    or ("directory" if path.is_dir() else "file")
+                    != locator["asset_type"]
+                ):
+                    raise WorkflowRunResultUnavailableError(
+                        "Downloaded immutable record asset does not match its locator."
+                    )
+            else:
+                try:
+                    path = storage.resolve_record_asset(
+                        locator["result_key"],
+                        locator["record_id"],
+                        locator["asset_path"],
+                    )
+                except (CacheCorruptionError, OSError, ValueError) as exc:
+                    raise WorkflowRunResultUnavailableError(
+                        "Immutable record required by the submitted result is unavailable.",
+                        details={
+                            "result_key": locator["result_key"],
+                            "record_id": locator["record_id"],
+                        },
+                    ) from exc
             shared = locator.get("shared_array")
             value = _load_shared_array(path, shared) if shared is not None else path
         elif kind == "return_asset":
             relative = validate_relative_posix_path(locator["path"])
-            path = Path(control_dir) / relative
+            path = asset_root / relative
             try:
-                confined_path(path, Path(control_dir), label="Return asset")
+                confined_path(path, asset_root, label="Return asset")
                 _size, digest = asset_digest_and_size(path)
             except Exception as exc:
                 raise WorkflowRunResultUnavailableError(
@@ -617,3 +650,23 @@ def load_public_return(
             strict=True,
         )
     }
+
+
+def load_public_return(
+    control_dir: Path,
+    storage_path: str | Path,
+    run_id: str,
+) -> Any:
+    """Rehydrate a successful public return without consulting current pointers."""
+    storage = Storage(storage_path)
+    manifest = load_return_manifest(
+        control_dir,
+        expected_run_id=run_id,
+        storage_path=storage_path,
+    )
+    return _rehydrate_public_return(
+        Path(control_dir),
+        manifest,
+        storage=storage,
+        record_assets={},
+    )

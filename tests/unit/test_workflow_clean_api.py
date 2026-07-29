@@ -45,6 +45,7 @@ PUBLIC_EXPORTS = {
     "Passthrough",
     "ProgressEvent",
     "ResourceLifetime",
+    "RemoteWorkflowRun",
     "SSHSubmissionTransport",
     "SchemaSerializationError",
     "SequentialEngine",

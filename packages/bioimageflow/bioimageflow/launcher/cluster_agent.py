@@ -18,6 +18,14 @@ from .cluster_protocol import (
 )
 from .cluster_submit import submit_bundle
 from .cluster_upload import allocate_upload, commit_upload, normalized_root
+from .remote_control import (
+    cancel_run,
+    inspect_run,
+    read_log_page,
+    read_progress_page,
+    refresh_run,
+)
+from .result_bundle import prepare_result
 
 
 def _exact_arguments(
@@ -70,6 +78,60 @@ def handle_operation(
             request_digest,
             value["object_path"],
             value["manifest"],
+        )
+    if operation == "inspect":
+        value = _exact_arguments(arguments, {"run_id", "storage_path"})
+        return inspect_run(value["storage_path"], value["run_id"])
+    if operation == "refresh":
+        value = _exact_arguments(arguments, {"run_id", "storage_path"})
+        return refresh_run(value["storage_path"], value["run_id"])
+    if operation == "read-progress":
+        value = _exact_arguments(
+            arguments,
+            {"after_sequence", "limit", "run_id", "storage_path"},
+        )
+        return read_progress_page(
+            value["storage_path"],
+            value["run_id"],
+            value["after_sequence"],
+            value["limit"],
+        )
+    if operation == "read-logs":
+        value = _exact_arguments(
+            arguments,
+            {"identity", "limit", "offset", "run_id", "storage_path", "stream"},
+        )
+        return read_log_page(
+            value["storage_path"],
+            value["run_id"],
+            value["stream"],
+            value["offset"],
+            value["identity"],
+            value["limit"],
+        )
+    if operation == "cancel":
+        value = _exact_arguments(
+            arguments,
+            {"run_id", "staging_root", "storage_path"},
+        )
+        return cancel_run(
+            value["staging_root"],
+            value["storage_path"],
+            value["run_id"],
+            request_id,
+            request_digest,
+        )
+    if operation == "prepare-result":
+        value = _exact_arguments(
+            arguments,
+            {"run_id", "staging_root", "storage_path"},
+        )
+        return prepare_result(
+            value["staging_root"],
+            value["storage_path"],
+            value["run_id"],
+            request_id,
+            request_digest,
         )
     raise ClusterProtocolFailure(
         "unsupported-operation",

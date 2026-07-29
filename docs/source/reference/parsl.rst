@@ -312,8 +312,8 @@ The complete launcher storage and retention contract is documented in :doc:`outp
 Laptop submission transport
 ---------------------------
 
-Work Package 2 installs the ``bioimageflow-cluster-agent`` one-shot command and adds the strict :class:`~bioimageflow.LocalUpload` and :class:`~bioimageflow.SSHSubmissionTransport` values.
-The final public ``transport=`` submission façade and remote run handle are delivered by the following work package; current application code should not call the package-private transport seam directly.
+The ``bioimageflow-cluster-agent`` one-shot command and strict :class:`~bioimageflow.SSHSubmissionTransport` provide public laptop submission and remote lifecycle control.
+Passing ``transport=`` with an explicit :class:`~bioimageflow.PSIJLaunchConfig` returns :class:`~bioimageflow.RemoteWorkflowRun`; omitting transport continues to return :class:`~bioimageflow.WorkflowRun`.
 
 The laptop uses its system ``ssh`` and ``sftp`` clients with ``BatchMode=yes`` and normal OpenSSH configuration and host-key verification.
 The transport stores no passwords, key contents, arbitrary SSH options, shell fragments, or environment setup commands.
@@ -330,6 +330,11 @@ It is not a cache or run store and does not change the existing ``launcher/v1``,
 Installed objects must remain readable by the orchestrator and workers for the lifetime of every referencing run.
 Sites may delete abandoned partial uploads and unreferenced objects according to an operator retention policy, but BioImageFlow does not provide a general transport garbage collector in this phase.
 
+``RemoteWorkflowRun.open(transport, storage_path, run_id)`` reconnects without exposing cluster control or view paths as laptop-local paths.
+Refresh, progress, logs, wait, and cancellation use bounded one-shot commands and the authoritative cluster-local ``WorkflowRun`` state machine.
+Successful ``result(destination=...)`` downloads one immutable verified bundle and atomically installs the destination.
+Owned return assets become laptop-local paths, while declared external cluster paths remain unchanged.
+
 API
 ---
 
@@ -345,6 +350,9 @@ API
    :members:
 
 .. autoclass:: SSHSubmissionTransport
+   :members:
+
+.. autoclass:: RemoteWorkflowRun
    :members:
 
 .. autoclass:: PSIJLaunchConfig

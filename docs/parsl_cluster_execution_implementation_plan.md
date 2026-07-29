@@ -1,6 +1,6 @@
 # PSI/J Cluster Execution Implementation Plan
 
-Status: Work Packages 1 and 2 are implemented and Work Package 3 is the next delivery checkpoint.
+Status: Work Packages 1, 2, and 3 are implemented and Work Package 4 is the next delivery checkpoint.
 
 ## 1. Authority, Goal, and Scope
 
@@ -426,6 +426,12 @@ Agent checkpoint:
 
 - Commit the remote façade, paged control operations, download bundle, factored return loader, errors, and focused tests.
 - Keep GUI code out of this worktree.
+
+Completion checkpoint:
+
+- Implemented transported public submission and the strict `RemoteWorkflowRun` façade while retaining cluster-local `WorkflowRun` as the only launcher lifecycle implementation.
+- Added bounded authoritative observation, refresh, progress, byte-paged logs, retry-safe cancellation, reconnect, and client-side wait behavior through one-shot cluster commands.
+- Added immutable result preparation, exact record/return asset copying, atomic verified SFTP download, and the factored asset-root return loader without consulting current cache pointers.
 
 ## Work Package 4 — End-to-End Integration, Documentation, and GUI Handoff
 

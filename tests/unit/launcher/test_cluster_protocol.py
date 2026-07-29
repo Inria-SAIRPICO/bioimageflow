@@ -63,7 +63,7 @@ def test_decoder_rejects_unknown_fields_versions_and_operations() -> None:
     for mutation in (
         {**base, "extra": True},
         {**base, "schema": "bioimageflow.cluster.command.v2"},
-        {**base, "operation": "inspect"},
+        {**base, "operation": "delete-run"},
     ):
         with pytest.raises(ClusterProtocolFailure):
             decode_request(json.dumps(mutation).encode())

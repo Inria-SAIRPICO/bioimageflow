@@ -1,11 +1,15 @@
-from pathlib import Path
+from datetime import timedelta
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from bioimageflow import (
     ExecutorBinding,
     ExecutorCapabilities,
+    PSIJLaunchConfig,
     ParslTaskPolicy,
+    RemoteWorkflowRun,
+    SSHSubmissionTransport,
     WorkerEnvironmentAttestation,
     WorkerSlotCapacity,
     Workflow,
@@ -16,6 +20,7 @@ from bioimageflow.launcher.types import (
     OrchestratorLaunchConfig,
     ParslConfigRef,
 )
+import bioimageflow.launcher.ssh as ssh_module
 
 
 def _binding() -> ExecutorBinding:
@@ -87,3 +92,70 @@ def test_invalid_route_fails_before_allocation(tmp_path: Path) -> None:
         )
 
     assert not (tmp_path / "launcher").exists()
+
+
+def test_transport_submission_returns_remote_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
+    transport = SSHSubmissionTransport(
+        host="hpc",
+        staging_root=PurePosixPath("/cluster/staging"),
+        remote_executable=PurePosixPath("/cluster/bin/agent"),
+    )
+    run_id = "run_1234567812344abc923456789abcdef0"
+
+    monkeypatch.setattr(
+        ssh_module,
+        "submit_cluster_workflow",
+        lambda *args, **kwargs: run_id,
+    )
+    monkeypatch.setattr(
+        ssh_module,
+        "execute_cluster_command",
+        lambda *args, **kwargs: {
+            "error": None,
+            "run_id": run_id,
+            "state": "prepared",
+            "status_revision": 0,
+            "storage_path": workflow.storage_path.as_posix(),
+            "submission_schema": "bioimageflow.launcher.submission.v1",
+            "status_schema": "bioimageflow.launcher.status.v1",
+            "terminal": False,
+            "updated_at": "2026-07-29T12:00:00Z",
+        },
+    )
+
+    run = submit_workflow(
+        workflow,
+        parsl_config=_config_ref(),
+        executor_bindings={"threads": _binding()},
+        launch=PSIJLaunchConfig(
+            executor="slurm",
+            walltime=timedelta(minutes=10),
+        ),
+        transport=transport,
+    )
+
+    assert isinstance(run, RemoteWorkflowRun)
+    assert run.id == run_id
+    assert not (tmp_path / "launcher").exists()
+
+
+def test_transport_submission_requires_psij_launch(tmp_path: Path) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
+    transport = SSHSubmissionTransport(
+        host="hpc",
+        staging_root=PurePosixPath("/cluster/staging"),
+        remote_executable=PurePosixPath("/cluster/bin/agent"),
+    )
+
+    with pytest.raises(TypeError, match="PSIJLaunchConfig"):
+        submit_workflow(
+            workflow,
+            parsl_config=_config_ref(),
+            executor_bindings={"threads": _binding()},
+            launch=OrchestratorLaunchConfig(backend="manual"),
+            transport=transport,
+        )
