@@ -18,8 +18,14 @@ from bioimageflow import (
 )
 from bioimageflow.launcher.cluster_protocol import ClusterProtocolFailure
 from bioimageflow.launcher.orchestrator import run_orchestrator
+from bioimageflow.launcher.remote_control import read_log_page, read_progress_page
 from bioimageflow.launcher.result_bundle import prepare_result
-from bioimageflow.launcher.result_download import _load_manifest, _verify_tree
+from bioimageflow.launcher.result_download import (
+    SSHTransportError,
+    _load_manifest,
+    _validate_entries,
+    _verify_tree,
+)
 from bioimageflow.launcher.returns import load_public_return_from_bundle
 
 
@@ -134,3 +140,94 @@ def test_bundle_digest_corruption_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(Exception, match="schema"):
         _load_manifest(path)
+
+
+def test_result_manifest_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    path = tmp_path / "manifest.json"
+    path.write_text('{"schema":"one","schema":"two"}')
+
+    with pytest.raises(SSHTransportError, match="malformed"):
+        _load_manifest(path)
+
+
+def test_result_entries_reject_nonportable_path_collisions() -> None:
+    digest = "sha256:" + "0" * 64
+    entries = [
+        {"digest": digest, "kind": "file", "path": "A.txt", "size": 0},
+        {"digest": digest, "kind": "file", "path": "a.txt", "size": 0},
+    ]
+
+    with pytest.raises(SSHTransportError, match="invalid"):
+        _validate_entries(entries)
+
+
+def test_remote_progress_page_is_bounded_and_preserves_sequences(
+    tmp_path: Path,
+) -> None:
+    storage = tmp_path / "storage"
+    run = _successful_run(storage)
+    existing = run._control.read_progress()
+    after = existing[-1]["sequence"] if existing else 0
+    run._control.append_progress(
+        kind="backend",
+        payload={
+            "event": "orchestrator_running",
+            "owner": "review-one",
+            "schema": "bioimageflow.launcher.backend_event.v1",
+        },
+    )
+    run._control.append_progress(
+        kind="backend",
+        payload={
+            "event": "orchestrator_succeeded",
+            "owner": "review-two",
+            "schema": "bioimageflow.launcher.backend_event.v1",
+        },
+    )
+
+    first = read_progress_page(storage.as_posix(), run.id, after, 1)
+    second = read_progress_page(
+        storage.as_posix(),
+        run.id,
+        first["next_sequence"],
+        1,
+    )
+
+    assert [event["sequence"] for event in first["events"]] == [after + 1]
+    assert first["has_more"] is True
+    assert [event["sequence"] for event in second["events"]] == [after + 2]
+    assert second["has_more"] is False
+
+
+def test_remote_log_pages_hold_the_first_page_snapshot(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    run = _successful_run(storage)
+    logs = run.control_dir / "logs"
+    logs.mkdir(exist_ok=True)
+    stdout = logs / "orchestrator.out"
+    stdout.write_bytes(b"abc")
+
+    first = read_log_page(
+        storage.as_posix(),
+        run.id,
+        "stdout",
+        0,
+        None,
+        None,
+        2,
+    )
+    stdout.write_bytes(b"abcdef")
+    second = read_log_page(
+        storage.as_posix(),
+        run.id,
+        "stdout",
+        first["next_offset"],
+        first["identity"],
+        first["snapshot_size"],
+        2,
+    )
+
+    assert first["snapshot_size"] == 3
+    assert second["snapshot_size"] == 3
+    assert second["eof"] is True
+    assert second["next_offset"] == 3

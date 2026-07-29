@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import subprocess
+import unicodedata
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -17,6 +18,7 @@ from bioimageflow.storage.dataframe_transport import file_sha256
 
 from .return_schema import validate_return_manifest_structure
 from .returns import load_public_return_from_bundle
+from .result_bundle import MAX_RESULT_BYTES, MAX_RESULT_DEPTH, MAX_RESULT_ENTRIES
 from .ssh import (
     SSHTransportError,
     _sftp_quote,
@@ -28,6 +30,7 @@ from .types import SSHSubmissionTransport
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _EMPTY_DIGEST = f"sha256:{hashlib.sha256(b'').hexdigest()}"
 RESULT_BUNDLE_SCHEMA = "bioimageflow.cluster.result-bundle.v1"
+MAX_RESULT_MANIFEST_BYTES = 64 * 1024 * 1024
 
 
 def _run_sftp(
@@ -74,49 +77,94 @@ def _run_sftp(
 
 def _load_manifest(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text())
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("manifest is not a regular file")
+        encoded = path.read_bytes()
+        if len(encoded) > MAX_RESULT_MANIFEST_BYTES:
+            raise ValueError("manifest exceeds the byte limit")
+        value = json.loads(
+            encoded.decode("utf-8"),
+            object_pairs_hook=_reject_duplicates,
+            parse_constant=_reject_nonfinite,
+        )
     except Exception as exc:
         raise SSHTransportError(
             "result-integrity",
             "Downloaded result manifest is malformed.",
         ) from exc
-    if type(value) is not dict or set(value) != {
-        "digest",
-        "entries",
-        "record_assets",
-        "return_manifest",
-        "run_id",
-        "schema",
-        "storage_path",
-    }:
+    try:
+        if type(value) is not dict or set(value) != {
+            "digest",
+            "entries",
+            "record_assets",
+            "return_manifest",
+            "run_id",
+            "schema",
+            "storage_path",
+        }:
+            raise SSHTransportError(
+                "result-integrity",
+                "Downloaded result manifest schema is invalid.",
+            )
+        if value["schema"] != RESULT_BUNDLE_SCHEMA:
+            raise SSHTransportError(
+                "result-integrity",
+                "Downloaded result manifest version is unsupported.",
+            )
+        body = {key: value[key] for key in value if key != "digest"}
+        expected = f"sha256:{hashlib.sha256(canonical_json_bytes(body)).hexdigest()}"
+        if value["digest"] != expected:
+            raise SSHTransportError(
+                "result-integrity",
+                "Downloaded result manifest digest is invalid.",
+            )
+        return_manifest = validate_return_manifest_structure(
+            value["return_manifest"]
+        )
+        if (
+            type(value["run_id"]) is not str
+            or return_manifest["run_id"] != value["run_id"]
+            or type(value["storage_path"]) is not str
+            or not PurePosixPath(value["storage_path"]).is_absolute()
+            or value["storage_path"].startswith("//")
+            or str(PurePosixPath(value["storage_path"])) != value["storage_path"]
+        ):
+            raise SSHTransportError(
+                "result-integrity",
+                "Downloaded result manifest has inconsistent run binding.",
+            )
+        return value
+    except SSHTransportError:
+        raise
+    except Exception as exc:
         raise SSHTransportError(
             "result-integrity",
-            "Downloaded result manifest schema is invalid.",
-        )
-    if value["schema"] != RESULT_BUNDLE_SCHEMA:
-        raise SSHTransportError(
-            "result-integrity",
-            "Downloaded result manifest version is unsupported.",
-        )
-    body = {key: value[key] for key in value if key != "digest"}
-    expected = f"sha256:{hashlib.sha256(canonical_json_bytes(body)).hexdigest()}"
-    if value["digest"] != expected:
-        raise SSHTransportError(
-            "result-integrity",
-            "Downloaded result manifest digest is invalid.",
-        )
-    validate_return_manifest_structure(value["return_manifest"])
+            "Downloaded result manifest structure is invalid.",
+        ) from exc
+
+
+def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
     return value
 
 
+def _reject_nonfinite(value: str) -> None:
+    raise ValueError(f"non-finite JSON value {value}")
+
+
 def _validate_entries(value: Any) -> list[dict[str, Any]]:
-    if type(value) is not list or len(value) > 100_000:
+    if type(value) is not list or len(value) > MAX_RESULT_ENTRIES:
         raise SSHTransportError(
             "result-integrity",
             "Result bundle file list is invalid.",
         )
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
+    folded: set[str] = set()
     total = 0
     for raw in value:
         if type(raw) is not dict or set(raw) != {"digest", "kind", "path", "size"}:
@@ -134,6 +182,10 @@ def _validate_entries(value: Any) -> list[dict[str, Any]]:
         if (
             relative == "manifest.json"
             or relative in seen
+            or relative.casefold() in folded
+            or unicodedata.normalize("NFC", relative) != relative
+            or any(character in relative for character in ("\x00", "\n", "\r"))
+            or len(PurePosixPath(relative).parts) > MAX_RESULT_DEPTH
             or raw["kind"] not in {"directory", "file"}
             or type(raw["size"]) is not int
             or raw["size"] < 0
@@ -152,8 +204,9 @@ def _validate_entries(value: Any) -> list[dict[str, Any]]:
                 "Result bundle directory entry is invalid.",
             )
         seen.add(relative)
+        folded.add(relative.casefold())
         total += raw["size"]
-        if total > 1 << 40:
+        if total > MAX_RESULT_BYTES:
             raise SSHTransportError(
                 "result-integrity",
                 "Result bundle exceeds the aggregate byte limit.",
@@ -219,6 +272,7 @@ def _validate_record_assets(
 
 def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
     entries = _validate_entries(manifest["entries"])
+    by_path = {entry["path"]: entry for entry in entries}
     actual: set[str] = set()
     for path in root.rglob("*"):
         relative = path.relative_to(root).as_posix()
@@ -226,7 +280,7 @@ def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
             continue
         actual.add(relative)
         mode = path.lstat().st_mode
-        entry = next((item for item in entries if item["path"] == relative), None)
+        entry = by_path.get(relative)
         if entry is None or stat.S_ISLNK(mode):
             raise SSHTransportError(
                 "result-integrity",
@@ -247,11 +301,23 @@ def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
             "result-integrity",
             "Result bundle has missing or extra paths.",
         )
-    return _validate_record_assets(
+    frame_paths = {frame["path"] for frame in manifest["return_manifest"]["frames"]}
+    if not frame_paths.issubset(expected):
+        raise SSHTransportError(
+            "result-integrity",
+            "Result bundle is missing a declared return frame.",
+        )
+    record_assets = _validate_record_assets(
         manifest["record_assets"],
         manifest["return_manifest"],
         root,
     )
+    if any(path.relative_to(root).as_posix() not in expected for path in record_assets.values()):
+        raise SSHTransportError(
+            "result-integrity",
+            "Result record-asset map names an undeclared path.",
+        )
+    return record_assets
 
 
 def _validate_remote_root(

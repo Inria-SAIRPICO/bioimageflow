@@ -15,6 +15,7 @@ from .repository import (
     LauncherStorageError,
     _canonical_json_bytes,
     _decode_json,
+    _open_binary_no_follow,
     _read_bytes,
 )
 from .schemas import (
@@ -104,6 +105,52 @@ class _ProgressControlMixin:
         self.confined_path("progress.jsonl", must_exist=True)
         entries, _ = self._read_progress_unlocked()
         return entries
+
+    def read_progress_page(
+        self,
+        *,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Read one page without retaining the complete progress history."""
+        if type(after_sequence) is not int or after_sequence < 0:
+            raise ValueError("after_sequence must be a non-negative integer.")
+        if type(limit) is not int or limit < 1:
+            raise ValueError("limit must be a positive integer.")
+        self.confined_path("progress.jsonl", must_exist=True)
+        page: list[dict[str, Any]] = []
+        previous = 0
+        with _open_binary_no_follow(self.progress_path) as stream:
+            for line_number, line in enumerate(stream, start=1):
+                if not line.endswith(b"\n"):
+                    break
+                if line == b"\n":
+                    raise LauncherCorruptionError(
+                        f"Blank complete progress line {line_number}."
+                    )
+                try:
+                    entry = validate_progress(
+                        _decode_json(line[:-1], path=self.progress_path)
+                    )
+                except LauncherSchemaError as error:
+                    raise LauncherCorruptionError(
+                        f"Invalid progress entry on line {line_number}."
+                    ) from error
+                if entry["run_id"] != self.run_id:
+                    raise LauncherCorruptionError(
+                        f"Progress line {line_number} has the wrong run ID."
+                    )
+                if entry["sequence"] != previous + 1:
+                    raise LauncherCorruptionError(
+                        f"Progress line {line_number} has non-monotonic sequence."
+                    )
+                previous = entry["sequence"]
+                if previous <= after_sequence:
+                    continue
+                if len(page) == limit:
+                    return page, True
+                page.append(entry)
+        return page, False
 
     def _read_progress_unlocked(self) -> tuple[list[dict[str, Any]], int]:
         encoded = _read_bytes(self.progress_path)

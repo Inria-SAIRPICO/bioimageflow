@@ -2018,7 +2018,7 @@ The staging root is disjoint from workflow storage and never changes launcher, c
 Before launcher allocation, submit durably binds the request to one preallocated launcher run ID and then reuses the cluster-local Phase 1b allocation and PSI/J dispatch path.
 Passing `transport=SSHSubmissionTransport(...)` to `submit_workflow()` requires `PSIJLaunchConfig` and returns `RemoteWorkflowRun`; omitting transport preserves the existing local `WorkflowRun` behavior and type.
 `RemoteWorkflowRun.open(transport, storage_path, run_id)` reconnects without local control/view path claims and validates the cluster storage/run binding before exposing state.
-Refresh delegates to the cluster-local `WorkflowRun.refresh()`, wait uses interruptible client polling with monotonic deadlines, progress retains the server's global sequences, and logs page raw bytes with file-identity and truncation detection before replacement decoding.
+Refresh delegates to the cluster-local `WorkflowRun.refresh()`, wait uses interruptible client polling with monotonic deadlines, progress retains the server's global sequences, and logs page a finite first-page snapshot as raw bytes with file-identity and truncation detection before replacement decoding.
 Cancellation is a receipt-backed retry-safe delegation to cluster-local `WorkflowRun.cancel()`.
 
 Successful remote results are prepared as immutable content-addressed transport objects after validating the exact Phase 1b return.

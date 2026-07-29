@@ -98,13 +98,15 @@ def read_progress_page(
             f"limit must be between 1 and {MAX_PROGRESS_PAGE}.",
         )
     run = _open(storage_path, run_id)
-    events = run.progress(after_sequence=after_sequence)
-    page = events[:limit]
+    page, has_more = run._control.read_progress_page(
+        after_sequence=after_sequence,
+        limit=limit,
+    )
     next_sequence = after_sequence if not page else page[-1]["sequence"]
     return {
         **_observation(run),
         "events": page,
-        "has_more": len(events) > len(page),
+        "has_more": has_more,
         "next_sequence": next_sequence,
     }
 
@@ -125,6 +127,7 @@ def read_log_page(
     stream: Any,
     offset: Any,
     identity: Any,
+    snapshot_size: Any,
     limit: Any,
 ) -> dict[str, Any]:
     if type(offset) is not int or offset < 0:
@@ -136,6 +139,20 @@ def read_log_page(
         raise ClusterProtocolFailure(
             "invalid-log-identity",
             "identity must be null or a non-empty string.",
+        )
+    if snapshot_size is not None and (
+        type(snapshot_size) is not int or snapshot_size < 0
+    ):
+        raise ClusterProtocolFailure(
+            "invalid-log-snapshot",
+            "snapshot_size must be null or a non-negative integer.",
+        )
+    if (identity is None) != (snapshot_size is None) or (
+        identity is None and offset != 0
+    ):
+        raise ClusterProtocolFailure(
+            "invalid-log-snapshot",
+            "Log identity, snapshot size, and offset are inconsistent.",
         )
     if type(limit) is not int or not 1 <= limit <= MAX_LOG_CHUNK:
         raise ClusterProtocolFailure(
@@ -155,6 +172,7 @@ def read_log_page(
             "identity": None,
             "next_offset": 0,
             "reset": offset != 0 or identity is not None,
+            "snapshot_size": 0,
             "stream": stream,
         }
     except OSError as exc:
@@ -173,12 +191,17 @@ def read_log_page(
         reset = (
             (identity is not None and identity != current_identity)
             or offset > metadata.st_size
+            or (
+                snapshot_size is not None
+                and metadata.st_size < snapshot_size
+            )
         )
         start = 0 if reset else offset
+        end = metadata.st_size if snapshot_size is None or reset else snapshot_size
         os.lseek(descriptor, start, os.SEEK_SET)
-        data = os.read(descriptor, limit)
+        data = os.read(descriptor, min(limit, max(0, end - start)))
         next_offset = start + len(data)
-        eof = next_offset >= os.fstat(descriptor).st_size
+        eof = next_offset >= end
     finally:
         os.close(descriptor)
     return {
@@ -189,6 +212,7 @@ def read_log_page(
         "identity": current_identity,
         "next_offset": next_offset,
         "reset": reset,
+        "snapshot_size": end,
         "stream": stream,
     }
 

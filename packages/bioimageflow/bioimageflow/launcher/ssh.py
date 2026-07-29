@@ -30,15 +30,7 @@ from .schemas import validate_run_id
 from .types import PSIJLaunchConfig, ParslConfigRef, SSHSubmissionTransport
 
 
-_ENV_ALLOWLIST = (
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "LOGNAME",
-    "PATH",
-    "SSH_AUTH_SOCK",
-    "USER",
-)
+_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "SSH_AUTH_SOCK", "USER")
 
 
 class SSHTransportError(RuntimeError):
@@ -119,6 +111,7 @@ _RUN_STATES = {
     "cancelled",
     "lost",
 }
+_OBSERVATION_ERROR_FIELDS = {"code", "exception_type", "message", "run_id"}
 
 
 def _validate_observation(
@@ -141,7 +134,20 @@ def _validate_observation(
         or not result["updated_at"]
         or (
             result["error"] is not None
-            and type(result["error"]) is not dict
+            and (
+                type(result["error"]) is not dict
+                or set(result["error"]) != _OBSERVATION_ERROR_FIELDS
+                or result["error"]["run_id"] != result["run_id"]
+                or type(result["error"]["code"]) is not str
+                or not result["error"]["code"]
+                or type(result["error"]["run_id"]) is not str
+                or not result["error"]["run_id"]
+                or any(
+                    result["error"][field] is not None
+                    and type(result["error"][field]) is not str
+                    for field in ("exception_type", "message")
+                )
+            )
         )
     ):
         raise SSHTransportError(
@@ -202,11 +208,25 @@ def _validate_log_result(
         or type(result["reset"]) is not bool
         or type(result["next_offset"]) is not int
         or result["next_offset"] < 0
+        or type(result["snapshot_size"]) is not int
+        or result["snapshot_size"] < 0
         or (
             result["identity"] is not None
             and (type(result["identity"]) is not str or not result["identity"])
         )
         or type(result["data"]) is not str
+        or (result["exists"] and result["identity"] is None)
+        or (
+            not result["exists"]
+            and (
+                result["identity"],
+                result["data"],
+                result["eof"],
+                result["next_offset"],
+                result["snapshot_size"],
+            )
+            != (None, "", True, 0, 0)
+        )
     ):
         raise SSHTransportError(
             "remote-protocol",
@@ -229,7 +249,20 @@ def _validate_log_result(
             ambiguous=True,
         )
     expected_offset = 0 if result["reset"] else requested_offset
-    if result["next_offset"] != expected_offset + len(decoded):
+    if (
+        result["next_offset"] != expected_offset + len(decoded)
+        or result["next_offset"] > result["snapshot_size"]
+        or result["eof"] != (result["next_offset"] >= result["snapshot_size"])
+        or (
+            not result["reset"]
+            and arguments.get("snapshot_size") is not None
+            and result["snapshot_size"] != arguments["snapshot_size"]
+        )
+        or (
+            not result["eof"]
+            and not decoded
+        )
+    ):
         raise SSHTransportError(
             "remote-protocol",
             "Cluster log page offset is inconsistent.",
@@ -296,6 +329,7 @@ def _validate_success_result(
             "identity",
             "next_offset",
             "reset",
+            "snapshot_size",
             "stream",
         }
         if set(result) != expected:

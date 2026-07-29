@@ -110,6 +110,11 @@ class RemoteWorkflowRun:
         }
 
     def _apply_observation(self, observation: Mapping[str, Any]) -> None:
+        if not isinstance(observation, Mapping):
+            raise TypeError("observation must be a remote observation mapping.")
+        from .ssh import _validate_observation
+
+        _validate_observation(observation, self._arguments())
         if (
             observation.get("run_id") != self.id
             or observation.get("storage_path") != str(self._storage_path)
@@ -202,6 +207,7 @@ class RemoteWorkflowRun:
         from .ssh import execute_cluster_command
 
         identity: str | None = None
+        snapshot_size: int | None = None
         offset = 0
         content = bytearray()
         resets = 0
@@ -214,6 +220,7 @@ class RemoteWorkflowRun:
                     "identity": identity,
                     "limit": _LOG_PAGE,
                     "offset": offset,
+                    "snapshot_size": snapshot_size,
                     "stream": stream,
                 },
                 request_id=str(uuid.uuid4()),
@@ -228,6 +235,7 @@ class RemoteWorkflowRun:
                 content.clear()
                 offset = 0
             identity = result["identity"]
+            snapshot_size = result["snapshot_size"]
             content.extend(base64.b64decode(result["data"], validate=True))
             offset = result["next_offset"]
             if result["eof"]:
@@ -265,7 +273,7 @@ class RemoteWorkflowRun:
                 "code": "workflow-execution-failed",
                 "message": f"Submitted workflow run {self.id} failed.",
             }
-            raise WorkflowRunFailedError(str(error["message"]), error=error)
+            raise WorkflowRunFailedError(error["message"], error=error)
         if self.status == "cancelled":
             raise WorkflowCancelledError(
                 f"Submitted workflow run {self.id} was cancelled."

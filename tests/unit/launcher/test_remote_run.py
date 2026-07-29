@@ -118,6 +118,7 @@ def test_logs_assemble_bytes_before_replacement_decoding_and_restart_rotation(
                 "identity": None,
                 "next_offset": 0,
                 "reset": False,
+                "snapshot_size": 0,
                 "stream": stream,
             }
         stdout_calls += 1
@@ -131,6 +132,7 @@ def test_logs_assemble_bytes_before_replacement_decoding_and_restart_rotation(
             "identity": "1:2",
             "next_offset": arguments["offset"] + len(chunk),
             "reset": False,
+            "snapshot_size": 3,
             "stream": stream,
         }
 

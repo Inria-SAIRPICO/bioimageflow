@@ -6,11 +6,17 @@ import hashlib
 import os
 import shutil
 import stat
+import unicodedata
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-from bioimageflow.storage import Storage, asset_digest_and_size, canonical_json_bytes
+from bioimageflow.storage import (
+    Storage,
+    asset_digest_and_size,
+    canonical_json_bytes,
+    validate_relative_posix_path,
+)
 from bioimageflow.storage.dataframe_transport import file_sha256
 
 from .cluster_protocol import ClusterProtocolFailure
@@ -28,6 +34,9 @@ from .returns import load_return_manifest
 
 RESULT_BUNDLE_SCHEMA = "bioimageflow.cluster.result-bundle.v1"
 _EMPTY_DIGEST = f"sha256:{hashlib.sha256(b'').hexdigest()}"
+MAX_RESULT_ENTRIES = 100_000
+MAX_RESULT_DEPTH = 64
+MAX_RESULT_BYTES = 1 << 40
 
 
 def _disjoint(root: Path, storage: Path) -> None:
@@ -101,8 +110,29 @@ def _copy_asset(source: Path, destination: Path) -> None:
 
 def _entries(root: Path) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    folded: set[str] = set()
+    total = 0
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root).as_posix()
+        try:
+            validate_relative_posix_path(relative)
+        except (TypeError, ValueError) as exc:
+            raise ClusterProtocolFailure(
+                "result-integrity",
+                "Result bundle contains an unsafe path.",
+            ) from exc
+        folded_path = relative.casefold()
+        if (
+            any(character in relative for character in ("\x00", "\n", "\r"))
+            or unicodedata.normalize("NFC", relative) != relative
+            or len(PurePosixPath(relative).parts) > MAX_RESULT_DEPTH
+            or folded_path in folded
+        ):
+            raise ClusterProtocolFailure(
+                "result-integrity",
+                "Result bundle paths are not canonical and portable.",
+            )
+        folded.add(folded_path)
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode):
             raise ClusterProtocolFailure(
@@ -119,18 +149,25 @@ def _entries(root: Path) -> list[dict[str, Any]]:
                 }
             )
         elif stat.S_ISREG(mode):
+            size = path.stat().st_size
             entries.append(
                 {
                     "digest": file_sha256(path),
                     "kind": "file",
                     "path": relative,
-                    "size": path.stat().st_size,
+                    "size": size,
                 }
             )
+            total += size
         else:
             raise ClusterProtocolFailure(
                 "result-integrity",
                 "Result bundle contains a special file.",
+            )
+        if len(entries) > MAX_RESULT_ENTRIES or total > MAX_RESULT_BYTES:
+            raise ClusterProtocolFailure(
+                "result-too-large",
+                "Result bundle exceeds transport limits.",
             )
     return entries
 

@@ -99,7 +99,15 @@ def handle_operation(
     if operation == "read-logs":
         value = _exact_arguments(
             arguments,
-            {"identity", "limit", "offset", "run_id", "storage_path", "stream"},
+            {
+                "identity",
+                "limit",
+                "offset",
+                "run_id",
+                "snapshot_size",
+                "storage_path",
+                "stream",
+            },
         )
         return read_log_page(
             value["storage_path"],
@@ -107,6 +115,7 @@ def handle_operation(
             value["stream"],
             value["offset"],
             value["identity"],
+            value["snapshot_size"],
             value["limit"],
         )
     if operation == "cancel":

@@ -1948,7 +1948,8 @@ Every response repeats and validates the exact storage/run binding.
 `inspect` is a read-only authoritative observation.
 `refresh` delegates to the cluster-local `WorkflowRun.refresh()` and therefore performs only its existing launcher recovery and PSI/J reconciliation.
 `read-progress` returns bounded pages after a global Phase 1b sequence and never creates client-side sequences.
-`read-logs` returns bounded base64 raw stdout or stderr bytes by byte offset plus a stable file identity, and explicitly reports replacement or truncation so the client restarts assembly before decoding with replacement.
+`read-logs` returns bounded base64 raw stdout or stderr bytes by byte offset plus a stable file identity and first-page snapshot size, and explicitly reports replacement or truncation so the client restarts assembly before decoding with replacement.
+Each call reads only that finite snapshot, so a concurrently growing log cannot make one client observation chase new bytes indefinitely.
 `wait()` runs as interruptible laptop-side polling with a monotonic deadline; no cluster agent survives a disconnected request.
 SSH or protocol loss is a transport error and does not change or guess launcher state.
 
