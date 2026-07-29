@@ -26,6 +26,32 @@ or in a `uv <https://docs.astral.sh/uv/>`_ project:
 This installs both ``bioimageflow`` (the orchestrator) and ``bioimageflow-core``
 (the worker-safe core).
 
+Parsl and remote cluster execution
+----------------------------------
+
+Install the Parsl runtime for attached or separate-process execution:
+
+.. code-block:: bash
+
+   pip install "bioimageflow[parsl]"
+
+Laptop-to-cluster execution additionally requires the system ``ssh`` and ``sftp`` clients from OpenSSH on the laptop.
+Authentication, host aliases, users, ports, keys, agents, ``ProxyJump``, and host-key policy belong in the user's normal OpenSSH configuration.
+BioImageFlow does not accept passwords, private-key contents, arbitrary SSH options, remote shell setup, or installation commands.
+
+Prepare the cluster environment independently:
+
+.. code-block:: bash
+
+   pip install "bioimageflow[parsl,psij]"
+
+Install the PSI/J executor plugin supplied for the site's Slurm, PBS, or LSF scheduler in that same environment.
+The selected executor descriptor and scheduler client commands must be available on the login node.
+Workflow configuration factories and worker tool environments must also be installed or available through their declared shared source paths.
+No hostname, account, queue, credential, home directory, or scheduler command has a library default.
+
+See :doc:`/reference/parsl` for the complete submission example and :doc:`/gui/submitted_parsl` for GUI profile fields.
+
 Companion tool packages
 -----------------------
 

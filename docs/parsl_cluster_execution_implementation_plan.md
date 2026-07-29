@@ -1,6 +1,6 @@
 # PSI/J Cluster Execution Implementation Plan
 
-Status: Work Packages 1, 2, and 3 are implemented and Work Package 4 is the next delivery checkpoint.
+Status: Complete.
 
 ## 1. Authority, Goal, and Scope
 
@@ -449,12 +449,13 @@ Integration scenarios:
 9. Materialize single, mapping, zero-output, record-owned, transient-owned, record-backed `SharedArray`, and external-path results.
 10. Verify one scheduler orchestrator job can cause Parsl providers to allocate multiple independent worker jobs without PSI/J managing those workers.
 
-Deterministic CI uses fake OpenSSH/SFTP and fake PSI/J executors for every state, retry, cancellation, and crash boundary.
-`tests/integration/parsl/test_launcher.py` gains an in-process fake-cluster composition that executes the real cluster command and real local Parsl runtime where practical.
-The existing `tests/integration/parsl/test_process_executor.py`, `test_semantics.py`, and `test_thread_executor.py` continue proving Phase 1a semantics.
+Deterministic CI uses audited OpenSSH/SFTP process-boundary fakes, an in-process fake scheduler boundary, and focused lifecycle fakes for every state, retry, cancellation, and crash boundary.
+`tests/integration/parsl/test_remote_cluster.py` composes the production bundle, installed cluster-agent protocol, cluster-local launcher, real local Parsl runtime, remote façade, and atomic result materialization.
+The existing `tests/integration/parsl/test_process_executor.py`, `test_semantics.py`, and `test_thread_executor.py` continue proving Parsl execution semantics.
 Optional real-site smoke tests are marker-gated, skipped by default, and configured only through environment names or local untracked files.
-One smoke test is provided for each available PSI/J Slurm, PBS, or LSF site, but the release gate requires only the executor types actually available to maintainers.
-Each smoke test submits a tiny workflow whose Parsl `ProcessingTool` reads an explicit `LocalUpload`, observes the native receipt, reconnects in a second process, verifies one orchestrator scheduler job, downloads the result, and cleans only its transport staging fixture after terminal completion.
+One generic smoke accepts an explicitly configured PSI/J Slurm, PBS, or LSF site, and the release gate requires only executor types actually available to maintainers.
+The smoke submits a tiny workflow whose Parsl `ProcessingTool` reads an explicit `LocalUpload`, observes one native job identity, reconnects from fresh client state, and downloads the result.
+Its unique transport staging fixture is removed through the site's documented retention procedure after terminal verification.
 No CI or documentation embeds a hostname, account, queue, credential, home path, or scheduler command from a real site.
 Documentation tasks:
 
@@ -497,6 +498,13 @@ Release acceptance:
 - Workflow payloads, explicit uploads, and root DataFrame values cross from laptop to cluster; ordinary paths and typed DataFrame path cells remain cluster paths, and arbitrary strings are preserved.
 - Progress, logs, cancellation, errors, reconnect, return shape, and owned-asset materialization work after laptop restart.
 - Partial uploads, protocol injection, tampered downloads, missing immutable records, and ambiguous PSI/J submission fail closed.
+
+Completion checkpoint:
+
+- The complete laptop-to-login-node-to-PSI/J-orchestrator-to-Parsl path has deterministic composed coverage through the installed command protocol and real local Parsl runtime.
+- Focused launcher suites remain the race, cancellation, reconnect, paging, integrity, and immutable-result parity oracle, while an optional maintainer-configured real-site smoke is skipped by default.
+- Installation, final API, transport/storage semantics, PSI/J lifecycle, result materialization, retention, stable errors, acceptance traceability, and the GUI integration contract are current documentation.
+- No implementation checkpoint remains; Section 6 records intentionally deferred platform scope.
 
 ## 6. Explicitly Deferred Work
 

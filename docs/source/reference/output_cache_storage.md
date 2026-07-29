@@ -1024,7 +1024,7 @@ It is not canonical storage, a cache, a launcher repository, or a remote run sto
 An installed input object is addressed by its canonical upload-manifest digest rather than by a launcher run ID.
 The orchestrator and all selected Parsl workers must retain access to that object for every referencing run.
 Sites may remove incomplete partial transfers after a local stale threshold and may remove an object only after proving that no live or retained launcher submission references it.
-BioImageFlow does not provide an automatic transport garbage collector in this phase.
+BioImageFlow does not provide an automatic transport garbage collector.
 
 ## Shared Memory Interaction
 

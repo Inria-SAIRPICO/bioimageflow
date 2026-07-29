@@ -22,9 +22,8 @@ Callers import public names from `bioimageflow`, `bioimageflow.engine`, `bioimag
 New internal code should import from the focused owner module when doing so does not introduce a dependency cycle.
 
 The launcher package owns submitted execution and laptop-to-cluster transport.
-Its ``cluster_protocol`` module owns the bounded JSON envelope, ``cluster_bundle`` owns laptop packaging, ``cluster_upload`` and ``cluster_submit`` own one-shot server mutations, and ``ssh`` owns shell-free system OpenSSH/SFTP invocation.
+Its ``cluster_protocol`` module owns the bounded JSON envelope, ``cluster_bundle`` owns laptop packaging, ``cluster_upload`` and ``cluster_submit`` own one-shot server mutations, ``ssh`` owns shell-free system OpenSSH/SFTP invocation, and ``remote_run`` and the result modules own remote observation and atomic local materialization.
 The installed ``bioimageflow-cluster-agent`` command is a thin standard-input/standard-output adapter over those modules.
-Remote observation, cancellation, and result retrieval do not belong in the Work Package 2 submission seam.
 
 The enforced dependency direction is storage → cache → engine → workflow.
 Storage must not import cache, engine, backends, or workflow; cache must not import engine, backends, or workflow; engine must not import workflow.

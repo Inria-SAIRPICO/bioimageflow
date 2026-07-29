@@ -16,6 +16,7 @@ COMPLETE_TEST_MARKERS = [
     "external_binary: tests that require non-Python command-line tools",
     "sairpico_binary: tests that require real SAIRPICO command-line tools",
     "model_runtime: tests that require optional model runtimes or model downloads",
+    "cluster_smoke: optional maintainer-configured OpenSSH, PSI/J, and scheduler site smoke",
 ]
 REGISTERED_TEST_MARKERS = [
     *COMPLETE_TEST_MARKERS,

@@ -312,28 +312,159 @@ The complete launcher storage and retention contract is documented in :doc:`outp
 Laptop submission transport
 ---------------------------
 
-The ``bioimageflow-cluster-agent`` one-shot command and strict :class:`~bioimageflow.SSHSubmissionTransport` provide public laptop submission and remote lifecycle control.
-Passing ``transport=`` with an explicit :class:`~bioimageflow.PSIJLaunchConfig` returns :class:`~bioimageflow.RemoteWorkflowRun`; omitting transport continues to return :class:`~bioimageflow.WorkflowRun`.
+The ``bioimageflow-cluster-agent`` one-shot command and :class:`~bioimageflow.SSHSubmissionTransport` provide laptop submission and remote lifecycle control.
+Passing ``transport=`` with an explicit :class:`~bioimageflow.PSIJLaunchConfig` returns :class:`~bioimageflow.RemoteWorkflowRun`.
+Omitting transport runs the same cluster-local submission path and returns :class:`~bioimageflow.WorkflowRun`.
 
-The laptop uses its system ``ssh`` and ``sftp`` clients with ``BatchMode=yes`` and normal OpenSSH configuration and host-key verification.
-The transport stores no passwords, key contents, arbitrary SSH options, shell fragments, or environment setup commands.
-The cluster environment must already contain BioImageFlow with the ``parsl`` and ``psij`` extras and the requested PSI/J executor plugin.
+Install OpenSSH ``ssh`` and ``sftp`` on the laptop.
+Install ``bioimageflow[parsl,psij]`` and the selected site PSI/J executor plugin in the cluster environment.
+OpenSSH resolves host aliases, users, keys, agents, ports, ``ProxyJump``, and host-key policy from its normal configuration.
+BioImageFlow uses ``BatchMode=yes`` and provides no password, private-key, host-key bypass, arbitrary option, shell setup, or remote bootstrap field.
 
-Only ``LocalUpload(Path(...))`` reads laptop files.
-It is valid only for a path-like root workflow input.
-An ordinary ``Path`` is an explicit cluster path, and a string is always a string even when it resembles a path.
-Typed ``Path`` cells in root DataFrames must already be normalized absolute cluster paths.
+The following complete example distinguishes laptop actions from cluster actions:
 
-Uploads first enter a server-allocated partial directory, are checked against a complete SHA-256 manifest, and become read-only content-addressed objects only after atomic commit.
-The transport staging root must be disjoint from the workflow storage root.
-It is not a cache or run store and does not change the existing ``launcher/v1``, ``cache/v1``, ``views/runs``, or output-view layout.
-Installed objects must remain readable by the orchestrator and workers for the lifetime of every referencing run.
-Sites may delete abandoned partial uploads and unreferenced objects according to an operator retention policy, but BioImageFlow does not provide a general transport garbage collector in this phase.
+.. code-block:: python
 
-``RemoteWorkflowRun.open(transport, storage_path, run_id)`` reconnects without exposing cluster control or view paths as laptop-local paths.
-Refresh, progress, logs, wait, and cancellation use bounded one-shot commands and the authoritative cluster-local ``WorkflowRun`` state machine.
-Successful ``result(destination=...)`` downloads one immutable verified bundle and atomically installs the destination.
-Owned return assets become laptop-local paths, while declared external cluster paths remain unchanged.
+   from datetime import timedelta
+   from pathlib import Path, PurePosixPath
+
+   import pandas as pd
+
+   from bioimageflow import (
+       LocalUpload,
+       PSIJLaunchConfig,
+       ParslConfigRef,
+       RemoteWorkflowRun,
+       SSHSubmissionTransport,
+       submit_workflow,
+   )
+
+   # Laptop: build the graph with the storage root that exists on the cluster.
+   workflow = build_workflow(
+       storage_path=Path("/cluster/project/my-workflow/results")
+   )
+   transport = SSHSubmissionTransport(
+       host="my-hpc",  # An OpenSSH Host alias, not a credential record.
+       staging_root=PurePosixPath(
+           "/cluster/project/my-workflow/transport"
+       ),
+       remote_executable=PurePosixPath(
+           "/cluster/apps/bioimageflow/bin/bioimageflow-cluster-agent"
+       ),
+   )
+
+   root_table = pd.DataFrame(
+       {
+           "atlas": [Path("/cluster/reference/atlas.tif")],
+           "label": ["/this/remains/a/string"],
+       },
+       index=["sample"],
+   )
+   run = submit_workflow(
+       workflow,
+       inputs={
+           # Laptop: package exactly this selected file or directory.
+           "images": LocalUpload(Path("./images")),
+           # Cluster: preserve this ordinary Path without probing the laptop.
+           "mask": Path("/cluster/reference/mask.tif"),
+           # Cluster: transfer verified DataFrame values; typed Paths are absolute.
+           "samples": root_table,
+           # Both sides: preserve strings without path heuristics.
+           "description": "/this/remains/a/string",
+       },
+       parsl_config=ParslConfigRef(
+           "my_project.parsl_config:build",
+           {"profile": "production"},
+       ),
+       executor_bindings=bindings,
+       shared_runtime_root=Path(
+           "/cluster/project/my-workflow/shared-runtime"
+       ),
+       launch=PSIJLaunchConfig(
+           executor="slurm",
+           queue="cpu",
+           project="BIOIMAGE",
+           walltime=timedelta(hours=2),
+           cpu_cores=4,
+           hard_cancel_after=300,
+       ),
+       transport=transport,
+   )
+
+   # Cluster: the agent validates and commits the upload, then PSI/J submits
+   # exactly one orchestrator job. Parsl providers allocate worker blocks.
+   # Laptop: these calls are bounded observations and may stop at any time.
+   progress_cursor = 0
+   for entry in run.progress(after_sequence=progress_cursor):
+       progress_cursor = entry["sequence"]
+   print(run.logs())
+   terminal = run.wait(poll_interval=5.0)
+
+   # A later laptop process needs only this transport profile, storage path,
+   # run ID, and its saved progress/log cursors.
+   run = RemoteWorkflowRun.open(
+       transport,
+       PurePosixPath("/cluster/project/my-workflow/results"),
+       run.id,
+   )
+   if terminal == "succeeded":
+       result = run.result(
+           destination=Path("./downloads") / run.id
+       )
+
+Only :class:`~bioimageflow.LocalUpload` reads laptop file content, and it is valid only for a path-like root workflow input.
+An ordinary ``Path`` is a cluster path.
+A string remains a string even when it resembles a path.
+Root DataFrames use verified Parquet and logical digests; every typed ``Path`` cell must be a normalized absolute cluster path, and string cells are unchanged.
+
+The transport staging root must be absolute, visible to the login node, and disjoint from workflow storage.
+It contains partial and ready submission bundles, content-addressed read-only upload objects, operation receipts, and immutable prepared result downloads.
+It never contains a launcher control tree, cache, canonical run view, output view, or authoritative status.
+Installed upload objects must remain readable by the orchestrator and every worker for the lifetime of each referencing run.
+Operators may remove abandoned partial uploads, expired result bundles, and upload objects that are no longer referenced by any retained run.
+
+The unchanged workflow storage layout remains authoritative:
+
+.. code-block:: text
+
+   <storage>/launcher/v1/runs/<run-id>/   mutable control, logs, return
+   <storage>/cache/v1/results/            immutable cache records
+   <storage>/views/runs/<run-id>/         canonical run view
+   <storage>/outputs/                     optional output projections
+
+PSI/J writes a submit intent before the external scheduler action and a native receipt immediately after the scheduler returns an ID.
+Reconnect uses that receipt to attach by native ID.
+A queued scheduler job remains launcher ``prepared`` until the orchestrator claims it.
+If submission may have happened without a durable receipt, :class:`~bioimageflow.PSIJSubmissionUncertainError` leaves the run prepared and prevents automatic resubmission.
+
+``cancel()`` commits prepared cancellation before best-effort queued-job cancellation.
+Starting and running cancellation stays graceful while the orchestrator stops submission, drains Parsl work, and cleans owned resources.
+After ``hard_cancel_after``, confirmed forced termination becomes ``lost`` because normal cleanup is not proven.
+``finalizing`` and terminal states are not displaced by a late cancellation request.
+
+Progress uses global sequence cursors.
+Logs use byte offsets and snapshot identities so clients can resume without splitting encoded text.
+Transport loss does not change run state.
+``RemoteWorkflowRun.open(transport, storage_path, run_id)`` reconstructs a handle without laptop-local claims about cluster control paths.
+
+``result(destination=...)`` downloads to a private sibling, verifies the immutable manifest and every digest, and atomically installs the destination.
+The exact destination may be reused only for the same verified bundle.
+Record-owned and return-owned paths, including ``SharedArray`` backing data, become laptop-local assets.
+Declared external cluster paths remain cluster ``Path`` values.
+Historical result preparation addresses exact immutable records and never consults ``current.json``.
+
+Transport failures expose stable codes for OpenSSH availability, connection, authentication, host keys, timeouts, SFTP transfer, remote protocol/validation, unsafe paths, and result integrity.
+Launcher failures retain structured run errors, PSI/J uncertainty remains distinct, and failed, cancelled, lost, not-ready, and result-unavailable states keep their public exception types.
+See :doc:`/gui/submitted_parsl` for the concise GUI action table.
+
+Optional real-site smoke
+------------------------
+
+The deterministic test suite needs no external scheduler.
+Maintainers may run ``tests/integration/parsl/test_cluster_smoke.py`` against an explicitly configured Slurm, PBS, or LSF site by setting ``BIOIMAGEFLOW_PSIJ_SMOKE_CONFIG`` to an absolute path to an untracked JSON file.
+The file supplies exactly ``host``, ``staging_root``, ``remote_executable``, ``storage_path``, ``shared_runtime_root``, ``executor``, ``walltime_seconds``, ``parsl_config_factory``, ``parsl_config_kwargs``, and ``executor_bindings``, with optional ``queue``, ``project``, and ``cpu_cores``.
+No site value is inferred, embedded in the repository, or required by CI.
+Use a unique staging root for the smoke and remove that fixture according to the site's transport-retention procedure after the terminal result has been verified.
 
 API
 ---

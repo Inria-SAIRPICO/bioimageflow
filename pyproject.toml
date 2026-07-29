@@ -62,6 +62,7 @@ filterwarnings = []
 markers = [
     "wetlands: tests that execute real Wetlands worker processes",
     "parsl: tests that execute the real optional Parsl runtime",
+    "cluster_smoke: optional maintainer-configured OpenSSH, PSI/J, and scheduler site smoke",
     "slow: deterministic or external tests excluded from the fast development loop",
     "acceptance: deterministic high-level workflow or example coverage excluded from the fast development loop",
     "packaging: build artifact, wheel, sdist, or package metadata artifact checks",

@@ -15,6 +15,7 @@ EXTERNAL_TIER_MARKERS = (
     "external_binary",
     "sairpico_binary",
     "model_runtime",
+    "cluster_smoke",
 )
 NON_COMPLETE_GATED_MARKERS = (
     "acceptance",

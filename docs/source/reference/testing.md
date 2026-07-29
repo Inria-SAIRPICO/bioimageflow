@@ -130,14 +130,15 @@ Add one or more specific resource markers when relevant:
 - `external_binary`: requires a non-Python command-line program;
 - `sairpico_binary`: requires real SAIRPICO binaries;
 - `model_runtime`: requires optional model runtimes or model downloads;
+- `cluster_smoke`: requires a maintainer-configured OpenSSH, PSI/J, and scheduler site;
 - `slow`: takes materially longer than the fast package tests.
 
 Reserve resource markers for tests that actually require those resources.
 External resource markers are descriptive selectors, and the external markers listed below also keep service-dependent tests out of the default pytest run.
 They are not permission to skip because a dependency is absent from the host environment after the external tier has been enabled.
-Regular tests that only build graphs, check documentation, or use fake/mocked resources should not use `public_data`, `external_binary`, `sairpico_binary`, or `model_runtime`.
+Regular tests that only build graphs, check documentation, or use fake/mocked resources should not use `public_data`, `external_binary`, `sairpico_binary`, `model_runtime`, or `cluster_smoke`.
 
-Tests marked `complete`, `wetlands`, `public_data`, `external_binary`, `sairpico_binary`, or `model_runtime` are skipped unless explicitly enabled with `--run-complete`:
+Tests marked `complete`, `wetlands`, `public_data`, `external_binary`, `sairpico_binary`, `model_runtime`, or `cluster_smoke` are skipped unless explicitly enabled with `--run-complete`:
 
 ```bash
 uv run pytest -m complete --run-complete
@@ -164,6 +165,7 @@ uv run pytest -m "complete and wetlands" --run-complete -rsx
 uv run pytest -m "complete and public_data" --run-complete -rsx
 uv run pytest -m "complete and external_binary" --run-complete -rsx
 uv run pytest -m "complete and model_runtime" --run-complete -rsx
+uv run pytest tests/integration/parsl/test_cluster_smoke.py --run-complete -rsx
 ```
 
 The Wetlands job is an umbrella portability selector.
@@ -224,7 +226,7 @@ BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_p
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
 ```
 
-Pyright is an implementation gate in this phase.
+Pyright is an implementation gate.
 The checked configuration includes package implementation code and excludes test modules because root tests still contain dynamic negative-test and pandas-stub idioms that are not part of the product type contract.
 
 Complete tests are appropriate at the end of a long package or workflow iteration, or when a maintainer explicitly asks for them.

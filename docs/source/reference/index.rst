@@ -25,3 +25,4 @@ Integrators trees.
 The exhaustive specification lives in :doc:`/specs`.
 The canonical output and cache storage layout is specified in
 :doc:`output_cache_storage`.
+The concise GUI integration deliverable is :doc:`/gui/submitted_parsl`.

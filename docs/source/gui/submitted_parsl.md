@@ -1,169 +1,81 @@
-# Submitted Parsl GUI Integration
+# Remote Cluster GUI Handoff
 
-This guide identifies the application surfaces a GUI should use for separate-process Parsl execution.
-The complete runtime API is documented in [Parsl execution](../reference/parsl), and the durable path contract is documented in [Output Cache and Storage Contract](../reference/output_cache_storage).
+Use `submit_workflow(..., transport=SSHSubmissionTransport(...), launch=PSIJLaunchConfig(...))` for a workflow launched from a laptop on a Slurm, PBS, or LSF cluster.
+The call returns a `RemoteWorkflowRun`.
+The launcher submits one PSI/J orchestrator job; the Parsl configuration used by that orchestrator owns all provider and worker allocation.
 
-## Integration Summary
+## Configuration fields
 
-Use `submit_workflow()` when a run must continue outside the GUI process and remain reconnectable.
-It returns a storage-backed `WorkflowRun`.
+A named GUI cluster profile should contain:
 
-The GUI supplies the workflow with its required `storage_path`.
-That exact storage root contains launcher control state, canonical run provenance, cache records, output projections, and diagnostics in distinct namespaces.
-The workflow graph and archive do not contain the runtime storage path.
+- an OpenSSH host or host alias;
+- an absolute transport staging root visible on the cluster login node;
+- the absolute cluster path to `bioimageflow-cluster-agent`;
+- the workflow's absolute cluster storage path;
+- the PSI/J executor name: `slurm`, `pbs`, or `lsf`;
+- optional queue and project/account;
+- positive walltime and orchestrator CPU core count;
+- an optional hard-cancel grace period.
 
-```python
-from bioimageflow import (
-    OrchestratorLaunchConfig,
-    ParslConfigRef,
-    submit_workflow,
-)
+OpenSSH configuration owns the user, port, keys, agent, `ProxyJump`, and host-key policy.
+Do not put credentials, private-key contents, literal secret values, arbitrary SSH options, scheduler directives, shell fragments, or bootstrap commands in a cluster profile.
+The cluster environment must already contain `bioimageflow[parsl,psij]`, the selected PSI/J executor plugin, the workflow's configuration factory, and the tool environments used by workers.
 
-run = submit_workflow(
-    workflow,
-    inputs=resolved_inputs,
-    parsl_config=ParslConfigRef(
-        "my_app.parsl_config:build_config",
-        {"profile": selected_profile},
-        secret_refs={"credential": "BIF_CLUSTER_CREDENTIAL"},
-    ),
-    executor_bindings=bindings,
-    node_routes=node_routes,
-    environment_routes=environment_routes,
-    shared_runtime_root=shared_runtime_root,
-    launch=OrchestratorLaunchConfig(backend="local"),
-)
-```
+## Input controls
 
-The configuration factory must be importable in the orchestrator process and return a Parsl Config.
-Persist only JSON-safe factory arguments and opaque secret-reference names.
-Keep Config, DFK, executor, provider, credential, and callable objects out of GUI project data and workflow JSON.
+A laptop file or directory chooser creates a `LocalUpload(Path(...))` only after the user explicitly chooses upload semantics.
+Every ordinary `Path` value is a cluster path and must never be probed, resolved, or uploaded by the GUI.
+A string stays a string even when it looks like a path.
+Root DataFrames cross as verified Parquet values; typed `Path` cells must already be normalized absolute cluster paths, while string cells remain strings.
 
-## Run Persistence and Reconnection
+Show the transport staging root separately from workflow storage.
+Transport staging contains submission bundles, explicit upload objects, operation receipts, and prepared result downloads.
+Workflow launcher state, cache records, run views, output views, diagnostics, and returns remain under the workflow storage path and are never mirrored into transport staging.
 
-Persist the run ID together with the workflow's explicit storage root.
-That pair is sufficient to reconnect:
+## Run persistence and presentation
+
+Persist only the cluster profile name, workflow storage path, run ID, and the last consumed progress and log cursors.
+Do not persist credentials or resolved secret values.
+A later process reconnects with:
 
 ```python
-from bioimageflow import WorkflowRun
-
-run = WorkflowRun.open(storage_path, run_id)
-run.refresh()
+run = RemoteWorkflowRun.open(transport, storage_path, run_id)
 ```
 
-Render these exact launcher states:
+Render the authoritative launcher states `prepared`, `starting`, `running`, `cancel_requested`, `finalizing`, `succeeded`, `failed`, `cancelled`, and `lost`.
+Scheduler state and the native job ID are secondary backend metadata from progress events.
+A queued scheduler job normally remains launcher `prepared` until the orchestrator claims the run.
 
-- `prepared`
-- `starting`
-- `running`
-- `finalizing`
-- `cancel_requested`
-- `succeeded`
-- `failed`
-- `cancelled`
-- `lost`
+Resume public and backend progress from the last global sequence.
+Resume each raw stdout/stderr stream from its byte offset and snapshot identity, assembling bytes before decoding text.
+Connection loss is an unknown observation, not a failed run, and the cluster run continues without a connected GUI.
 
-Treat `finalizing` as a non-cancellable success claim, but do not render success until the run reaches `succeeded`; finalization can still fail or become lost.
-Treat `lost` separately from `failed`: the orchestrator disappeared or was force-terminated without proof that providers, writers, and cleanup finished normally.
+Allow cancellation in `prepared`, `starting`, and `running`.
+Explain that `prepared` cancellation stops a queued job, active cancellation first requests graceful workflow and Parsl cleanup, and an optional hard cancellation after the grace period becomes `lost`.
+Disable cancellation in `finalizing` and terminal states because finalization or a terminal outcome has already won the durable race.
 
-`WorkflowRun.status` is the last loaded state.
-Call `refresh()` before rendering a new state or requesting the result.
-Polling may be driven by the GUI's normal background task mechanism.
+## Results
 
-## Progress, Logs, Cancellation, and Errors
+Require the user to choose an explicit local destination.
+`run.result(destination=...)` downloads into a private sibling directory, verifies the complete immutable bundle, and atomically installs the destination.
+A destination may be reused only when it is the exact verified bundle for the same run.
+Record-owned and return-owned assets become local paths beneath the destination, including downloaded `SharedArray` backing data.
+Declared external cluster paths remain cluster `Path` values and should be labelled as unavailable locally rather than guessed from their spelling.
 
-Read progress incrementally:
+## Stable error actions
 
-```python
-events = run.progress(after_sequence=last_sequence)
-for entry in events:
-    last_sequence = entry["sequence"]
-    if entry["kind"] == "public":
-        render_progress(entry["payload"])
-```
+| Category or code | GUI action |
+|---|---|
+| `ssh-unavailable`, `ssh-connection`, `ssh-timeout` | Keep the run identity, show transport unavailable, and offer reconnect or retry. |
+| `ssh-authentication`, `ssh-host-key` | Ask the user to repair normal OpenSSH configuration outside the application. |
+| `sftp-*`, `unsafe-upload-target`, `unsafe-destination` | Keep partial content hidden and ask for a safe path or retry. |
+| `remote-protocol`, `remote-invalid-*` | Stop automatic retries unless the error says the operation is retryable; report a client/cluster installation mismatch or invalid request. |
+| `PSIJSubmissionUncertainError` | Retain the prepared run and run ID, warn that submission may have happened, and never offer automatic resubmission. |
+| PSI/J executor unavailable or scheduler rejection | Ask the user to select an installed site executor or correct queue, project, walltime, and resource fields. |
+| `WorkflowRunNotReadyError` | Continue observation; no result is available yet. |
+| `WorkflowRunFailedError` | Show the persisted structured workflow error and logs. |
+| `WorkflowCancelledError` | Show normal cancellation. |
+| `WorkflowRunLostError` | Explain that backend termination was confirmed without proof of normal cleanup. |
+| `WorkflowRunResultUnavailableError`, `result-integrity` | Keep the destination uninstalled and report pruned, missing, corrupt, interrupted, or tampered immutable result data. |
 
-Every entry has a globally increasing sequence.
-Public payloads contain the same node name, status, row counts, messages, timestamps, result key, and record ID exposed by `ProgressEvent`.
-Backend entries are operational events and should remain visually separate from workflow progress.
-
-`run.logs()` returns the available orchestrator stdout and stderr text.
-Use it for diagnostics rather than primary status detection.
-
-`run.cancel()`:
-
-- directly cancels a run that is still `prepared`;
-- requests graceful cancellation for `starting` or `running`;
-- is a no-op once `finalizing` or a terminal state has won.
-
-The GUI should display `cancel_requested` until a terminal state arrives.
-When `hard_cancel_after` is configured for a local launch, an unresponsive orchestrator may become `lost` after that grace period even when the GUI has reconnected through a new `WorkflowRun` instance.
-
-`run.result()` returns the same single DataFrame or ordered mapping shape as the submitted call.
-Handle:
-
-- `WorkflowRunNotReadyError` while the run is non-terminal;
-- `WorkflowRunFailedError` with its structured persisted error;
-- `WorkflowCancelledError` for cancellation;
-- `WorkflowRunLostError` for an indeterminate terminated run;
-- `WorkflowRunResultUnavailableError` when an explicitly pruned or corrupted immutable record prevents historical reconstruction.
-
-At submission or reconnection boundaries, surface `LauncherProtocolError` for invalid launcher metadata and `LauncherStateConflictError` for conflicting guarded operations.
-`LauncherError` is their shared public base type.
-
-## Storage Areas the GUI Must Distinguish
-
-One submitted run uses the same run ID in two namespaces:
-
-```text
-<storage_path>/launcher/v1/runs/<run-id>/
-<storage_path>/views/runs/<run-id>/
-```
-
-The launcher tree contains mutable status, progress, logs, serialized invocation inputs, the manual command descriptor, structured errors, and the submitted public return.
-The canonical view contains portable run and node provenance.
-
-Reusable cache records remain under:
-
-```text
-<storage_path>/cache/v1/results/
-```
-
-Optional human-facing output projections remain under:
-
-```text
-<storage_path>/outputs/
-```
-
-The GUI should use `WorkflowRun`, `Storage`, workflow output-view APIs, and portable pointer readers instead of constructing cache, record, return, or output paths.
-Do not read a submitted result from `current.json`: `WorkflowRun.result()` resolves the exact immutable records selected by that run.
-Do not present launcher input Parquet files or return transport files as cache records.
-
-## Launch Modes
-
-`local` starts a separate orchestrator process and is the direct desktop/server integration.
-
-`manual` persists the complete submission and a shell-free `command.json` descriptor while remaining `prepared`.
-A GUI may display or export that descriptor for an external submitter and later reconnect to the same run.
-
-`psij` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator when the GUI is already running in the cluster environment.
-Represent it through `PSIJLaunchConfig` fields for executor, positive walltime, optional queue, optional project/account, positive core count, optional absolute cluster work directory, and optional hard-cancel grace.
-Do not offer arbitrary directives, scripts, custom attributes, environment values, or literal secrets.
-Direct `slurm`, `pbs`, `lsf`, and `oar` launch values do not exist, and OAR is not currently supported.
-Render PSI/J native job ID and scheduler state as secondary backend metadata while the existing launcher state remains authoritative.
-If `PSIJSubmissionUncertainError` occurs, retain the run ID, show the run as prepared with an uncertain scheduler outcome, and do not offer automatic resubmission.
-Parsl providers configured by the factory still allocate worker resources; launcher mode controls only the orchestrator process.
-
-## GUI Verification Checklist
-
-- The selected workflow always has an explicit storage root.
-- Submitted runs persist the storage root and run ID for reconnection.
-- Runtime Parsl configuration uses an importable factory reference and JSON-safe arguments.
-- Secret values never enter project JSON, submission displays, command text, progress, errors, or logs.
-- The run list distinguishes launcher status from canonical cache/run provenance.
-- Progress polling resumes from the last observed sequence.
-- Cancel remains responsive and renders `cancel_requested` until terminal state.
-- Failed, cancelled, lost, not-ready, and result-unavailable outcomes have distinct presentation.
-- Results load through `WorkflowRun.result()`.
-- Cache browsers continue to use immutable records and public `Storage` operations.
-- Launcher inputs, return transports, logs, and diagnostics are not presented as cache content.
-- Manual mode exposes the structured command without changing the run ID or storage root.
+The complete API and operational contract are documented in [Parsl execution](../reference/parsl) and [Output Cache and Storage Contract](../reference/output_cache_storage).
