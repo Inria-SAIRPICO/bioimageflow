@@ -69,6 +69,8 @@ def test_unknown_payload_fields_are_rejected(tmp_path: Path) -> None:
 def test_archive_payload_includes_custom_source_once_and_round_trips(
     tmp_path: Path,
 ) -> None:
+    assert not hasattr(_ArchiveSource, "_bif_custom_source_id")
+    assert not hasattr(_ArchiveSource, "_bif_custom_source_hash")
     workflow = Workflow(storage_path=tmp_path / "original", engine="direct")
     with workflow:
         _ArchiveSource()(name="source")
@@ -83,3 +85,5 @@ def test_archive_payload_includes_custom_source_once_and_round_trips(
     assert len(payload["payload"]["custom_sources"]) == 1
     assert restored.storage_path == (tmp_path / "assigned").absolute()
     assert restored.to_dict(include_custom_tools=True) == payload["payload"]
+    assert not hasattr(_ArchiveSource, "_bif_custom_source_id")
+    assert not hasattr(_ArchiveSource, "_bif_custom_source_hash")

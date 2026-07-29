@@ -228,8 +228,6 @@ def _register_custom_tool_module(
         if source_id not in seen_ids:
             records.append(record)
             seen_ids.add(source_id)
-        setattr(cls, "_bif_custom_source_id", source_id)
-        setattr(cls, "_bif_custom_source_hash", record["source_hash"])
         return source_id
 
     source = source_file.read_text(encoding="utf-8")
@@ -246,8 +244,6 @@ def _register_custom_tool_module(
             }
         )
         seen_ids.add(source_id)
-    setattr(cls, "_bif_custom_source_id", source_id)
-    setattr(cls, "_bif_custom_source_hash", source_hash)
     return source_id
 
 

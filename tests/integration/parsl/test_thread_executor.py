@@ -23,6 +23,7 @@ from bioimageflow import (
     WorkflowCancelledError,
 )
 from bioimageflow.cache import compute_env_hash
+from bioimageflow.parsl.startup import CORE_REQUIREMENT
 from bioimageflow.storage import Storage
 from bioimageflow_core import Arguments, IOModel
 from tests.testkit.parsl_tools import (
@@ -73,7 +74,7 @@ def _binding(label: str = "threads") -> ExecutorBinding:
                 name=PARSL_TEST_ENV.name,
                 dependency_hash=compute_env_hash(PARSL_TEST_ENV.dependencies),
                 allow_flexible_versions=False,
-                core_requirement="bioimageflow-core>=0.1.7,<0.2",
+                core_requirement=CORE_REQUIREMENT,
             ),
         ),
         capabilities=ExecutorCapabilities(

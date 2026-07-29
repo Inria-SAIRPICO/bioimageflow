@@ -20,6 +20,7 @@ from bioimageflow import (
 )
 from bioimageflow.cache import compute_env_hash
 from bioimageflow.launcher.errors import WorkflowRunFailedError
+from bioimageflow.parsl.startup import CORE_REQUIREMENT
 from bioimageflow_core import IOModel
 from tests.testkit.parsl_tools import (
     PARSL_TEST_ENV,
@@ -56,7 +57,7 @@ def _binding() -> ExecutorBinding:
                     PARSL_TEST_ENV.dependencies
                 ),
                 allow_flexible_versions=False,
-                core_requirement="bioimageflow-core>=0.1.7,<0.2",
+                core_requirement=CORE_REQUIREMENT,
             ),
         ),
         capabilities=ExecutorCapabilities(

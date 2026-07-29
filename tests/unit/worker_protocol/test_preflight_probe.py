@@ -23,6 +23,9 @@ from bioimageflow_core.worker_origins import (
 
 
 ROOT = Path(__file__).parents[3]
+CURRENT_CORE_REQUIREMENT = (
+    f"bioimageflow-core=={importlib.metadata.version('bioimageflow-core')}"
+)
 
 
 def _write_tool(source: Path, marker: Path) -> SourceFileOriginV1:
@@ -71,7 +74,7 @@ def _request(
     return {
         "schema": PREFLIGHT_SCHEMA,
         "executor_label": "cpu",
-        "core_requirements": ["bioimageflow-core>=0.1.7,<0.2"],
+        "core_requirements": [CURRENT_CORE_REQUIREMENT],
         "storage_root": str(storage.resolve()),
         "sentinel_path": str(
             (storage / ".preflight" / "session" / "sentinel").resolve()
@@ -100,7 +103,7 @@ def test_probe_returns_exact_success_evidence_without_invoking_tool(
         "executor_label": "cpu",
         "worker_api": "bioimageflow.processing_task.v1",
         "core_version": importlib.metadata.version("bioimageflow-core"),
-        "core_requirements": ["bioimageflow-core>=0.1.7,<0.2"],
+        "core_requirements": [CURRENT_CORE_REQUIREMENT],
         "core_compatible": True,
         "storage_root": request["storage_root"],
         "sentinel_path": request["sentinel_path"],

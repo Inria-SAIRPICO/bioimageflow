@@ -24,6 +24,7 @@ from bioimageflow.parsl.requirements import (
     WorkerRequirement,
 )
 from bioimageflow.parsl.routing import resolve_executor_routes
+from bioimageflow.parsl.startup import CORE_REQUIREMENT as CURRENT_CORE_REQUIREMENT
 from bioimageflow.parsl.types import (
     ExecutorBinding,
     ExecutorCapabilities,
@@ -199,7 +200,7 @@ class ProbeTool(ProcessingTool):
     expectation = PreflightExpectation(
         executor_label="cpu",
         environment_identities=("env_test",),
-        core_requirements=(CORE_REQUIREMENT,),
+        core_requirements=(CURRENT_CORE_REQUIREMENT,),
         storage_root=str(storage.resolve()),
         sentinel_path=str(
             (storage / ".preflight" / "session" / "sentinel").resolve()

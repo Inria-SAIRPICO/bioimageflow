@@ -1,7 +1,8 @@
 """Small importable processing tools for real Parsl executor tests."""
 
-import time
+import importlib.metadata
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +16,13 @@ from bioimageflow_core import (
 )
 
 
+PARSL_TEST_CORE_VERSION = importlib.metadata.version("bioimageflow-core")
 PARSL_TEST_ENV = EnvironmentSpec(
     name="parsl-test",
-    dependencies={"python": "3.10", "pip": ["bioimageflow-core==0.1.7"]},
+    dependencies={
+        "python": "3.10",
+        "pip": [f"bioimageflow-core=={PARSL_TEST_CORE_VERSION}"],
+    },
 )
 
 

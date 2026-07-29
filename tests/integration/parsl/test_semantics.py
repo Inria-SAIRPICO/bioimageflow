@@ -21,6 +21,7 @@ from bioimageflow import (
     Workflow,
 )
 from bioimageflow.cache import compute_env_hash
+from bioimageflow.parsl.startup import CORE_REQUIREMENT
 from bioimageflow_core import Arguments, IOModel
 from tests.integration.runtime_cache.test_recursive_provenance import (
     ValueAssetWriter,
@@ -274,7 +275,7 @@ def test_non_reusable_recursive_path_uses_parsl_transient_workspace(
                     writer_environment.dependencies
                 ),
                 allow_flexible_versions=False,
-                core_requirement="bioimageflow-core>=0.1.7,<0.2",
+                core_requirement=CORE_REQUIREMENT,
             ),
         ),
         capabilities=ExecutorCapabilities(
