@@ -2,11 +2,9 @@
 
 # ruff: noqa: F401
 
-from pathlib import Path
-from typing import Literal
-
 from .models import CacheCorruptionError, OutputViewCapability
 from .manifests import CurrentPointer, RecordManifest
+from .exports import export_outputs
 from .identity import (
     _atomic_write_json,
     _bioimageflow_version,
@@ -34,32 +32,6 @@ from .identity import (
     validate_relative_posix_path,
 )
 from .storage import Storage
-
-
-def export_outputs(
-    storage_path: str | Path,
-    *,
-    mode: Literal["pointer", "symlink", "copy", "hardlink"] = "copy",
-    scope: Literal["latest", "runs", "both"] = "latest",
-    run_id: str | None = None,
-) -> list[Path]:
-    """Materialize assets, dataframes, and provenance from portable run views."""
-    if scope not in {"latest", "runs", "both"}:
-        raise ValueError(
-            "Invalid output scope. Expected 'latest', 'runs', or 'both'."
-        )
-    storage = Storage(storage_path)
-    materialized: list[Path] = []
-    if scope in {"latest", "both"}:
-        materialized.extend(storage.materialize_latest_outputs(mode))
-    if scope in {"runs", "both"}:
-        selected_run_id = run_id or storage.latest_success_run_id()
-        if selected_run_id is None:
-            raise CacheCorruptionError(
-                "No successful run view is available for output export."
-            )
-        materialized.extend(storage.materialize_run_outputs(selected_run_id, mode))
-    return materialized
 
 __all__ = [
     "CacheCorruptionError",

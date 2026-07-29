@@ -973,12 +973,20 @@ The probe verifies both file and directory symlinks are readable, tests hardlink
 The library does not define an automatic fallback mode; platform callers choose fallback policy.
 
 `Workflow.export_outputs(...)` and `bioimageflow.export_outputs(...)` are explicit operations and raise if the requested materialization cannot be produced.
-The top-level function accepts only a storage path and defaults to a latest copy, making it suitable for the CLI:
+The top-level function defaults to a latest copy beneath the storage path, making it suitable for the CLI:
 
 ```bash
 bioimageflow export-outputs <storage-path>
 bioimageflow export-outputs <storage-path> --mode copy --scope runs --run-id <run-id>
 ```
+
+Passing `destination=<path>` or `--destination <path>` installs a complete external output root containing `latest/` and/or `runs/<run-id>/`.
+External exports are always rebuilt from canonical run views and immutable records, never from a disposable tree already present under `outputs/`.
+The complete tree is staged beside the destination before installation.
+An existing destination raises `FileExistsError` unless `replace=True` or `--replace` is provided; failed replacement restores the previous tree and removes staging artifacts.
+Passing `replace=True` without an explicit destination raises `ValueError`.
+The destination may not equal, contain, or be contained by the source storage root.
+Returned paths always identify the installed destination rather than its staging directory.
 
 Automatic disposable output-view materialization logs a warning and does not turn a successfully computed workflow into a failed computation.
 

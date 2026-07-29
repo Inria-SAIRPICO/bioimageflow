@@ -199,6 +199,17 @@ paths = export_outputs("./results", mode="copy", scope="latest")
 Each node directory includes the declared assets, canonical `dataframe.parquet`, readable `dataframe.csv` and `dataframe.json` exports, and a `provenance.json` explanation containing the tool/version, parameters, selected upstream records, cache identities, and run metadata.
 Use `--scope runs --run-id <run-id>` to export a particular run, or `--scope both` to export both the latest node view and a run view.
 
+To install a self-contained output tree outside workflow storage, pass an explicit destination:
+
+```bash
+bioimageflow export-outputs ./results --destination ./shared-results
+```
+
+The destination contains `latest/` and/or `runs/<run-id>/` according to the selected scope.
+It is staged as a complete sibling tree and must not already exist unless `--replace` is passed.
+The Python API provides the equivalent `destination=` and `replace=` keyword arguments.
+The `replace` option is invalid when no explicit destination is supplied.
+
 ## Development
 
 The full test workflow is documented in `docs/source/reference/testing.md`.

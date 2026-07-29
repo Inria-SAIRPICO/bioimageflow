@@ -493,6 +493,8 @@ class _RuntimeMixin:
     def export_outputs(
         self,
         *,
+        destination: str | Path | None = None,
+        replace: bool = False,
         mode: Literal["pointer", "symlink", "copy", "hardlink"] = "symlink",
         scope: Literal["latest", "runs", "both"] = "latest",
         run_id: str | None = None,
@@ -502,6 +504,8 @@ class _RuntimeMixin:
 
         return export_outputs(
             self.storage_path,
+            destination=destination,
+            replace=replace,
             mode=mode,
             scope=scope,
             run_id=run_id,

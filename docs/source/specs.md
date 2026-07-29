@@ -2594,13 +2594,30 @@ from bioimageflow import export_outputs
 export_outputs("./results", mode="copy", scope="latest")
 ```
 
+An explicit external output root may be installed without reading from a disposable `outputs/` projection:
+
+```python
+export_outputs(
+    "./results",
+    destination="./shared-results",
+    replace=False,
+    mode="copy",
+    scope="latest",
+)
+```
+
 ```bash
 bioimageflow export-outputs ./results
 bioimageflow export-outputs ./results --scope runs --run-id run_...
+bioimageflow export-outputs ./results --destination ./shared-results --replace
 ```
 
 The function and CLI default to `mode="copy"` and `scope="latest"`.
 `Workflow.export_outputs(...)` retains its existing `mode="symlink"` default for API compatibility.
+An explicit destination is a complete output root containing `latest/` and/or `runs/<run-id>/`.
+It must be disjoint from source storage and is installed from a sibling staging tree.
+Existing destinations require explicit replacement, and an installation failure restores the previous tree.
+The `replace` flag is invalid without an explicit destination.
 
 `run.json` records the effective injected backend and effective parallel or sequential scheduling policy.
 The active `WorkflowExecutionContext` run ID is used consistently in attempt diagnostics, transient invocation diagnostics, guarded selection provenance, and run views, but never in result-key or record-ID material.

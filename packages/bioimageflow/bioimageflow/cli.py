@@ -18,6 +18,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     export.add_argument("storage_path", type=Path)
     export.add_argument(
+        "--destination",
+        type=Path,
+        help="install a complete output root at this external path",
+    )
+    export.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace an existing explicit destination",
+    )
+    export.add_argument(
         "--mode",
         choices=("copy", "hardlink", "symlink", "pointer"),
         default="copy",
@@ -40,6 +50,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "export-outputs":
         paths = export_outputs(
             args.storage_path,
+            destination=args.destination,
+            replace=args.replace,
             mode=args.mode,
             scope=args.scope,
             run_id=args.run_id,
