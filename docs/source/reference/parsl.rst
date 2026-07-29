@@ -408,8 +408,10 @@ The following complete example distinguishes laptop actions from cluster actions
        run.id,
    )
    if terminal == "succeeded":
+       result_destination = Path("./downloads") / run.id
+       result_destination.parent.mkdir(parents=True, exist_ok=True)
        result = run.result(
-           destination=Path("./downloads") / run.id
+           destination=result_destination
        )
 
 Only :class:`~bioimageflow.LocalUpload` reads laptop file content, and it is valid only for a path-like root workflow input.
@@ -443,7 +445,8 @@ After ``hard_cancel_after``, confirmed forced termination becomes ``lost`` becau
 ``finalizing`` and terminal states are not displaced by a late cancellation request.
 
 Progress uses global sequence cursors.
-Logs use byte offsets and snapshot identities so clients can resume without splitting encoded text.
+``logs()`` uses byte offsets and snapshot identities internally so one read assembles a stable byte snapshot before decoding text.
+Each public call returns the complete currently available combined text; the byte cursor is not part of the public API.
 Transport loss does not change run state.
 ``RemoteWorkflowRun.open(transport, storage_path, run_id)`` reconstructs a handle without laptop-local claims about cluster control paths.
 
@@ -462,7 +465,7 @@ Optional real-site smoke
 
 The deterministic test suite needs no external scheduler.
 Maintainers may run ``tests/integration/parsl/test_cluster_smoke.py`` against an explicitly configured Slurm, PBS, or LSF site by setting ``BIOIMAGEFLOW_PSIJ_SMOKE_CONFIG`` to an absolute path to an untracked JSON file.
-The file supplies exactly ``host``, ``staging_root``, ``remote_executable``, ``storage_path``, ``shared_runtime_root``, ``executor``, ``walltime_seconds``, ``parsl_config_factory``, ``parsl_config_kwargs``, and ``executor_bindings``, with optional ``queue``, ``project``, and ``cpu_cores``.
+The file supplies exactly ``host``, ``staging_root``, ``remote_executable``, ``storage_path``, ``shared_runtime_root``, ``executor``, ``walltime_seconds``, ``timeout_seconds``, ``parsl_config_factory``, ``parsl_config_kwargs``, and ``executor_bindings``, with optional ``queue``, ``project``, and ``cpu_cores``.
 No site value is inferred, embedded in the repository, or required by CI.
 Use a unique staging root for the smoke and remove that fixture according to the site's transport-retention procedure after the terminal result has been verified.
 

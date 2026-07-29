@@ -34,7 +34,7 @@ Workflow launcher state, cache records, run views, output views, diagnostics, an
 
 ## Run persistence and presentation
 
-Persist only the cluster profile name, workflow storage path, run ID, and the last consumed progress and log cursors.
+Persist only the cluster profile name, workflow storage path, run ID, and the last consumed progress sequence.
 Do not persist credentials or resolved secret values.
 A later process reconnects with:
 
@@ -47,7 +47,8 @@ Scheduler state and the native job ID are secondary backend metadata from progre
 A queued scheduler job normally remains launcher `prepared` until the orchestrator claims the run.
 
 Resume public and backend progress from the last global sequence.
-Resume each raw stdout/stderr stream from its byte offset and snapshot identity, assembling bytes before decoding text.
+`run.logs()` reads bounded stdout/stderr snapshots by byte offset internally, assembles bytes before decoding text, and returns the complete currently available combined text.
+Replace the displayed log snapshot after each call rather than persisting an internal byte cursor that the public API does not expose.
 Connection loss is an unknown observation, not a failed run, and the cluster run continues without a connected GUI.
 
 Allow cancellation in `prepared`, `starting`, and `running`.
@@ -66,7 +67,7 @@ Declared external cluster paths remain cluster `Path` values and should be label
 
 | Category or code | GUI action |
 |---|---|
-| `ssh-unavailable`, `ssh-connection`, `ssh-timeout` | Keep the run identity, show transport unavailable, and offer reconnect or retry. |
+| `ssh-unavailable`, `ssh-connection`, `ssh-timeout`, `ssh-command-failed` | Keep the run identity, show transport unavailable, and offer reconnect or retry. |
 | `ssh-authentication`, `ssh-host-key` | Ask the user to repair normal OpenSSH configuration outside the application. |
 | `sftp-*`, `unsafe-upload-target`, `unsafe-destination` | Keep partial content hidden and ask for a safe path or retry. |
 | `remote-protocol`, `remote-invalid-*` | Stop automatic retries unless the error says the operation is retryable; report a client/cluster installation mismatch or invalid request. |

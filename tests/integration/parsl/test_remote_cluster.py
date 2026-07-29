@@ -129,7 +129,7 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
     staging = tmp_path / "transport"
     uploaded = tmp_path / "laptop image.bin"
     uploaded.write_bytes(b"pixels")
-    cluster = FakeCluster()
+    cluster = FakeCluster(lose_submit_response=True)
     cluster.install(monkeypatch)
     original_archive_class = dict(_ArchiveIncrement.__dict__)
 
@@ -188,15 +188,27 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
     assert isinstance(run, RemoteWorkflowRun)
     assert run.status == "prepared"
     assert cluster.launch_count == 1
+    assert cluster.operation_counts["submit"] == 2
+    assert len(cluster.job_specs) == 1
+    spec = cluster.job_specs[0]
+    assert spec.arguments[-2:] == ["--run-id", run.id]
     queued = [event for event in run.progress() if event["kind"] == "backend"]
-    assert any(event["payload"]["event"] == "psij_queued" for event in queued)
+    queued_event = next(
+        event for event in queued if event["payload"]["event"] == "psij_queued"
+    )
+    assert queued_event["payload"]["native_id"] == "fake-native-1"
     assert cluster.control is not None
+    receipt = cluster.control.confined_path("psij_job.json")
+    assert f'"run_id":"{run.id}"' in receipt.read_text(encoding="utf-8")
+    assert '"native_id":"fake-native-1"' in receipt.read_text(encoding="utf-8")
     logs = cluster.control.control_dir / "logs"
     logs.mkdir(exist_ok=True)
     (logs / "orchestrator.out").write_bytes(b"queued stdout")
     (logs / "orchestrator.err").write_bytes(b"queued stderr")
     assert run.logs() == "[stdout]\nqueued stdout\n[stderr]\nqueued stderr"
-    reconnected = RemoteWorkflowRun.open(_transport(staging), storage.as_posix(), run.id)
+    reconnected = RemoteWorkflowRun.open(
+        _transport(staging), storage.as_posix(), run.id
+    )
     assert cluster.run_queued_job() == "succeeded"
     reconnected.refresh()
     destination = tmp_path / "download" / run.id
@@ -231,9 +243,7 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
 
     control = LauncherRepository(storage).open(run.id)
     submission = control.read_submission()
-    encoded_inputs = {
-        item["name"]: item for item in submission["invocation"]["inputs"]
-    }
+    encoded_inputs = {item["name"]: item for item in submission["invocation"]["inputs"]}
     loaded = load_invocation(
         workflow,
         submission["invocation"],
@@ -242,10 +252,7 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
     assert loaded.inputs["table"].at["row", "dataframe_path"] == Path(
         "/cluster/data/from-frame.tif"
     )
-    assert (
-        loaded.inputs["table"].at["row", "label"]
-        == "/looks/local/but-is-a-string"
-    )
+    assert loaded.inputs["table"].at["row", "label"] == "/looks/local/but-is-a-string"
     installed_upload = Path(encoded_inputs["upload"]["value"]["value"])
     assert installed_upload.read_bytes() == b"pixels"
     assert encoded_inputs["cluster_path"]["value"] == {
@@ -258,8 +265,7 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
     }
     assert cluster.launch_count == 1
     assert not any(
-        (staging / name).exists()
-        for name in ("cache", "launcher", "outputs", "views")
+        (staging / name).exists() for name in ("cache", "launcher", "outputs", "views")
     )
 
 
