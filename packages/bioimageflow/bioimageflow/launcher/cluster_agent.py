@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
+from contextlib import redirect_stdout
 from typing import Any
 
 from .cluster_protocol import (
@@ -91,12 +92,13 @@ def run_agent(encoded: bytes) -> bytes:
                 "schema": value["schema"],
             }
         )
-        result = handle_operation(
-            value["operation"],
-            request_id,
-            value["arguments"],
-            digest,
-        )
+        with redirect_stdout(sys.stderr):
+            result = handle_operation(
+                value["operation"],
+                request_id,
+                value["arguments"],
+                digest,
+            )
         response = success_response(request_id, result)
     except ClusterProtocolFailure as failure:
         response = error_response(request_id, failure)

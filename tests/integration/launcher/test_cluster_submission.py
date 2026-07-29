@@ -201,3 +201,87 @@ def test_concurrent_equal_submit_requests_launch_once(
     assert len(results) == 2
     assert results[0] == results[1]
     assert launches == 1
+
+
+def test_retry_after_crash_between_allocation_and_dispatch_resumes_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import bioimageflow.launcher.submission as submission_module
+
+    workflow = Workflow(storage_path=tmp_path / "results")
+    staging = tmp_path / "transport"
+    launches = []
+
+    def fake_launch(control, launch, *, secret_refs):
+        launches.append(control.run_id)
+
+    monkeypatch.setattr(
+        "bioimageflow.launcher.backends.launch_orchestrator",
+        fake_launch,
+    )
+    original_launch_prepared = submission_module._launch_prepared_control
+
+    def crash_after_allocation(*args, **kwargs):
+        raise KeyboardInterrupt("injected process crash")
+
+    with prepare_cluster_bundle(
+        workflow,
+        inputs=None,
+        targets=None,
+        parsl_config=ParslConfigRef(
+            "tests.unit.launcher.config_factories:build",
+            {"workers": 1},
+        ),
+        executor_bindings={"threads": _binding()},
+        node_routes=None,
+        environment_routes=None,
+        shared_runtime_root=None,
+        task_policy=None,
+        launch=PSIJLaunchConfig(
+            executor="slurm",
+            walltime=timedelta(minutes=10),
+        ),
+    ) as bundle:
+        base = {
+            "manifest": bundle.manifest,
+            "staging_root": staging.as_posix(),
+        }
+        allocated = _call("allocate-upload", base, str(uuid.uuid4()))
+        shutil.copytree(
+            bundle.root,
+            Path(allocated["remote_root"]),
+            dirs_exist_ok=True,
+        )
+        committed = _call(
+            "commit-upload",
+            {**base, "upload_id": allocated["upload_id"]},
+            str(uuid.uuid4()),
+        )
+        submit_id = str(uuid.uuid4())
+        arguments = {**base, "object_path": committed["object_path"]}
+        monkeypatch.setattr(
+            submission_module,
+            "_launch_prepared_control",
+            crash_after_allocation,
+        )
+        encoded = canonical_json_bytes(
+            request("submit", arguments, request_id=submit_id)
+        )
+        try:
+            run_agent(encoded)
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("Injected crash was not observed.")
+        monkeypatch.setattr(
+            submission_module,
+            "_launch_prepared_control",
+            original_launch_prepared,
+        )
+
+        resumed = _call("submit", arguments, submit_id)
+        repeated = _call("submit", arguments, submit_id)
+
+    assert resumed == repeated
+    assert launches == [resumed["run_id"]]

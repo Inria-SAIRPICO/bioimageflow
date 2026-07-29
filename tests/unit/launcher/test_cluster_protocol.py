@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 
+import bioimageflow.launcher.cluster_agent as cluster_agent
 from bioimageflow.launcher.cluster_agent import run_agent
 from bioimageflow.launcher.cluster_protocol import (
     REQUEST_SCHEMA,
@@ -104,3 +105,35 @@ def test_agent_rejects_future_protocol_without_echoing_untrusted_id() -> None:
     assert response["ok"] is False
     assert response["request_id"] is None
     assert response["error"]["code"] == "unsupported-protocol"
+
+
+def test_agent_routes_operation_prints_away_from_protocol_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    request_id = str(uuid.uuid4())
+
+    def noisy_handler(operation, request_id, arguments, request_digest):
+        print("factory diagnostic")
+        return {"run_id": "run_" + "0" * 32}
+
+    monkeypatch.setattr(cluster_agent, "handle_operation", noisy_handler)
+    encoded = json.dumps(
+        {
+            "arguments": {
+                "manifest": {},
+                "object_path": "/cluster/object",
+                "staging_root": "/cluster/staging",
+            },
+            "operation": "submit",
+            "request_id": request_id,
+            "schema": REQUEST_SCHEMA,
+        }
+    ).encode()
+
+    response = json.loads(run_agent(encoded))
+    captured = capsys.readouterr()
+
+    assert response["ok"] is True
+    assert captured.out == ""
+    assert "factory diagnostic" in captured.err

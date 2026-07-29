@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import stat
+import unicodedata
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
@@ -80,6 +81,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             "Upload manifest entries are invalid.",
         )
     seen: set[str] = set()
+    folded_paths: set[str] = set()
     total = 0
     for item in entries:
         if type(item) is not dict or set(item) != {
@@ -99,8 +101,11 @@ def validate_manifest(value: Any) -> dict[str, Any]:
                 "invalid-upload-manifest",
                 "Upload manifest path is unsafe.",
             ) from exc
+        folded = path.casefold()
         if (
             path in seen
+            or folded in folded_paths
+            or unicodedata.normalize("NFC", path) != path
             or item["kind"] not in {"directory", "file"}
             or type(item["size"]) is not int
             or item["size"] < 0
@@ -121,6 +126,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
                 "Upload directory manifest entry is invalid.",
             )
         seen.add(path)
+        folded_paths.add(folded)
         total += item["size"]
         if total > 1 << 40:
             raise ClusterProtocolFailure(

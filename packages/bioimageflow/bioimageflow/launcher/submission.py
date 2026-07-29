@@ -115,6 +115,27 @@ def _mark_launch_failed(control: Any, error: BaseException) -> None:
         )
 
 
+def _launch_prepared_control(
+    control: Any,
+    launch: LaunchConfig,
+    *,
+    parsl_config: ParslConfigRef,
+) -> None:
+    try:
+        from .backends import launch_orchestrator
+
+        launch_orchestrator(
+            control,
+            launch,
+            secret_refs=tuple((parsl_config.secret_refs or {}).values()),
+        )
+    except PSIJSubmissionUncertainError:
+        raise
+    except BaseException as exc:
+        _mark_launch_failed(control, exc)
+        raise
+
+
 def _submit_workflow(
     workflow: Workflow,
     *,
@@ -223,19 +244,11 @@ def _submit_workflow(
                 shutil.rmtree(candidate)
             raise
 
-        try:
-            from .backends import launch_orchestrator
-
-            launch_orchestrator(
-                control,
-                selected_launch,
-                secret_refs=tuple((parsl_config.secret_refs or {}).values()),
-            )
-        except PSIJSubmissionUncertainError:
-            raise
-        except BaseException as exc:
-            _mark_launch_failed(control, exc)
-            raise
+        _launch_prepared_control(
+            control,
+            selected_launch,
+            parsl_config=parsl_config,
+        )
         return WorkflowRun(control)
     raise RuntimeError(
         "Could not allocate a unique submitted workflow run ID."

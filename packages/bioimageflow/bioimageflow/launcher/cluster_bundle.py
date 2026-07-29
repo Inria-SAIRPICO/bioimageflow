@@ -144,6 +144,8 @@ def _walk_upload(source: Path, destination: Path) -> tuple[str, list[dict[str, A
     if stat.S_ISREG(mode):
         destination.mkdir(parents=True, exist_ok=True)
         entry = _copy_entry(source, destination_root, root_name)
+        if entry["size"] > MAX_UPLOAD_BYTES:
+            raise ValueError("LocalUpload exceeds the transport byte limit.")
         return "file", [entry]
     if not stat.S_ISDIR(mode):
         raise ValueError("LocalUpload must name a regular file or directory.")
@@ -188,6 +190,8 @@ def _walk_upload(source: Path, destination: Path) -> tuple[str, list[dict[str, A
                         "size": 0,
                     }
                 )
+                if len(entries) > MAX_UPLOAD_FILES:
+                    raise ValueError("LocalUpload exceeds the transport file limit.")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             entry = _copy_entry(child, target, str(relative))
@@ -283,6 +287,7 @@ def _cluster_path_string(value: Path | str, *, field: str) -> str:
 
 def _manifest(root: Path) -> dict[str, Any]:
     entries = []
+    total = 0
     for path in sorted(root.rglob("*")):
         if path.is_symlink():
             raise ValueError("Submission bundle symlinks are forbidden.")
@@ -296,6 +301,8 @@ def _manifest(root: Path) -> dict[str, Any]:
                     "size": 0,
                 }
             )
+            if len(entries) > MAX_UPLOAD_FILES:
+                raise ValueError("Submission bundle exceeds the entry limit.")
             continue
         if not path.is_file():
             raise ValueError("Submission bundle contains a special file.")
@@ -307,6 +314,9 @@ def _manifest(root: Path) -> dict[str, Any]:
                 "size": path.stat().st_size,
             }
         )
+        total += path.stat().st_size
+        if len(entries) > MAX_UPLOAD_FILES or total > MAX_UPLOAD_BYTES:
+            raise ValueError("Submission bundle exceeds the transport limits.")
     body = {
         "entries": entries,
         "root_name": "submission",
