@@ -22,7 +22,12 @@ from .cluster_protocol import (
     ClusterProtocolFailure,
     _check_tree,
 )
-from .cluster_upload import _ensure_root, _verify_tree, validate_manifest
+from .cluster_upload import (
+    _ensure_confined_directory,
+    _ensure_root,
+    _verify_tree,
+    validate_manifest,
+)
 from .inputs import decode_cluster_typed_constant
 from .payload import load_workflow_payload
 from .repository import (
@@ -316,7 +321,11 @@ def submit_bundle(
             "invalid-object-path",
             "submit must name the committed content-addressed object.",
         )
-    _verify_tree(expected_object, validated_manifest)
+    _verify_tree(
+        expected_object,
+        validated_manifest,
+        require_read_only=True,
+    )
     request_value = _load_request(expected_object)
     storage_path = _absolute_cluster_path(
         request_value["storage_path"],
@@ -354,20 +363,38 @@ def submit_bundle(
             f"Cluster submission validation failed: {type(exc).__name__}.",
         ) from exc
     receipt_dir = staging_root / "receipts" / "submit"
-    receipt_dir.mkdir(mode=0o700, exist_ok=True)
+    _ensure_confined_directory(receipt_dir, root=staging_root)
     receipt_path = receipt_dir / f"{request_id}.json"
     dispatch_path = receipt_dir / f"{request_id}.dispatched.json"
     lock_path = staging_root / "locks" / f"submit-{request_id}.lock"
     with _CrossProcessLock(lock_path):
         if receipt_path.exists():
             receipt = _read_json(receipt_path)
-            if receipt.get("request_digest") != request_digest:
+            expected_receipt_fields = {
+                "bundle_digest",
+                "request_digest",
+                "request_id",
+                "run_id",
+                "schema",
+            }
+            if set(receipt) != expected_receipt_fields:
+                raise ClusterProtocolFailure(
+                    "corrupt-receipt",
+                    "Submit receipt is malformed.",
+                )
+            if receipt["request_digest"] != request_digest:
                 raise ClusterProtocolFailure(
                     "duplicate-request-conflict",
                     "request_id was already used with different arguments.",
                 )
-            run_id = receipt.get("run_id")
-            if type(run_id) is not str:
+            run_id = receipt["run_id"]
+            if (
+                type(run_id) is not str
+                or receipt["bundle_digest"] != validated_manifest["digest"]
+                or receipt["request_id"] != request_id
+                or receipt["schema"]
+                != "bioimageflow.cluster.submit_receipt.v1"
+            ):
                 raise ClusterProtocolFailure(
                     "corrupt-receipt",
                     "Submit receipt is malformed.",
@@ -463,6 +490,11 @@ def submit_bundle(
                         "psij-unavailable",
                         "Requested PSI/J executor is unavailable in the cluster environment.",
                     ) from exc
+                except Exception as exc:
+                    raise ClusterProtocolFailure(
+                        "remote-submission-failed",
+                        f"Cluster submission failed: {type(exc).__name__}.",
+                    ) from exc
                 _atomic_write_json(
                     dispatch_path,
                     {
@@ -470,5 +502,19 @@ def submit_bundle(
                         "run_id": run_id,
                         "schema": "bioimageflow.cluster.submit_dispatch.v1",
                     },
+                )
+            elif control.confined_path("psij_job.json").exists():
+                _atomic_write_json(
+                    dispatch_path,
+                    {
+                        "request_digest": request_digest,
+                        "run_id": run_id,
+                        "schema": "bioimageflow.cluster.submit_dispatch.v1",
+                    },
+                )
+            else:
+                raise ClusterProtocolFailure(
+                    "remote-submission-failed",
+                    "Cluster submission previously failed before scheduler dispatch.",
                 )
         return {"run_id": run_id, "storage_path": storage_path.as_posix()}

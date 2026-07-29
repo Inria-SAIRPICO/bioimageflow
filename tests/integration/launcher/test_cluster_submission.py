@@ -285,3 +285,72 @@ def test_retry_after_crash_between_allocation_and_dispatch_resumes_once(
 
     assert resumed == repeated
     assert launches == [resumed["run_id"]]
+
+
+def test_retry_after_definitive_launch_failure_does_not_become_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path / "results")
+    staging = tmp_path / "transport"
+    launches = 0
+
+    def fail_launch(control, launch, *, secret_refs):
+        nonlocal launches
+        launches += 1
+        raise RuntimeError("scheduler rejected submission")
+
+    monkeypatch.setattr(
+        "bioimageflow.launcher.backends.launch_orchestrator",
+        fail_launch,
+    )
+    with prepare_cluster_bundle(
+        workflow,
+        inputs=None,
+        targets=None,
+        parsl_config=ParslConfigRef(
+            "tests.unit.launcher.config_factories:build",
+            {"workers": 1},
+        ),
+        executor_bindings={"threads": _binding()},
+        node_routes=None,
+        environment_routes=None,
+        shared_runtime_root=None,
+        task_policy=None,
+        launch=PSIJLaunchConfig(
+            executor="slurm",
+            walltime=timedelta(minutes=10),
+        ),
+    ) as bundle:
+        base = {
+            "manifest": bundle.manifest,
+            "staging_root": staging.as_posix(),
+        }
+        allocated = _call("allocate-upload", base, str(uuid.uuid4()))
+        shutil.copytree(
+            bundle.root,
+            Path(allocated["remote_root"]),
+            dirs_exist_ok=True,
+        )
+        committed = _call(
+            "commit-upload",
+            {**base, "upload_id": allocated["upload_id"]},
+            str(uuid.uuid4()),
+        )
+        submit_id = str(uuid.uuid4())
+        encoded = canonical_json_bytes(
+            request(
+                "submit",
+                {**base, "object_path": committed["object_path"]},
+                request_id=submit_id,
+            )
+        )
+
+        first = json.loads(run_agent(encoded))
+        second = json.loads(run_agent(encoded))
+
+    assert first["ok"] is False
+    assert second["ok"] is False
+    assert first["error"]["code"] == "remote-submission-failed"
+    assert second["error"]["code"] == "remote-submission-failed"
+    assert launches == 1

@@ -32,6 +32,7 @@ def test_ssh_uses_exact_safe_argv_environment_and_stdin(
 ) -> None:
     captured = {}
     request_id = str(uuid.uuid4())
+    upload_id = str(uuid.uuid4())
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
@@ -44,7 +45,10 @@ def test_ssh_uses_exact_safe_argv_environment_and_stdin(
                     "error": None,
                     "ok": True,
                     "request_id": request_id,
-                    "result": {"upload_id": str(uuid.uuid4())},
+                    "result": {
+                        "remote_root": f"/cluster/staging/.partial/{upload_id}",
+                        "upload_id": upload_id,
+                    },
                     "schema": RESPONSE_SCHEMA,
                 }
             ).encode(),
@@ -216,6 +220,76 @@ def test_response_loss_is_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured.value.ambiguous is True
 
 
+def test_allocate_response_must_bind_exact_server_partial_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_id = str(uuid.uuid4())
+    upload_id = str(uuid.uuid4())
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "error": None,
+                    "ok": True,
+                    "request_id": request_id,
+                    "result": {
+                        "remote_root": (
+                            f"/cluster/staging/.partial/{upload_id}/nested"
+                        ),
+                        "upload_id": upload_id,
+                    },
+                    "schema": RESPONSE_SCHEMA,
+                }
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    with pytest.raises(SSHTransportError) as captured:
+        execute_cluster_command(
+            _transport(),
+            "allocate-upload",
+            {"manifest": {}, "staging_root": "/cluster/staging"},
+            request_id=request_id,
+        )
+
+    assert captured.value.code == "remote-protocol"
+    assert captured.value.ambiguous is True
+
+
+def test_response_rejects_duplicate_keys_and_non_boolean_retryability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_id = str(uuid.uuid4())
+    encoded = (
+        '{"schema":"bioimageflow.cluster.response.v1",'
+        f'"request_id":"{request_id}","ok":false,"ok":true,'
+        '"result":null,"error":null}'
+    ).encode()
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=encoded,
+            stderr=b"",
+        ),
+    )
+
+    with pytest.raises(SSHTransportError, match="duplicate"):
+        execute_cluster_command(
+            _transport(),
+            "submit",
+            {},
+            request_id=request_id,
+        )
+
+
 def test_real_fake_ssh_executable_captures_process_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,7 +308,10 @@ response = {{
     "error": None,
     "ok": True,
     "request_id": request["request_id"],
-    "result": {{"upload_id": "00000000-0000-4000-8000-000000000000"}},
+    "result": {{
+        "remote_root": "/cluster/staging/.partial/00000000-0000-4000-8000-000000000000",
+        "upload_id": "00000000-0000-4000-8000-000000000000",
+    }},
     "schema": {RESPONSE_SCHEMA!r},
 }}
 sys.stdout.write(json.dumps(response))

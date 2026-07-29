@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import uuid
 from collections.abc import Mapping, Sequence
@@ -19,6 +20,8 @@ from .cluster_bundle import PreparedClusterBundle, prepare_cluster_bundle
 from .cluster_protocol import (
     MAX_RESPONSE_BYTES,
     RESPONSE_SCHEMA,
+    ClusterProtocolFailure,
+    _check_tree,
     request,
 )
 from .schemas import validate_run_id
@@ -53,14 +56,160 @@ def _timeout_seconds(value: float) -> int:
     return max(1, math.ceil(value))
 
 
-def _decode_response(encoded: bytes, request_id: str) -> dict[str, Any]:
+def _reject_response_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster response contains a duplicate JSON key.",
+                ambiguous=True,
+            )
+        result[key] = value
+    return result
+
+
+def _reject_response_nonfinite(value: str) -> None:
+    raise SSHTransportError(
+        "remote-protocol",
+        "Cluster response contains a non-finite JSON number.",
+        ambiguous=True,
+    )
+
+
+def _canonical_uuid4(value: Any, *, field: str) -> str:
+    try:
+        canonical = str(uuid.UUID(value, version=4))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SSHTransportError(
+            "remote-protocol",
+            f"Cluster response contains an invalid {field}.",
+            ambiguous=True,
+        ) from exc
+    if canonical != value:
+        raise SSHTransportError(
+            "remote-protocol",
+            f"Cluster response contains an invalid {field}.",
+            ambiguous=True,
+        )
+    return canonical
+
+
+def _validate_success_result(
+    operation: str,
+    result: dict[str, Any],
+    transport: SSHSubmissionTransport,
+) -> dict[str, Any]:
+    if operation == "allocate-upload":
+        if set(result) != {"remote_root", "upload_id"}:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster allocate response schema is invalid.",
+                ambiguous=True,
+            )
+        upload_id = _canonical_uuid4(result["upload_id"], field="upload ID")
+        expected = transport.staging_root / ".partial" / upload_id
+        if result["remote_root"] != str(expected):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster allocate response contains an unsafe upload path.",
+                ambiguous=True,
+            )
+        return result
+    if operation == "commit-upload":
+        if set(result) != {"bundle_digest", "object_path", "upload_id"}:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster commit response schema is invalid.",
+                ambiguous=True,
+            )
+        _canonical_uuid4(result["upload_id"], field="upload ID")
+        digest = result["bundle_digest"]
+        if (
+            type(digest) is not str
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        ):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster commit response contains an invalid bundle digest.",
+                ambiguous=True,
+            )
+        expected = (
+            transport.staging_root
+            / "objects"
+            / "sha256"
+            / digest.removeprefix("sha256:")
+            / "submission"
+        )
+        if result["object_path"] != str(expected):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster commit response contains an unsafe object path.",
+                ambiguous=True,
+            )
+        return result
+    if operation == "submit":
+        if set(result) != {"run_id", "storage_path"}:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster submit response schema is invalid.",
+                ambiguous=True,
+            )
+        try:
+            canonical = validate_run_id(result["run_id"])
+        except (TypeError, ValueError) as exc:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster submit response contains an invalid run ID.",
+                ambiguous=True,
+            ) from exc
+        storage_path = result["storage_path"]
+        if (
+            canonical != result["run_id"]
+            or type(storage_path) is not str
+            or str(PurePosixPath(storage_path)) != storage_path
+            or not PurePosixPath(storage_path).is_absolute()
+            or storage_path.startswith("//")
+        ):
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster submit response contains invalid identifiers.",
+                ambiguous=True,
+            )
+        return result
+    raise SSHTransportError(
+        "remote-protocol",
+        "Cluster response names an unsupported operation.",
+        ambiguous=True,
+    )
+
+
+def _decode_response(
+    encoded: bytes,
+    request_id: str,
+    operation: str,
+    transport: SSHSubmissionTransport,
+) -> dict[str, Any]:
     if len(encoded) > MAX_RESPONSE_BYTES:
         raise SSHTransportError(
             "remote-protocol",
             "Cluster response exceeds the protocol byte limit.",
         )
     try:
-        value = json.loads(encoded.decode("utf-8"))
+        value = json.loads(
+            encoded.decode("utf-8"),
+            object_pairs_hook=_reject_response_duplicates,
+            parse_constant=_reject_response_nonfinite,
+        )
+        _check_tree(value)
+    except SSHTransportError:
+        raise
+    except ClusterProtocolFailure as exc:
+        raise SSHTransportError(
+            "remote-protocol",
+            "Cluster response exceeds the protocol structure limits.",
+            ambiguous=True,
+        ) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SSHTransportError(
             "remote-protocol",
@@ -86,13 +235,17 @@ def _decode_response(encoded: bytes, request_id: str) -> dict[str, Any]:
             ambiguous=True,
         )
     if value["ok"] is True and value["error"] is None and type(value["result"]) is dict:
-        return value["result"]
+        return _validate_success_result(operation, value["result"], transport)
     error = value["error"]
     if (
         value["ok"] is not False
         or value["result"] is not None
         or type(error) is not dict
         or set(error) != {"code", "message", "retryable"}
+        or type(error["code"]) is not str
+        or re.fullmatch(r"[a-z][a-z0-9-]{0,63}", error["code"]) is None
+        or type(error["message"]) is not str
+        or type(error["retryable"]) is not bool
     ):
         raise SSHTransportError(
             "remote-protocol",
@@ -102,7 +255,7 @@ def _decode_response(encoded: bytes, request_id: str) -> dict[str, Any]:
     raise SSHTransportError(
         f"remote-{error['code']}",
         str(error["message"]),
-        ambiguous=bool(error["retryable"]),
+        ambiguous=error["retryable"],
     )
 
 
@@ -176,7 +329,12 @@ def execute_cluster_command(
             "OpenSSH connection, authentication, host-key, or remote command failed.",
             ambiguous=True,
         )
-    return _decode_response(completed.stdout, request_id)
+    return _decode_response(
+        completed.stdout,
+        request_id,
+        operation,
+        transport,
+    )
 
 
 def _sftp_quote(value: str) -> str:
@@ -194,8 +352,11 @@ def upload_bundle(
     remote = PurePosixPath(remote_root)
     staging = transport.staging_root
     try:
-        remote.relative_to(staging / ".partial")
-    except ValueError as exc:
+        relative = remote.relative_to(staging / ".partial")
+        if len(relative.parts) != 1:
+            raise ValueError("upload path is not one allocated directory")
+        _canonical_uuid4(relative.parts[0], field="upload ID")
+    except (SSHTransportError, ValueError) as exc:
         raise SSHTransportError(
             "unsafe-upload-target",
             "Server-issued upload path escapes transport staging.",
@@ -328,28 +489,28 @@ def submit_cluster_workflow(
                 {**base, "upload_id": allocated["upload_id"]},
                 str(uuid.uuid4()),
             )
+            if (
+                committed["upload_id"] != allocated["upload_id"]
+                or committed["bundle_digest"] != bundle.digest
+            ):
+                raise SSHTransportError(
+                    "remote-protocol",
+                    "Cluster commit response does not match the allocated bundle.",
+                    ambiguous=True,
+                )
             submitted = _retry_mutation(
                 transport,
                 "submit",
                 {**base, "object_path": committed["object_path"]},
                 str(uuid.uuid4()),
             )
-            run_id = submitted.get("run_id")
-            try:
-                canonical = validate_run_id(run_id)
-            except (TypeError, ValueError) as exc:
+            if submitted["storage_path"] != workflow.storage_path.as_posix():
                 raise SSHTransportError(
                     "remote-protocol",
-                    "Cluster submit response contains an invalid run ID.",
-                    ambiguous=True,
-                ) from exc
-            if canonical != run_id:
-                raise SSHTransportError(
-                    "remote-protocol",
-                    "Cluster submit response contains an invalid run ID.",
+                    "Cluster submit response changed Workflow.storage_path.",
                     ambiguous=True,
                 )
-            return cast(str, run_id)
+            return cast(str, submitted["run_id"])
     except SSHTransportError:
         raise
     except (OSError, TypeError, ValueError) as exc:

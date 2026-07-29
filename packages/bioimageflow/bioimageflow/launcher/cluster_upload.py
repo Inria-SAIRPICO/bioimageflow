@@ -15,7 +15,7 @@ from typing import Any, Callable
 from bioimageflow.storage import canonical_json_bytes, validate_relative_posix_path
 from bioimageflow.storage.dataframe_transport import file_sha256
 
-from .cluster_bundle import MANIFEST_SCHEMA
+from .cluster_bundle import MANIFEST_SCHEMA, MAX_UPLOAD_DEPTH
 from .cluster_protocol import ClusterProtocolFailure
 from .repository import _CrossProcessLock, _atomic_write_json, _read_json, _sync_directory
 
@@ -43,7 +43,14 @@ def normalized_root(value: Any) -> Path:
 
 def _ensure_root(root: Path) -> None:
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if root.is_symlink() or not root.is_dir():
+    try:
+        root_mode = root.lstat().st_mode
+    except OSError as exc:
+        raise ClusterProtocolFailure(
+            "unsafe-staging-root",
+            "Transport staging root is unavailable.",
+        ) from exc
+    if stat.S_ISLNK(root_mode) or not stat.S_ISDIR(root_mode):
         raise ClusterProtocolFailure(
             "unsafe-staging-root",
             "Transport staging root must be a non-symlink directory.",
@@ -51,7 +58,28 @@ def _ensure_root(root: Path) -> None:
     for child in (".partial", "ready", "objects", "receipts", "locks"):
         path = root / child
         path.mkdir(mode=0o700, exist_ok=True)
-        if path.is_symlink() or not path.is_dir():
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+            raise ClusterProtocolFailure(
+                "unsafe-staging-root",
+                "Transport staging contains an unsafe directory.",
+            )
+
+
+def _ensure_confined_directory(path: Path, *, root: Path) -> None:
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ClusterProtocolFailure(
+            "unsafe-staging-root",
+            "Transport staging path escapes its root.",
+        ) from exc
+    current = root
+    for part in path.relative_to(root).parts:
+        current /= part
+        current.mkdir(mode=0o700, exist_ok=True)
+        mode = current.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
             raise ClusterProtocolFailure(
                 "unsafe-staging-root",
                 "Transport staging contains an unsafe directory.",
@@ -83,6 +111,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     seen: set[str] = set()
     folded_paths: set[str] = set()
     total = 0
+    paths: list[str] = []
     for item in entries:
         if type(item) is not dict or set(item) != {
             "digest",
@@ -106,6 +135,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             path in seen
             or folded in folded_paths
             or unicodedata.normalize("NFC", path) != path
+            or len(PurePosixPath(path).parts) > MAX_UPLOAD_DEPTH
             or item["kind"] not in {"directory", "file"}
             or type(item["size"]) is not int
             or item["size"] < 0
@@ -127,12 +157,18 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             )
         seen.add(path)
         folded_paths.add(folded)
+        paths.append(path)
         total += item["size"]
         if total > 1 << 40:
             raise ClusterProtocolFailure(
                 "upload-too-large",
                 "Upload manifest exceeds the aggregate byte limit.",
             )
+    if paths != sorted(paths):
+        raise ClusterProtocolFailure(
+            "invalid-upload-manifest",
+            "Upload manifest entries must be in canonical path order.",
+        )
     body = {
         "entries": entries,
         "root_name": value["root_name"],
@@ -155,18 +191,35 @@ def _receipt(
     create: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
     receipt_dir = root / "receipts" / operation
-    receipt_dir.mkdir(mode=0o700, exist_ok=True)
+    _ensure_confined_directory(receipt_dir, root=root)
     receipt_path = receipt_dir / f"{request_id}.json"
     lock = root / "locks" / f"{operation}-{request_id}.lock"
     with _CrossProcessLock(lock):
         if receipt_path.exists():
             persisted = _read_json(receipt_path)
-            if persisted.get("request_digest") != digest:
+            expected_fields = {
+                "operation",
+                "request_digest",
+                "request_id",
+                "result",
+                "schema",
+            }
+            if (
+                set(persisted) != expected_fields
+                or persisted["operation"] != operation
+                or persisted["request_id"] != request_id
+                or persisted["schema"] != "bioimageflow.cluster.receipt.v1"
+            ):
+                raise ClusterProtocolFailure(
+                    "corrupt-receipt",
+                    "Transport receipt is malformed.",
+                )
+            if persisted["request_digest"] != digest:
                 raise ClusterProtocolFailure(
                     "duplicate-request-conflict",
                     "request_id was already used with different arguments.",
                 )
-            result = persisted.get("result")
+            result = persisted["result"]
             if type(result) is not dict:
                 raise ClusterProtocolFailure(
                     "corrupt-receipt",
@@ -209,11 +262,40 @@ def allocate_upload(
     return _receipt(root, "allocate-upload", request_id, digest, create)
 
 
-def _verify_tree(root: Path, manifest: dict[str, Any]) -> None:
+def _verify_tree(
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    require_read_only: bool = False,
+) -> None:
+    try:
+        root_mode = root.lstat().st_mode
+    except OSError as exc:
+        raise ClusterProtocolFailure(
+            "upload-integrity",
+            "Uploaded tree root is unavailable.",
+        ) from exc
+    if stat.S_ISLNK(root_mode) or not stat.S_ISDIR(root_mode):
+        raise ClusterProtocolFailure(
+            "upload-integrity",
+            "Uploaded tree root must be a non-symlink directory.",
+        )
+    if require_read_only and root_mode & 0o222:
+        raise ClusterProtocolFailure(
+            "upload-integrity",
+            "Installed upload object is not read-only.",
+        )
     expected = {entry["path"]: entry for entry in manifest["entries"]}
     actual: set[str] = set()
     for path in root.rglob("*"):
-        if path.is_symlink():
+        try:
+            mode = path.lstat().st_mode
+        except OSError as exc:
+            raise ClusterProtocolFailure(
+                "upload-integrity",
+                "Uploaded tree changed during verification.",
+            ) from exc
+        if stat.S_ISLNK(mode):
             raise ClusterProtocolFailure(
                 "upload-integrity",
                 "Uploaded tree contains a symlink.",
@@ -221,17 +303,27 @@ def _verify_tree(root: Path, manifest: dict[str, Any]) -> None:
         relative = path.relative_to(root).as_posix()
         entry = expected.get(relative)
         actual.add(relative)
-        if path.is_dir():
+        if stat.S_ISDIR(mode):
             if entry is None or entry["kind"] != "directory":
                 raise ClusterProtocolFailure(
                     "upload-integrity",
                     "Uploaded directory is not declared by the manifest.",
                 )
+            if require_read_only and mode & 0o222:
+                raise ClusterProtocolFailure(
+                    "upload-integrity",
+                    "Installed upload object is not read-only.",
+                )
             continue
-        if not path.is_file():
+        if not stat.S_ISREG(mode):
             raise ClusterProtocolFailure(
                 "upload-integrity",
                 "Uploaded tree contains a special file.",
+            )
+        if require_read_only and mode & 0o222:
+            raise ClusterProtocolFailure(
+                "upload-integrity",
+                "Installed upload object is not read-only.",
             )
         if (
             entry is None
@@ -280,34 +372,50 @@ def commit_upload(
         )
 
     def create() -> dict[str, Any]:
-        partial = root / ".partial" / upload_id
-        ready = root / "ready" / upload_id
-        if partial.exists():
-            _verify_tree(partial, validated)
-            os.replace(partial, ready)
-            _sync_directory(ready.parent)
-        elif not ready.exists():
-            raise ClusterProtocolFailure(
-                "upload-not-found",
-                "Allocated upload is not available to commit.",
-            )
-        _verify_tree(ready, validated)
+        with _CrossProcessLock(root / "locks" / f"upload-{upload_id}.lock"):
+            partial = root / ".partial" / upload_id
+            ready = root / "ready" / upload_id
+            if partial.exists():
+                _verify_tree(partial, validated)
+                os.replace(partial, ready)
+                _sync_directory(ready.parent)
+            elif not ready.exists():
+                raise ClusterProtocolFailure(
+                    "upload-not-found",
+                    "Allocated upload is not available to commit.",
+                )
+            _verify_tree(ready, validated)
         digest_token = validated["digest"].removeprefix("sha256:")
-        object_root = root / "objects" / "sha256" / digest_token / "submission"
-        if object_root.exists():
-            _verify_tree(object_root, validated)
-        else:
-            temporary = object_root.parent / f".{uuid.uuid4().hex}.tmp"
-            temporary.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            shutil.copytree(ready, temporary)
-            _verify_tree(temporary, validated)
-            _make_read_only(temporary)
-            try:
-                os.rename(temporary, object_root)
-            except FileExistsError:
-                shutil.rmtree(temporary)
-                _verify_tree(object_root, validated)
-            _sync_directory(object_root.parent)
+        with _CrossProcessLock(root / "locks" / f"object-{digest_token}.lock"):
+            object_parent = root / "objects" / "sha256" / digest_token
+            _ensure_confined_directory(object_parent, root=root)
+            object_root = object_parent / "submission"
+            if object_root.exists():
+                _verify_tree(
+                    object_root,
+                    validated,
+                    require_read_only=True,
+                )
+            else:
+                temporary = object_parent / f".{uuid.uuid4().hex}.tmp"
+                shutil.copytree(ready, temporary)
+                _verify_tree(temporary, validated)
+                _make_read_only(temporary)
+                _verify_tree(
+                    temporary,
+                    validated,
+                    require_read_only=True,
+                )
+                try:
+                    os.rename(temporary, object_root)
+                except FileExistsError:
+                    shutil.rmtree(temporary)
+                    _verify_tree(
+                        object_root,
+                        validated,
+                        require_read_only=True,
+                    )
+                _sync_directory(object_root.parent)
         return {
             "bundle_digest": validated["digest"],
             "object_path": object_root.as_posix(),
