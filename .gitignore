@@ -5,7 +5,6 @@
 .claude/
 .venv/
 TODO.md
-bif_data/
 data/
 !example_workflows/fish_analysis/data/
 example_workflows/bbbc038_segmentation_benchmark/data/
@@ -15,7 +14,6 @@ packages/bioimageflow-common-tools/bioimageflow_common_tools/data/*
 !packages/bioimageflow-common-tools/bioimageflow_common_tools/data/blobs.txt
 packages/bioimageflow-common-tools/bioimageflow_common_tools/.vscode/
 __pycache__/
-docs/build/
 docs/_build/
 wetlands/
 wetlands-lib/
