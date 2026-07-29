@@ -217,6 +217,44 @@ def test_dataframe_transport_round_trips_index_metadata(
     assert canonical_dataframe_identity(restored) == canonical_dataframe_identity(frame)
 
 
+def test_dataframe_transport_restores_object_dtype_after_string_inference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "asset": pd.Series(
+                [Path("/cluster/input.tif"), "/cluster/reference.tif"],
+                dtype=object,
+            )
+        }
+    )
+    destination = tmp_path / "frame.parquet"
+    metadata = write_dataframe_transport(
+        frame,
+        destination,
+        preserve_paths=True,
+    )
+    read_parquet = pd.read_parquet
+
+    def infer_arrow_string(path: Path) -> pd.DataFrame:
+        loaded = read_parquet(path)
+        loaded["asset"] = loaded["asset"].astype("string[pyarrow]")
+        return loaded
+
+    monkeypatch.setattr(pd, "read_parquet", infer_arrow_string)
+    restored = read_dataframe_transport(
+        destination,
+        metadata,
+        preserve_paths=True,
+    )
+
+    assert restored["asset"].dtype == object
+    assert restored.at[0, "asset"] == Path("/cluster/input.tif")
+    assert restored.at[1, "asset"] == "/cluster/reference.tif"
+    assert canonical_dataframe_identity(restored) == canonical_dataframe_identity(frame)
+
+
 def test_root_loader_rejects_transport_and_logical_tampering(
     tmp_path: Path,
 ) -> None:

@@ -626,6 +626,8 @@ def _rehydrate_public_return(
             raise WorkflowRunResultUnavailableError(
                 f"Unknown return locator kind {kind!r}."
             )
+        if frame[column].dtype != object:
+            frame[column] = frame[column].astype(object)
         column_position = list(frame.columns).index(column)
         frame.iat[row_position, column_position] = value
 

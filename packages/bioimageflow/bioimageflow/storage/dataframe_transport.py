@@ -311,6 +311,67 @@ def _validate_json_value(value: Any, *, label: str) -> None:
     raise ValueError(f"{label} contains a non-JSON value.")
 
 
+def _restore_logical_dtypes(
+    frame: pd.DataFrame,
+    logical_schema: list[Any],
+) -> None:
+    """Restore manifest-declared dtypes after Parquet inference."""
+    columns = {str(column): column for column in frame.columns}
+    if len(columns) != len(frame.columns):
+        raise ValueError("DataFrame columns are ambiguous after string conversion.")
+    seen: set[str] = set()
+    for value in logical_schema:
+        if type(value) is not dict:
+            raise ValueError("DataFrame logical schema entries must be objects.")
+        name = value.get("name")
+        dtype = value.get("dtype")
+        kind = value.get("kind")
+        if (
+            type(name) is not str
+            or not name
+            or name in seen
+            or name not in columns
+            or type(dtype) is not str
+            or not dtype
+            or type(kind) is not str
+            or not kind
+        ):
+            raise ValueError("DataFrame logical schema entry is invalid.")
+        seen.add(name)
+        expected_keys = {"dtype", "kind", "name"}
+        target_dtype: Any = dtype
+        if dtype == "category":
+            expected_keys |= {"categories", "ordered"}
+            categories = value.get("categories")
+            ordered = value.get("ordered")
+            if (
+                type(categories) is not list
+                or any(type(item) is not str for item in categories)
+                or type(ordered) is not bool
+            ):
+                raise ValueError("DataFrame categorical schema is invalid.")
+            target_dtype = pd.CategoricalDtype(
+                categories=categories,
+                ordered=ordered,
+            )
+        elif "timezone" in value:
+            expected_keys.add("timezone")
+            if type(value["timezone"]) is not str or not value["timezone"]:
+                raise ValueError("DataFrame datetime timezone is invalid.")
+        if set(value) != expected_keys:
+            raise ValueError("DataFrame logical schema entry has unknown fields.")
+        try:
+            original = columns[name]
+            if str(frame[original].dtype) != dtype:
+                frame[original] = frame[original].astype(target_dtype)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"DataFrame column {name!r} cannot restore its logical dtype."
+            ) from exc
+    if seen != set(columns):
+        raise ValueError("DataFrame logical schema does not cover every column.")
+
+
 def read_dataframe_transport(
     source: Path,
     metadata: Mapping[str, Any],
@@ -354,6 +415,7 @@ def read_dataframe_transport(
                 f"Duplicate dataframe column after string conversion: {name!r}"
             )
         columns[name] = position
+    _restore_logical_dtypes(frame, logical_schema)
     path_cells = _validate_path_cells(
         raw_metadata["path_cells"],
         row_count=len(frame),
