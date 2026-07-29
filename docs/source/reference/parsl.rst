@@ -268,7 +268,7 @@ For a caller already running on a cluster login node:
        ),
    )
 
-``PSIJLaunchConfig`` accepts only strict scheduler identifiers and a normalized absolute POSIX working path.
+``PSIJLaunchConfig`` accepts only strict scheduler identifiers and a normalized absolute POSIX working path that exists as a non-symlink directory when initial submission begins.
 It has no native directive, custom attribute, pre-launch script, environment, live PSI/J object, or shell-fragment field.
 ``walltime`` is always explicit so PSI/J's default duration is never selected accidentally.
 The queue maps to ``JobAttributes.queue_name`` and the project maps to ``JobAttributes.account``.
@@ -296,6 +296,7 @@ The launcher states are ``prepared``, ``starting``, ``running``, ``finalizing``,
 ``status.json`` beneath ``launcher/v1/runs/<run-id>/`` is authoritative for reconnection.
 The portable canonical view uses the same ID beneath ``views/runs/<run-id>/``.
 Mutable launcher state, logs, externalized inputs, and return transports never enter the canonical view or cache identity.
+A terminal PSI/J scheduler observation confirms backend absence only after an active launcher lease expires, then invokes the existing recovery rules without rerunning workflow code.
 
 ``WorkflowRun.cancel()`` directly cancels an unclaimed prepared run or commits ``cancel_requested`` for an active run.
 The orchestrator watches durable status and the optional wake-up marker, calls ``Workflow.cancel()``, drains its Parsl work, and finishes as ``cancelled``.

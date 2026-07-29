@@ -1865,7 +1865,7 @@ It requests one node, one process, one process per node, the configured cores pe
 It maps `queue` to `JobAttributes.queue_name` and `project` to `JobAttributes.account`.
 It directs standard output and error to the existing confined launcher logs.
 The job executable is the absolute cluster Python executable for the installed BioImageFlow environment, and the arguments contain only the orchestrator module, absolute storage root, and run ID.
-The optional job working directory is the configured normalized absolute cluster path.
+The optional job working directory is the configured normalized absolute cluster path and MUST exist as a non-symlink directory when the initial submission begins.
 Pre-launch scripts, post-launch scripts, native scheduler directives, custom attributes, arbitrary environment values, relative executables, and shell evaluation are forbidden.
 
 The PSI/J `JobExecutor` uses a fixed shared work directory at `psij/executor/` beneath the run control directory.
@@ -1889,7 +1889,7 @@ Receipt-backed monitoring reconstructs the configured executor, calls `attach(Jo
 Queued and active scheduler observations are secondary backend progress metadata.
 A queued or active scheduler job remains launcher `prepared` until the orchestrator commits its normal startup claim.
 Scheduler rejection, failure, cancellation, or completion before an orchestrator claim transitions the run to structured `failed`.
-After the orchestrator claim, scheduler observations remain secondary; claim expiry and the existing recovery rules remain authoritative and workflow code is never rerun.
+After the orchestrator claim, scheduler observations remain secondary; a terminal scheduler observation confirms backend absence only after the execution claim expires, then invokes the existing recovery rules, and workflow code is never rerun.
 An unavailable or purged scheduler observation is recorded as unknown and does not imply launcher success, failure, cancellation, or loss.
 
 Cancelling a receipt-backed `prepared` run first commits launcher `cancelled` and then best-effort cancels the exact PSI/J native job.

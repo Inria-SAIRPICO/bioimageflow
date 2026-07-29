@@ -140,6 +140,7 @@ def _launch_config(
     *,
     executor: Literal["slurm", "pbs", "lsf"] = "slurm",
     hard_cancel_after: float | None = None,
+    work_dir: PurePosixPath | None = None,
 ) -> PSIJLaunchConfig:
     return PSIJLaunchConfig(
         executor=executor,
@@ -147,7 +148,7 @@ def _launch_config(
         queue="cpu",
         project="BIOIMAGE",
         cpu_cores=4,
-        work_dir=PurePosixPath("/cluster/project/orchestrator"),
+        work_dir=work_dir,
         hard_cancel_after=hard_cancel_after,
     )
 
@@ -167,9 +168,12 @@ def _control(
 def test_psij_backend_builds_exact_single_process_job_and_receipt(
     tmp_path: Path,
 ) -> None:
-    control = _control(tmp_path)
+    job_work_dir = tmp_path / "job-work"
+    job_work_dir.mkdir()
+    launch = _launch_config(work_dir=PurePosixPath(str(job_work_dir)))
+    control = _control(tmp_path, launch=launch)
 
-    result = launch_orchestrator(control, _launch_config())
+    result = launch_orchestrator(control, launch)
 
     assert isinstance(result, PSIJLaunch)
     assert result.native_id == "job-1"
@@ -184,7 +188,7 @@ def test_psij_backend_builds_exact_single_process_job_and_receipt(
         "--run-id",
         control.run_id,
     ]
-    assert spec.directory == "/cluster/project/orchestrator"
+    assert spec.directory == str(job_work_dir)
     assert spec.stdout_path == control.control_dir / "logs/orchestrator.out"
     assert spec.stderr_path == control.control_dir / "logs/orchestrator.err"
     assert spec.resources.__dict__ == {
@@ -284,7 +288,7 @@ def test_crash_before_intent_never_calls_external_submit(
     control = _control(tmp_path)
     monkeypatch.setattr(
         psij_module,
-        "write_intent",
+        "install_intent",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             OSError("intent crash")
         ),
@@ -433,9 +437,14 @@ def test_cancel_without_receipt_resolves_uncertain_prepared_run(
     control = _control(tmp_path)
     work_dir = control.confined_path("psij/executor")
     work_dir.mkdir(parents=True)
-    from bioimageflow.launcher.psij_artifacts import write_intent
+    from bioimageflow.launcher.psij_artifacts import install_intent
 
-    write_intent(control, _launch_config(), work_dir)
+    _intent, created = install_intent(
+        control,
+        _launch_config(),
+        work_dir,
+    )
+    assert created
     run = WorkflowRun.open(tmp_path, control.run_id)
 
     run.cancel()
@@ -456,3 +465,23 @@ def test_cancel_rejects_receipt_with_wrong_native_id_correlation(
 
     with pytest.raises(LauncherProtocolError, match="native job ID"):
         cancel_psij(control)
+
+
+def test_prepared_cancel_is_best_effort_without_psij_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = _control(tmp_path)
+    launch_psij(control, _launch_config())
+    run = WorkflowRun.open(tmp_path, control.run_id)
+    monkeypatch.setattr(
+        psij_module,
+        "_load_runtime",
+        lambda: (_ for _ in ()).throw(
+            BackendNotSupportedError("runtime unavailable")
+        ),
+    )
+
+    run.cancel()
+
+    assert run.status == "cancelled"

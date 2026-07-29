@@ -224,6 +224,35 @@ def test_progress_validates_kind_specific_payload_schema() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("event", "native_id", "state"),
+    [
+        ("psij_queued", "job-1", "ACTIVE"),
+        ("psij_unknown", "job-1", "FAILED"),
+        ("psij_submission_uncertain", "invented-job", None),
+        ("psij_active", " job-1", "ACTIVE"),
+    ],
+)
+def test_progress_rejects_incoherent_psij_observations(
+    event: str,
+    native_id: str,
+    state: str | None,
+) -> None:
+    payload = {
+        "schema": "bioimageflow.launcher.backend_event.v1",
+        "event": event,
+        "executor": "slurm",
+        "native_id": native_id,
+        "state": state,
+        "message": None,
+    }
+
+    with pytest.raises(LauncherSchemaError):
+        validate_progress(
+            _progress(new_run_id(), kind="backend", payload=payload)
+        )
+
+
 @pytest.mark.parametrize("field", ["node", "task", "backend"])
 def test_error_rejects_unknown_nested_fields(field: str) -> None:
     payload = _error(new_run_id())

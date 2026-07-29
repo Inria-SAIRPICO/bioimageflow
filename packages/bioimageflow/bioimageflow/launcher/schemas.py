@@ -20,6 +20,9 @@ RETURN_SCHEMA = "bioimageflow.launcher.return.v1"
 
 RUN_ID_PATTERN = re.compile(r"^run_[0-9a-f]{32}$")
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+PSIJ_NATIVE_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.:+/-]{0,255}$"
+)
 
 LAUNCHER_STATES = frozenset(
     {
@@ -57,6 +60,13 @@ PSIJ_PROGRESS_EVENTS = frozenset(
         "psij_submission_uncertain",
     }
 )
+PSIJ_PROGRESS_STATES = {
+    "psij_queued": "QUEUED",
+    "psij_active": "ACTIVE",
+    "psij_completed": "COMPLETED",
+    "psij_failed": "FAILED",
+    "psij_cancelled": "CANCELED",
+}
 
 SUBMISSION_FIELDS = frozenset(
     {
@@ -539,6 +549,28 @@ def validate_progress(payload: object) -> dict[str, Any]:
                     event[field],
                     field=f"payload.{field}",
                     nullable=True,
+                )
+            native_id = event["native_id"]
+            state = event["state"]
+            expected_state = PSIJ_PROGRESS_STATES.get(event["event"])
+            if event["event"] == "psij_submission_uncertain":
+                if native_id is not None or state is not None:
+                    raise LauncherSchemaError(
+                        "PSI/J submission uncertainty cannot invent job identity."
+                    )
+            elif (
+                not isinstance(native_id, str)
+                or PSIJ_NATIVE_ID_PATTERN.fullmatch(native_id) is None
+            ):
+                raise LauncherSchemaError("payload.native_id is invalid.")
+            if expected_state is None:
+                if state is not None:
+                    raise LauncherSchemaError(
+                        "Unknown PSI/J observations require a null state."
+                    )
+            elif state != expected_state:
+                raise LauncherSchemaError(
+                    "PSI/J progress event and state do not match."
                 )
         else:
             _require_string(event["owner"], field="payload.owner")

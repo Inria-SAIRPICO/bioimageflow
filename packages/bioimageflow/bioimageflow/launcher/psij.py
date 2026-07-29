@@ -14,13 +14,14 @@ from .control import LauncherRunControl
 from .errors import (
     BackendNotSupportedError,
     LauncherProtocolError,
+    LauncherStateConflictError,
     PSIJSubmissionUncertainError,
 )
 from .psij_artifacts import (
+    install_intent,
     read_intent,
     read_receipt,
     validate_native_id,
-    write_intent,
     write_receipt,
 )
 from .state import RevisionConflictError
@@ -97,6 +98,23 @@ def _executor_work_dir(control: LauncherRunControl) -> Path:
     )
 
 
+def _validate_job_work_dir(launch: PSIJLaunchConfig) -> None:
+    if launch.work_dir is None:
+        return
+    path = Path(launch.work_dir)
+    try:
+        mode = path.lstat().st_mode
+    except OSError as error:
+        raise LauncherProtocolError(
+            "The PSI/J orchestrator work directory is unavailable."
+        ) from error
+    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+        raise LauncherProtocolError(
+            "The PSI/J orchestrator work directory must be a non-symlink "
+            "directory."
+        )
+
+
 def _executor(runtime: Any, name: str, work_dir: Path) -> Any:
     try:
         names = runtime.JobExecutor.get_executor_names()
@@ -142,17 +160,21 @@ def _build_spec(runtime: Any, job: dict[str, Any]) -> Any:
 def _state_name(state: object) -> str | None:
     name = getattr(state, "name", None)
     if type(name) is str:
-        return name.upper()
+        upper = name.upper()
+        return upper if upper in _STATE_EVENTS else None
     encoded = str(state)
     if encoded.startswith("JobState."):
-        return encoded.rsplit(".", 1)[-1].upper()
+        upper = encoded.rsplit(".", 1)[-1].upper()
+        return upper if upper in _STATE_EVENTS else None
     upper = encoded.upper()
-    return upper if upper in {"NEW", *_STATE_EVENTS} else None
+    return upper if upper in _STATE_EVENTS else None
 
 
 def _verify_attached_id(job: Any, expected: str) -> None:
     if job.native_id is None:
-        return
+        raise LauncherProtocolError(
+            "PSI/J attachment did not expose the persisted native job ID."
+        )
     attached_id = validate_native_id(job.native_id)
     if attached_id != expected:
         raise LauncherProtocolError("PSI/J attached a different native job ID.")
@@ -188,14 +210,6 @@ def _uncertain(
     executor: str,
     cause: BaseException | None = None,
 ) -> PSIJSubmissionUncertainError:
-    _append_observation(
-        control,
-        event="psij_submission_uncertain",
-        executor=executor,
-        native_id=None,
-        state=None,
-        message="PSI/J submission outcome is uncertain.",
-    )
     error = PSIJSubmissionUncertainError(
         "PSI/J submission may have succeeded, but no durable native job "
         "receipt exists; this run will not be submitted again.",
@@ -203,6 +217,17 @@ def _uncertain(
     )
     if cause is not None:
         error.__cause__ = cause
+    try:
+        _append_observation(
+            control,
+            event="psij_submission_uncertain",
+            executor=executor,
+            native_id=None,
+            state=None,
+            message="PSI/J submission outcome is uncertain.",
+        )
+    except BaseException:
+        pass
     return error
 
 
@@ -211,18 +236,33 @@ def launch_psij(
     launch: PSIJLaunchConfig,
 ) -> PSIJLaunch:
     """Submit exactly one PSI/J job, or fail closed after submit uncertainty."""
+    persisted_launch = PSIJLaunchConfig.from_dict(
+        control.read_submission()["launch"]
+    )
+    if launch != persisted_launch:
+        raise LauncherProtocolError(
+            "PSI/J launch config does not match the allocated run."
+        )
+    intent_path = control.confined_path("psij_intent.json")
+    if not intent_path.exists():
+        _validate_job_work_dir(persisted_launch)
     runtime = _load_runtime()
     work_dir = _executor_work_dir(control)
-    executor = _executor(runtime, launch.executor, work_dir)
-    intent_path = control.confined_path("psij_intent.json")
-    if intent_path.exists():
-        intent = read_intent(control)
+    executor = _executor(runtime, persisted_launch.executor, work_dir)
+    intent, created = install_intent(control, persisted_launch, work_dir)
+    if not created:
         receipt_path = control.confined_path("psij_job.json")
         if not receipt_path.exists():
             raise _uncertain(control, executor=intent["executor"])
         receipt = read_receipt(control, intent)
         job = runtime.Job()
-        executor.attach(job, receipt["native_id"])
+        try:
+            executor.attach(job, receipt["native_id"])
+            _verify_attached_id(job, receipt["native_id"])
+        except LauncherProtocolError:
+            raise
+        except Exception:
+            pass
         return PSIJLaunch(
             native_id=receipt["native_id"],
             executor_name=receipt["executor"],
@@ -230,31 +270,44 @@ def launch_psij(
             job=job,
             executor=executor,
         )
-    intent = write_intent(control, launch, work_dir)
+    _validate_job_work_dir(persisted_launch)
     spec = _build_spec(runtime, intent["job"])
     job = runtime.Job(spec)
     try:
         executor.submit(job)
         native_id = validate_native_id(job.native_id)
-        receipt = write_receipt(control, intent, native_id=native_id)
     except BaseException as error:
         raise _uncertain(
             control,
-            executor=launch.executor,
+            executor=persisted_launch.executor,
             cause=error,
         ) from error
-    state = _state_name(job.status.state)
-    _append_observation(
-        control,
-        event=_event_for_state(state),
-        executor=launch.executor,
-        native_id=receipt["native_id"],
-        state=state,
-        message=None,
-    )
+    try:
+        receipt = write_receipt(control, intent, native_id=native_id)
+    except BaseException as error:
+        try:
+            receipt = read_receipt(control, intent)
+        except BaseException:
+            raise _uncertain(
+                control,
+                executor=persisted_launch.executor,
+                cause=error,
+            ) from error
+    try:
+        state = _state_name(job.status.state)
+        _append_observation(
+            control,
+            event=_event_for_state(state),
+            executor=persisted_launch.executor,
+            native_id=receipt["native_id"],
+            state=state,
+            message=None,
+        )
+    except BaseException:
+        pass
     return PSIJLaunch(
         native_id=receipt["native_id"],
-        executor_name=launch.executor,
+        executor_name=persisted_launch.executor,
         executor_work_dir=work_dir,
         job=job,
         executor=executor,
@@ -333,7 +386,20 @@ def reconcile_psij(control: LauncherRunControl) -> PSIJObservation | None:
         return None
     observation = observe_psij(control)
     status = control.read_status()
-    if status["state"] != "prepared" or not observation.final:
+    if not observation.final:
+        return observation
+    if status["state"] != "prepared":
+        try:
+            from .orchestrator import run_orchestrator
+
+            run_orchestrator(
+                control.repository.storage_root,
+                control.run_id,
+                recover=True,
+                backend_absent_confirmed=True,
+            )
+        except LauncherStateConflictError:
+            pass
         return observation
     messages = {
         "COMPLETED": "The PSI/J orchestrator job completed before startup claim.",
@@ -376,12 +442,15 @@ def cancel_psij(control: LauncherRunControl) -> bool:
         return False
     intent = read_intent(control)
     receipt = read_receipt(control, intent)
-    runtime = _load_runtime()
-    executor = _executor(
-        runtime,
-        receipt["executor"],
-        Path(receipt["executor_work_dir"]),
-    )
+    try:
+        runtime = _load_runtime()
+        executor = _executor(
+            runtime,
+            receipt["executor"],
+            Path(receipt["executor_work_dir"]),
+        )
+    except BackendNotSupportedError:
+        return False
     job = runtime.Job()
     try:
         executor.attach(job, receipt["native_id"])

@@ -11,14 +11,13 @@ from .artifacts import _write_json
 from .backends import build_orchestrator_argv, launcher_log_paths
 from .control import LauncherRunControl
 from .errors import LauncherProtocolError
-from .repository import LauncherCorruptionError, _read_json
-from .schemas import parse_utc_timestamp, utc_timestamp
+from .repository import LauncherCorruptionError, _atomic_create_json, _read_json
+from .schemas import PSIJ_NATIVE_ID_PATTERN, parse_utc_timestamp, utc_timestamp
 from .types import PSIJLaunchConfig
 
 
 INTENT_SCHEMA = "bioimageflow.launcher.psij_intent.v1"
 RECEIPT_SCHEMA = "bioimageflow.launcher.psij_job.v1"
-_NATIVE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+/-]{0,255}$")
 
 
 def _read_artifact(
@@ -198,12 +197,12 @@ def read_intent(control: LauncherRunControl) -> dict[str, Any]:
     return validate_intent(control, _read_artifact(control, "psij_intent.json"))
 
 
-def write_intent(
+def install_intent(
     control: LauncherRunControl,
     launch: PSIJLaunchConfig,
     work_dir: Path,
-) -> dict[str, Any]:
-    """Install submit intent before any external PSI/J submission action."""
+) -> tuple[dict[str, Any], bool]:
+    """Atomically elect the only caller allowed to submit the PSI/J job."""
     submit_token = uuid.uuid4().hex
     payload = validate_intent(
         control,
@@ -221,13 +220,20 @@ def write_intent(
             ),
         },
     )
-    _write_json(control, "psij_intent.json", payload, immutable=True)
-    return payload
+    path = control.confined_path("psij_intent.json")
+    try:
+        _atomic_create_json(path, payload)
+    except FileExistsError:
+        return read_intent(control), False
+    return payload, True
 
 
 def validate_native_id(value: object) -> str:
     """Validate a persisted scheduler-native PSI/J job identity."""
-    if type(value) is not str or _NATIVE_ID_RE.fullmatch(value) is None:
+    if (
+        type(value) is not str
+        or PSIJ_NATIVE_ID_PATTERN.fullmatch(value) is None
+    ):
         raise LauncherProtocolError("PSI/J returned an invalid native job ID.")
     return value
 
