@@ -1,6 +1,6 @@
 # PSI/J Cluster Execution Implementation Plan
 
-Status: implementation-ready plan for the cluster-submitted extension of the completed Phase 1a Parsl engine and Phase 1b submitted-run control plane.
+Status: Work Package 1 is implemented and Work Package 2 is the next delivery checkpoint.
 
 ## 1. Authority, Goal, and Scope
 
