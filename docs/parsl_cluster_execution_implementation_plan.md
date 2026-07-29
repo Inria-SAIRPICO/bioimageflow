@@ -1,6 +1,6 @@
 # PSI/J Cluster Execution Implementation Plan
 
-Status: Work Package 1 is implemented and Work Package 2 is the next delivery checkpoint.
+Status: Work Packages 1 and 2 are implemented and Work Package 3 is the next delivery checkpoint.
 
 ## 1. Authority, Goal, and Scope
 
@@ -369,6 +369,12 @@ Agent checkpoint:
 
 - Commit the SSH client, cluster protocol, command entry point, upload codec, focused tests, and concise protocol documentation.
 - Do not expose transported `submit_workflow()` or implement the remote run/result façade in this worktree.
+
+Completion checkpoint:
+
+- Implemented the strict `LocalUpload` and `SSHSubmissionTransport` values, bounded one-shot command protocol, installed cluster-agent entry point, shell-free OpenSSH/SFTP client, canonical upload bundle, durable operation receipts, content-addressed read-only object installation, and package-private remote submission seam.
+- Submission binds one preallocated launcher run ID before the existing Phase 1b allocation and PSI/J dispatch path, while preserving the workflow storage, launcher, cache, run-view, and output-view layouts.
+- The public transported `submit_workflow()` façade, `RemoteWorkflowRun`, observation, cancellation, log/progress access, and result retrieval remain exclusively in Work Package 3.
 
 ## Work Package 3 — Remote WorkflowRun Control and Result Retrieval
 

@@ -13,17 +13,25 @@ from .errors import (
 )
 from .run import WorkflowRun
 from .submission import submit_workflow
-from .types import OrchestratorLaunchConfig, PSIJLaunchConfig, ParslConfigRef
+from .types import (
+    LocalUpload,
+    OrchestratorLaunchConfig,
+    PSIJLaunchConfig,
+    ParslConfigRef,
+    SSHSubmissionTransport,
+)
 
 __all__ = [
     "BackendNotSupportedError",
     "LauncherError",
     "LauncherProtocolError",
     "LauncherStateConflictError",
+    "LocalUpload",
     "OrchestratorLaunchConfig",
     "PSIJLaunchConfig",
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
+    "SSHSubmissionTransport",
     "WorkflowRun",
     "WorkflowRunFailedError",
     "WorkflowRunLostError",

@@ -1900,11 +1900,54 @@ Confirmed scheduler termination after that hard-cancel request follows the exist
 The PSI/J launcher starts only the orchestrator job.
 Parsl providers still allocate worker blocks.
 
+### 17.11 Laptop-to-cluster submission transport
+
+Remote submission from a laptop uses the system OpenSSH `ssh` and `sftp` executables to reach an installed `bioimageflow-cluster-agent` command on the cluster login node.
+The command is one-shot: it reads exactly one bounded JSON request from standard input, writes exactly one protocol JSON response to standard output, writes diagnostics only to standard error, and runs no service.
+The protocol schema is `bioimageflow.cluster.command.v1` and supports only `allocate-upload`, `commit-upload`, and `submit` in this phase.
+Every mutable request carries a canonical UUID4 request ID, has an exact argument schema and canonical request digest, and stores an operation-scoped durable receipt.
+Reusing a request ID with different arguments fails, while retrying the same request converges on the persisted result.
+Unknown fields, versions, operations, duplicate JSON keys, invalid UTF-8, non-finite JSON, excessive size, excessive nesting, and excessive value count fail closed.
+Responses use `bioimageflow.cluster.response.v1`, echo the request ID, and contain either an exact result or a stable structured error without tracebacks, credentials, environment dumps, or signed material.
+
+`SSHSubmissionTransport` contains only an OpenSSH host alias or `user@host`, a normalized absolute POSIX staging root, one safe absolute remote executable token, and a positive finite connection timeout.
+OpenSSH resolves user configuration, keys, agent, host-key policy, ports, and `ProxyJump`.
+BioImageFlow invokes `ssh` and `sftp` with `shell=False`, explicit argument vectors, `BatchMode=yes`, normal host-key verification, bounded timeouts, and a small environment allowlist.
+It provides no password handling, interactive authentication, private-key field, arbitrary SSH option list, host-key bypass, shell prelude, module command, environment escape hatch, or interpolation of request values into remote shell syntax.
+SFTP uses one audited quoting function and writes only beneath a server-issued `.partial/<upload-id>/` path.
+
+`LocalUpload(Path(...))` is the only marker that reads laptop filesystem content.
+It is accepted only for a root workflow field port whose declared annotation is path-like.
+Ordinary `Path` values are already cluster paths and retain their explicit normalized absolute POSIX spelling without laptop `expanduser()`, `resolve()`, or existence checks.
+Ordinary strings remain byte-for-value strings even if they resemble paths.
+Root DataFrames retain the existing logical digest and Parquet transport.
+Each typed `Path` cell must already be a normalized absolute cluster path; relative typed paths and `LocalUpload` cells are rejected, while string cells remain strings.
+
+One ready-bundle manifest covers the strict workflow graph or archive, invocation/configuration data, root DataFrame transports, and every explicit upload.
+The workflow's absolute `storage_path` travels beside the workflow payload and remains the sole runtime storage path supplied to `Workflow.from_dict`; it never enters the graph/archive and is not an override.
+Local upload roots preserve an NFC basename and contain only regular files and canonical directories with normalized POSIX relative names.
+Symlinks, special files, traversal, excessive depth/count/bytes, duplicate names, Unicode/case collisions, and mutation between scan, read, and final stat are rejected.
+The manifest records every file's size and SHA-256 digest and has its own canonical digest.
+
+`allocate-upload` creates a distinct immutable upload ID and secure `.partial/<upload-id>/` directory.
+`commit-upload` rejects missing, extra, symlinked, special, or tampered entries, atomically installs `ready/<upload-id>/`, and installs a revalidated read-only content-addressed object beneath `objects/sha256/<manifest-digest>/submission`.
+No launcher run ID enters upload object identity.
+The transport staging root is disjoint from `Workflow.storage_path`, including its launcher, cache, run-view, and output-view trees.
+Installed objects must remain visible to the orchestrator and selected Parsl workers for every referencing run.
+Operators may remove abandoned partial uploads and unreferenced objects only after their site's retention policy proves no live or retained run references them; this phase adds no general garbage-collection service or remote run store.
+
+`submit` validates the committed bundle and cluster paths, materializes the workflow with the exact captured storage path, decodes only declared input types, validates Parsl and PSI/J configuration in the cluster environment, and then dispatches through the existing Phase 1b allocation and PSI/J launcher path.
+Before launcher allocation it durably binds the submit request ID and digest to one preallocated UUID4 launcher run ID.
+A retry opens that run when it already exists or resumes allocation with the same ID; concurrent equal requests cannot launch twice and a conflicting digest fails.
+The existing PSI/J intent remains the external scheduler idempotency boundary, so response loss never authorizes a second orchestrator job.
+The laptop API that exposes transported `submit_workflow()` and remote run control is deliberately deferred to the next work package; this phase supplies only the package-private submission seam.
+
 ---
 
 ## 18. No-Shared-Filesystem Execution
 
-No-shared-filesystem execution is a later required portability milestone for sites where the orchestrator, worker, and client do not share paths.
+The laptop submission transport in Section 17.11 does not require the laptop to share the cluster filesystem.
+No-shared-filesystem execution remains a later portability milestone specifically for sites where the orchestrator and Parsl workers do not share paths.
 
 It requires a schema-aware `ArtifactStager` with these logical operations:
 

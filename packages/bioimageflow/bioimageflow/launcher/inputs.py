@@ -6,7 +6,7 @@ import hashlib
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal, NoReturn, TYPE_CHECKING, cast
 
@@ -91,6 +91,7 @@ def _encode_constant(
     *,
     state: _CodecState,
     depth: int,
+    preserve_paths: bool,
 ) -> dict[str, Any]:
     state.visit(depth=depth)
     value_type = type(value)
@@ -107,9 +108,24 @@ def _encode_constant(
     if value_type is str:
         return {"tag": "str", "value": value}
     if isinstance(value, Path):
+        if preserve_paths:
+            encoded = value.as_posix()
+            candidate = Path(encoded)
+            if (
+                not candidate.is_absolute()
+                or encoded.startswith("//")
+                or candidate.as_posix() != encoded
+                or any(part in {"", ".", ".."} for part in candidate.parts[1:])
+            ):
+                raise ValueError(
+                    "Transported cluster paths must be normalized absolute "
+                    "POSIX paths."
+                )
+        else:
+            encoded = _normalized_absolute_path(value).as_posix()
         return {
             "tag": "path",
-            "value": _normalized_absolute_path(value).as_posix(),
+            "value": encoded,
         }
     if value_type not in {list, tuple, dict}:
         raise TypeError(f"Unsupported submitted constant type: {value_type.__name__}.")
@@ -123,7 +139,12 @@ def _encode_constant(
             return {
                 "tag": "list" if value_type is list else "tuple",
                 "value": [
-                    _encode_constant(item, state=state, depth=depth + 1)
+                    _encode_constant(
+                        item,
+                        state=state,
+                        depth=depth + 1,
+                        preserve_paths=preserve_paths,
+                    )
                     for item in value
                 ],
             }
@@ -135,11 +156,13 @@ def _encode_constant(
                         key,
                         state=state,
                         depth=depth + 1,
+                        preserve_paths=preserve_paths,
                     ),
                     "value": _encode_constant(
                         item,
                         state=state,
                         depth=depth + 1,
+                        preserve_paths=preserve_paths,
                     ),
                 }
             )
@@ -154,6 +177,17 @@ def encode_typed_constant(value: Any) -> dict[str, Any]:
         value,
         state=_CodecState(active=set()),
         depth=0,
+        preserve_paths=False,
+    )
+
+
+def encode_cluster_typed_constant(value: Any) -> dict[str, Any]:
+    """Encode constants while preserving explicit cluster Path spellings."""
+    return _encode_constant(
+        value,
+        state=_CodecState(active=set()),
+        depth=0,
+        preserve_paths=True,
     )
 
 
@@ -173,6 +207,7 @@ def _decode_constant(
     *,
     state: _CodecState,
     depth: int,
+    preserve_paths: bool,
 ) -> Any:
     state.visit(depth=depth)
     value = _plain_object(
@@ -207,20 +242,36 @@ def _decode_constant(
     if tag == "path":
         if type(payload) is not str or not payload:
             raise ValueError("path constant payload must be a non-empty string.")
-        path = Path(payload)
-        if (
-            not path.is_absolute()
-            or _normalized_absolute_path(path).as_posix() != payload
-        ):
+        if preserve_paths:
+            pure = PurePosixPath(payload)
+            valid = (
+                pure.is_absolute()
+                and not payload.startswith("//")
+                and str(pure) == payload
+                and all(part not in {"", ".", ".."} for part in pure.parts[1:])
+            )
+        else:
+            path = Path(payload)
+            valid = (
+                path.is_absolute()
+                and _normalized_absolute_path(path).as_posix() == payload
+            )
+        if not valid:
             raise ValueError(
                 "path constant payload must be a normalized absolute path."
             )
-        return path
+        return Path(payload)
     if type(payload) is not list:
         raise ValueError(f"{tag} constant payload must be a list.")
     if tag in {"list", "tuple"}:
         decoded = [
-            _decode_constant(item, state=state, depth=depth + 1) for item in payload
+            _decode_constant(
+                item,
+                state=state,
+                depth=depth + 1,
+                preserve_paths=preserve_paths,
+            )
+            for item in payload
         ]
         return decoded if tag == "list" else tuple(decoded)
 
@@ -235,6 +286,7 @@ def _decode_constant(
             entry["key"],
             state=state,
             depth=depth + 1,
+            preserve_paths=preserve_paths,
         )
         try:
             hash(key)
@@ -246,6 +298,7 @@ def _decode_constant(
             entry["value"],
             state=state,
             depth=depth + 1,
+            preserve_paths=preserve_paths,
         )
     return result
 
@@ -256,6 +309,17 @@ def decode_typed_constant(envelope: Any) -> Any:
         envelope,
         state=_CodecState(active=set()),
         depth=0,
+        preserve_paths=False,
+    )
+
+
+def decode_cluster_typed_constant(envelope: Any) -> Any:
+    """Decode transported cluster Paths without local path resolution."""
+    return _decode_constant(
+        envelope,
+        state=_CodecState(active=set()),
+        depth=0,
+        preserve_paths=True,
     )
 
 
@@ -334,6 +398,7 @@ def serialize_invocation(
     inputs: Mapping[str, Any] | None = None,
     targets: Sequence[str] | None = None,
     control_candidate: Path,
+    preserve_cluster_paths: bool = False,
 ) -> dict[str, Any]:
     """Serialize exactly one root-interface or ad-hoc invocation."""
     if targets is not None and inputs is not None:
@@ -381,7 +446,17 @@ def serialize_invocation(
             raise TypeError(
                 f"Field workflow input {port.name!r} cannot contain a DataFrame."
             )
-        planned.append((port, value, encode_typed_constant(value)))
+        planned.append(
+            (
+                port,
+                value,
+                (
+                    encode_cluster_typed_constant(value)
+                    if preserve_cluster_paths
+                    else encode_typed_constant(value)
+                ),
+            )
+        )
 
     candidate = _ensure_control_candidate(control_candidate)
     serialized_inputs: list[dict[str, Any]] = []
@@ -400,6 +475,7 @@ def serialize_invocation(
         metadata = write_dataframe_transport(
             cast(pd.DataFrame, value),
             candidate / Path(relative_path),
+            preserve_paths=preserve_cluster_paths,
         )
         serialized_inputs.append(
             {

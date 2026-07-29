@@ -1006,6 +1006,18 @@ Transient cleanup may remove an attempt, temporary record directory, or non-reus
 
 Automatic record pruning is not part of the cache contract.
 
+## Cluster Submission Staging
+
+Laptop-to-cluster submission uses a separate operator-selected transport staging root.
+That root must be disjoint from `Workflow.storage_path` and therefore from every cache, launcher, run-view, and output-view path described in this document.
+It contains partial transfers, committed upload trees, content-addressed read-only input objects, and operation receipts only.
+It is not canonical storage, a cache, a launcher repository, or a remote run store.
+
+An installed input object is addressed by its canonical upload-manifest digest rather than by a launcher run ID.
+The orchestrator and all selected Parsl workers must retain access to that object for every referencing run.
+Sites may remove incomplete partial transfers after a local stale threshold and may remove an object only after proving that no live or retained launcher submission references it.
+BioImageFlow does not provide an automatic transport garbage collector in this phase.
+
 ## Shared Memory Interaction
 
 Shared memory is a runtime transport optimization, not a canonical storage format.

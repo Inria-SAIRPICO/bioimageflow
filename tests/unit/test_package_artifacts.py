@@ -141,6 +141,16 @@ def _wheel_metadata(path: Path):
         return BytesParser(policy=default).parsebytes(archive.read(metadata_name))
 
 
+def _wheel_entry_points(path: Path) -> str:
+    with zipfile.ZipFile(path) as archive:
+        [entry_points_name] = [
+            name
+            for name in archive.namelist()
+            if name.endswith(".dist-info/entry_points.txt")
+        ]
+        return archive.read(entry_points_name).decode("utf-8")
+
+
 def _sdist_members(path: Path) -> list[str]:
     with tarfile.open(path, "r:gz") as archive:
         names = archive.getnames()
@@ -223,6 +233,25 @@ def test_spot_tools_atlas_data_file_is_in_wheel_and_sdist(
 
     assert data_path in _wheel_members(_wheel_path(built_artifacts, distribution_name))
     assert data_path in _sdist_members(_sdist_path(built_artifacts, distribution_name))
+
+
+def test_bioimageflow_wheel_contains_cluster_agent_console_script(
+    request: pytest.FixtureRequest,
+) -> None:
+    distribution_name = "bioimageflow"
+    if distribution_name not in _distribution_names():
+        pytest.skip(f"{distribution_name} is not the selected release package")
+    built_artifacts = request.getfixturevalue("built_artifacts")
+    assert isinstance(built_artifacts, Path)
+
+    entry_points = _wheel_entry_points(
+        _wheel_path(built_artifacts, distribution_name)
+    )
+
+    assert (
+        "bioimageflow-cluster-agent = bioimageflow.launcher.cluster_agent:main"
+        in entry_points
+    )
 
 
 def test_base_wheels_import_public_modules_without_optional_runtimes(

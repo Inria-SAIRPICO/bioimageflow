@@ -115,7 +115,7 @@ def _mark_launch_failed(control: Any, error: BaseException) -> None:
         )
 
 
-def submit_workflow(
+def _submit_workflow(
     workflow: Workflow,
     *,
     inputs: Mapping[str, Any] | None = None,
@@ -127,8 +127,10 @@ def submit_workflow(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     launch: LaunchConfig | None = None,
+    preallocated_run_id: str | None = None,
+    preserve_cluster_paths: bool = False,
 ) -> WorkflowRun:
-    """Persist and launch one reconnectable submitted Parsl workflow."""
+    """Persist and launch one workflow, optionally using a bound server run ID."""
     if not isinstance(workflow, Workflow):
         raise TypeError("workflow must be a Workflow.")
     if type(parsl_config) is not ParslConfigRef:
@@ -174,8 +176,9 @@ def submit_workflow(
     repository = LauncherRepository(storage_root)
     selected_task_policy = task_policy or ParslTaskPolicy()
     last_collision: BaseException | None = None
-    for _attempt in range(8):
-        run_id = repository.new_run_id()
+    attempts = 1 if preallocated_run_id is not None else 8
+    for _attempt in range(attempts):
+        run_id = preallocated_run_id or repository.new_run_id()
         candidate = repository.create_candidate(run_id)
         try:
             invocation = serialize_invocation(
@@ -183,6 +186,7 @@ def submit_workflow(
                 inputs=inputs,
                 targets=targets,
                 control_candidate=candidate,
+                preserve_cluster_paths=preserve_cluster_paths,
             )
             created_at = utc_timestamp()
             submission = {
@@ -236,3 +240,32 @@ def submit_workflow(
     raise RuntimeError(
         "Could not allocate a unique submitted workflow run ID."
     ) from last_collision
+
+
+def submit_workflow(
+    workflow: Workflow,
+    *,
+    inputs: Mapping[str, Any] | None = None,
+    targets: Sequence[str] | None = None,
+    parsl_config: ParslConfigRef,
+    executor_bindings: Mapping[str, ExecutorBinding],
+    node_routes: Mapping[str, str] | None = None,
+    environment_routes: Mapping[str, str] | None = None,
+    shared_runtime_root: Path | str | None = None,
+    task_policy: ParslTaskPolicy | None = None,
+    launch: LaunchConfig | None = None,
+) -> WorkflowRun:
+    """Persist and launch one reconnectable submitted Parsl workflow."""
+    return _submit_workflow(
+        workflow,
+        inputs=inputs,
+        targets=targets,
+        parsl_config=parsl_config,
+        executor_bindings=executor_bindings,
+        node_routes=node_routes,
+        environment_routes=environment_routes,
+        shared_runtime_root=shared_runtime_root,
+        task_policy=task_policy,
+        launch=launch,
+        preserve_cluster_paths=False,
+    )

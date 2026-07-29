@@ -31,6 +31,7 @@ dependencies = [
 
 [project.scripts]
 bioimageflow = "bioimageflow.cli:main"
+bioimageflow-cluster-agent = "bioimageflow.launcher.cluster_agent:main"
 
 [project.optional-dependencies]
 parsl = ["parsl>=2026.5.25,<2026.6"]

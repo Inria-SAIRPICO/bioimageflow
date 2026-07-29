@@ -152,6 +152,7 @@ name = "launcher"
 sources = ["packages/bioimageflow/bioimageflow/launcher"]
 edit_tests = [
     "tests/unit/launcher",
+    "tests/integration/launcher",
     "tests/integration/parsl/test_launcher.py",
     "tests/unit/parsl/test_optional_dependency.py",
     "tests/unit/test_workflow_clean_api.py",

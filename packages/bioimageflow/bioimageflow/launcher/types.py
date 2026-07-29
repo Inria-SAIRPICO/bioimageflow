@@ -25,6 +25,7 @@ _FACTORY_RE = re.compile(
 _SECRET_KEY_PARTS = frozenset(
     {"api_key", "credential", "credentials", "password", "secret", "token"}
 )
+_SSH_HOST_RE = re.compile(r"^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def _sensitive_key(key: str) -> bool:
@@ -261,6 +262,104 @@ def _cluster_work_dir(value: object) -> PurePosixPath | None:
     ):
         raise ValueError("work_dir must be a normalized absolute POSIX path.")
     return path
+
+
+def _absolute_posix_path(value: object, *, field: str) -> PurePosixPath:
+    if not isinstance(value, (str, PurePosixPath)):
+        raise TypeError(f"{field} must be a POSIX path-like value.")
+    encoded = str(value)
+    path = PurePosixPath(encoded)
+    if (
+        not encoded
+        or any(character in encoded for character in ("\x00", "\n", "\r"))
+        or not path.is_absolute()
+        or encoded.startswith("//")
+        or str(path) != encoded
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+    ):
+        raise ValueError(f"{field} must be a normalized absolute POSIX path.")
+    return path
+
+
+@dataclass(frozen=True, slots=True)
+class LocalUpload:
+    """An explicit laptop file or directory input for cluster submission."""
+
+    path: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, Path):
+            raise TypeError("LocalUpload.path must be a pathlib.Path.")
+
+
+@dataclass(frozen=True, slots=True)
+class SSHSubmissionTransport:
+    """Strict OpenSSH connection configuration for cluster submission."""
+
+    host: str
+    staging_root: PurePosixPath
+    remote_executable: PurePosixPath
+    connect_timeout: float = 15.0
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.host) is not str
+            or _SSH_HOST_RE.fullmatch(self.host) is None
+            or self.host.startswith("-")
+        ):
+            raise ValueError(
+                "host must be an OpenSSH alias or user@destination without "
+                "whitespace, controls, or options."
+            )
+        object.__setattr__(
+            self,
+            "staging_root",
+            _absolute_posix_path(self.staging_root, field="staging_root"),
+        )
+        object.__setattr__(
+            self,
+            "remote_executable",
+            _absolute_posix_path(
+                self.remote_executable,
+                field="remote_executable",
+            ),
+        )
+        if re.fullmatch(r"/[A-Za-z0-9._/+:@-]+", str(self.remote_executable)) is None:
+            raise ValueError(
+                "remote_executable must be one safe absolute remote command token."
+            )
+        object.__setattr__(
+            self,
+            "connect_timeout",
+            _positive_finite(self.connect_timeout, field="connect_timeout"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "connect_timeout": self.connect_timeout,
+            "host": self.host,
+            "remote_executable": str(self.remote_executable),
+            "staging_root": str(self.staging_root),
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "SSHSubmissionTransport":
+        if type(value) is not dict or set(value) != {
+            "connect_timeout",
+            "host",
+            "remote_executable",
+            "staging_root",
+        }:
+            raise ValueError(
+                "SSHSubmissionTransport requires exactly connect_timeout, host, "
+                "remote_executable, and staging_root."
+            )
+        return cls(
+            host=value["host"],
+            staging_root=value["staging_root"],
+            remote_executable=value["remote_executable"],
+            connect_timeout=value["connect_timeout"],
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -2001,6 +2001,23 @@ A successful submitted run persists its exact public DataFrame or ordered mappin
 Record-backed path cells address exact immutable record IDs, external paths remain typed external references, and transient owned assets are copied into the return.
 Historical result loading never consults `current.json`.
 
+Laptop-to-cluster submission uses the system OpenSSH and SFTP clients plus the installed one-shot `bioimageflow-cluster-agent`.
+`SSHSubmissionTransport` carries only a host alias or `user@host`, normalized absolute cluster staging root, safe absolute remote executable, and finite timeout.
+OpenSSH retains normal user configuration, agent authentication, `ProxyJump`, and host-key verification; BioImageFlow supplies no credentials, arbitrary options, shell fragments, bootstrap commands, or host-key bypass.
+
+Only a path-like root workflow input explicitly wrapped in `LocalUpload(Path(...))` reads laptop bytes.
+Ordinary `Path` values remain explicit normalized absolute cluster paths without laptop filesystem probing, and path-looking strings remain strings.
+Root DataFrames use the existing logical/Parquet transport, reject `LocalUpload` cells and relative typed `Path` cells, and preserve string cells.
+The workflow's existing absolute cluster `storage_path` travels beside the graph/archive and remains the sole value passed to `Workflow.from_dict`.
+
+The one-shot `bioimageflow.cluster.command.v1` protocol implements `allocate-upload`, `commit-upload`, and `submit` with exact bounded JSON schemas and canonical UUID4 operation request IDs.
+Operation receipts make equal retries idempotent and reject request-ID digest conflicts.
+SFTP writes only beneath a server-issued partial upload path.
+Commit verifies a complete canonical manifest, rejects unsafe or tampered trees, atomically marks the upload ready, and installs a read-only content-addressed object.
+The staging root is disjoint from workflow storage and never changes launcher, cache, run-view, or output-view layouts.
+Before launcher allocation, submit durably binds the request to one preallocated launcher run ID and then reuses the cluster-local Phase 1b allocation and PSI/J dispatch path.
+Remote run observation, cancellation, and result retrieval are not part of this submission-only transport phase.
+
 ### 4.6 Input Binding Logic (Graph Construction)
 
 At graph construction time, the engine builds an **input binding plan** for each tool call. The binding rules differ by tool type, reflecting their different relationships with upstream data.

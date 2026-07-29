@@ -44,6 +44,8 @@ def _normalize_path(value: Path) -> Path:
 
 def _logical_frame_and_path_cells(
     frame: pd.DataFrame,
+    *,
+    preserve_paths: bool,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     logical = frame.copy(deep=True)
     names: dict[str, int] = {}
@@ -61,7 +63,9 @@ def _logical_frame_and_path_cells(
             value = logical.iat[row_position, column_position]
             if not isinstance(value, Path):
                 continue
-            logical.iat[row_position, column_position] = _normalize_path(value)
+            logical.iat[row_position, column_position] = (
+                value if preserve_paths else _normalize_path(value)
+            )
             path_cells.append({"column": name, "row_position": row_position})
     return logical, path_cells
 
@@ -81,7 +85,11 @@ def _is_missing(value: Any) -> bool:
     return type(missing) is bool and missing
 
 
-def _prepare_for_parquet(frame: pd.DataFrame) -> pd.DataFrame:
+def _prepare_for_parquet(
+    frame: pd.DataFrame,
+    *,
+    preserve_paths: bool,
+) -> pd.DataFrame:
     prepared = frame.copy(deep=True)
     for column in prepared.columns:
         series = prepared[column]
@@ -92,7 +100,11 @@ def _prepare_for_parquet(frame: pd.DataFrame) -> pd.DataFrame:
         normalized: list[Any] = []
         for value in series:
             if isinstance(value, Path):
-                normalized.append(_normalize_path(value).as_posix())
+                normalized.append(
+                    value.as_posix()
+                    if preserve_paths
+                    else _normalize_path(value).as_posix()
+                )
                 continue
             if type(value) in {str, int, float, bool, type(None)}:
                 normalized.append(value)
@@ -113,11 +125,19 @@ def _prepare_for_parquet(frame: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
-def _write_parquet(frame: pd.DataFrame, path: Path) -> None:
+def _write_parquet(
+    frame: pd.DataFrame,
+    path: Path,
+    *,
+    preserve_paths: bool,
+) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    table = pa.Table.from_pandas(_prepare_for_parquet(frame), preserve_index=True)
+    table = pa.Table.from_pandas(
+        _prepare_for_parquet(frame, preserve_paths=preserve_paths),
+        preserve_index=True,
+    )
     pq.write_table(
         table,
         path,
@@ -159,6 +179,8 @@ def _index_metadata(index: pd.Index) -> dict[str, Any]:
 def write_dataframe_transport(
     frame: pd.DataFrame,
     destination: Path,
+    *,
+    preserve_paths: bool = False,
 ) -> dict[str, Any]:
     """Write one canonical Parquet file and return its verification metadata."""
     if not isinstance(frame, pd.DataFrame):
@@ -168,11 +190,18 @@ def write_dataframe_transport(
         raise FileExistsError(f"DataFrame transport already exists: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    logical, path_cells = _logical_frame_and_path_cells(frame)
+    logical, path_cells = _logical_frame_and_path_cells(
+        frame,
+        preserve_paths=preserve_paths,
+    )
     logical_schema, logical_digest = canonical_dataframe_identity(logical)
     temporary = destination.parent / (f".{destination.name}.{uuid.uuid4().hex}.tmp")
     try:
-        _write_parquet(logical, temporary)
+        _write_parquet(
+            logical,
+            temporary,
+            preserve_paths=preserve_paths,
+        )
         transport_index = pd.read_parquet(temporary).index
         os.replace(temporary, destination)
     finally:
@@ -285,6 +314,8 @@ def _validate_json_value(value: Any, *, label: str) -> None:
 def read_dataframe_transport(
     source: Path,
     metadata: Mapping[str, Any],
+    *,
+    preserve_paths: bool = False,
 ) -> pd.DataFrame:
     """Verify and load one canonical DataFrame transport artifact."""
     source = Path(source)
@@ -333,7 +364,19 @@ def read_dataframe_transport(
         if type(value) is not str or not value:
             raise ValueError("DataFrame path cell transport value is not a string.")
         path = Path(value)
-        if not path.is_absolute() or _normalize_path(path).as_posix() != value:
+        if preserve_paths:
+            from pathlib import PurePosixPath
+
+            pure = PurePosixPath(value)
+            valid = (
+                pure.is_absolute()
+                and not value.startswith("//")
+                and str(pure) == value
+                and all(part not in {"", ".", ".."} for part in pure.parts[1:])
+            )
+        else:
+            valid = path.is_absolute() and _normalize_path(path).as_posix() == value
+        if not valid:
             raise ValueError("DataFrame path cell is not a normalized absolute path.")
         frame.iat[row_position, column_position] = path
 

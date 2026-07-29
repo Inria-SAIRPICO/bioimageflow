@@ -309,6 +309,27 @@ If an explicitly pruned or corrupted immutable record is required, :meth:`~bioim
 
 The complete launcher storage and retention contract is documented in :doc:`output_cache_storage`.
 
+Laptop submission transport
+---------------------------
+
+Work Package 2 installs the ``bioimageflow-cluster-agent`` one-shot command and adds the strict :class:`~bioimageflow.LocalUpload` and :class:`~bioimageflow.SSHSubmissionTransport` values.
+The final public ``transport=`` submission façade and remote run handle are delivered by the following work package; current application code should not call the package-private transport seam directly.
+
+The laptop uses its system ``ssh`` and ``sftp`` clients with ``BatchMode=yes`` and normal OpenSSH configuration and host-key verification.
+The transport stores no passwords, key contents, arbitrary SSH options, shell fragments, or environment setup commands.
+The cluster environment must already contain BioImageFlow with the ``parsl`` and ``psij`` extras and the requested PSI/J executor plugin.
+
+Only ``LocalUpload(Path(...))`` reads laptop files.
+It is valid only for a path-like root workflow input.
+An ordinary ``Path`` is an explicit cluster path, and a string is always a string even when it resembles a path.
+Typed ``Path`` cells in root DataFrames must already be normalized absolute cluster paths.
+
+Uploads first enter a server-allocated partial directory, are checked against a complete SHA-256 manifest, and become read-only content-addressed objects only after atomic commit.
+The transport staging root must be disjoint from the workflow storage root.
+It is not a cache or run store and does not change the existing ``launcher/v1``, ``cache/v1``, ``views/runs``, or output-view layout.
+Installed objects must remain readable by the orchestrator and workers for the lifetime of every referencing run.
+Sites may delete abandoned partial uploads and unreferenced objects according to an operator retention policy, but BioImageFlow does not provide a general transport garbage collector in this phase.
+
 API
 ---
 
@@ -318,6 +339,12 @@ API
    :members:
 
 .. autoclass:: ParslTaskPolicy
+   :members:
+
+.. autoclass:: LocalUpload
+   :members:
+
+.. autoclass:: SSHSubmissionTransport
    :members:
 
 .. autoclass:: PSIJLaunchConfig

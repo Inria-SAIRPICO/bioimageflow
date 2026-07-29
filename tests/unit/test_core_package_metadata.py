@@ -144,6 +144,14 @@ def test_core_declares_numpy_runtime_dependency() -> None:
     assert "zero dependencies" not in pyproject["project"]["description"].lower()
 
 
+def test_bioimageflow_declares_cluster_agent_console_script() -> None:
+    project = _project(ROOT / "packages" / "bioimageflow" / "pyproject.toml")
+
+    assert project["scripts"]["bioimageflow-cluster-agent"] == (
+        "bioimageflow.launcher.cluster_agent:main"
+    )
+
+
 def test_workspace_core_requirement_matches_local_core_version() -> None:
     workspace = _pyproject(ROOT / "pyproject.toml")
     core = _pyproject(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
