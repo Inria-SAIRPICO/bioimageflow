@@ -1953,6 +1953,10 @@ An injected DFK requires `resource_lifetime="external"`.
 `storage_mode="staged"` is recognized and rejected until a separate staging contract exists.
 
 `ParslTaskPolicy`, `WorkerSlotCapacity`, `ExecutorCapabilities`, `WorkerEnvironmentAttestation`, and `ExecutorBinding` are strict immutable JSON-safe values.
+`ParslTaskPolicy(row_chunk_size=1, max_in_flight=32)` requires two positive integers.
+`row_chunk_size` groups consecutive row positions into one task, while `max_in_flight` bounds all unfinished Parsl futures and may be lowered for a node by `ResourceSpec.max_concurrent`.
+Whole-node `process_batch()` remains one task regardless of `row_chunk_size`.
+Parsl Config must use `retries=0` because BioImageFlow owns deterministic task failure selection and rejects opaque Parsl retries.
 Live Config, DFK, executor/provider objects, routes, credentials, and secrets remain runtime-only.
 `ParslTaskError` is the public structured remote-error subtype.
 
@@ -1994,7 +1998,8 @@ Root DataFrames are stored under the control directory and verified by transport
 
 `OrchestratorLaunchConfig(backend="local")` starts a separate Python process.
 `backend="manual"` writes a reproducible shell-free command descriptor and remains prepared until that command is executed.
-`PSIJLaunchConfig` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator through the optional `bioimageflow[psij]` runtime.
+`PSIJLaunchConfig` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator.
+The cluster environment must contain `bioimageflow[parsl,psij]`, the selected site PSI/J executor plugin, the importable Parsl configuration factory, and every tool environment required by its workers.
 It requires an explicit positive walltime and supports strict queue, project/account, core-count, absolute cluster work-directory, and hard-cancel values without native scheduler directives, scripts, environment strings, or live PSI/J objects.
 Direct scheduler backend aliases and OAR are not supported.
 The PSI/J launcher persists immutable submit intent before external submission and a correlated native-job receipt immediately afterward.
@@ -2032,12 +2037,16 @@ The staging root is disjoint from workflow storage and never changes launcher, c
 Before launcher allocation, submit durably binds the request to one preallocated launcher run ID and then reuses the cluster-local Phase 1b allocation and PSI/J dispatch path.
 Passing `transport=SSHSubmissionTransport(...)` to `submit_workflow()` requires `PSIJLaunchConfig` and returns `RemoteWorkflowRun`; omitting transport preserves the existing local `WorkflowRun` behavior and type.
 `RemoteWorkflowRun.open(transport, storage_path, run_id)` reconnects without local control/view path claims and validates the cluster storage/run binding before exposing state.
-Refresh delegates to the cluster-local `WorkflowRun.refresh()`, wait uses interruptible client polling with monotonic deadlines, progress retains the server's global sequences, and logs page a finite first-page snapshot as raw bytes with file-identity and truncation detection before replacement decoding.
+Refresh delegates to the cluster-local `WorkflowRun.refresh()`, wait uses interruptible client polling with monotonic deadlines, and progress retains the server's global sequences.
+`RemoteWorkflowRun.logs()` uses bounded internal pages, byte offsets, file identities, and truncation detection to assemble complete current stdout and stderr snapshots before replacement decoding.
+Each call returns the complete currently available combined text; no byte cursor is exposed in the public API.
 Cancellation is a receipt-backed retry-safe delegation to cluster-local `WorkflowRun.cancel()`.
 
 Successful remote results are prepared as immutable content-addressed transport objects after validating the exact Phase 1b return.
 The object contains exact Parquet frames, self-contained return assets, and only the immutable record assets named by typed return locators; it never consults `current.json` or copies launcher state, cache records, run views, or output views.
 The laptop downloads into a unique sibling candidate, validates the final manifest, paths, file types, sizes, and SHA-256 digests, and atomically installs the requested destination.
+Every component of the destination's parent path must already be a real directory and not a symlink.
+An existing destination is accepted only when it is the exact verified bundle for the same run.
 Only record-owned and return-owned cells are rebound to verified laptop-local assets; declared external cluster Paths remain cluster Paths, and SharedArray values receive fresh laptop-local backing.
 
 ### 4.6 Input Binding Logic (Graph Construction)
@@ -2935,6 +2944,14 @@ from bioimageflow import (
     ParslTaskPolicy, WorkerSlotCapacity, ExecutorCapabilities,
     WorkerEnvironmentAttestation, ExecutorBinding,
     ParslTaskError, WorkflowCancelledError,
+    # Submitted and remote Parsl execution
+    ParslConfigRef, OrchestratorLaunchConfig, PSIJLaunchConfig,
+    SSHSubmissionTransport, LocalUpload,
+    WorkflowRun, RemoteWorkflowRun, submit_workflow,
+    BackendNotSupportedError, PSIJSubmissionUncertainError,
+    WorkflowRunFailedError, WorkflowRunLostError,
+    WorkflowRunNotReadyError, WorkflowRunResultUnavailableError,
+    LauncherError, LauncherProtocolError, LauncherStateConflictError,
     WorkflowNode,
     # Versioned tool loading and PEP 723 support
     load_versioned_package, unload_versioned_package, get_tool_package_info,
