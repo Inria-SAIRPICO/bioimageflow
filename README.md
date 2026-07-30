@@ -130,6 +130,28 @@ result = workflow.compute(inputs={"folder": "/data/images"})
 print(result)  # DataFrame with a 'mask' column of output paths
 ```
 
+Saved definitions remain portable because runtime storage is not serialized.
+The application loading a workflow chooses that storage explicitly; a simple project convention is to keep it beside the definition:
+
+```python
+workflow_directory = Path("workspace/workflows/threshold-images").resolve()
+
+workflow = Workflow.load(
+    workflow_directory / "workflow.json",
+    storage_path=workflow_directory / "results",
+)
+```
+
+Persistent archive import keeps the extraction destination and runtime results distinct:
+
+```python
+workflow = Workflow.import_archive(
+    "threshold-images.zip",
+    workflow_directory,
+    storage_path=workflow_directory / "results",
+)
+```
+
 ## Architecture
 
 ```

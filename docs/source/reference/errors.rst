@@ -91,7 +91,7 @@ The full set of kinds, drawn from :data:`bioimageflow.validation.ValidationError
      - ``node``
    * - ``construction_failed``
      - Graph construction raised in
-       ``Workflow.from_dict(validate_only=True)`` mode. The wrapped
+       ``Workflow.from_dict(data, storage_path=results, validate_only=True)`` mode. The wrapped
        exception's text is captured in ``message``.
      - ``message``
    * - ``source_tool_upstream``

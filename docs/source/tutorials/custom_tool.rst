@@ -43,7 +43,7 @@ tools:
 
 ``Workflow.export(path)`` embeds the workflow-local ``tools/`` package in
 the exported JSON when custom tools from that package are used.
-``Workflow.load(path)`` reconstructs the package before falling back to
+``Workflow.load(path, storage_path=results)`` reconstructs the package before falling back to
 imports, so the exported workflow can move to another machine without
 separately installing the custom tool code.
 

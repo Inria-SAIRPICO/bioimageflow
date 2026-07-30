@@ -39,6 +39,39 @@ The tool store is resolved from ``BIOIMAGEFLOW_TOOL_STORE``, then
 ``BIOIMAGEFLOW_HOME / "tool_packages"``, then
 ``~/.bioimageflow/tool_packages``.
 
+Load a saved workflow
+---------------------
+
+Saved JSON definitions and portable archives do not contain a runtime storage path.
+The application loading them must choose one explicitly.
+A simple convention is to put ``results/`` beside ``workflow.json``:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from bioimageflow import Workflow
+
+   workflow_directory = Path("workspace/workflows/invert-images").resolve()
+   workflow = Workflow.load(
+       workflow_directory / "workflow.json",
+       storage_path=workflow_directory / "results",
+   )
+
+``Workflow.load()`` also reads a ``.zip`` archive into a temporary import context.
+Use ``Workflow.import_archive()`` when the extracted definition and bundled custom tools should remain in a permanent workflow directory:
+
+.. code-block:: python
+
+   workflow = Workflow.import_archive(
+       "invert-images.zip",
+       workflow_directory,
+       storage_path=workflow_directory / "results",
+   )
+
+The archive extraction ``destination`` and runtime ``storage_path`` are separate arguments.
+BioImageFlow does not infer one from the other, although co-locating ``results/`` with the workflow is the recommended workspace convention.
+
 Pick a source
 -------------
 

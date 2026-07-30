@@ -21,7 +21,7 @@ Their combinations give four modes:
      - ``False`` (default)
      - **Strict load.** Returns a fully wired ``Workflow``. The first
        error during construction raises immediately. Use for
-       ``Workflow.load(path)``-style runs.
+       ``Workflow.load(path, storage_path=results)``-style runs.
    * - ``False``
      - ``True``
      - **Best-effort load.** Per-node failures are captured. After all
@@ -76,7 +76,7 @@ Other parameters
   through to the constructed :class:`Workflow`. ``None`` means "use the
   values from ``data['config']`` (or defaults)".
 
-``Workflow.load(path)`` is a thin wrapper around the strict mode
+``Workflow.load(path, storage_path=results)`` is a thin wrapper around the strict mode
 (``partial=False, validate_only=False``).
 
 Worked example: GUI loading a graph with an unavailable package

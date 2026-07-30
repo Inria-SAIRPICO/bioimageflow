@@ -1594,6 +1594,7 @@ workspace/
   workflows/
     segmentation/
       workflow.json
+      results/
   tools/
     download_images.py
     measure_spots.py
@@ -1603,7 +1604,6 @@ workspace/
   tests/
     test_tools.py
       tiny_input.csv
-  outputs/
 ```
 
 Rules:
@@ -1763,16 +1763,30 @@ A `column` edge carries `source_node`, `source_output`, `target_node`, and `targ
 A `dataframe` edge carries `source_node`, `target_node`, and exactly one of `target_position` or `target_input`.
 The `id` round-trips unchanged and is copied onto matching `ValidationError` records; DataFrame positions are represented directly and require no sentinel field value.
 
-### 4.3 The \`Workflow\` Object
+### 4.3 The `Workflow` Object
 
-\`Workflow(storage_path=..., name="workflow", display_name=None, ...)\` owns definition metadata, its immediate node map, one public interface, and root execution configuration.
-\`display_name\` defaults to \`name\`.
-Structural workflow and node names are non-empty and cannot contain \`/\`, which separates scoped execution paths.
+`Workflow(storage_path=..., name="workflow", display_name=None, ...)` owns definition metadata, its immediate node map, one public interface, and root execution configuration.
+`display_name` defaults to `name`.
+Structural workflow and node names are non-empty and cannot contain `/`, which separates scoped execution paths.
+
+All public materialization APIs require one concrete runtime storage root:
+
+```python
+Workflow(storage_path, ...)
+Workflow.from_python(path_or_module, *, storage_path)
+Workflow.from_dict(data, *, storage_path, ...)
+Workflow.load(path, *, storage_path)
+Workflow.import_archive(path, destination, *, storage_path)
+```
+
+`storage_path` always means the workflow's runtime root for cache records, provenance, run views, transient workspaces, and materialized outputs.
+It is not an override, has no implicit fallback, and is never serialized into a graph or archive.
+`Workflow.import_archive()` keeps the persistent extraction `destination` separate from runtime `storage_path`; the platform convention is to use `<destination>/results/`.
 
 Ordinary ad hoc graphs still register tools through the workflow context manager.
 Reusable definitions additionally declare symbolic inputs and published outputs:
 
-\`\`\`python
+```python
 workflow = Workflow(
     storage_path="./results",
     name="segment",
@@ -1782,15 +1796,15 @@ with workflow:
     image = workflow.input("image", ImagePath, id="input-image")
     masks = Segment()(input_image=image, name="segment")
     workflow.output("mask", masks["mask"], id="output-mask")
-\`\`\`
+```
 
-Calling this object in another active workflow returns \`WorkflowNode\`; root callers use \`compute(inputs={...})\`.
+Calling this object in another active workflow returns `WorkflowNode`; root callers use `compute(inputs={...})`.
 The `engine` preference is one of `direct`, `wetlands`, or `parsl` and is serialized as a string.
 Live engines, Parsl Config/DFK objects, executor bindings, routes, task policy, credentials, and execution contexts are runtime-only and never enter graph or archive data.
 An explicit engine passed to `compute()` or `compute_steps()` has precedence over the stored preference.
-\`to_dict()\` emits the recursive graph.
-\`to_dict(include_custom_tools=True)\` emits the portable archive envelope when custom sources exist.
-\`from_dict(validate_only=True, partial=True)\` retains its diagnostic tuple form but parses only schema version 1.
+`to_dict()` emits the recursive graph.
+`to_dict(include_custom_tools=True)` emits the portable archive envelope when custom sources exist.
+`from_dict(data, storage_path=..., validate_only=True, partial=True)` retains its diagnostic tuple form but parses only schema version 1.
 
 ### 4.4 Progress Monitoring
 
@@ -2128,13 +2142,20 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 
 `tool_module` stores the **canonical** module path (not the scoped `__1_0_0` variant). When `tool_package` and `tool_package_version` are present, `Workflow.load()` uses `load_versioned_package()` to load the package and `resolve_tool_class()` to find the class in the scoped namespace. Workflows should include package identity for package tools.
 
-`Workflow.load()` restores the flag: disabled nodes remain disabled in the loaded workflow.
+`Workflow.load(path, storage_path=...)` restores the flag: disabled nodes remain disabled in the loaded workflow.
 
 ### 4.7 WorkflowSession (Incremental Editing API)
 
 `WorkflowSession` is a parallel, **dict-backed** model of a workflow designed for GUI clients that mutate the graph incrementally. The session is the canonical state — a `Workflow` is materialized on demand and cached across edits, with selective rebuilds triggered only by structural changes.
 
 **Why a separate class?** `Workflow` builds nodes eagerly in `__init__`, with `_upstream_nodes` and column bindings wired at construction. Retrofitting incremental mutation onto that model would require invasive changes to `Node`. A dict-backed session, materialized to a `Workflow` only when needed, is both simpler and matches what GUIs actually want to send over the wire.
+
+Both session constructors require the same runtime root and keep it outside the wire-format dictionary:
+
+```python
+WorkflowSession(data=None, *, storage_path, registry=None)
+WorkflowSession.from_dict(data, *, storage_path, registry=None)
+```
 
 ```python
 from bioimageflow import WorkflowSession
@@ -2386,7 +2407,7 @@ It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list
 `ValidationError` is a frozen dataclass produced by:
 
 - `Workflow.capture_errors()` — for construction-time errors when the context is active.
-- `Workflow.from_dict(..., partial=True)` — for tool-resolution and per-node construction failures during deserialization (also accessible via `wf.errors` and `wf.failed_nodes` after the call).
+- `Workflow.from_dict(data, storage_path=..., partial=True)` — for tool-resolution and per-node construction failures during deserialization (also accessible via `wf.errors` and `wf.failed_nodes` after the call).
 - `Workflow.validate()` — for post-construction checks.
 - `WorkflowSession.validate()` — same as `Workflow.validate()` but cached across non-structural session edits.
 
@@ -2939,68 +2960,68 @@ from bioimageflow.tool_loader import resolve_tool_class
 
 ## 14. Unified Recursive Workflows
 
-There is one workflow definition type at every nesting level: \`Workflow\`.
-Calling a workflow inside an active, distinct parent captures an independent structural snapshot and returns a public \`WorkflowNode\`.
-Factories in reusable Python modules export the exact symbol \`build_workflow(*, storage_path)\` and return a fresh \`Workflow\`.
-They may provide a file-local default such as \`Path(__file__).resolve().parent / "results"\` for direct standalone use.
+There is one workflow definition type at every nesting level: `Workflow`.
+Calling a workflow inside an active, distinct parent captures an independent structural snapshot and returns a public `WorkflowNode`.
+Factories in reusable Python modules export the exact symbol `build_workflow(*, storage_path)` and return a fresh `Workflow`.
+They may provide a file-local default such as `Path(__file__).resolve().parent / "results"` for direct standalone use.
 
 ### 14.1 Interface construction
 
-\`Workflow.input(name, annotation=None, *, kind="field", default=MISSING, id=None)\` declares a stable input port and returns a symbolic reference owned by that workflow.
+`Workflow.input(name, annotation=None, *, kind="field", default=MISSING, id=None)` declares a stable input port and returns a symbolic reference owned by that workflow.
 Field inputs target named tool fields or child-workflow field ports.
-DataFrame inputs target positional \`DataFrameTool\` inputs or child-workflow DataFrame ports.
+DataFrame inputs target positional `DataFrameTool` inputs or child-workflow DataFrame ports.
 A symbolic input can fan out to multiple compatible targets, but cannot be used outside its active owner.
 
-\`Workflow.output(name, source, *, id=None)\` publishes an internal \`ColumnRef\`.
+`Workflow.output(name, source, *, id=None)` publishes an internal `ColumnRef`.
 Interface names are unique across inputs and outputs, while IDs are immutable wire identities.
-The name \`name\` is reserved for invocation node naming and cannot be an input name.
+The name `name` is reserved for invocation node naming and cannot be an input name.
 
 ### 14.2 Invocation and execution
 
-\`workflow(name=None, **bindings)\` validates names and kinds, snapshots the definition, registers one \`WorkflowNode\` in the parent, and never executes a factory.
-\`workflow_node.workflow\` is the editable definition for that invocation; editing it does not affect its source or siblings.
-\`workflow_node["output_name"]\` resolves the name to the stable output-port ID.
+`workflow(name=None, **bindings)` validates names and kinds, snapshots the definition, registers one `WorkflowNode` in the parent, and never executes a factory.
+`workflow_node.workflow` is the editable definition for that invocation; editing it does not affect its source or siblings.
+`workflow_node["output_name"]` resolves the name to the stable output-port ID.
 
-Root values use \`workflow.compute(inputs={...})\`.
-Field inputs receive ordinary values at root and constants or \`ColumnRef\` values when nested.
+Root values use `workflow.compute(inputs={...})`.
+Field inputs receive ordinary values at root and constants or `ColumnRef` values when nested.
 DataFrame inputs receive complete DataFrames at root and upstream nodes when nested.
 Explicit values override interface defaults, which override local tool defaults.
 
-The compiler recursively expands workflow nodes into scoped executable paths such as \`outer/inner/tool\`.
+The compiler recursively expands workflow nodes into scoped executable paths such as `outer/inner/tool`.
 It assigns stable real-tool ordinals by deterministic topological order with scoped path as the ready-node tie breaker.
 Every enabled internal terminal is a completion dependency, including detached branches.
 Published output dependencies contribute values and provider/selector recipes that resolve selected real-provider records at runtime; completion-only dependencies do not change unrelated downstream identity.
 A zero-output workflow executes its terminals and returns a zero-row, zero-column DataFrame.
-\`compute_steps()\` yields real tool steps only; \`plan()\` additionally reports aggregate workflow-node entries.
+`compute_steps()` yields real tool steps only; `plan()` additionally reports aggregate workflow-node entries.
 
 ### 14.3 Strict recursive graph and archive formats
 
-\`Workflow.to_dict()\`, \`Workflow.from_dict()\`, \`Workflow.load()\`, and \`Workflow.export()\` accept only \`schema_version: 1\`.
-A recursive node has \`"type": "workflow"\`, an inline \`workflow\` graph, and constant \`bindings\` keyed by stable child-input IDs.
-Tool nodes use \`"type": "tool"\`.
-Edges have explicit \`"column"\` or \`"dataframe"\` variants and stable IDs.
+`Workflow.to_dict()`, `Workflow.from_dict()`, `Workflow.load()`, and `Workflow.export()` accept only `schema_version: 1`.
+A recursive node has `"type": "workflow"`, an inline `workflow` graph, and constant `bindings` keyed by stable child-input IDs.
+Tool nodes use `"type": "tool"`.
+Edges have explicit `"column"` or `"dataframe"` variants and stable IDs.
 Unknown variants, extra fields, malformed endpoints, duplicate IDs, and unversioned graphs are errors.
 
 The portable archive envelope is separate from the graph:
 
-\`\`\`json
+```json
 {
   "archive_version": 1,
   "workflow": {"schema_version": 1, "...": "..."},
   "custom_sources": []
 }
-\`\`\`
+```
 
 The source table is collected once across the recursive graph.
-Tool records refer to it through \`source_module\`, so equal class names from different source IDs cannot shadow one another.
+Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 Export serializes the already-materialized graph and never calls a factory again.
 
 ### 14.4 Trusted Python loading
 
-\`Workflow.from_python(path_or_module, storage_path=...)\` loads the exact \`build_workflow\` symbol and calls it once as \`build_workflow(storage_path=storage_path)\`.
-The return value must be a standalone \`Workflow\`.
+`Workflow.from_python(path_or_module, storage_path=...)` loads the exact `build_workflow` symbol and calls it once as `build_workflow(storage_path=storage_path)`.
+The return value must be a standalone `Workflow`.
 File-based loading captures local Python sources before import, materializes them in a fresh import context, and captures custom-source records before that context is released.
-Repeated calls therefore observe changes to the entry module or local helpers without stale \`sys.modules\` state.
+Repeated calls therefore observe changes to the entry module or local helpers without stale `sys.modules` state.
 
 The normative host-facing grammar, identifiers, status rules, and golden fixtures are specified in [Unified workflow contract](reference/unified_workflow_contract.md).
 

@@ -80,6 +80,26 @@ Workflow.export(path: str | Path) -> None
 
 `storage_path` is required runtime state and never enters the recursive graph or portable archive.
 Hosts choose it when constructing, loading, importing, or editing a workflow.
+There is no default storage location and no separate override parameter.
+Archive import keeps the persistent extraction `destination` independent from runtime `storage_path`.
+
+GUI editing sessions follow the same rule:
+
+```python
+WorkflowSession(
+    data: dict[str, Any] | None = None,
+    *,
+    storage_path: str | Path,
+    registry: Any | None = None,
+)
+WorkflowSession.from_dict(
+    data: dict[str, Any],
+    *,
+    storage_path: str | Path,
+    registry: Any | None = None,
+) -> WorkflowSession
+```
+
 `WorkflowNode` is exported from `bioimageflow` and is the only public composite node type.
 `WorkflowNode.workflow` is the captured, editable definition for that invocation.
 `WorkflowNode[output_name]` returns a `ColumnRef` whose `column` is the stable output-port ID.

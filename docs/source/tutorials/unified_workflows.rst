@@ -44,3 +44,38 @@ The workflow boundary succeeds only after every enabled internal terminal, inclu
 
 Use :meth:`~bioimageflow.Workflow.from_python` only for trusted Python definitions.
 Portable exports contain the materialized recursive graph and never need to run the factory again.
+
+Load reusable definitions
+-------------------------
+
+Every loading API receives its runtime storage explicitly.
+For a trusted Python definition, ``from_python`` calls ``build_workflow(storage_path=...)`` exactly once:
+
+.. code-block:: python
+
+   workflow_directory = Path("workspace/workflows/segment").resolve()
+   workflow = Workflow.from_python(
+       workflow_directory / "workflow.py",
+       storage_path=workflow_directory / "results",
+   )
+
+A saved JSON definition uses the same runtime convention:
+
+.. code-block:: python
+
+   workflow = Workflow.load(
+       workflow_directory / "workflow.json",
+       storage_path=workflow_directory / "results",
+   )
+
+Portable archives can be loaded temporarily with ``Workflow.load()`` or extracted permanently with ``Workflow.import_archive()``:
+
+.. code-block:: python
+
+   workflow = Workflow.import_archive(
+       "segment.zip",
+       workflow_directory,
+       storage_path=workflow_directory / "results",
+   )
+
+The workflow file or archive describes the graph, while ``storage_path`` belongs to this execution environment and is never serialized.
