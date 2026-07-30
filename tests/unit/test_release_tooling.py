@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -320,7 +322,17 @@ def test_github_release_workflow_coordinates_validated_package_sets() -> None:
         for step in publish["steps"]
         if str(step.get("uses", "")).startswith("actions/download-artifact@")
     )
-    assert download_step["with"]["path"] == "${{ runner.temp }}/release"
+    assert (
+        download_step["with"]["path"]
+        == "${{ runner.temp }}/downloaded-release-artifacts"
+    )
+    assert download_step["with"]["merge-multiple"] == "true"
+    assert 'release_root="$RUNNER_TEMP/release"' in publish_script
+    assert 'artifact_dir="$release_root/release-$package-$version"' in publish_script
+    assert (
+        "'.include[] | [.package, .normalized_name, .version] | @tsv'"
+        in publish_script
+    )
     assert "scripts/release_set.py publish" in publish_script
     assert '--artifacts-dir "$RUNNER_TEMP/release"' in publish_script
     assert "scripts/release_set.py verify" in publish_script
@@ -329,6 +341,57 @@ def test_github_release_workflow_coordinates_validated_package_sets() -> None:
     assert '"--trusted-publishing"' in release_set_source
     assert '"always"' in release_set_source
     assert not (root / ".gitlab-ci.yml").exists()
+
+
+def test_release_workflow_stages_flat_downloads_by_package(tmp_path: Path) -> None:
+    root = Path(__file__).parents[2]
+    workflow = _workflow(root, "release.yml")
+    publish = workflow["jobs"]["publish"]
+    stage_step = next(
+        step
+        for step in publish["steps"]
+        if step.get("name") == "Stage artifacts by validated package"
+    )
+    download_root = tmp_path / "downloaded-release-artifacts"
+    download_root.mkdir()
+    items = [
+        {
+            "package": "demo-core",
+            "normalized_name": "demo_core",
+            "version": "1.2.3",
+        },
+        {
+            "package": "demo-app",
+            "normalized_name": "demo_app",
+            "version": "2.0.0",
+        },
+    ]
+    for item in items:
+        stem = f"{item['normalized_name']}-{item['version']}"
+        (download_root / f"{stem}-py3-none-any.whl").write_bytes(b"wheel")
+        (download_root / f"{stem}.tar.gz").write_bytes(b"sdist")
+
+    subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", stage_step["run"]],
+        check=True,
+        env={
+            **os.environ,
+            "RELEASE_MATRIX": json.dumps({"include": items}),
+            "RUNNER_TEMP": str(tmp_path),
+        },
+    )
+
+    for item in items:
+        artifact_dir = (
+            tmp_path
+            / "release"
+            / f"release-{item['package']}-{item['version']}"
+        )
+        assert sorted(path.suffix for path in artifact_dir.iterdir()) == [
+            ".gz",
+            ".whl",
+        ]
+    assert not list(download_root.iterdir())
 
 
 def test_github_workflows_cover_normal_and_complete_validation() -> None:

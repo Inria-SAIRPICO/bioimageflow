@@ -156,8 +156,37 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
-          path: ${{ runner.temp }}/release
-          merge-multiple: false
+          path: ${{ runner.temp }}/downloaded-release-artifacts
+          merge-multiple: true
+      - name: Stage artifacts by validated package
+        env:
+          RELEASE_MATRIX: ${{ needs.prepare.outputs.matrix }}
+        run: |
+          download_root="$RUNNER_TEMP/downloaded-release-artifacts"
+          release_root="$RUNNER_TEMP/release"
+          mkdir -p "$release_root"
+          shopt -s nullglob
+          while IFS=$'\t' read -r package normalized_name version; do
+            artifact_dir="$release_root/release-$package-$version"
+            wheels=("$download_root/$normalized_name-$version-"*.whl)
+            sdists=("$download_root/$normalized_name-$version.tar.gz")
+            if [[ "${#wheels[@]}" -ne 1 || "${#sdists[@]}" -ne 1 ]]; then
+              printf 'Expected one wheel and one source distribution for %s==%s\n' \
+                "$package" "$version" >&2
+              exit 1
+            fi
+            mkdir "$artifact_dir"
+            mv "${wheels[0]}" "${sdists[0]}" "$artifact_dir/"
+          done < <(
+            jq -r \
+              '.include[] | [.package, .normalized_name, .version] | @tsv' \
+              <<< "$RELEASE_MATRIX"
+          )
+          remaining=("$download_root"/*.whl "$download_root"/*.tar.gz)
+          if [[ "${#remaining[@]}" -ne 0 ]]; then
+            printf 'Downloaded release set contains unexpected artifacts\n' >&2
+            exit 1
+          fi
       - name: Publish packages in dependency order
         env:
           RELEASE_TAGS: ${{ inputs.release_tags }}
