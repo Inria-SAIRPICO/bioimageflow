@@ -315,7 +315,14 @@ def test_github_release_workflow_coordinates_validated_package_sets() -> None:
     assert publish["permissions"]["id-token"] == "write"
     assert "scripts/check_package_release.py" in build_script
     assert 'uv build --package "$RELEASE_PACKAGE" --no-sources' in build_script
+    download_step = next(
+        step
+        for step in publish["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    )
+    assert download_step["with"]["path"] == "${{ runner.temp }}/release"
     assert "scripts/release_set.py publish" in publish_script
+    assert '--artifacts-dir "$RUNNER_TEMP/release"' in publish_script
     assert "scripts/release_set.py verify" in publish_script
     assert "UV_PUBLISH_TOKEN" not in prepare_script + build_script + publish_script
     release_set_source = (root / "scripts" / "release_set.py").read_text()
