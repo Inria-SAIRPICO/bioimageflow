@@ -37,7 +37,7 @@ def _binding() -> ExecutorBinding:
                 name="default",
                 dependency_hash="0" * 64,
                 allow_flexible_versions=False,
-                core_requirement="bioimageflow-core>=0.2.0,<0.3",
+                core_requirement="bioimageflow-core>=0.2.1,<0.3",
             ),
         ),
         capabilities=ExecutorCapabilities(

@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow-core"
-version = "0.2.0"
+version = "0.2.1"
 description = "Worker-safe core types and tool base classes for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.9"

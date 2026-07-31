@@ -24,7 +24,7 @@ from .routing import RoutingPlan, resolve_executor_routes
 from .types import ExecutorBinding
 
 
-CORE_REQUIREMENT = "bioimageflow-core>=0.2.0,<0.3"
+CORE_REQUIREMENT = "bioimageflow-core>=0.2.1,<0.3"
 
 
 @dataclass(frozen=True, slots=True)

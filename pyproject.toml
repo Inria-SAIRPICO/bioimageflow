@@ -3,12 +3,12 @@ name = "bioimageflow-workspace"
 version = "0.0.1"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.2.0,<0.3",
+    "bioimageflow-core>=0.2.1,<0.3",
 ]
 
 [dependency-groups]
 dev = [
-    "bioimageflow>=0.2.0",
+    "bioimageflow>=0.3.0",
     "bioimageflow-common-tools>=0.1.7",
     "bioimageflow-io-tools>=0.1.7",
     "bioimageflow-measurement-tools>=0.1.7",
