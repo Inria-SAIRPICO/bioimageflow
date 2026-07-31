@@ -1,8 +1,8 @@
-# Execution Frontend Integration
+# BioImageFlow Execution UI Integration
 
-This guide is the public integration contract for an engine-neutral BioImageFlow execution UI.
-A frontend backend should configure public values, call public validation and planning operations, attach or submit, and consume callbacks or reconnectable handles.
-It must not reproduce routing logic, inspect launcher storage, parse logs for node errors, or invoke cluster-agent operations directly.
+This guide describes the public APIs for building a BioImageFlow execution UI.
+A GUI application should configure public values, call public validation and planning operations, start or reconnect to executions, and consume callbacks or reconnectable run handles.
+It should not reproduce routing logic, inspect launcher storage, parse logs for node errors, or invoke cluster-agent operations directly.
 
 ## Capability discovery
 

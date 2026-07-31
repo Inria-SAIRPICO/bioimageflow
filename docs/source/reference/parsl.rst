@@ -6,10 +6,10 @@ BioImageFlow can dispatch ``ProcessingTool`` work through an attached Parsl runt
 Install the optional runtime with ``pip install "bioimageflow[parsl]"``.
 Importing ``bioimageflow``, validating or serializing a workflow, and calling ``plan()`` do not import Parsl.
 
-Public platform preflight
--------------------------
+Public GUI preflight
+--------------------
 
-Execution frontends should use the cohesive public preflight surface instead of importing private Parsl startup or launcher modules:
+BioImageFlow GUIs should use the cohesive public preflight surface instead of importing private Parsl startup or launcher modules:
 
 - :func:`bioimageflow.get_execution_capabilities` reports optional runtime availability without importing Parsl or PSI/J.
 - :func:`bioimageflow.validate_parsl_config_ref` resolves a trusted configuration factory in an isolated process and validates secrets, retries, and executor labels without creating a DFK or run.
@@ -198,7 +198,7 @@ Backend task diagnostics are stored separately from immutable cache records at:
 A diagnostic records task correlation, executor label, mode, retry, row positions, tool origin, status, timestamps, and terminal error type.
 It becomes terminal only after BioImageFlow observes the future.
 Attempt and task diagnostics do not contribute to result keys or record IDs.
-Submitted handles expose the same engine-neutral failed-node values through ``WorkflowRun.diagnostics()`` and ``RemoteWorkflowRun.diagnostics()``.
+Submitted handles expose the same failed-node values across execution engines through ``WorkflowRun.diagnostics()`` and ``RemoteWorkflowRun.diagnostics()``.
 
 Submitted workflows
 -------------------

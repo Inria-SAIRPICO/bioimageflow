@@ -41,7 +41,7 @@ For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-ap
 
 ### 1.1.1 Public Distributed-Execution Integration Contract
 
-The documented platform boundary is engine-neutral and consists of the following public values and operations:
+The public integration surface for a BioImageFlow execution UI consists of the following values and operations:
 
 - `NodeResourceOverrides`, `Node.resource_overrides`, `Node.set_resource_overrides()`, `Node.effective_resources`, and `effective_node_resources()` provide portable per-instance worker requirements for `ProcessingTool` nodes.
 - `validate_parsl_config_ref()` requires an explicit trusted-factory allowlist, resolves the `ParslConfigRef` in an isolated child process, validates secrets, `retries=0`, and executor labels, returns sanitized structured diagnostics, and creates neither a DataFlowKernel nor a workflow run.
@@ -3120,7 +3120,7 @@ result = task.wait_for()
 ```
 
 BioImageFlow observes public `ExecutionEvent`, `ExecutionEventKind`, `ExecutionState`, and structured `ExecutionFailure` values.
-Worker exceptions are converted to `WorkerTaskError` and then to the engine-neutral `NodeFailureDiagnostic`.
+Worker exceptions are converted to `WorkerTaskError` and then to the `NodeFailureDiagnostic` shared by all execution engines.
 
 ### A.5 Progress Reporting and Cancellation (Worker Side)
 

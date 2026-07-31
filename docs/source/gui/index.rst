@@ -1,5 +1,5 @@
-GUI / Frontend Integrators
-==========================
+BioImageFlow GUI Integration
+============================
 
 This tree targets developers who embed BioImageFlow in a long-lived process —
 graphical editors, web servers, plugin hosts. It documents the wire format,
