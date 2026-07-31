@@ -213,25 +213,6 @@ class TestWetlandsResourceRequirements:
 
             assert len(df) == 3
 
-    def test_worker_env_override_has_explicit_migration_error(self, workspace):
-        """Wetlands 1 worker_env callbacks fail with a clear migration error."""
-        load = FileLoader()
-        tool = GpuTool()
-
-        def custom_env(i):
-            return {"MY_DEVICE": str(i)}
-
-        with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
-        ) as wf:
-            env = wf.get_environment(tool)
-            env.worker_env = custom_env
-            raw = load(path=str(workspace / "data"))
-            out = tool(input_path=raw["path"])
-            with pytest.raises(ValueError, match="Wetlands 2"):
-                wf.compute(out)
-
-
 # =====================================================================
 # Feature 3: Sub-row progress reporting
 # =====================================================================
@@ -463,8 +444,7 @@ class TestBranchParallelism:
             df = wf.compute(out, engine=engine)
 
             assert len(df) == 3
-            # SequentialEngine._resolve_worker_config always returns (1, None, None)
-            mw, we, wt = engine._resolve_worker_config(tool, wf)
+            # SequentialEngine always selects one worker.
+            mw, wt = engine._resolve_worker_config(tool, wf)
             assert mw == 1
-            assert we is None
             assert wt is None

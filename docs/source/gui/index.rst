@@ -1,4 +1,4 @@
-GUI / Platform Integrators
+GUI / Frontend Integrators
 ==========================
 
 This tree targets developers who embed BioImageFlow in a long-lived process —

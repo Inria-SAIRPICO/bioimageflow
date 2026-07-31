@@ -172,9 +172,32 @@ def test_planning_is_non_allocating_and_uses_effective_resources(tmp_path: Path)
     assert plan.nodes[0].selected_executor == "threads"
     assert plan.nodes[0].environment_name == TEST_ENV.name
     assert plan.nodes[0].environment_identity is not None
+    assert plan.nodes[0].execution_status == "unexecuted"
+    assert plan.nodes[0].will_dispatch
     assert plan.task_policy == task_policy
     assert not (tmp_path / "results" / "runs").exists()
     assert DistributedExecutionPlan.from_dict(plan.to_dict()) == plan
+
+
+def test_public_plan_does_not_route_cached_processing_nodes(tmp_path: Path) -> None:
+    workflow = Workflow(storage_path=tmp_path / "results", engine="direct")
+    with workflow:
+        node = ContractTool()(name="worker")
+    workflow.compute(node)
+
+    plan = plan_distributed_execution(
+        workflow,
+        executor_bindings={
+            "first": _binding("first"),
+            "second": _binding("second"),
+        },
+    )
+
+    assert plan.valid
+    assert plan.nodes[0].execution_status == "cached"
+    assert not plan.nodes[0].will_dispatch
+    assert plan.nodes[0].selected_executor is None
+    assert plan.nodes[0].route_reason == "cached: no worker dispatch"
 
 
 def test_public_plan_and_runtime_startup_select_the_same_route(
@@ -349,6 +372,7 @@ def test_remote_preparation_binds_copied_upload_bytes(tmp_path: Path) -> None:
         source.write_bytes(b"changed")
         assert prepared.manifest.bundle_digest == digest
         assert manifest == prepared.manifest
+        assert all(entry.path for entry in manifest.entries)
         assert not prepared.expired
     finally:
         prepared.close()

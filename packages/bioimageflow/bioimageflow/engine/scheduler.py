@@ -543,8 +543,7 @@ class SequentialEngine(DefaultEngine):
     """Forces sequential execution — useful for debugging and deterministic reproduction.
 
     Inherits from :class:`DefaultEngine` but forces ``_force_sequential=True``
-    and overrides worker resolution to always use a single worker with no
-    ``worker_env``.
+    and overrides worker resolution to always use a single worker.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -555,12 +554,12 @@ class SequentialEngine(DefaultEngine):
         self,
         tool: ProcessingTool,
         workflow: Any,
-    ) -> tuple[int, Any, float | None]:
-        """Always single-worker, no worker_env — truly sequential.
+    ) -> tuple[int, float | None]:
+        """Always use a single worker.
 
         ``worker_timeout`` is still honored from ``get_environment()`` so a
         hung tool doesn't block the sequential engine indefinitely.
         """
         env_config = workflow._env_configs.get(tool.environment.name)
         worker_timeout = env_config.worker_timeout if env_config else None
-        return 1, None, worker_timeout
+        return 1, worker_timeout

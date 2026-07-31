@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
 from .errors import LauncherProtocolError
@@ -12,6 +12,46 @@ from .types import ParslConfigRef
 
 
 SecretResolver = Callable[[str], str]
+
+
+def inspect_parsl_config(
+    config: Any,
+    *,
+    binding_labels: Collection[str],
+) -> tuple[int | None, tuple[str, ...], tuple[tuple[str, str, str | None], ...]]:
+    """Return normalized retries, labels, and stable validation issues."""
+    raw_retries = getattr(config, "retries", None)
+    retries = raw_retries if type(raw_retries) is int else None
+    executors = getattr(config, "executors", ())
+    if isinstance(executors, Mapping):
+        labels = tuple(sorted(str(label) for label in executors))
+    else:
+        labels = tuple(
+            sorted(
+                label
+                for executor in executors
+                if isinstance((label := getattr(executor, "label", None)), str)
+            )
+        )
+    issues: list[tuple[str, str, str | None]] = []
+    if retries != 0:
+        issues.append(
+            (
+                "parsl-retries",
+                "Parsl Config.retries must be exactly 0.",
+                "retries",
+            )
+        )
+    missing = sorted(set(binding_labels).difference(labels))
+    if missing:
+        issues.append(
+            (
+                "executor-labels",
+                f"Config is missing declared executor labels: {missing}.",
+                "executor_bindings",
+            )
+        )
+    return retries, labels, tuple(issues)
 
 
 def import_config_factory(

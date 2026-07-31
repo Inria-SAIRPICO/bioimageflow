@@ -211,7 +211,6 @@ def test_core_requirement_must_name_and_constrain_core(value: str) -> None:
 class WorkflowEnvironmentSettings:
     name: str = "analysis"
     max_workers: int = 0
-    worker_env: object | None = None
     worker_timeout: float | None = None
 
 
@@ -219,7 +218,6 @@ class WorkflowEnvironmentSettings:
     "settings",
     [
         WorkflowEnvironmentSettings(max_workers=2),
-        WorkflowEnvironmentSettings(worker_env=object()),
         WorkflowEnvironmentSettings(worker_timeout=10),
     ],
 )

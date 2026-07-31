@@ -130,7 +130,7 @@ class _DispatchMixin:
         self,
         tool: ProcessingTool,
         workflow: Any,
-    ) -> tuple[int, Any, float | None]:
+    ) -> tuple[int, float | None]:
         """Determine Wetlands 2 pool size and worker health timeout."""
         env_name = tool.environment.name
         env_config = workflow._env_configs.get(env_name)
@@ -141,15 +141,9 @@ class _DispatchMixin:
         else:
             max_workers = workflow.max_workers
 
-        if env_config and env_config.worker_env is not None:
-            raise ValueError(
-                "WorkflowEnvironment.worker_env is unavailable in Wetlands 2."
-            )
-        worker_env = None
-
         worker_timeout = env_config.worker_timeout if env_config else None
 
-        return max_workers, worker_env, worker_timeout
+        return max_workers, worker_timeout
 
     def _dispatch_via_wetlands(
         self,
@@ -177,7 +171,7 @@ class _DispatchMixin:
             return []
         env_spec = tool.environment
         origin = resolve_worker_tool_origin(tool)
-        max_workers, worker_env, worker_timeout = self._resolve_worker_config(
+        max_workers, worker_timeout = self._resolve_worker_config(
             tool, workflow
         )
         engine_timeout = _compute_engine_timeout(worker_timeout)
@@ -212,7 +206,6 @@ class _DispatchMixin:
                 env_spec,
                 encode_processing_task(invocation),
                 max_workers=max_workers,
-                worker_env=worker_env,
                 worker_timeout=worker_timeout,
             )
             try:
@@ -284,7 +277,6 @@ class _DispatchMixin:
                     env_spec,
                     payloads[start : start + window],
                     max_workers=max_workers,
-                    worker_env=worker_env,
                     worker_timeout=worker_timeout,
                 )
                 tasks.extend(active)

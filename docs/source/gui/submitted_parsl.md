@@ -1,7 +1,7 @@
-# Remote Cluster GUI Handoff
+# Execution Frontend Integration
 
 This guide is the public integration contract for an engine-neutral BioImageFlow execution UI.
-Platform code should configure public values, call public validation and planning operations, attach or submit, and consume callbacks or reconnectable handles.
+A frontend backend should configure public values, call public validation and planning operations, attach or submit, and consume callbacks or reconnectable handles.
 It must not reproduce routing logic, inspect launcher storage, parse logs for node errors, or invoke cluster-agent operations directly.
 
 ## Capability discovery
@@ -106,9 +106,10 @@ plan = plan_distributed_execution(
 )
 ```
 
-Each `DistributedNodePlan` contains the scoped path, normalized effective CPU/GPU/memory/GPU-memory/concurrency requirement, compatible executor labels, selected route and route reason when unambiguous, tool-origin mode, environment name and canonical identity, storage mode, per-executor incompatibility reasons, and structured diagnostics.
+Each `DistributedNodePlan` contains the scoped path, cache-derived execution status, whether the node will dispatch, normalized effective CPU/GPU/memory/GPU-memory/concurrency requirement, compatible executor labels, selected route and route reason when unambiguous, tool-origin mode, environment name and canonical identity, storage mode, per-executor incompatibility reasons, and structured diagnostics.
 The enclosing plan records the validated `ParslTaskPolicy` that will bound row chunking and unfinished futures at runtime.
 The planner shares requirement derivation, binding compatibility, and route resolution with runtime startup.
+Cached and skipped processing nodes remain visible in the plan but do not require or resolve a worker route because runtime will not dispatch them.
 It compiles the requested recursive scope but does not create storage runs, materialize archives, provision Wetlands, import Parsl, start a DFK, probe workers, allocate provider blocks, or submit scheduler jobs.
 Runtime executor probing remains a post-acceptance operation before the first processing task.
 
@@ -326,13 +327,11 @@ Capability, validation, plan, diagnostic, and preparation-manifest values are JS
 
 Consumers must use each public `from_dict()` method instead of accepting unknown keys or guessing future schema versions.
 
-## Migration and compatibility
+## Stable execution behavior
 
-Direct and Wetlands workflow execution retain their public `Workflow.compute()` behavior.
-Existing progress fields are unchanged; the attached `diagnostic` field is optional and submitted diagnostics use a new event kind.
-Graph payloads without `resource_overrides` remain valid.
-Wetlands 2 is a deliberate runtime migration: BioImageFlow now requires `wetlands>=2.0.0,<3`, translates recipes to typed Wetlands specs, and uses provision/start/worker-pool APIs.
-Wetlands 1 per-worker environment callbacks are unsupported and produce an explicit migration error.
+Direct and Wetlands execution use the same `Workflow.compute()` entry point and progress model.
+The attached `diagnostic` field is optional because only failed events carry it, while submitted diagnostics use a dedicated event kind.
+Nodes without `resource_overrides` inherit their tool declaration.
 Resource placement does not invalidate cache identity.
 
 ## Results

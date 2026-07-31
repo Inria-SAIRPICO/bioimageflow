@@ -103,36 +103,20 @@ def validate_profile_on_cluster(arguments: dict[str, Any]) -> dict[str, Any]:
         launch = PSIJLaunchConfig.from_dict(arguments["launch"])
         _absolute_posix_path(arguments["storage_path"], field="storage_path")
         _absolute_posix_path(arguments["staging_root"], field="staging_root")
-        from .configuration import build_parsl_config
+        from .configuration import build_parsl_config, inspect_parsl_config
 
         config = build_parsl_config(
             config_ref,
             trusted_factories=(config_ref.factory,),
         )
-        retries = getattr(config, "retries", None)
-        if retries != 0:
-            diagnostics.append(
-                RemoteProfileDiagnostic(
-                    "parsl-retries",
-                    "Parsl Config.retries must be exactly 0.",
-                )
-            )
-        executors = getattr(config, "executors", ())
-        labels = tuple(
-            sorted(
-                label
-                for executor in executors
-                if isinstance((label := getattr(executor, "label", None)), str)
-            )
+        _retries, labels, issues = inspect_parsl_config(
+            config,
+            binding_labels=bindings,
         )
-        missing = sorted(set(bindings).difference(labels))
-        if missing:
-            diagnostics.append(
-                RemoteProfileDiagnostic(
-                    "executor-labels",
-                    f"Config is missing declared executor labels: {missing}.",
-                )
-            )
+        diagnostics.extend(
+            RemoteProfileDiagnostic(code, message)
+            for code, message, _field in issues
+        )
         if launch.work_dir is not None:
             work_dir = Path(launch.work_dir)
             if not work_dir.is_dir():

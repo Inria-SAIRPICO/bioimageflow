@@ -1,10 +1,12 @@
 import traceback
+from types import SimpleNamespace
 
 import pytest
 
 from bioimageflow.launcher.configuration import (
     build_parsl_config,
     import_config_factory,
+    inspect_parsl_config,
     verify_secret_references,
 )
 from bioimageflow.launcher.errors import LauncherProtocolError
@@ -12,6 +14,20 @@ from bioimageflow.launcher.types import ParslConfigRef
 
 
 FACTORY = "tests.unit.launcher.config_factories:build"
+
+
+def test_config_inspection_normalizes_mapping_executors_and_shared_issues() -> None:
+    retries, labels, issues = inspect_parsl_config(
+        SimpleNamespace(retries=1, executors={"gpu": object()}),
+        binding_labels={"gpu", "cpu"},
+    )
+
+    assert retries == 1
+    assert labels == ("gpu",)
+    assert [issue[0] for issue in issues] == [
+        "parsl-retries",
+        "executor-labels",
+    ]
 
 
 def test_build_parsl_config_resolves_secret_outside_persisted_values() -> None:

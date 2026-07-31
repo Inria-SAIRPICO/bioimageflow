@@ -35,7 +35,7 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - BioImageFlow translates its public `EnvironmentSpec` into the immutable Wetlands 2 `EnvironmentSpec`, provisions with `EnvironmentManager.provision(...).wait_for()`, and starts a `WorkerPool` with `ManagedEnvironment.start()`.
 - Processing calls use `WorkerPool.submit_import("bioimageflow_core.worker:execute_processing_task", ...)`.
 - `max_workers` selects the Wetlands 2 pool size. Node-effective `max_concurrent` bounds the number of row tasks BioImageFlow keeps active for that node.
-- Wetlands 1 `worker_env` callbacks and automatic `CUDA_VISIBLE_DEVICES` assignment are not supported by Wetlands 2. Configuring `worker_env` produces an explicit migration error rather than silently changing execution.
+- GPU device visibility is configured by the managed environment or external runtime; BioImageFlow does not mutate worker environments.
 
 For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-api).
 
@@ -45,7 +45,7 @@ The documented platform boundary is engine-neutral and consists of the following
 
 - `NodeResourceOverrides`, `Node.resource_overrides`, `Node.set_resource_overrides()`, `Node.effective_resources`, and `effective_node_resources()` provide portable per-instance worker requirements for `ProcessingTool` nodes.
 - `validate_parsl_config_ref()` resolves a trusted `ParslConfigRef` in an isolated child process, validates secrets, `retries=0`, and executor labels, returns sanitized structured diagnostics, and creates neither a DataFlowKernel nor a workflow run.
-- `plan_distributed_execution()` compiles the same recursive processing scope and uses the same worker-requirement, capacity parser, compatibility, and route functions as Parsl startup. It records the validated task policy and creates no run, DataFlowKernel, provider allocation, scheduler job, Wetlands environment, or worker.
+- `plan_distributed_execution()` compiles the same recursive processing scope and uses the same cache status, worker-requirement, capacity parser, compatibility, and route functions as Parsl startup. Cached and skipped nodes remain visible without requiring a worker route. The operation records the validated task policy and creates no run, DataFlowKernel, provider allocation, scheduler job, Wetlands environment, or worker.
 - `validate_remote_execution_profile()` invokes the public one-shot cluster protocol to validate connectivity, the remote factory, secrets, retries, executor labels, PSI/J availability, and cluster paths without creating a workflow run or scheduler job.
 - `NodeFailureDiagnostic` is attached to failed `ProgressEvent` callbacks and is persisted as a separate diagnostic progress event for both `WorkflowRun.diagnostics()` and `RemoteWorkflowRun.diagnostics()`.
 - `prepare_remote_submission()` copies all explicit `LocalUpload` bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original paths.
@@ -1873,8 +1873,8 @@ When using branch-level parallelism, progress events from concurrent nodes may i
 
 `Workflow.get_environment()` provides access to per-environment launch configuration. It accepts a tool instance, an `EnvironmentSpec`, or an environment name string.
 This configuration is Wetlands-only.
-Parsl uses executor bindings and rejects `max_workers`, `worker_env`, or `worker_timeout` as Parsl routing or capacity settings.
-Wetlands 2 supports `max_workers` and `worker_timeout`; assigning the retained migration-only `worker_env` field fails before provisioning.
+Parsl uses executor bindings and rejects `max_workers` or `worker_timeout` as Parsl routing or capacity settings.
+Wetlands supports `max_workers` and `worker_timeout`.
 
 ```python
 wf = Workflow(storage_path="./results", max_workers=4)
@@ -1892,7 +1892,6 @@ Multiple calls with tools sharing the same environment return the same `Workflow
 | `name` | `str` | — | Environment name (read-only) |
 | `spec` | `EnvironmentSpec` | — | The environment specification (read-only) |
 | `max_workers` | `int` | `0` | Number of worker processes. `0` = use `Workflow.max_workers`. |
-| `worker_env` | `Callable[[int], dict] \| None` | `None` | Retained only to detect Wetlands 1 configurations and raise a migration error. |
 | `worker_timeout` | `float \| None` | `None` | Inactivity timeout in seconds. When set, Wetlands' health monitor marks the active task as `FAILED` and replaces the worker if it sends no IPC message within this duration — useful for catching native-code deadlocks or segfaults that don't close the pipe. The engine adds its own safety timeout of `max(worker_timeout * 1.5, worker_timeout + 60)` to `task.wait_for()`; if that fires, `WorkerTimeoutError` is raised. `None` = no timeout. |
 
 #### 4.5.1 Resource Lifetime and Ownership
@@ -2668,7 +2667,7 @@ bioimageflow export-outputs ./results --destination ./shared-results --replace
 ```
 
 The function and CLI default to `mode="copy"` and `scope="latest"`.
-`Workflow.export_outputs(...)` retains its existing `mode="symlink"` default for API compatibility.
+`Workflow.export_outputs(...)` defaults to `mode="symlink"`.
 An explicit destination is a complete output root containing `latest/` and/or `runs/<run-id>/`.
 It must be disjoint from source storage and is installed from a sibling staging tree.
 Existing destinations require explicit replacement, and an installation failure restores the previous tree.
@@ -3084,7 +3083,6 @@ manager = EnvironmentManager(
 
 Manager construction stores configuration and does not provision an environment.
 `configure_wetlands(root=..., pixi_executable=..., network=..., termination_grace=...)` exposes the corresponding BioImageFlow configuration.
-The old `wetlands_instance_path` and `conda_path` keywords are accepted as explicit migration aliases, while `main_conda_environment_path`, manager selection, and debug-mode construction are rejected.
 
 ### A.2 Provision an Environment
 
@@ -3110,7 +3108,6 @@ pool = environment.start(workers=4, worker_timeout=300)
 ```
 
 The returned `WorkerPool` owns its workers and is closed during the selected BioImageFlow resource lifetime.
-Wetlands 1 `launch()`, `exit()`, and `worker_env` APIs are not used.
 
 ### A.4 Task-Based Execution
 

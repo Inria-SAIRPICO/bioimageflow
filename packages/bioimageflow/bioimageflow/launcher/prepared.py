@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import copy
+import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, ClassVar
+from pathlib import Path, PurePosixPath
+from typing import Any, ClassVar, Literal
 
 from bioimageflow.parsl import ExecutorBinding, ParslTaskPolicy
 from bioimageflow.workflow import Workflow
@@ -26,18 +26,80 @@ from .types import (
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedSubmissionEntry:
+    """One immutable file or directory entry in a prepared bundle."""
+
+    path: str
+    kind: Literal["file", "directory"]
+    size: int
+    digest: str
+
+    def __post_init__(self) -> None:
+        pure = PurePosixPath(self.path)
+        if (
+            type(self.path) is not str
+            or not self.path
+            or pure.is_absolute()
+            or str(pure) != self.path
+            or any(part in {"", ".", ".."} for part in pure.parts)
+        ):
+            raise ValueError("Prepared submission entry path is invalid.")
+        if self.kind not in {"file", "directory"}:
+            raise ValueError("Prepared submission entry kind is invalid.")
+        if type(self.size) is not int or self.size < 0:
+            raise ValueError("Prepared submission entry size is invalid.")
+        if self.kind == "directory" and self.size != 0:
+            raise ValueError("Prepared submission directories must have size zero.")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", self.digest) is None:
+            raise ValueError("Prepared submission entry digest is invalid.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "digest": self.digest,
+            "kind": self.kind,
+            "path": self.path,
+            "size": self.size,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "PreparedSubmissionEntry":
+        if not isinstance(value, dict) or set(value) != {
+            "digest",
+            "kind",
+            "path",
+            "size",
+        }:
+            raise ValueError("Invalid PreparedSubmissionEntry payload.")
+        return cls(
+            path=value["path"],
+            kind=value["kind"],
+            size=value["size"],
+            digest=value["digest"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedSubmissionManifest:
     """Serializable digest manifest for a prepared remote invocation."""
 
     SCHEMA: ClassVar[str] = "bioimageflow.prepared_submission_manifest.v1"
     bundle_digest: str
-    entries: tuple[Mapping[str, Any], ...]
+    entries: tuple[PreparedSubmissionEntry, ...]
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", self.bundle_digest) is None:
+            raise ValueError("Prepared submission bundle digest is invalid.")
+        if type(self.entries) is not tuple or any(
+            type(entry) is not PreparedSubmissionEntry
+            for entry in self.entries
+        ):
+            raise TypeError("entries must contain PreparedSubmissionEntry values.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": self.SCHEMA,
             "bundle_digest": self.bundle_digest,
-            "entries": [dict(entry) for entry in self.entries],
+            "entries": [entry.to_dict() for entry in self.entries],
         }
 
     @classmethod
@@ -51,7 +113,10 @@ class PreparedSubmissionManifest:
             raise ValueError("Invalid PreparedSubmissionManifest payload.")
         return cls(
             bundle_digest=value["bundle_digest"],
-            entries=tuple(copy.deepcopy(value["entries"])),
+            entries=tuple(
+                PreparedSubmissionEntry.from_dict(entry)
+                for entry in value["entries"]
+            ),
         )
 
 
@@ -74,7 +139,10 @@ class PreparedRemoteSubmission:
         self._submitted = False
         self.manifest = PreparedSubmissionManifest(
             bundle_digest=bundle.digest,
-            entries=tuple(copy.deepcopy(bundle.manifest["entries"])),
+            entries=tuple(
+                PreparedSubmissionEntry.from_dict(entry)
+                for entry in bundle.manifest["entries"]
+            ),
         )
 
     @property
@@ -174,6 +242,7 @@ def prepare_remote_submission(
 
 __all__ = [
     "PreparedRemoteSubmission",
+    "PreparedSubmissionEntry",
     "PreparedSubmissionManifest",
     "prepare_remote_submission",
 ]

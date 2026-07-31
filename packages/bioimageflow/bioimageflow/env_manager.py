@@ -8,6 +8,7 @@ import re
 import threading
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
@@ -26,12 +27,6 @@ from wetlands import (
 logger = logging.getLogger("bioimageflow")
 
 _WORKER_TARGET = "bioimageflow_core.worker:execute_processing_task"
-_WETLANDS_V2_CONFIG_KEYS = frozenset(
-    {"root", "pixi_executable", "network", "termination_grace"}
-)
-_REMOVED_WETLANDS_V1_CONFIG_KEYS = frozenset(
-    {"main_conda_environment_path", "debug", "manager"}
-)
 _LOCAL_PYPI_REFERENCE = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9_.-]+)"
     r"(?:\[(?P<extras>[A-Za-z0-9_.,-]+)\])?"
@@ -105,32 +100,24 @@ def _env_var_is_truthy(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _normalize_manager_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Translate the one safe Wetlands 1 path alias and reject stale options."""
-    normalized = dict(config)
-    if "wetlands_instance_path" in normalized:
-        if "root" in normalized:
-            raise TypeError("Use only Wetlands 2 'root', not both root and wetlands_instance_path.")
-        normalized["root"] = normalized.pop("wetlands_instance_path")
-    if "conda_path" in normalized:
-        if "pixi_executable" in normalized:
-            raise TypeError("Use only Wetlands 2 'pixi_executable', not conda_path.")
-        normalized["pixi_executable"] = normalized.pop("conda_path")
-    removed = sorted(_REMOVED_WETLANDS_V1_CONFIG_KEYS.intersection(normalized))
-    if removed:
-        joined = ", ".join(removed)
-        raise TypeError(
-            f"Wetlands 2 removed configuration option(s): {joined}. "
-            "Use root, pixi_executable, network, and termination_grace."
-        )
-    unknown = sorted(set(normalized).difference(_WETLANDS_V2_CONFIG_KEYS))
-    if unknown:
-        raise TypeError(f"Unsupported Wetlands 2 configuration option(s): {', '.join(unknown)}.")
-    if normalized.get("root") is None:
-        normalized["root"] = get_wetlands_path()
-    if normalized.get("pixi_executable") is None:
-        normalized.pop("pixi_executable", None)
-    return normalized
+def _manager_config(
+    *,
+    root: str | Path | None = None,
+    pixi_executable: str | Path | None = None,
+    network: Mapping[str, str] | None = None,
+    termination_grace: float | None = None,
+) -> dict[str, Any]:
+    """Return only explicitly configured Wetlands manager values."""
+    config: dict[str, Any] = {}
+    if root is not None:
+        config["root"] = root
+    if pixi_executable is not None:
+        config["pixi_executable"] = pixi_executable
+    if network is not None:
+        config["network"] = network
+    if termination_grace is not None:
+        config["termination_grace"] = termination_grace
+    return config
 
 
 _shared_manager: EnvironmentManager | None = None
@@ -138,28 +125,52 @@ _shared_manager_lock = threading.Lock()
 _wetlands_config: dict[str, Any] = {}
 
 
-def configure_wetlands(**config: Any) -> None:
+def configure_wetlands(
+    root: str | Path | None = None,
+    *,
+    pixi_executable: str | Path | None = None,
+    network: Mapping[str, str] | None = None,
+    termination_grace: float | None = None,
+) -> None:
     """Configure the process-wide Wetlands 2 manager before first use."""
     global _wetlands_config
-    normalized = _normalize_manager_config(config)
+    config = _manager_config(
+        root=root,
+        pixi_executable=pixi_executable,
+        network=network,
+        termination_grace=termination_grace,
+    )
     with _shared_manager_lock:
         if _shared_manager is not None:
             logger.warning(
                 "Wetlands already initialized; ignoring configure_wetlands() call."
             )
             return
-        _wetlands_config = normalized
+        _wetlands_config = config
 
 
-def get_shared_environment_manager(**config: Any) -> EnvironmentManager:
+def get_shared_environment_manager(
+    root: str | Path | None = None,
+    *,
+    pixi_executable: str | Path | None = None,
+    network: Mapping[str, str] | None = None,
+    termination_grace: float | None = None,
+) -> EnvironmentManager:
     """Return the lazily created process-wide Wetlands 2 manager."""
     global _shared_manager
     if _shared_manager is not None:
         return _shared_manager
     with _shared_manager_lock:
         if _shared_manager is None:
-            merged = {**_wetlands_config, **config}
-            _shared_manager = EnvironmentManager(**_normalize_manager_config(merged))
+            supplied = _manager_config(
+                root=root,
+                pixi_executable=pixi_executable,
+                network=network,
+                termination_grace=termination_grace,
+            )
+            merged = {**_wetlands_config, **supplied}
+            merged.setdefault("root", get_wetlands_path())
+            _shared_manager = EnvironmentManager(**merged)
         return _shared_manager
 
 
@@ -255,24 +266,20 @@ class WetlandsEnvManager:
 
     def __init__(
         self,
-        root: Path | None = None,
-        wetlands_instance_path: Path | None = None,
-        conda_path: str | None = None,
-        main_conda_environment_path: str | None = None,
+        root: str | Path | None = None,
+        *,
+        pixi_executable: str | Path | None = None,
+        network: Mapping[str, str] | None = None,
+        termination_grace: float | None = None,
         bioimageflow_core_dependency: Any | None = None,
         use_local_bioimageflow_core: bool | None = None,
-        **kwargs: Any,
     ) -> None:
-        config = dict(kwargs)
-        if root is not None:
-            config["root"] = root
-        if wetlands_instance_path is not None:
-            config["wetlands_instance_path"] = wetlands_instance_path
-        if conda_path is not None:
-            config["conda_path"] = conda_path
-        if main_conda_environment_path is not None:
-            config["main_conda_environment_path"] = main_conda_environment_path
-        self._manager = get_shared_environment_manager(**config)
+        self._manager = get_shared_environment_manager(
+            root=root,
+            pixi_executable=pixi_executable,
+            network=network,
+            termination_grace=termination_grace,
+        )
         self._environments: dict[str, ManagedEnvironment] = {}
         self._pools: dict[str, WorkerPool] = {}
         self._pool_configs: dict[str, tuple[int, float | None]] = {}
@@ -357,15 +364,9 @@ class WetlandsEnvManager:
         self,
         env_spec: BioImageFlowEnvironmentSpec,
         max_workers: int = 1,
-        worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> WorkerPool:
         """Provision an environment and return its cached Wetlands 2 pool."""
-        if worker_env is not None:
-            raise ValueError(
-                "Wetlands 2 removed per-worker environment mutation; "
-                "WorkflowEnvironment.worker_env is unsupported."
-            )
         wetlands_spec = self._to_wetlands_spec(env_spec)
         config = (max_workers, worker_timeout)
         with self._lock:
@@ -402,13 +403,11 @@ class WetlandsEnvManager:
         env_spec: BioImageFlowEnvironmentSpec,
         payload: dict[str, Any],
         max_workers: int = 1,
-        worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> Any:
         pool = self.get_or_create(
             env_spec,
             max_workers=max_workers,
-            worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
         return pool.submit_import(
@@ -422,7 +421,6 @@ class WetlandsEnvManager:
         env_spec: BioImageFlowEnvironmentSpec,
         payloads: list[dict[str, Any]],
         max_workers: int = 1,
-        worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> list[Any]:
         return [
@@ -430,7 +428,6 @@ class WetlandsEnvManager:
                 env_spec,
                 payload,
                 max_workers=max_workers,
-                worker_env=worker_env,
                 worker_timeout=worker_timeout,
             )
             for payload in payloads

@@ -115,14 +115,13 @@ class WetlandsBackend:
         tool = node.tool
         if not isinstance(tool, ProcessingTool):
             return
-        max_workers, worker_env, worker_timeout = engine._resolve_worker_config(
+        max_workers, worker_timeout = engine._resolve_worker_config(
             tool,
             workflow,
         )
         engine._env_manager.get_or_create(
             tool.environment,
             max_workers=max_workers,
-            worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
 

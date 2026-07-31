@@ -52,6 +52,7 @@ PUBLIC_EXPORTS = {
     "ParslTaskPolicy",
     "Passthrough",
     "PreparedRemoteSubmission",
+    "PreparedSubmissionEntry",
     "PreparedSubmissionManifest",
     "ProgressEvent",
     "ResourceLifetime",

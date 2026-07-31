@@ -126,7 +126,6 @@ class _StubEnvManager:
         env_spec,
         payload,
         max_workers=1,
-        worker_env=None,
         worker_timeout=None,
     ):
         self.last_worker_timeout = worker_timeout
@@ -139,7 +138,6 @@ class _StubEnvManager:
         env_spec,
         payloads,
         max_workers=1,
-        worker_env=None,
         worker_timeout=None,
     ):
         self.last_worker_timeout = worker_timeout

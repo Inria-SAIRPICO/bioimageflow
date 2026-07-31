@@ -78,7 +78,7 @@ class TestResolveWorkerConfig:
         engine = DefaultEngine(use_wetlands=False)
         tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
-        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        _max_workers, wt = engine._resolve_worker_config(tool, wf)
         assert wt is None
 
     def test_default_engine_returns_configured_timeout(self, tmp_path):
@@ -86,7 +86,7 @@ class TestResolveWorkerConfig:
         tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 45.0
-        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        _max_workers, wt = engine._resolve_worker_config(tool, wf)
         assert wt == 45.0
 
     def test_sequential_engine_respects_timeout(self, tmp_path):
@@ -94,7 +94,6 @@ class TestResolveWorkerConfig:
         tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
         wf.get_environment(tool).worker_timeout = 15.0
-        mw, we, wt = engine._resolve_worker_config(tool, wf)
+        mw, wt = engine._resolve_worker_config(tool, wf)
         assert mw == 1
-        assert we is None
         assert wt == 15.0

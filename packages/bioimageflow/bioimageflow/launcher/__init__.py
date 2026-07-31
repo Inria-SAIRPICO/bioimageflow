@@ -16,6 +16,7 @@ from .remote_run import RemoteWorkflowRun
 from .submission import submit_workflow
 from .prepared import (
     PreparedRemoteSubmission,
+    PreparedSubmissionEntry,
     PreparedSubmissionManifest,
     prepare_remote_submission,
 )
@@ -43,17 +44,18 @@ __all__ = [
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
     "PreparedRemoteSubmission",
+    "PreparedSubmissionEntry",
     "PreparedSubmissionManifest",
-    "RemoteWorkflowRun",
     "RemoteProfileDiagnostic",
     "RemoteProfileValidationReport",
+    "RemoteWorkflowRun",
     "SSHSubmissionTransport",
     "WorkflowRun",
     "WorkflowRunFailedError",
     "WorkflowRunLostError",
     "WorkflowRunNotReadyError",
     "WorkflowRunResultUnavailableError",
-    "submit_workflow",
     "prepare_remote_submission",
+    "submit_workflow",
     "validate_remote_execution_profile",
 ]

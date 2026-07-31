@@ -9,6 +9,7 @@ import re
 import traceback
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, ClassVar
 
 from .launcher.types import ParslConfigRef
@@ -102,42 +103,23 @@ def _config_validation_worker(
         if (value := os.environ.get(reference))
     )
     try:
-        from .launcher.configuration import build_parsl_config
+        from .launcher.configuration import (
+            build_parsl_config,
+            inspect_parsl_config,
+        )
 
         config = build_parsl_config(
             ParslConfigRef.from_dict(reference_payload),
             trusted_factories=trusted_factories,
         )
-        raw_retries = getattr(config, "retries", None)
-        retries = raw_retries if type(raw_retries) is int else None
-        if retries != 0:
-            diagnostics.append(
-                IntegrationDiagnostic(
-                    "parsl-retries",
-                    "Parsl Config.retries must be exactly 0.",
-                    "retries",
-                )
-            )
-        executors = getattr(config, "executors", ())
-        if isinstance(executors, Mapping):
-            labels = tuple(sorted(str(label) for label in executors))
-        else:
-            labels = tuple(
-                sorted(
-                    label
-                    for executor in executors
-                    if isinstance((label := getattr(executor, "label", None)), str)
-                )
-            )
-        missing = sorted(set(binding_labels).difference(labels))
-        if missing:
-            diagnostics.append(
-                IntegrationDiagnostic(
-                    "executor-labels",
-                    f"Config is missing declared executor labels: {missing}.",
-                    "executor_bindings",
-                )
-            )
+        retries, labels, issues = inspect_parsl_config(
+            config,
+            binding_labels=binding_labels,
+        )
+        diagnostics.extend(
+            IntegrationDiagnostic(code, message, field)
+            for code, message, field in issues
+        )
     except Exception as exc:
         details = getattr(exc, "details", {})
         secret_ref = details.get("secret_ref") if isinstance(details, dict) else None
@@ -329,6 +311,18 @@ class ExecutionCapabilityReport:
 
     SCHEMA: ClassVar[str] = "bioimageflow.execution_capabilities.v1"
     capabilities: Mapping[str, CapabilityStatus]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capabilities, Mapping) or any(
+            type(name) is not str or type(status) is not CapabilityStatus
+            for name, status in self.capabilities.items()
+        ):
+            raise TypeError("capabilities must map names to CapabilityStatus values.")
+        object.__setattr__(
+            self,
+            "capabilities",
+            MappingProxyType(dict(self.capabilities)),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -112,9 +112,6 @@ The proxy carries two supported runtime fields:
 - ``worker_timeout`` (float, default ``None``) — last-resort safety
   timeout per row dispatch.
 
-The former ``worker_env`` field remains detectable only to produce an actionable Wetlands 2 migration error.
-Wetlands 2 has no public equivalent and BioImageFlow does not use private Wetlands APIs to emulate it.
-
 Multiple ``get_environment`` calls with the same target name return
 the **same** proxy — edits propagate.
 
@@ -134,8 +131,6 @@ top of a script, before calling ``require_tool_packages()``,
 
 ``root`` is where Wetlands 2 stores managed Pixi environments, state, and worker metadata.
 Use ``pixi_executable=...`` to select an existing Pixi executable, ``network=...`` for proxy configuration, and ``termination_grace=...`` for worker shutdown.
-``wetlands_instance_path`` is accepted only as a migration alias for ``root``.
-Wetlands 1 ``main_conda_environment_path``, ``debug``, manager selection, and per-worker environment configuration are rejected.
 
 If no explicit path is configured, BioImageFlow resolves the default
 Wetlands instance path in this order:

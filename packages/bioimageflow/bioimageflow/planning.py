@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, ClassVar, Mapping, TYPE_CHECKING
 
 from .integration import IntegrationDiagnostic
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class DistributedNodePlan:
     scoped_node_path: str
+    execution_status: str
+    will_dispatch: bool
     resources: "NormalizedResourceRequest"
     compatible_executors: tuple[str, ...]
     selected_executor: str | None
@@ -27,9 +30,23 @@ class DistributedNodePlan:
     incompatibilities: Mapping[str, tuple[str, ...]]
     diagnostics: tuple[IntegrationDiagnostic, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "incompatibilities",
+            MappingProxyType(
+                {
+                    label: tuple(reasons)
+                    for label, reasons in self.incompatibilities.items()
+                }
+            ),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "scoped_node_path": self.scoped_node_path,
+            "execution_status": self.execution_status,
+            "will_dispatch": self.will_dispatch,
             "resources": {
                 "cpu": self.resources.cpu,
                 "gpu": self.resources.gpu,
@@ -57,6 +74,8 @@ class DistributedNodePlan:
 
         fields = {
             "scoped_node_path",
+            "execution_status",
+            "will_dispatch",
             "resources",
             "compatible_executors",
             "selected_executor",
@@ -72,6 +91,8 @@ class DistributedNodePlan:
             raise ValueError("Invalid DistributedNodePlan payload.")
         return cls(
             scoped_node_path=value["scoped_node_path"],
+            execution_status=value["execution_status"],
+            will_dispatch=value["will_dispatch"],
             resources=NormalizedResourceRequest.from_dict(value["resources"]),
             compatible_executors=tuple(value["compatible_executors"]),
             selected_executor=value["selected_executor"],
@@ -164,11 +185,27 @@ def plan_distributed_execution(
         raise TypeError("task_policy must be ParslTaskPolicy or None.")
     selected_task_policy = task_policy or ParslTaskPolicy()
     bindings = dict(executor_bindings)
-    scheduler_targets = targets or list(workflow._nodes.values())
-    from .engine import DefaultEngine
+    scheduler_targets = (
+        list(workflow._nodes.values())
+        if targets is None
+        else targets
+    )
+    from .engine import DefaultEngine, NodePlanStatus
 
     scheduler = DefaultEngine(use_wetlands=False)
-    order, names, _plans = _reachable_plan(scheduler, scheduler_targets, workflow)
+    order, names, node_plans = _reachable_plan(
+        scheduler,
+        scheduler_targets,
+        workflow,
+    )
+    plans_by_name = {plan.node_name: plan for plan in node_plans}
+    resolve_executor_routes(
+        (),
+        executor_bindings=bindings,
+        node_routes=node_routes,
+        environment_routes=environment_routes,
+        storage_mode=storage_mode,
+    )
     root = (
         None
         if shared_runtime_root is None
@@ -180,31 +217,41 @@ def plan_distributed_execution(
             continue
         effective = effective_node_resources(node)
         normalized = normalize_resource_request(effective)
+        node_plan = plans_by_name[names[node]]
+        will_dispatch = node_plan.status not in {
+            NodePlanStatus.CACHED,
+            NodePlanStatus.SKIPPED,
+        }
         diagnostics: list[IntegrationDiagnostic] = []
         requirement = None
-        try:
-            _reject_remote_shared_memory(node.tool, names[node])
-            origin = _worker_origin(node, node.tool, workflow, root)
-            requirement = build_worker_requirement(
-                names[node],
-                node.tool,
-                origin,
-                core_requirement=CORE_REQUIREMENT,
-                workflow_environment=workflow._env_configs.get(
-                    node.tool.environment.name
-                ),
-                resources=effective,
-            )
-        except Exception as exc:
-            diagnostics.append(
-                IntegrationDiagnostic("requirement", str(exc), names[node])
-            )
+        if will_dispatch:
+            try:
+                _reject_remote_shared_memory(node.tool, names[node])
+                origin = _worker_origin(node, node.tool, workflow, root)
+                requirement = build_worker_requirement(
+                    names[node],
+                    node.tool,
+                    origin,
+                    core_requirement=CORE_REQUIREMENT,
+                    workflow_environment=workflow._env_configs.get(
+                        node.tool.environment.name
+                    ),
+                    resources=effective,
+                )
+            except Exception as exc:
+                diagnostics.append(
+                    IntegrationDiagnostic("requirement", str(exc), names[node])
+                )
         incompatibilities: dict[str, tuple[str, ...]] = {}
         compatible: tuple[str, ...] = ()
         selected = None
-        route_reason = None
+        route_reason = (
+            None
+            if will_dispatch
+            else f"{node_plan.status.value}: no worker dispatch"
+        )
         origin_kind = None
-        environment_name = None
+        environment_name = node.tool.environment.name
         environment_identity = None
         if requirement is not None:
             origin_kind = requirement.tool_origin_mode
@@ -238,6 +285,8 @@ def plan_distributed_execution(
         records.append(
             DistributedNodePlan(
                 scoped_node_path=names[node],
+                execution_status=node_plan.status.value,
+                will_dispatch=will_dispatch,
                 resources=normalized,
                 compatible_executors=compatible,
                 selected_executor=selected,

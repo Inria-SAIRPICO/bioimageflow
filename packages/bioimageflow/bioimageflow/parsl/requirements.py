@@ -252,8 +252,6 @@ def _validate_wetlands_settings(
     configured: list[str] = []
     if getattr(workflow_environment, "max_workers", 0) != 0:
         configured.append("max_workers")
-    if getattr(workflow_environment, "worker_env", None) is not None:
-        configured.append("worker_env")
     if getattr(workflow_environment, "worker_timeout", None) is not None:
         configured.append("worker_timeout")
     if configured:
