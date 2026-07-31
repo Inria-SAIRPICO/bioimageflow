@@ -65,6 +65,7 @@ if not validation.valid:
 ```
 
 The operation accepts only the existing finite JSON-safe `ParslConfigRef` arguments and environment-variable secret references.
+The explicit `trusted_factories` allowlist is mandatory; configuration resolution never defaults to trusting every importable callable.
 It resolves the factory in an isolated spawned process, verifies `Config.retries == 0`, compares actual executor labels with bindings, returns structured sanitized diagnostics, and terminates the validation process.
 It does not create a DataFlowKernel, workflow run, provider allocation, or scheduler job.
 The operation reports the missing environment-variable reference, never its value.

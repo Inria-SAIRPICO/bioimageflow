@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from collections.abc import Callable, Generator, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -259,7 +259,7 @@ class ParslEngine:
         reference: Any,
         *,
         executor_bindings: Mapping[str, ExecutorBinding],
-        trusted_factories: Any = None,
+        trusted_factories: Collection[str],
         **engine_options: Any,
     ) -> "ParslEngine":
         """Build through the trusted public config boundary."""

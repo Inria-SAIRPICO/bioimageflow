@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Collection, Mapping
+from typing import Any
 
 from .types import ExecutorBinding
 
@@ -12,7 +13,7 @@ def engine_from_config_ref(
     reference: Any,
     *,
     executor_bindings: Mapping[str, ExecutorBinding],
-    trusted_factories: Any,
+    trusted_factories: Collection[str],
     engine_options: dict[str, Any],
 ) -> Any:
     from bioimageflow.integration import validate_parsl_config_ref

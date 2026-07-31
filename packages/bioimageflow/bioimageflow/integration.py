@@ -91,7 +91,7 @@ def _config_validation_worker(
     connection: Any,
     reference_payload: dict[str, Any],
     binding_labels: tuple[str, ...],
-    trusted_factories: tuple[str, ...] | None,
+    trusted_factories: tuple[str, ...],
 ) -> None:
     diagnostics: list[IntegrationDiagnostic] = []
     retries: int | None = None
@@ -157,7 +157,7 @@ def validate_parsl_config_ref(
     reference: ParslConfigRef,
     *,
     executor_bindings: Mapping[str, Any],
-    trusted_factories: Collection[str] | None = None,
+    trusted_factories: Collection[str],
     timeout: float = 30.0,
 ) -> ParslConfigValidationReport:
     """Resolve a trusted config in an isolated process without creating a DFK."""
@@ -179,7 +179,7 @@ def validate_parsl_config_ref(
             child,
             reference.to_dict(),
             tuple(sorted(bindings)),
-            None if trusted_factories is None else tuple(trusted_factories),
+            tuple(trusted_factories),
         ),
         name="bioimageflow-parsl-config-validation",
     )
