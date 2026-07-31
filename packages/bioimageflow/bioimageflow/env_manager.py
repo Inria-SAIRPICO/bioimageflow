@@ -1,35 +1,46 @@
-"""Orchestrator-side Wetlands environment management.
+"""Orchestrator-side Wetlands 2 environment management."""
 
-Provides a single shared ``EnvironmentManager`` instance used by both
-the execution engine (tool dispatch) and the tool loader (package install).
-Call :func:`configure_wetlands` once at the top of your script to set paths;
-everything else picks up the same instance automatically.
-"""
+from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
+import urllib.parse
+import urllib.request
 from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from bioimageflow_core.environment import EnvironmentSpec
+from bioimageflow_core.environment import EnvironmentSpec as BioImageFlowEnvironmentSpec
 from bioimageflow.paths import get_wetlands_path
-
-from wetlands._internal.dependency_manager import Dependency, Dependencies, LocalDependency
-from wetlands.environment_manager import EnvironmentManager
+from wetlands import (
+    EnvironmentManager,
+    EnvironmentSpec,
+    LocalPackage,
+    ManagedEnvironment,
+    WorkerPool,
+)
 
 logger = logging.getLogger("bioimageflow")
 
+_WORKER_TARGET = "bioimageflow_core.worker:execute_processing_task"
+_WETLANDS_V2_CONFIG_KEYS = frozenset(
+    {"root", "pixi_executable", "network", "termination_grace"}
+)
+_REMOVED_WETLANDS_V1_CONFIG_KEYS = frozenset(
+    {"main_conda_environment_path", "debug", "manager"}
+)
+_LOCAL_PYPI_REFERENCE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9_.-]+)"
+    r"(?:\[(?P<extras>[A-Za-z0-9_.,-]+)\])?"
+    r"\s*@\s*(?P<url>file://\S+)\s*$"
+)
+
 
 def _bioimageflow_core_pin() -> str:
-    """Return the package requirement pinning bioimageflow-core.
-
-    Tool environments must run the same ``bioimageflow-core`` API the
-    orchestrator was built against, otherwise tools that import newer
-    symbols (e.g. ``Connectable``) fail at import time inside the worker.
-    """
+    """Return the package requirement pinning bioimageflow-core."""
     try:
         return f"bioimageflow-core=={_pkg_version('bioimageflow-core')}"
     except PackageNotFoundError:
@@ -46,7 +57,6 @@ def _local_bioimageflow_core_project() -> Path | None:
         import bioimageflow_core
     except ImportError:
         return None
-
     package_dir = Path(bioimageflow_core.__file__).resolve().parent
     project_dir = package_dir.parent
     pyproject = project_dir / "pyproject.toml"
@@ -56,7 +66,7 @@ def _local_bioimageflow_core_project() -> Path | None:
 
 
 def _bioimageflow_core_editable_dependency(project_dir: Path) -> dict[str, Any]:
-    """Return the Wetlands dependency entry for editable local core installs."""
+    """Return BioImageFlow's portable local-dependency declaration."""
     return {
         "name": "bioimageflow-core",
         "path": str(project_dir),
@@ -64,17 +74,26 @@ def _bioimageflow_core_editable_dependency(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def _dependency_name(dependency: Any) -> str | None:
+    if isinstance(dependency, dict):
+        value = dependency.get("name")
+        return value if isinstance(value, str) else None
+    if not isinstance(dependency, str):
+        return None
+    value = dependency.split(";", 1)[0].strip()
+    value = value.split(" @ ", 1)[0]
+    for marker in ("===", "==", "~=", ">=", "<=", "!=", ">", "<", "="):
+        value = value.split(marker, 1)[0]
+    return value.strip()
+
+
 def _has_bioimageflow_core_dependency(*dependency_lists: list[Any]) -> bool:
-    dependencies = [
-        dependency
+    return any(
+        (_dependency_name(dependency) or "").replace("_", "-").lower()
+        == "bioimageflow-core"
         for dependency_list in dependency_lists
         for dependency in dependency_list
-    ]
-    for dependency in dependencies:
-        name = dependency.get("name") if isinstance(dependency, dict) else dependency
-        if isinstance(name, str) and "bioimageflow-core" in name:
-            return True
-    return False
+    )
 
 
 def _is_local_dependency(dependency: Any) -> bool:
@@ -85,7 +104,34 @@ def _env_var_is_truthy(name: str) -> bool:
     value = os.environ.get(name, "")
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
-# ── Shared EnvironmentManager singleton ──────────────────────────────
+
+def _normalize_manager_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Translate the one safe Wetlands 1 path alias and reject stale options."""
+    normalized = dict(config)
+    if "wetlands_instance_path" in normalized:
+        if "root" in normalized:
+            raise TypeError("Use only Wetlands 2 'root', not both root and wetlands_instance_path.")
+        normalized["root"] = normalized.pop("wetlands_instance_path")
+    if "conda_path" in normalized:
+        if "pixi_executable" in normalized:
+            raise TypeError("Use only Wetlands 2 'pixi_executable', not conda_path.")
+        normalized["pixi_executable"] = normalized.pop("conda_path")
+    removed = sorted(_REMOVED_WETLANDS_V1_CONFIG_KEYS.intersection(normalized))
+    if removed:
+        joined = ", ".join(removed)
+        raise TypeError(
+            f"Wetlands 2 removed configuration option(s): {joined}. "
+            "Use root, pixi_executable, network, and termination_grace."
+        )
+    unknown = sorted(set(normalized).difference(_WETLANDS_V2_CONFIG_KEYS))
+    if unknown:
+        raise TypeError(f"Unsupported Wetlands 2 configuration option(s): {', '.join(unknown)}.")
+    if normalized.get("root") is None:
+        normalized["root"] = get_wetlands_path()
+    if normalized.get("pixi_executable") is None:
+        normalized.pop("pixi_executable", None)
+    return normalized
+
 
 _shared_manager: EnvironmentManager | None = None
 _shared_manager_lock = threading.Lock()
@@ -93,73 +139,123 @@ _wetlands_config: dict[str, Any] = {}
 
 
 def configure_wetlands(**config: Any) -> None:
-    """Set Wetlands configuration for the entire process.
-
-    Must be called **before** any tool loading or workflow execution.
-    Subsequent calls are ignored with a warning if the manager is
-    already initialized.
-
-    Common parameters:
-        wetlands_instance_path: Path for Wetlands state (logs, pixi).
-        conda_path: Path to the pixi or micromamba installation.
-        main_conda_environment_path: Main conda env for dep checking.
-        debug: Enable debugpy in worker processes.
-        Use ``BIOIMAGEFLOW_USE_LOCAL_CORE=1`` to inject the local editable
-        ``bioimageflow-core`` checkout into worker environments.
-    """
-    global _wetlands_config, _shared_manager
+    """Configure the process-wide Wetlands 2 manager before first use."""
+    global _wetlands_config
+    normalized = _normalize_manager_config(config)
     with _shared_manager_lock:
         if _shared_manager is not None:
             logger.warning(
-                "Wetlands already initialized; ignoring configure_wetlands() call. "
-                "Call configure_wetlands() before require_tool_packages() or Workflow.compute()."
+                "Wetlands already initialized; ignoring configure_wetlands() call."
             )
             return
-        _wetlands_config = dict(config)
+        _wetlands_config = normalized
 
 
 def get_shared_environment_manager(**config: Any) -> EnvironmentManager:
-    """Return the process-wide Wetlands ``EnvironmentManager``.
-
-    On first call, creates the manager using configuration from
-    :func:`configure_wetlands` (merged with any *config* kwargs passed
-    here).  Subsequent calls return the cached instance.
-    """
+    """Return the lazily created process-wide Wetlands 2 manager."""
     global _shared_manager
     if _shared_manager is not None:
         return _shared_manager
     with _shared_manager_lock:
-        if _shared_manager is not None:
-            return _shared_manager
-        merged = {**_wetlands_config, **config}
-        _shared_manager = EnvironmentManager(**merged)
+        if _shared_manager is None:
+            merged = {**_wetlands_config, **config}
+            _shared_manager = EnvironmentManager(**_normalize_manager_config(merged))
         return _shared_manager
 
 
 def _reset_shared_manager() -> None:
-    """Reset the shared manager (for testing only)."""
+    """Reset shared state for isolated tests."""
     global _shared_manager, _wetlands_config
+    manager = _shared_manager
     _shared_manager = None
     _wetlands_config = {}
+    if manager is not None:
+        try:
+            manager.close()
+        except Exception:
+            logger.debug("Failed to close test Wetlands manager", exc_info=True)
 
 
-def _find_worker_file() -> str:
-    """Return the absolute file path to bioimageflow_core/worker.py."""
-    import bioimageflow_core
-    return str(Path(bioimageflow_core.__file__).parent / "worker.py")
+def _translate_conda(
+    values: list[Any],
+    channels: list[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    translated: list[str] = []
+    ordered_channels = list(channels)
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError(f"Wetlands 2 Conda dependencies must be strings, got {value!r}.")
+        if "::" in value:
+            channel, value = value.split("::", 1)
+            if channel and channel not in ordered_channels:
+                ordered_channels.append(channel)
+        translated.append(value)
+    if not ordered_channels:
+        ordered_channels.append("conda-forge")
+    return tuple(translated), tuple(ordered_channels)
+
+
+def _translate_local_dependency(value: Any) -> LocalPackage:
+    if not isinstance(value, dict) or "path" not in value:
+        raise TypeError("Wetlands 2 local dependencies require a mapping with 'path'.")
+    package = LocalPackage(
+        source=Path(str(value["path"])),
+        editable=bool(value.get("editable", False)),
+        extras=tuple(value.get("extras", ())),
+    )
+    declared = value.get("name")
+    if isinstance(declared, str):
+        canonical = declared.replace("_", "-").lower()
+        if canonical != package.distribution_name:
+            raise ValueError(
+                f"Local dependency declares {declared!r}, but its project is "
+                f"{package.distribution_name!r}."
+            )
+    return package
+
+
+def _translate_pypi_dependencies(
+    values: list[Any],
+) -> tuple[tuple[str, ...], tuple[LocalPackage, ...]]:
+    pypi: list[str] = []
+    local: list[LocalPackage] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError("Wetlands 2 PyPI dependencies must be strings.")
+        match = _LOCAL_PYPI_REFERENCE.fullmatch(value)
+        if match is None:
+            pypi.append(value)
+            continue
+        parsed = urllib.parse.urlparse(match.group("url"))
+        if parsed.scheme != "file" or parsed.query or parsed.fragment:
+            raise ValueError(f"Invalid local file dependency {value!r}.")
+        if parsed.netloc not in {"", "localhost"}:
+            raise ValueError("Local file dependencies must not use a remote host.")
+        source = Path(
+            urllib.request.url2pathname(urllib.parse.unquote(parsed.path))
+        )
+        extras = tuple(
+            extra
+            for extra in (match.group("extras") or "").split(",")
+            if extra
+        )
+        package = LocalPackage(source=source, extras=extras)
+        expected = re.sub(r"[-_.]+", "-", match.group("name")).lower()
+        if expected != package.distribution_name:
+            raise ValueError(
+                f"Local dependency declares {match.group('name')!r}, but its "
+                f"project is {package.distribution_name!r}."
+            )
+        local.append(package)
+    return tuple(pypi), tuple(local)
 
 
 class WetlandsEnvManager:
-    """Manages Wetlands environments for ProcessingTool execution.
-
-    - Creates environments lazily on first use.
-    - Caches launched environments by name.
-    - Auto-injects ``bioimageflow-core`` into every environment's pip deps.
-    - Provides dispatch helpers that route calls through the Wetlands proxy.
-    """
+    """Provision Wetlands 2 environments and own their warm worker pools."""
 
     def __init__(
         self,
+        root: Path | None = None,
         wetlands_instance_path: Path | None = None,
         conda_path: str | None = None,
         main_conda_environment_path: str | None = None,
@@ -167,19 +263,20 @@ class WetlandsEnvManager:
         use_local_bioimageflow_core: bool | None = None,
         **kwargs: Any,
     ) -> None:
-        if wetlands_instance_path is None:
-            wetlands_instance_path = get_wetlands_path()
-        kwargs.update({
-            "wetlands_instance_path": wetlands_instance_path,
-            "conda_path": conda_path,
-            "main_conda_environment_path": main_conda_environment_path,
-        })
-
-        self._manager = get_shared_environment_manager(**kwargs)
-        self._envs: dict[str, Any] = {}            # name -> wetlands env
-        self._launch_configs: dict[str, tuple[int, Any, float | None]] = {}
-        # name -> (max_workers, worker_env, worker_timeout)
-        self._worker_file = _find_worker_file()
+        config = dict(kwargs)
+        if root is not None:
+            config["root"] = root
+        if wetlands_instance_path is not None:
+            config["wetlands_instance_path"] = wetlands_instance_path
+        if conda_path is not None:
+            config["conda_path"] = conda_path
+        if main_conda_environment_path is not None:
+            config["main_conda_environment_path"] = main_conda_environment_path
+        self._manager = get_shared_environment_manager(**config)
+        self._environments: dict[str, ManagedEnvironment] = {}
+        self._pools: dict[str, WorkerPool] = {}
+        self._pool_configs: dict[str, tuple[int, float | None]] = {}
+        self._specs: dict[str, EnvironmentSpec] = {}
         self._lock = threading.RLock()
         if bioimageflow_core_dependency is not None:
             self._bioimageflow_core_dependency = bioimageflow_core_dependency
@@ -194,159 +291,174 @@ class WetlandsEnvManager:
 
     @staticmethod
     def _default_core_dependency(*, use_local_bioimageflow_core: bool) -> Any:
-        if use_local_bioimageflow_core:
-            project_dir = _local_bioimageflow_core_project()
-            if project_dir is None:
-                raise RuntimeError(
-                    "use_local_bioimageflow_core=True requires an editable "
-                    "or source checkout of bioimageflow-core."
-                )
-            return _bioimageflow_core_editable_dependency(project_dir)
-        return _bioimageflow_core_pin()
+        if not use_local_bioimageflow_core:
+            return _bioimageflow_core_pin()
+        project_dir = _local_bioimageflow_core_project()
+        if project_dir is None:
+            raise RuntimeError(
+                "use_local_bioimageflow_core=True requires a source checkout."
+            )
+        return _bioimageflow_core_editable_dependency(project_dir)
 
-    def _augment_dependencies(self, dependencies: dict) -> Dependencies:
-        """Auto-inject bioimageflow-core into the environment deps."""
-        deps = cast(Dependencies, deepcopy(dependencies))
+    def _augment_dependencies(self, dependencies: dict[str, Any]) -> dict[str, Any]:
+        """Return an independent BioImageFlow declaration including core."""
+        deps = deepcopy(dependencies)
         pip_deps = list(deps.get("pip", []))
         local_deps = list(deps.get("local", []))
         if not _has_bioimageflow_core_dependency(pip_deps, local_deps):
             if _is_local_dependency(self._bioimageflow_core_dependency):
-                local_deps.append(
-                    cast(LocalDependency, self._bioimageflow_core_dependency)
-                )
+                local_deps.append(deepcopy(self._bioimageflow_core_dependency))
             else:
-                pip_deps.append(
-                    cast(str | Dependency, self._bioimageflow_core_dependency)
-                )
+                pip_deps.append(self._bioimageflow_core_dependency)
         deps["pip"] = pip_deps
         if local_deps:
             deps["local"] = local_deps
         return deps
 
+    def _to_wetlands_spec(
+        self,
+        env_spec: BioImageFlowEnvironmentSpec,
+    ) -> EnvironmentSpec:
+        dependencies = self._augment_dependencies(env_spec.dependencies)
+        allowed = {"python", "conda", "pip", "channels", "local"}
+        unknown = sorted(set(dependencies).difference(allowed))
+        if unknown:
+            raise ValueError(
+                "Unsupported BioImageFlow environment dependency section(s) for "
+                f"Wetlands 2: {', '.join(unknown)}."
+            )
+        python = dependencies.get("python", ">=3.9")
+        if not isinstance(python, str):
+            raise TypeError("Environment 'python' must be a version string.")
+        if re.fullmatch(r"[0-9]+\.[0-9]+", python):
+            python = f"{python}.*"
+        raw_conda = list(dependencies.get("conda", []))
+        raw_channels = list(dependencies.get("channels", []))
+        if any(not isinstance(channel, str) for channel in raw_channels):
+            raise TypeError("Environment channels must be strings.")
+        conda, channels = _translate_conda(raw_conda, raw_channels)
+        pypi, local_from_pypi = _translate_pypi_dependencies(
+            list(dependencies.get("pip", ()))
+        )
+        explicit_local = tuple(
+            _translate_local_dependency(item)
+            for item in dependencies.get("local", ())
+        )
+        local = local_from_pypi + explicit_local
+        return EnvironmentSpec(
+            python=python,
+            conda=conda,
+            pypi=pypi,
+            channels=channels,
+            local=local,
+        )
+
     def get_or_create(
         self,
-        env_spec: EnvironmentSpec,
+        env_spec: BioImageFlowEnvironmentSpec,
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
-    ) -> Any:
-        """Get or create a Wetlands environment.
-
-        Wetlands validates same-name environment recipe reuse. On first creation,
-        ``env.launch(max_workers=..., worker_env=..., worker_timeout=...)`` is
-        called. Subsequent calls with a different ``max_workers`` or
-        ``worker_timeout`` log a warning but do **not** re-launch.
-
-        This method is thread-safe and may be called concurrently.
-        """
-        augmented_deps = self._augment_dependencies(env_spec.dependencies)
-
-        with self._lock:
-            env = self._manager.create(env_spec.name, augmented_deps)
-            if env_spec.name in self._envs:
-                prev_workers, _, prev_timeout = self._launch_configs.get(
-                    env_spec.name, (1, None, None)
-                )
-                if prev_workers != max_workers:
-                    logger.warning(
-                        "Environment '%s' already launched with max_workers=%d; "
-                        "ignoring new max_workers=%d",
-                        env_spec.name, prev_workers, max_workers,
-                    )
-                if prev_timeout != worker_timeout:
-                    logger.warning(
-                        "Environment '%s' already launched with worker_timeout=%s; "
-                        "ignoring new worker_timeout=%s",
-                        env_spec.name, prev_timeout, worker_timeout,
-                    )
-                return self._envs[env_spec.name]
-
-            logger.info(
-                "Creating Wetlands environment '%s' (max_workers=%d, worker_timeout=%s)",
-                env_spec.name, max_workers, worker_timeout,
+    ) -> WorkerPool:
+        """Provision an environment and return its cached Wetlands 2 pool."""
+        if worker_env is not None:
+            raise ValueError(
+                "Wetlands 2 removed per-worker environment mutation; "
+                "WorkflowEnvironment.worker_env is unsupported."
             )
-            launch_kwargs: dict[str, Any] = {}
-            if max_workers > 1:
-                launch_kwargs["max_workers"] = max_workers
-            if worker_env is not None:
-                launch_kwargs["worker_env"] = worker_env
-            if worker_timeout is not None:
-                launch_kwargs["worker_timeout"] = worker_timeout
-            env.launch(**launch_kwargs)
-            self._envs[env_spec.name] = env
-            self._launch_configs[env_spec.name] = (max_workers, worker_env, worker_timeout)
-            return env
+        wetlands_spec = self._to_wetlands_spec(env_spec)
+        config = (max_workers, worker_timeout)
+        with self._lock:
+            existing = self._pools.get(env_spec.name)
+            if existing is not None:
+                if self._specs[env_spec.name] != wetlands_spec:
+                    raise ValueError(
+                        f"Environment {env_spec.name!r} was already provisioned "
+                        "with a different recipe."
+                    )
+                if self._pool_configs[env_spec.name] != config:
+                    raise ValueError(
+                        f"Environment {env_spec.name!r} already has a pool with "
+                        f"workers={self._pool_configs[env_spec.name][0]} and "
+                        f"worker_timeout={self._pool_configs[env_spec.name][1]}."
+                    )
+                return existing
+            environment = self._manager.provision(
+                env_spec.name,
+                wetlands_spec,
+            ).wait_for()
+            pool = environment.start(
+                workers=max_workers,
+                worker_timeout=worker_timeout,
+            )
+            self._environments[env_spec.name] = environment
+            self._pools[env_spec.name] = pool
+            self._pool_configs[env_spec.name] = config
+            self._specs[env_spec.name] = wetlands_spec
+            return pool
 
     def submit_processing_task(
         self,
-        env_spec: EnvironmentSpec,
+        env_spec: BioImageFlowEnvironmentSpec,
         payload: dict[str, Any],
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
     ) -> Any:
-        """Submit one strict processing-task payload via ``env.submit()``."""
-        env = self.get_or_create(
-            env_spec, max_workers=max_workers, worker_env=worker_env,
+        pool = self.get_or_create(
+            env_spec,
+            max_workers=max_workers,
+            worker_env=worker_env,
             worker_timeout=worker_timeout,
         )
-        return env.submit(
-            self._worker_file,
-            "execute_processing_task",
+        return pool.submit_import(
+            _WORKER_TARGET,
             args=(payload,),
+            context_keyword="task",
         )
 
     def map_processing_tasks(
         self,
-        env_spec: EnvironmentSpec,
+        env_spec: BioImageFlowEnvironmentSpec,
         payloads: list[dict[str, Any]],
         max_workers: int = 1,
         worker_env: Any = None,
         worker_timeout: float | None = None,
-    ) -> list:
-        """Submit strict processing-task payloads via ``env.map_tasks()``."""
-        env = self.get_or_create(
-            env_spec, max_workers=max_workers, worker_env=worker_env,
-            worker_timeout=worker_timeout,
-        )
-        return env.map_tasks(
-            self._worker_file,
-            "execute_processing_task",
-            payloads,
-        )
+    ) -> list[Any]:
+        return [
+            self.submit_processing_task(
+                env_spec,
+                payload,
+                max_workers=max_workers,
+                worker_env=worker_env,
+                worker_timeout=worker_timeout,
+            )
+            for payload in payloads
+        ]
 
     def shutdown_all(self) -> None:
-        """Shut down all managed Wetlands environments."""
         with self._lock:
-            for name in list(self._envs):
+            for name in tuple(self._pools):
                 self.stop(name)
 
     def stop(self, env_name: str) -> bool:
-        """Stop one launched environment.
-
-        Returns ``True`` when an environment was stopped and ``False`` when
-        *env_name* was not running. The manager forgets a failed worker exit so
-        a later execution can launch a fresh environment with the same name.
-        """
         with self._lock:
-            env = self._envs.pop(env_name, None)
-            self._launch_configs.pop(env_name, None)
-            if env is None:
+            pool = self._pools.pop(env_name, None)
+            self._pool_configs.pop(env_name, None)
+            self._environments.pop(env_name, None)
+            self._specs.pop(env_name, None)
+            if pool is None:
                 return False
             try:
-                env.exit()
+                pool.close()
             except Exception:
-                logger.warning(
-                    "Failed to shut down environment '%s'", env_name, exc_info=True
-                )
+                logger.warning("Failed to close Wetlands pool %r", env_name, exc_info=True)
             return True
 
     def is_running(self, env_name: str) -> bool:
-        """Return whether this manager currently tracks *env_name* as launched."""
         with self._lock:
-            return env_name in self._envs
+            return env_name in self._pools
 
     def running_environments(self) -> tuple[str, ...]:
-        """Return the sorted names of environments currently tracked as launched."""
         with self._lock:
-            return tuple(sorted(self._envs))
+            return tuple(sorted(self._pools))

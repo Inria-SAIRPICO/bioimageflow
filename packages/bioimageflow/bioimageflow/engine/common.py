@@ -535,7 +535,7 @@ def _raise_worker_task_error(
         environment_name=tool.environment.name,
         row_index=row_index,
         original=original,
-        task_status=getattr(task, "status", None),
+        task_status=getattr(task, "state", None),
         task_traceback=getattr(task, "traceback", None),
     )
     if original is None:

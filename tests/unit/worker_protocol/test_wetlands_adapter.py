@@ -6,29 +6,25 @@ from bioimageflow.env_manager import WetlandsEnvManager
 from bioimageflow_core import EnvironmentSpec
 
 
-class _Environment:
+class _Pool:
     def __init__(self) -> None:
         self.submission = None
-        self.mapping = None
+        self.submissions = []
 
-    def submit(self, worker_file, function_name, *, args):
-        self.submission = (worker_file, function_name, args)
+    def submit_import(self, target, *, args, context_keyword=None):
+        self.submission = (target, args, context_keyword)
+        self.submissions.append(self.submission)
         return "submitted"
 
-    def map_tasks(self, worker_file, function_name, payloads):
-        self.mapping = (worker_file, function_name, payloads)
-        return ["mapped"]
 
-
-def _manager(environment: _Environment) -> WetlandsEnvManager:
+def _manager(environment: _Pool) -> WetlandsEnvManager:
     manager = object.__new__(WetlandsEnvManager)
-    manager._worker_file = "/shared/bioimageflow_core/worker.py"
     manager.get_or_create = lambda *args, **kwargs: environment
     return manager
 
 
 def test_wetlands_submits_the_canonical_processing_entry_point() -> None:
-    environment = _Environment()
+    environment = _Pool()
     manager = _manager(environment)
     payload = {"schema": "bioimageflow.processing_task.v1"}
 
@@ -39,14 +35,14 @@ def test_wetlands_submits_the_canonical_processing_entry_point() -> None:
 
     assert result == "submitted"
     assert environment.submission == (
-        "/shared/bioimageflow_core/worker.py",
-        "execute_processing_task",
+        "bioimageflow_core.worker:execute_processing_task",
         (payload,),
+        "task",
     )
 
 
 def test_wetlands_maps_the_same_canonical_processing_entry_point() -> None:
-    environment = _Environment()
+    environment = _Pool()
     manager = _manager(environment)
     payloads = [
         {"schema": "bioimageflow.processing_task.v1", "task_id": "task_0"},
@@ -58,9 +54,8 @@ def test_wetlands_maps_the_same_canonical_processing_entry_point() -> None:
         payloads,
     )
 
-    assert result == ["mapped"]
-    assert environment.mapping == (
-        "/shared/bioimageflow_core/worker.py",
-        "execute_processing_task",
-        payloads,
-    )
+    assert result == ["submitted", "submitted"]
+    assert environment.submissions == [
+        ("bioimageflow_core.worker:execute_processing_task", (payload,), "task")
+        for payload in payloads
+    ]

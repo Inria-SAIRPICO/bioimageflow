@@ -214,6 +214,7 @@ def prepare_parsl_execution(
                     workflow_environment=workflow._env_configs.get(
                         node.tool.environment.name
                     ),
+                    resources=node.effective_resources,
                 )
             )
     requirement_tuple = tuple(requirements)

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -50,7 +51,17 @@ def _run_subprocess(
     command: Sequence[str],
     run_kwargs: dict[str, Any],
 ) -> subprocess.CompletedProcess[Any]:
-    return subprocess.run(command, **run_kwargs)
+    resolved_command = list(command)
+    executable = resolved_command[0]
+    if (
+        executable
+        and Path(executable).name == executable
+        and shutil.which(executable) is None
+    ):
+        environment_executable = Path(sys.executable).resolve().parent / executable
+        if environment_executable.is_file():
+            resolved_command[0] = str(environment_executable)
+    return subprocess.run(resolved_command, **run_kwargs)
 
 
 def _signal_name(returncode: int) -> Optional[str]:

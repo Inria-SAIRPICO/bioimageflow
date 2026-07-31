@@ -191,6 +191,16 @@ class WorkflowRun:
             if event["sequence"] > after_sequence
         ]
 
+    def diagnostics(self) -> tuple[Any, ...]:
+        """Return independently persisted structured node failures."""
+        from bioimageflow.integration import NodeFailureDiagnostic
+
+        return tuple(
+            NodeFailureDiagnostic.from_dict(event["payload"])
+            for event in self._control.read_progress()
+            if event["kind"] == "diagnostic"
+        )
+
     def logs(self) -> str:
         """Return currently persisted orchestrator stdout and stderr."""
         sections: list[str] = []

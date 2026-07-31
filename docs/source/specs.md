@@ -31,10 +31,30 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - By default they remain alive for one workflow execution, while an explicit engine ownership policy can retain them for an engine session or delegate their lifetime to an external manager.
 - Communication between the main process and worker environments uses Python's `multiprocessing.connection`, so all transferred objects must be picklable.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
-- When `max_workers > 1` is passed to `env.launch()`, Wetlands starts multiple worker processes sharing the same Conda environment on disk. Tasks are dispatched to idle workers automatically; when all workers are busy, tasks queue internally. This enables `process_row` calls within a single node to run in parallel.
-- BioImageFlow uses Wetlands' `env.map_tasks()` for row-level dispatch and `env.submit()` for batch dispatch, replacing the proxy-based `import_module()` pattern.
+- BioImageFlow requires Wetlands `>=2.0.0,<3` and uses only its public top-level API.
+- BioImageFlow translates its public `EnvironmentSpec` into the immutable Wetlands 2 `EnvironmentSpec`, provisions with `EnvironmentManager.provision(...).wait_for()`, and starts a `WorkerPool` with `ManagedEnvironment.start()`.
+- Processing calls use `WorkerPool.submit_import("bioimageflow_core.worker:execute_processing_task", ...)`.
+- `max_workers` selects the Wetlands 2 pool size. Node-effective `max_concurrent` bounds the number of row tasks BioImageFlow keeps active for that node.
+- Wetlands 1 `worker_env` callbacks and automatic `CUDA_VISIBLE_DEVICES` assignment are not supported by Wetlands 2. Configuring `worker_env` produces an explicit migration error rather than silently changing execution.
 
 For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-api).
+
+### 1.1.1 Public Distributed-Execution Integration Contract
+
+The documented platform boundary is engine-neutral and consists of the following public values and operations:
+
+- `NodeResourceOverrides`, `Node.resource_overrides`, `Node.set_resource_overrides()`, `Node.effective_resources`, and `effective_node_resources()` provide portable per-instance worker requirements for `ProcessingTool` nodes.
+- `validate_parsl_config_ref()` resolves a trusted `ParslConfigRef` in an isolated child process, validates secrets, `retries=0`, and executor labels, returns sanitized structured diagnostics, and creates neither a DataFlowKernel nor a workflow run.
+- `plan_distributed_execution()` compiles the same recursive processing scope and uses the same worker-requirement, capacity parser, compatibility, and route functions as Parsl startup. It records the validated task policy and creates no run, DataFlowKernel, provider allocation, scheduler job, Wetlands environment, or worker.
+- `validate_remote_execution_profile()` invokes the public one-shot cluster protocol to validate connectivity, the remote factory, secrets, retries, executor labels, PSI/J availability, and cluster paths without creating a workflow run or scheduler job.
+- `NodeFailureDiagnostic` is attached to failed `ProgressEvent` callbacks and is persisted as a separate diagnostic progress event for both `WorkflowRun.diagnostics()` and `RemoteWorkflowRun.diagnostics()`.
+- `prepare_remote_submission()` copies all explicit `LocalUpload` bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original paths.
+- `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
+
+Every cross-process report has `to_dict()` and `from_dict()` methods and a versioned schema where applicable.
+Scoped node paths are used consistently by planning, progress, and failure diagnostics.
+Secrets and live Parsl objects are never serialized.
+Resource placement values do not contribute to result or cache keys.
 
 ### 1.2 Package Architecture
 
@@ -345,7 +365,7 @@ By default, entries in `pip` and `conda` lists use exact pins; bare names such a
 Set `allow_flexible_versions=True` only when the environment intentionally accepts resolver flexibility; in that mode explicit constraints such as `">=2,<3"` or `"~=1.2"` are accepted, but bare names still raise.
 Direct references such as `"bioimageflow-core @ file:///..."` and Wetlands local dependency dicts are already anchored and do not need a package-index version specifier.
 
-Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates the workflow graph before execution: reachable tools sharing the same `name` must declare identical `dependencies`, or `EnvironmentMismatchError` is raised with the conflicting tool names and dependency declarations. During Wetlands execution, BioImageFlow passes the augmented environment recipe to `wetlands.EnvironmentManager.create()`, and Wetlands validates whether any existing same-name managed environment can be reused.
+Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates the workflow graph before execution: reachable tools sharing the same `name` must declare identical `dependencies`, or `EnvironmentMismatchError` is raised with the conflicting tool names and dependency declarations. During Wetlands execution, BioImageFlow translates the augmented environment recipe to the Wetlands 2 immutable specification, calls `EnvironmentManager.provision(...).wait_for()`, and lets Wetlands validate whether a ready same-name managed environment can be reused.
 
 **Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
 - Dependency lists are sorted alphabetically (e.g., `["numpy==2.4.2", "cellpose==3.1.1.1"]` and `["cellpose==3.1.1.1", "numpy==2.4.2"]` produce the same hash).
@@ -387,7 +407,7 @@ Do not create one-off environments for these tasks.
 
 **When NOT to use `GENERAL_ENV`:** Tools that require specialized libraries (cellpose, stardist, SimpleITK, bioio, opencv, etc.) still declare their own `EnvironmentSpec`. The general env catches the long tail of tools that just need standard scientific Python.
 
-**Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine creates it on first use and reuses it for all tools referencing it. All tools with `environment = GENERAL_ENV` share a single Wetlands worker process.
+**Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine provisions it on first use and reuses one cached Wetlands 2 worker pool for all tools referencing it. The pool size follows the workflow environment configuration.
 
 ```python
 from pathlib import Path
@@ -1416,7 +1436,9 @@ Tool packages are installed in a **tool store** — a directory that holds versi
         ...
 ```
 
-Packages are installed via `pip install --target <dir> simpleitk-tools==X.Y.Z`, executed through Wetlands' pixi installation (no separate `pip` or `uv` on `PATH` required). Set `BIOIMAGEFLOW_TOOL_STORE` when a workflow needs an explicit shared or project-local store.
+Packages are installed via `<orchestrator-python> -m pip install --target <dir> simpleitk-tools==X.Y.Z`.
+This tool-store operation is intentionally independent of the Wetlands 2 environment lifecycle.
+Set `BIOIMAGEFLOW_TOOL_STORE` when a workflow needs an explicit shared or project-local store.
 
 #### Versioned Loading
 
@@ -1496,7 +1518,7 @@ Workflow scripts can declare their tool dependencies using [PEP 723](https://pep
 
 from bioimageflow import Workflow, require_tool_packages, configure_wetlands
 # Optionally configure wetlands
-configure_wetlands(wetlands_instance_path="./wetlands")
+configure_wetlands(root="./wetlands")
 
 # Parse PEP 723, install missing packages into tool store, load all
 require_tool_packages(__file__)
@@ -1517,7 +1539,7 @@ with Workflow(storage_path="./results") as wf:
 1. **Parses PEP 723 metadata** from the given script file. Extracts the `dependencies` list from the `# /// script` TOML block.
 2. **Requires exact version pins** (`==`). Flexible specifiers like `>=1.0` or `~=1.0` are rejected with a `ValueError` — reproducibility demands pinned versions.
 3. **Normalizes package names**: converts PyPI names to Python module names (`simpleitk-tools` → `simpleitk_tools`).
-4. **Auto-installs missing packages** into the tool store via `pip install --target`, executed through Wetlands' pixi (so no separate `pip` or `uv` needs to be on `PATH`). Set `auto_install=False` to raise `FileNotFoundError` instead.
+4. **Auto-installs missing packages** into the tool store via the orchestrator interpreter's `python -m pip install --target`. Set `auto_install=False` to raise `FileNotFoundError` instead.
 5. **Loads each package** via `load_versioned_package()`.
 6. **Registers canonical names** in `sys.modules`: copies every scoped entry (e.g., `simpleitk_tools__1_0_0.gaussian`) to its canonical equivalent (`simpleitk_tools.gaussian`). This enables standard `from simpleitk_tools import GaussianSmooth` syntax.
 
@@ -1525,7 +1547,9 @@ This is safe because PEP 723 declares exactly one version per package — there 
 
 #### Auto-Install on JSON Load
 
-`Workflow.load()` also auto-installs missing versioned packages. When a serialized workflow references `tool_package` and `tool_package_version`, the loader checks the tool store and installs via Wetlands' pixi if the package is absent. This means both `.py` scripts and `.json` workflow files are self-resolving — the user only needs `bioimageflow` (which bundles Wetlands) installed.
+`Workflow.load()` also auto-installs missing versioned packages.
+When a serialized workflow references `tool_package` and `tool_package_version`, the loader checks the tool store and installs through the orchestrator interpreter if the package is absent.
+This means both `.py` scripts and `.json` workflow files are self-resolving when that environment provides `pip`.
 
 ### 3.11 Tool Registry
 
@@ -1537,7 +1561,7 @@ The registry deliberately separates **install** (slow, network-bound) from **reg
 from bioimageflow import ToolRegistry, ToolMetadata
 
 reg = ToolRegistry()                                 # uses default tool store path
-reg.install_package("cellpose_tools", "2.3.1")       # network: installs via Wetlands' pixi
+reg.install_package("cellpose_tools", "2.3.1")       # network: installs via host Python
 metas: list[ToolMetadata] = reg.register_package(    # fast: loads + indexes already-installed pkg
     "cellpose_tools", "2.3.1"
 )
@@ -1835,6 +1859,7 @@ results.compute()
 | `current`     | `int \| None`   | Sub-row progress current value                         |
 | `maximum`     | `int \| None`   | Sub-row progress maximum value                         |
 | `timestamp`   | `float`         | Unix timestamp                                         |
+| `diagnostic`  | `NodeFailureDiagnostic \| None` | Structured, sanitized failed-node diagnostic available to attached callbacks. |
 
 `result_key` and `record_id` are cache identities only.
 Diagnostic signatures are separate debug values and are not cache identities.
@@ -1849,13 +1874,13 @@ When using branch-level parallelism, progress events from concurrent nodes may i
 `Workflow.get_environment()` provides access to per-environment launch configuration. It accepts a tool instance, an `EnvironmentSpec`, or an environment name string.
 This configuration is Wetlands-only.
 Parsl uses executor bindings and rejects `max_workers`, `worker_env`, or `worker_timeout` as Parsl routing or capacity settings.
+Wetlands 2 supports `max_workers` and `worker_timeout`; assigning the retained migration-only `worker_env` field fails before provisioning.
 
 ```python
 wf = Workflow(storage_path="./results", max_workers=4)
 
 segmenter = CellposeSegmenter()
 wf.get_environment(segmenter).max_workers = 2
-wf.get_environment(segmenter).worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
 ```
 
 Multiple calls with tools sharing the same environment return the same `WorkflowEnvironment` object. Configuration set via one tool applies to all tools in that environment.
@@ -1867,7 +1892,7 @@ Multiple calls with tools sharing the same environment return the same `Workflow
 | `name` | `str` | — | Environment name (read-only) |
 | `spec` | `EnvironmentSpec` | — | The environment specification (read-only) |
 | `max_workers` | `int` | `0` | Number of worker processes. `0` = use `Workflow.max_workers`. |
-| `worker_env` | `Callable[[int], dict] \| None` | `None` | Per-worker environment variables. `None` = auto-infer from `ResourceSpec`. |
+| `worker_env` | `Callable[[int], dict] \| None` | `None` | Retained only to detect Wetlands 1 configurations and raise a migration error. |
 | `worker_timeout` | `float \| None` | `None` | Inactivity timeout in seconds. When set, Wetlands' health monitor marks the active task as `FAILED` and replaces the worker if it sends no IPC message within this duration — useful for catching native-code deadlocks or segfaults that don't close the pipe. The engine adds its own safety timeout of `max(worker_timeout * 1.5, worker_timeout + 60)` to `task.wait_for()`; if that fires, `WorkerTimeoutError` is raised. `None` = no timeout. |
 
 #### 4.5.1 Resource Lifetime and Ownership
@@ -2758,7 +2783,9 @@ Completion timing never selects the primary error.
 
 ## 10. Resource Constraints
 
-Processing tools can declare their resource requirements via an optional `ResourceSpec`. Declarations are engine-agnostic — each execution engine interprets them according to its own scheduling model.
+Processing tools declare minimum worker requirements through `ResourceSpec`.
+Each `ProcessingTool` node may independently add public `NodeResourceOverrides`.
+`DataFrameTool` and workflow-boundary nodes do not expose worker overrides.
 
 ```python
 @dataclass(frozen=True)
@@ -2772,31 +2799,27 @@ class ResourceSpec:
 class MyGPUTool(ProcessingTool):
     resources = ResourceSpec(gpu=1, max_concurrent=4)
     ...
+
+node = MyGPUTool()(name="segment")
+node.set_resource_overrides(
+    NodeResourceOverrides(gpu=2, memory="32GB", max_concurrent=2)
+)
 ```
 
-- `ResourceSpec.max_concurrent` bounds Parsl submission and is not used by the direct or Wetlands backends.
+- A missing override field inherits the declaration.
+- CPU, GPU, memory, and GPU-memory overrides are requirements and may not fall below the declaration.
+- A non-zero `max_concurrent` override may lower but may not raise a non-zero declared cap. Zero means unlimited only when the declaration permits unlimited execution.
+- `Node.effective_resources` and `effective_node_resources(node)` return the validated merged `ResourceSpec`.
+- `ResourceSpec.max_concurrent` bounds both Wetlands 2 row submission and Parsl submission. Direct execution remains sequential within a node.
 - Parsl validates each request against an explicitly attested executor slot and uses `max_concurrent` with `ParslTaskPolicy.max_in_flight` to bound unfinished submissions.
 - Scoped-node routes, environment-identity routes, or one unique compatible binding select the executor; there is no implicit default, GPU, or environment-name route.
-- Tools without `resources` have no constraints (unlimited concurrency, CPU-only).
+- Tools without an explicit declaration inherit `ResourceSpec()` defaults: one CPU, zero GPUs, no memory floors, and unlimited node concurrency.
+- Overrides round-trip recursively in graph serialization and archives, belong to the node instance rather than the tool class, and do not affect result/cache keys.
 
 `ResourceSpec` lives in `bioimageflow_core.environment` alongside `EnvironmentSpec`.
 
-**Wetlands worker resolution:** The Wetlands backend determines `max_workers` per environment using a three-level approach:
-
-1. **Explicit override:** `wf.get_environment(tool).max_workers = M` takes precedence.
-2. **GPU auto-inference:** If any tool in the environment declares `ResourceSpec(gpu >= 1)` and no explicit `worker_env` was set, the engine auto-generates `worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`.
-3. **Workflow default:** `Workflow(storage_path="./results", max_workers=N)` provides the baseline for all environments.
-
-**GPU assignment:** When `engine="wetlands"` and `ResourceSpec.gpu >= 1`, the Wetlands backend automatically assigns `CUDA_VISIBLE_DEVICES` per worker process: worker `i` gets `CUDA_VISIBLE_DEVICES=str(i)`. This default can be overridden by providing an explicit `worker_env` via `get_environment()`.
-
-**Explicit override:**
-```python
-wf = Workflow(storage_path="./results", max_workers=4)
-wf.get_environment(my_gpu_tool).worker_env = lambda i: {
-    "CUDA_VISIBLE_DEVICES": str(i),
-    "OMP_NUM_THREADS": "4",
-}
-```
+The Wetlands backend selects the environment pool size from `wf.get_environment(tool).max_workers` when non-zero and otherwise from `Workflow.max_workers`.
+Wetlands 2 has no application-facing per-worker environment callback, so GPU device visibility is the responsibility of the environment or external runtime rather than implicit BioImageFlow mutation.
 
 ---
 
@@ -2818,7 +2841,7 @@ node_logger = logging.getLogger(f"bioimageflow.node.{node_name}")
 ```
 
 - `bioimageflow.configure_logging()` sets the BioImageFlow logger level to `INFO` by default and routes emitted `DEBUG`/`INFO` records to stdout and `WARNING`+ records to stderr using BioImageFlow-owned split stream handlers. Pass `level=logging.DEBUG` to emit debug records.
-- `bioimageflow.configure_logging()` delegates Wetlands console setup to `wetlands.logger.enable_console_logging`; with Wetlands 1.1.0, subprocess stdout is logged at `INFO`/stdout and subprocess stderr at `ERROR`/stderr.
+- `bioimageflow.configure_logging()` delegates Wetlands console setup to `wetlands.logger.enable_console_logging`; Wetlands 2 worker stdout and stderr are forwarded through its logging channel.
 - BioImageFlow does not own Wetlands file logging. Wetlands file logs remain the responsibility of the Wetlands `EnvironmentManager`.
 - A `JsonFormatter` is available for machine-readable output (structured event logging).
 - Wetlands worker logs may be forwarded through its communication channel.
@@ -3044,110 +3067,76 @@ The normative host-facing grammar, identifiers, status rules, and golden fixture
 
 ## Appendix A: Wetlands API
 
-Wetlands is a lightweight Python library for managing Conda environments. It creates environments on demand, installs dependencies, and runs Python code inside them as isolated subprocess workers. Each environment is fully isolated, enabling tools with conflicting dependencies to coexist in the same workflow.
+BioImageFlow requires Wetlands 2.
+Wetlands 2 separates manager construction, observable provisioning, managed environments, worker pools, and execution tasks.
+BioImageFlow uses its public top-level imports only.
 
 ### A.1 Environment Manager
 
 ```python
-from wetlands.environment_manager import EnvironmentManager
+from wetlands import EnvironmentManager
 
 manager = EnvironmentManager(
-    wetlands_instance_path="wetlands/",
-    conda_path="path/to/pixi/",
-    main_conda_environment_path=None,
+    root="wetlands/",
+    pixi_executable="path/to/pixi",  # optional
 )
 ```
 
-### A.2 Create an Environment
+Manager construction stores configuration and does not provision an environment.
+`configure_wetlands(root=..., pixi_executable=..., network=..., termination_grace=...)` exposes the corresponding BioImageFlow configuration.
+The old `wetlands_instance_path` and `conda_path` keywords are accepted as explicit migration aliases, while `main_conda_environment_path`, manager selection, and debug-mode construction are rejected.
+
+### A.2 Provision an Environment
 
 ```python
-env = manager.create("cellpose_env", {"conda": ["cellpose==3.1.0"]})
-```
+from wetlands import EnvironmentSpec
 
-- If a managed environment with this name already exists, Wetlands reuses it only when its stored recipe matches the requested recipe.
-- Use Wetlands' `replace_existing=True` to intentionally recreate a same-name managed environment with a different recipe, or `load(name)` to intentionally load an existing environment without recipe validation.
-- `create_from_config()` accepts `requirements.txt`, `environment.yml`, `pyproject.toml`, or `pixi.toml`.
-
-### A.3 Launch Workers
-
-```python
-# Single worker (default)
-env.launch()
-
-# Multiple workers sharing the same conda environment on disk
-env.launch(max_workers=4)
-
-# With per-worker environment variables (e.g., GPU assignment)
-env.launch(
-    max_workers=4,
-    worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)},
+spec = EnvironmentSpec(
+    python="3.12.*",
+    conda=("cellpose==3.1.0",),
+    pypi=("bioimageflow-core>=0.1.0",),
 )
+environment = manager.provision("cellpose_env", spec).wait_for()
 ```
 
-When `max_workers > 1`, tasks are dispatched to idle workers automatically. When all workers are busy, tasks queue internally and are dispatched as workers become available.
+BioImageFlow translates its own immutable environment declaration into this Wetlands 2 value and includes `bioimageflow-core`.
+Provisioning is lazy on the first uncached node that needs the environment.
+The observable provisioning operation is always awaited through `wait_for()`.
+
+### A.3 Start a Worker Pool
+
+```python
+pool = environment.start(workers=4, worker_timeout=300)
+```
+
+The returned `WorkerPool` owns its workers and is closed during the selected BioImageFlow resource lifetime.
+Wetlands 1 `launch()`, `exit()`, and `worker_env` APIs are not used.
 
 ### A.4 Task-Based Execution
 
 ```python
-# Non-blocking: returns a Task[T]
-task = env.submit("module.py", "function_name", args=(arg1, arg2))
-task.wait_for()
-result = task.result
-
-# Blocking (convenience)
-result = env.execute("module.py", "function_name", (arg1, arg2))
-
-# Batch parallel execution — yields results in order
-results = list(env.map("module.py", "process", items))
-
-# Batch with per-item Task control
-tasks = env.map_tasks("module.py", "process", items)
-for task in tasks:
-    task.listen(my_callback)
-for task in tasks:
-    task.wait_for()
+task = pool.submit_import(
+    "bioimageflow_core.worker:execute_processing_task",
+    args=(request,),
+)
+result = task.wait_for()
 ```
 
-**Task lifecycle:** `PENDING` → `RUNNING` → `COMPLETED` | `FAILED` | `CANCELED`
-
-**Task API:**
-- `task.status` — current `TaskStatus` (has `.is_finished()` for terminal state check)
-- `task.result` — return value (only when `COMPLETED`, raises `InvalidStateError` otherwise)
-- `task.error` — error message string (only when `FAILED`)
-- `task.exception` — `ExecutionException` wrapping error + traceback (only when `FAILED`)
-- `task.traceback` — traceback lines (only when `FAILED`)
-- `task.progress` — float in [0, 1] or None (computed from `current / maximum`)
-- `task.message` — last progress message from `update()`
-- `task.current` — current progress counter from `update()`
-- `task.maximum` — maximum progress counter from `update()`
-- `task.outputs` — dict of named intermediate outputs from `set_output()`
-- `task.listen(callback)` — register event listener
-- `task.wait_for(timeout=)` — block until terminal state
-- `task.cancel()` — request cooperative cancellation
-- `task.future` — `concurrent.futures.Future[T]` for interop
+BioImageFlow observes public `ExecutionEvent`, `ExecutionEventKind`, `ExecutionState`, and structured `ExecutionFailure` values.
+Worker exceptions are converted to `WorkerTaskError` and then to the engine-neutral `NodeFailureDiagnostic`.
 
 ### A.5 Progress Reporting and Cancellation (Worker Side)
 
-Remote functions can declare an optional `task` parameter to receive a `RemoteTaskHandle`:
-
-```python
-# runs inside the isolated environment
-def my_function(data, *, task=None):
-    for i, item in enumerate(data):
-        if task and task.cancel_requested:
-            task.cancel()
-            return None
-        if task:
-            task.update(f"Processing {i+1}/{len(data)}",
-                        current=i, maximum=len(data))
-        process(item)
-    return result
-```
-
-Functions without a `task` parameter work exactly as before.
+The BioImageFlow worker entry point remains responsible for its portable task context.
+Wetlands task event listeners are adapted to public `ProgressEvent` callbacks.
+Cancellation requests stop new work, cancel outstanding Wetlands tasks where supported, and drain terminal task states.
 
 ### A.6 Cleanup
 
 ```python
-env.exit()  # Shuts down all workers and releases resources
+pool.close()
+manager.close()
 ```
+
+Cleanup is idempotent through `WetlandsEnvManager.stop()` and `close()`.
+BioImageFlow never uses Wetlands private environment storage or transport internals.

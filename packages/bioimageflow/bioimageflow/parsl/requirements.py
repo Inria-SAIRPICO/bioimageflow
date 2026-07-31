@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from bioimageflow.cache import compute_env_hash
+from bioimageflow.resources import parse_capacity
 from bioimageflow_core import EnvironmentSpec, ProcessingTool, ResourceSpec
 from bioimageflow_core.worker_origins import (
     WorkerToolOriginV1,
@@ -20,20 +21,6 @@ from bioimageflow_core.worker_origins import (
 )
 
 
-_MEMORY_PATTERN = re.compile(
-    r"^(?P<amount>[1-9][0-9]*)(?P<unit>B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$"
-)
-_MEMORY_MULTIPLIERS = {
-    "B": 1,
-    "KB": 1024,
-    "MB": 1024**2,
-    "GB": 1024**3,
-    "TB": 1024**4,
-    "KiB": 1024,
-    "MiB": 1024**2,
-    "GiB": 1024**3,
-    "TiB": 1024**4,
-}
 _CORE_REQUIREMENT_PATTERN = re.compile(
     r"^bioimageflow[-_.]core(?P<constraint>[<>=!~].+)$",
     re.IGNORECASE,
@@ -46,15 +33,12 @@ class WorkerRequirementError(ValueError):
 
 def parse_memory_bytes(value: str, *, field: str = "memory") -> int:
     """Parse one canonical integral byte-capacity string."""
-    if type(value) is not str:
-        raise TypeError(f"{field} must be a string.")
-    match = _MEMORY_PATTERN.fullmatch(value)
-    if match is None:
-        raise WorkerRequirementError(
-            f"{field} must be an integral capacity with a canonical unit "
-            "(B, KB, MB, GB, TB, KiB, MiB, GiB, or TiB)."
-        )
-    return int(match.group("amount")) * _MEMORY_MULTIPLIERS[match.group("unit")]
+    try:
+        return parse_capacity(value, field=field)
+    except TypeError:
+        raise
+    except ValueError as exc:
+        raise WorkerRequirementError(str(exc)) from exc
 
 
 def normalize_core_requirement(value: str) -> str:
@@ -129,6 +113,28 @@ class NormalizedResourceRequest:
             raise WorkerRequirementError(
                 "max_concurrent must be a non-negative integer."
             )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cpu": self.cpu,
+            "gpu": self.gpu,
+            "memory_bytes": self.memory_bytes,
+            "gpu_memory_bytes": self.gpu_memory_bytes,
+            "max_concurrent": self.max_concurrent,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "NormalizedResourceRequest":
+        fields = {
+            "cpu",
+            "gpu",
+            "memory_bytes",
+            "gpu_memory_bytes",
+            "max_concurrent",
+        }
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ValueError("Invalid NormalizedResourceRequest payload.")
+        return cls(**value)
 
 
 def normalize_resource_request(
@@ -331,6 +337,7 @@ def build_worker_requirement(
     *,
     core_requirement: str,
     workflow_environment: Any | None = None,
+    resources: ResourceSpec | None = None,
 ) -> WorkerRequirement:
     """Build and validate one canonical requirement before DFK acquisition."""
     if (
@@ -370,7 +377,9 @@ def build_worker_requirement(
         anchored_dependency_paths=anchored_dependency_paths(
             environment.dependencies
         ),
-        resources=normalize_resource_request(getattr(tool, "resources", None)),
+        resources=normalize_resource_request(
+            resources if resources is not None else getattr(tool, "resources", None)
+        ),
         tool_origin=canonical_origin,
     )
 

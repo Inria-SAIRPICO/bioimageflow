@@ -72,14 +72,15 @@ class _SequentialHarness(SequentialEngine):
 class _FakeWetlandsEnvironment:
     def __init__(self, *, fail_on_exit: bool = False) -> None:
         self.launch_calls: list[dict[str, Any]] = []
-        self.exit_calls = 0
+        self.close_calls = 0
         self.fail_on_exit = fail_on_exit
 
-    def launch(self, **kwargs: Any) -> None:
+    def start(self, **kwargs: Any) -> "_FakeWetlandsEnvironment":
         self.launch_calls.append(kwargs)
+        return self
 
-    def exit(self) -> None:
-        self.exit_calls += 1
+    def close(self) -> None:
+        self.close_calls += 1
         if self.fail_on_exit:
             raise RuntimeError("worker exit failed")
 
@@ -89,17 +90,19 @@ class _FakeWetlandsBackend:
         self.env = env
         self.create_calls = 0
 
-    def create(self, name: str, dependencies: Any) -> _FakeWetlandsEnvironment:
+    def provision(self, name: str, dependencies: Any) -> Any:
         self.create_calls += 1
-        return self.env
+        return SimpleNamespace(wait_for=lambda: self.env)
 
 
 def _bare_manager(
     envs: dict[str, _FakeWetlandsEnvironment] | None = None,
 ) -> WetlandsEnvManager:
     manager = object.__new__(WetlandsEnvManager)
-    manager._envs = dict(envs or {})
-    manager._launch_configs = {name: (1, None, None) for name in manager._envs}
+    manager._environments = {}
+    manager._pools = dict(envs or {})
+    manager._pool_configs = {name: (1, None) for name in manager._pools}
+    manager._specs = {}
     manager._lock = threading.RLock()
     return manager
 
@@ -180,7 +183,6 @@ def test_repeated_engine_executions_launch_environment_once() -> None:
     manager = _bare_manager()
     manager._manager = backend
     manager._bioimageflow_core_dependency = "bioimageflow-core==0"
-    manager._worker_file = "worker.py"
     spec = EnvironmentSpec(
         name="warm",
         dependencies={"pip": ["bioimageflow-core==0"]},
@@ -191,10 +193,10 @@ def test_repeated_engine_executions_launch_environment_once() -> None:
     engine.execute([], object())
     engine.execute([], object())
 
-    assert environment.launch_calls == [{}]
+    assert environment.launch_calls == [{"workers": 1, "worker_timeout": None}]
     assert manager.running_environments() == ("warm",)
     engine.close()
-    assert environment.exit_calls == 1
+    assert environment.close_calls == 1
 
 
 def test_close_is_idempotent_and_closed_engine_cannot_execute() -> None:
@@ -260,13 +262,13 @@ def test_manager_stop_and_status_introspection() -> None:
     assert manager.stop("alpha") is True
     assert manager.stop("alpha") is False
     assert manager.is_running("alpha") is False
-    assert first.exit_calls == 1
+    assert first.close_calls == 1
 
     manager.shutdown_all()
     manager.shutdown_all()
 
     assert manager.running_environments() == ()
-    assert second.exit_calls == 1
+    assert second.close_calls == 1
 
 
 def test_sequential_engine_honors_engine_lifetime() -> None:
@@ -296,7 +298,7 @@ def test_workflow_public_factory_preserves_configuration(
     workflow = Workflow(
         storage_path=tmp_path,
         execution="sequential",
-        wetlands_config={"debug": True},
+        wetlands_config={"termination_grace": 7.0},
         max_workers=4,
     )
 
@@ -306,7 +308,7 @@ def test_workflow_public_factory_preserves_configuration(
     assert engine._use_wetlands is True
     assert engine._force_sequential is True
     assert engine.resource_lifetime is ResourceLifetime.ENGINE
-    assert created == [{"debug": True}]
+    assert created == [{"termination_grace": 7.0}]
     assert workflow.max_workers == 4
     engine.close()
 

@@ -100,7 +100,7 @@ class Threshold(ProcessingTool):
 # 3. Define and run a reusable workflow
 from bioimageflow import configure_wetlands
 
-configure_wetlands(wetlands_instance_path="./wetlands")
+configure_wetlands(root="./wetlands")
 
 WORKFLOW_DIRECTORY = Path(__file__).resolve().parent
 

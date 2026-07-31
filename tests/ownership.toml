@@ -24,6 +24,7 @@ sources = [
     "packages/bioimageflow/bioimageflow/engine",
     "packages/bioimageflow/bioimageflow/env_manager.py",
     "packages/bioimageflow/bioimageflow/events.py",
+    "packages/bioimageflow/bioimageflow/resources.py",
 ]
 edit_tests = [
     "tests/unit/test_env_manager_core_dependency.py",
@@ -127,6 +128,7 @@ sources = [
     "packages/bioimageflow/bioimageflow/cli.py",
     "packages/bioimageflow/bioimageflow/logging_config.py",
     "packages/bioimageflow/bioimageflow/paths.py",
+    "packages/bioimageflow/bioimageflow/integration.py",
 ]
 edit_tests = [
     "tests/unit/test_cli.py",
@@ -140,7 +142,10 @@ precommit_suites = ["unit", "integration"]
 
 [[areas]]
 name = "parsl"
-sources = ["packages/bioimageflow/bioimageflow/parsl"]
+sources = [
+    "packages/bioimageflow/bioimageflow/parsl",
+    "packages/bioimageflow/bioimageflow/planning.py",
+]
 edit_tests = [
     "tests/unit/parsl",
     "tests/integration/parsl",

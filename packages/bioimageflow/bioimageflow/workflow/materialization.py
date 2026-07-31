@@ -197,6 +197,7 @@ class _MaterializationMixin:
                     "source_module",
                     "constants",
                     "output_templates",
+                    "resource_overrides",
                     "enabled",
                 }
             )
@@ -463,6 +464,16 @@ class _MaterializationMixin:
                                     output_templates=node_data.get("output_templates"),
                                     **kwargs,
                                 )
+                                if "resource_overrides" in node_data:
+                                    from bioimageflow.resources import (
+                                        NodeResourceOverrides,
+                                    )
+
+                                    node.set_resource_overrides(
+                                        NodeResourceOverrides.from_dict(
+                                            node_data["resource_overrides"]
+                                        )
+                                    )
                             node._constant_bindings.update(fallback_constants)
                             node._workflow_input_fallback_constants.update(
                                 fallback_constants

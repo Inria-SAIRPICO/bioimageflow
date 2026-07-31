@@ -141,6 +141,7 @@ class WetlandsBackend:
             request.batch_context,
             request.invocation_id,
             request.cache_attempt_id,
+            request.resources,
         )
 
     def cleanup_execution(self, engine: "DefaultEngine") -> None:

@@ -93,6 +93,30 @@ def test_processing_task_has_exact_round_trip(tmp_path) -> None:
     assert decode_processing_task(encode_processing_task(task)) == task
 
 
+def test_processing_task_recursively_encodes_paths(tmp_path) -> None:
+    task = _task(tmp_path)
+    path = tmp_path.resolve() / "input.tif"
+    task = replace(
+        task,
+        rows=(
+            replace(
+                task.rows[0],
+                arguments={
+                    "input": path,
+                    "nested": [{"mask": path}],
+                },
+            ),
+        ),
+    )
+
+    payload = encode_processing_task(task)
+
+    assert payload["rows"][0]["arguments"] == {
+        "input": str(path),
+        "nested": [{"mask": str(path)}],
+    }
+
+
 def test_processing_result_has_exact_round_trip(tmp_path) -> None:
     result = _result(_task(tmp_path))
     assert decode_processing_result(encode_processing_result(result)) == result

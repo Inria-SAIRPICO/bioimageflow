@@ -22,33 +22,50 @@ def _manager_with_core_dependency(dependency: object) -> WetlandsEnvManager:
     return manager
 
 
-class _MutatingWetlandsEnvironment:
-    def __init__(self, dependencies: dict[str, Any]) -> None:
-        self.dependencies = dependencies
-        self.launched = False
-        self.launch_count = 0
+class _Pool:
+    def __init__(self) -> None:
+        self.close_count = 0
 
-    def launch(self, **kwargs: Any) -> None:
-        self.launched = True
-        self.launch_count += 1
-        self.dependencies.setdefault("channels", []).append("bioimageit")
+    def close(self) -> None:
+        self.close_count += 1
+
+
+class _MutatingWetlandsEnvironment:
+    def __init__(self) -> None:
+        self.start_count = 0
+        self.pool = _Pool()
+
+    def start(self, **kwargs: Any) -> _Pool:
+        self.start_count += 1
+        self.start_kwargs = kwargs
+        return self.pool
+
+
+class _Operation:
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def wait_for(self) -> Any:
+        return self.value
 
 
 class _MutatingWetlandsManager:
     def __init__(self) -> None:
-        self.created_dependencies: list[dict[str, Any]] = []
+        self.provisioned_specs: list[Any] = []
+        self.environment = _MutatingWetlandsEnvironment()
 
-    def create(self, name: str, dependencies: dict[str, Any]) -> _MutatingWetlandsEnvironment:
-        self.created_dependencies.append(dependencies)
-        return _MutatingWetlandsEnvironment(dependencies)
+    def provision(self, name: str, spec: Any) -> _Operation:
+        self.provisioned_specs.append(spec)
+        return _Operation(self.environment)
 
 
 def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvManager:
     manager = _manager_with_core_dependency(dependency)
     manager._manager = _MutatingWetlandsManager()
-    manager._envs = {}
-    manager._launch_configs = {}
-    manager._worker_file = "worker.py"
+    manager._environments = {}
+    manager._pools = {}
+    manager._pool_configs = {}
+    manager._specs = {}
     manager._lock = threading.RLock()
     return manager
 
@@ -191,7 +208,7 @@ def test_augment_dependencies_does_not_mutate_dependency_spec() -> None:
 def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
     dependency = {
         "name": "bioimageflow-core",
-        "path": "/repo/packages/bioimageflow-core",
+        "path": str(_local_bioimageflow_core_project()),
         "editable": True,
     }
     manager = _runtime_manager_with_core_dependency(dependency)
@@ -208,46 +225,65 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
     second = manager.get_or_create(env_spec)
 
     assert first is second
-    assert first.launch_count == 1
+    assert manager._manager.environment.start_count == 1
     assert env_spec.dependencies == {
         "python": "3.9",
         "conda": ["bioimageit::simglib=0.1.2"],
         "channels": ["conda-forge", "bioimageit"],
     }
-    created_dependencies = manager._manager.created_dependencies[0]
-    assert created_dependencies["channels"] == [
-        "conda-forge",
-        "bioimageit",
-        "bioimageit",
-    ]
-    assert len(manager._manager.created_dependencies) == 2
+    translated = manager._manager.provisioned_specs[0]
+    assert translated.channels == ("conda-forge", "bioimageit")
+    assert translated.conda == ("simglib=0.1.2",)
+    assert len(manager._manager.provisioned_specs) == 1
+
+
+def test_wetlands_v2_translates_local_pypi_reference_to_typed_package() -> None:
+    project = _local_bioimageflow_core_project()
+    assert project is not None
+    manager = _manager_with_core_dependency(
+        f"bioimageflow-core @ {project.as_uri()}"
+    )
+    spec = manager._to_wetlands_spec(
+        EnvironmentSpec(
+            name="local-core",
+            dependencies={
+                "python": "3.13",
+                "pip": [f"bioimageflow-core @ {project.as_uri()}"],
+            },
+        )
+    )
+
+    assert spec.python == "3.13.*"
+    assert spec.pypi == ()
+    assert len(spec.local) == 1
+    assert spec.local[0].source == project.resolve()
+    assert spec.local[0].distribution_name == "bioimageflow-core"
 
 
 def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
     dependency = {
         "name": "bioimageflow-core",
-        "path": "/repo/packages/bioimageflow-core",
+        "path": str(_local_bioimageflow_core_project()),
         "editable": True,
     }
 
     class _ValidatingWetlandsManager:
         def __init__(self) -> None:
-            self.created_dependencies: list[dict[str, Any]] = []
-            self.env = _MutatingWetlandsEnvironment({})
+            self.provisioned_specs: list[Any] = []
+            self.env = _MutatingWetlandsEnvironment()
 
-        def create(
-            self, name: str, dependencies: dict[str, Any]
-        ) -> _MutatingWetlandsEnvironment:
-            self.created_dependencies.append(dependencies)
-            if len(self.created_dependencies) > 1:
+        def provision(self, name: str, spec: Any) -> _Operation:
+            self.provisioned_specs.append(spec)
+            if len(self.provisioned_specs) > 1:
                 raise RuntimeError("wetlands recipe mismatch")
-            return self.env
+            return _Operation(self.env)
 
     manager = _manager_with_core_dependency(dependency)
     manager._manager = _ValidatingWetlandsManager()
-    manager._envs = {}
-    manager._launch_configs = {}
-    manager._worker_file = "worker.py"
+    manager._environments = {}
+    manager._pools = {}
+    manager._pool_configs = {}
+    manager._specs = {}
     manager._lock = threading.RLock()
 
     first = EnvironmentSpec(name="shared", dependencies={"pip": ["numpy==2.4.2"]})
@@ -255,11 +291,11 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
 
     manager.get_or_create(first)
 
-    with pytest.raises(RuntimeError, match="wetlands recipe mismatch"):
+    with pytest.raises(ValueError, match="different recipe"):
         manager.get_or_create(second)
 
-    assert len(manager._manager.created_dependencies) == 2
-    assert manager._manager.env.launched is True
+    assert len(manager._manager.provisioned_specs) == 1
+    assert manager._manager.env.start_count == 1
 
 
 @pytest.mark.parametrize(

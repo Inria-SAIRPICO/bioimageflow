@@ -6,7 +6,11 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 import bioimageflow.launcher.ssh as ssh_module
-from bioimageflow import RemoteWorkflowRun, SSHSubmissionTransport
+from bioimageflow import (
+    NodeFailureDiagnostic,
+    RemoteWorkflowRun,
+    SSHSubmissionTransport,
+)
 
 
 RUN_ID = "run_1234567812344abc923456789abcdef0"
@@ -96,6 +100,42 @@ def test_progress_preserves_server_sequences_across_pages(
 
     assert [event["sequence"] for event in run.progress(after_sequence=5)] == [8, 11]
     assert calls == [5, 8]
+
+
+def test_reconnected_run_exposes_same_structured_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = NodeFailureDiagnostic(
+        scoped_node_path="nested/tool",
+        category="worker",
+        exception_type="RuntimeError",
+        message="remote failure",
+        traceback="remote traceback",
+        attempt_id="task-7",
+    )
+
+    def execute(transport, operation, arguments, *, request_id):
+        del transport, arguments, request_id
+        if operation == "inspect":
+            return _observation("failed")
+        assert operation == "read-progress"
+        return {
+            **_observation("failed"),
+            "events": [
+                {
+                    "sequence": 1,
+                    "kind": "diagnostic",
+                    "payload": expected.to_dict(),
+                }
+            ],
+            "has_more": False,
+            "next_sequence": 1,
+        }
+
+    monkeypatch.setattr(ssh_module, "execute_cluster_command", execute)
+    run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
+
+    assert run.diagnostics() == (expected,)
 
 
 def test_logs_assemble_bytes_before_replacement_decoding_and_restart_rotation(

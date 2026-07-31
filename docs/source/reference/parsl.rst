@@ -6,11 +6,25 @@ BioImageFlow can dispatch ``ProcessingTool`` work through an attached Parsl runt
 Install the optional runtime with ``pip install "bioimageflow[parsl]"``.
 Importing ``bioimageflow``, validating or serializing a workflow, and calling ``plan()`` do not import Parsl.
 
+Public platform preflight
+-------------------------
+
+Execution frontends should use the cohesive public preflight surface instead of importing private Parsl startup or launcher modules:
+
+- :func:`bioimageflow.get_execution_capabilities` reports optional runtime availability without importing Parsl or PSI/J.
+- :func:`bioimageflow.validate_parsl_config_ref` resolves a trusted configuration factory in an isolated process and validates secrets, retries, and executor labels without creating a DFK or run.
+- :func:`bioimageflow.plan_distributed_execution` uses runtime requirement, compatibility, and routing logic without importing Parsl, allocating workers, submitting a job, or creating a run.
+- :func:`bioimageflow.validate_remote_execution_profile` performs the corresponding non-submitting checks on a remote cluster through the public protocol.
+- :func:`bioimageflow.prepare_remote_submission` binds explicit ``LocalUpload`` values to an immutable, digest-verified, single-use submission.
+
+The complete integration sequence, allocation table, wire examples, diagnostics contract, and lifecycle rules are in :doc:`/gui/submitted_parsl`.
+
 Attached engine construction
 ----------------------------
 
 A Parsl execution requires explicit runtime configuration.
 Construct :class:`~bioimageflow.ParslEngine` with exactly one of a ``parsl.Config`` or an existing DataFlowKernel, plus an :class:`~bioimageflow.ExecutorBinding` for every selectable executor label.
+Persistent profiles may instead use :meth:`bioimageflow.ParslEngine.from_config_ref`, which applies the trusted public validation boundary before constructing the engine.
 
 The following local example attests one thread executor for a tool environment:
 
@@ -140,6 +154,7 @@ Scheduling and task bounds
 
 ``row_chunk_size`` creates consecutive row chunks.
 ``max_in_flight`` bounds unfinished Parsl futures, and ``ResourceSpec.max_concurrent`` can lower that bound for one processing node.
+When a node has :class:`~bioimageflow.NodeResourceOverrides`, Parsl consumes its validated effective resource value rather than the shared tool-class declaration.
 Whole-node ``process_batch()`` remains one task and emits no row-complete events.
 
 Parsl Config must use ``retries=0``.
@@ -169,6 +184,7 @@ Progress and diagnostics
 ------------------------
 
 Parsl uses the same public ``ProgressEvent`` statuses as the other engines.
+Failed events may carry a :class:`~bioimageflow.NodeFailureDiagnostic`.
 Row-complete callbacks are serialized and emitted in aligned row order even when futures complete out of order.
 Independent node events may interleave.
 
@@ -182,6 +198,7 @@ Backend task diagnostics are stored separately from immutable cache records at:
 A diagnostic records task correlation, executor label, mode, retry, row positions, tool origin, status, timestamps, and terminal error type.
 It becomes terminal only after BioImageFlow observes the future.
 Attempt and task diagnostics do not contribute to result keys or record IDs.
+Submitted handles expose the same engine-neutral failed-node values through ``WorkflowRun.diagnostics()`` and ``RemoteWorkflowRun.diagnostics()``.
 
 Submitted workflows
 -------------------

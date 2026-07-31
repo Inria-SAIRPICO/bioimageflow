@@ -12,7 +12,7 @@ state. There are three separate locations:
 
 - ``Workflow(storage_path=...)`` stores workflow outputs, cache metadata, and generated assets.
   The path is required runtime state; it is never serialized into workflow definitions.
-- ``configure_wetlands(wetlands_instance_path=...)`` stores Wetlands'
+- ``configure_wetlands(root=...)`` stores Wetlands 2's
   environment state: logs, debug port metadata, the bundled Pixi or
   Micromamba installation, and the isolated tool environments. Call it
   before ``Workflow.compute()``, ``Workflow.load()``, or
@@ -27,7 +27,7 @@ For a project-local run, start scripts like this:
 
    from bioimageflow import Workflow, configure_wetlands
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
    with Workflow(storage_path="./results") as wf:
        ...
@@ -143,7 +143,7 @@ Wire tools together inside a :class:`~bioimageflow.Workflow` context manager:
 
    invert = InvertImage()
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
    with Workflow(storage_path="./results") as wf:
        images = files(path="/data/raw", pattern="*.tif")

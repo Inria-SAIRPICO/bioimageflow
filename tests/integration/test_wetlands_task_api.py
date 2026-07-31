@@ -1,9 +1,9 @@
 """Integration tests for the Wetlands Task API features.
 
 These tests use REAL Wetlands worker processes (use_wetlands=True).
-They cover the 5 features from the Task API integration plan:
-  1. Intra-node row parallelism (map_tasks)
-  2. GPU-aware worker assignment (worker_env, ResourceSpec)
+They cover the Wetlands execution contract:
+  1. Intra-node row parallelism
+  2. Portable resource requirements and Wetlands 2 pool configuration
   3. Sub-row progress reporting (task.update → ProgressEvent)
   4. Workflow cancellation (cancel(), WorkflowCancelledError)
   5. Branch-level parallelism (TopologicalSorter + ThreadPoolExecutor)
@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bioimageflow import ProgressEvent, Workflow
+from bioimageflow import NodeResourceOverrides, ProgressEvent, Workflow
 from bioimageflow.engine import DefaultEngine, SequentialEngine, WorkflowCancelledError
 
 from tests.testkit.integration_tools import FileLoader
@@ -28,7 +28,6 @@ from .wetlands_test_tools import (
     ProgressReportingTool,
     SimpleRowTool,
     SlowRowTool,
-    gpu_env,
 )
 
 pytestmark = pytest.mark.wetlands
@@ -158,29 +157,27 @@ class TestRowParallelism:
 
 
 # =====================================================================
-# Feature 2: GPU-aware worker assignment
+# Feature 2: portable resources and Wetlands 2 pools
 # =====================================================================
 
-class TestGpuWorkerAssignment:
-    """GPU auto-inference and get_environment() overrides."""
+class TestWetlandsResourceRequirements:
+    """Resource requirements are portable rather than worker-env callbacks."""
 
-    def test_gpu_tool_auto_infers_worker_env(self, workspace):
-        """Tool with ResourceSpec(gpu=1) triggers CUDA_VISIBLE_DEVICES."""
+    def test_gpu_tool_runs_without_mutating_worker_environment(self, workspace):
+        """GPU declarations do not synthesize Wetlands worker environment state."""
         load = FileLoader()
         tool = GpuTool()
 
-        engine = DefaultEngine(use_wetlands=True)
-        # Verify the engine detects GPU requirement
         with Workflow(
             storage_path=workspace / "results", engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
-            df = wf.compute(out, engine=engine)
+            out.set_resource_overrides(NodeResourceOverrides(gpu=2))
+            df = wf.compute(out)
 
             assert len(df) == 3
-            # The engine should have detected GPU and auto-set worker_env
-            assert engine._env_has_gpu_tool(gpu_env.name, wf)
+            assert out.effective_resources.gpu == 2
 
     def test_get_environment_override(self, workspace):
         """Explicit get_environment() max_workers override takes precedence."""
@@ -216,8 +213,8 @@ class TestGpuWorkerAssignment:
 
             assert len(df) == 3
 
-    def test_worker_env_override(self, workspace):
-        """get_environment().worker_env overrides GPU auto-inference."""
+    def test_worker_env_override_has_explicit_migration_error(self, workspace):
+        """Wetlands 1 worker_env callbacks fail with a clear migration error."""
         load = FileLoader()
         tool = GpuTool()
 
@@ -231,9 +228,8 @@ class TestGpuWorkerAssignment:
             env.worker_env = custom_env
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
-            df = wf.compute(out)
-
-            assert len(df) == 3
+            with pytest.raises(ValueError, match="Wetlands 2"):
+                wf.compute(out)
 
 
 # =====================================================================

@@ -77,9 +77,9 @@ class _HangingTask:
     """Fake wetlands Task that never reaches a terminal state."""
 
     def __init__(self) -> None:
-        from wetlands.task import TaskStatus
+        from wetlands import ExecutionState
 
-        self.status = TaskStatus.RUNNING
+        self.state = ExecutionState.RUNNING
         self.cancel_called = False
 
     def wait_for(self, timeout: float | None = None) -> None:
@@ -96,9 +96,9 @@ class _FailedTask:
     """Fake Wetlands Task that finished with a worker-side exception."""
 
     def __init__(self, exception: BaseException) -> None:
-        from wetlands.task import TaskStatus
+        from wetlands import ExecutionState
 
-        self.status = TaskStatus.FAILED
+        self.state = ExecutionState.FAILED
         self.exception = exception
         self.cancel_called = False
 

@@ -26,6 +26,7 @@ from .remote_control import (
     refresh_run,
 )
 from .result_bundle import prepare_result
+from .profile_validation import validate_profile_on_cluster
 
 
 def _exact_arguments(
@@ -142,6 +143,18 @@ def handle_operation(
             request_id,
             request_digest,
         )
+    if operation == "validate-profile":
+        value = _exact_arguments(
+            arguments,
+            {
+                "executor_bindings",
+                "launch",
+                "parsl_config",
+                "staging_root",
+                "storage_path",
+            },
+        )
+        return validate_profile_on_cluster(value)
     raise ClusterProtocolFailure(
         "unsupported-operation",
         "Cluster operation is unsupported.",

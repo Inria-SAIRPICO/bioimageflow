@@ -10,6 +10,7 @@ Integrators trees.
    errors
    logging
    environments
+   wetlands_v2_migration
    parsl
    parsl_acceptance
    testing

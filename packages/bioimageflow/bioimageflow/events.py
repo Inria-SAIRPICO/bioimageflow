@@ -1,6 +1,7 @@
 """Engine-to-workflow event value objects."""
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -17,3 +18,4 @@ class ProgressEvent:
     timestamp: float = 0.0
     result_key: str | None = None
     record_id: str | None = None
+    diagnostic: Any | None = None

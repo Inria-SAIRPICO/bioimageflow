@@ -103,7 +103,17 @@ class _NodeExecutionMixin:
             self._emit_progress(workflow, node.name, "cancelled")
             raise
         except Exception as exc:
-            self._emit_progress(workflow, node.name, "failed")
+            from bioimageflow.integration import NodeFailureDiagnostic
+
+            self._emit_progress(
+                workflow,
+                node.name,
+                "failed",
+                diagnostic=NodeFailureDiagnostic.from_exception(
+                    node.name,
+                    exc,
+                ),
+            )
             if "/" in node.name and node.name not in str(exc):
                 exc.args = (f"Node '{node.name}' failed: {exc}", *exc.args[1:])
             raise

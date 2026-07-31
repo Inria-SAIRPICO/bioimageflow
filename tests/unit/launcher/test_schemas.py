@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from bioimageflow import NodeFailureDiagnostic
 from bioimageflow.launcher.schemas import (
     ERROR_SCHEMA,
     PROGRESS_SCHEMA,
@@ -222,6 +223,27 @@ def test_progress_validates_kind_specific_payload_schema() -> None:
                 payload=backend_progress_payload(),
             )
         )
+
+
+def test_progress_accepts_structured_node_diagnostic() -> None:
+    diagnostic = NodeFailureDiagnostic(
+        scoped_node_path="nested/tool",
+        category="execution",
+        exception_type="RuntimeError",
+        message="failed independently",
+        traceback="traceback",
+        attempt_id="task-1",
+    )
+
+    result = validate_progress(
+        _progress(
+            new_run_id(),
+            kind="diagnostic",
+            payload=diagnostic.to_dict(),
+        )
+    )
+
+    assert result["payload"] == diagnostic.to_dict()
 
 
 @pytest.mark.parametrize(

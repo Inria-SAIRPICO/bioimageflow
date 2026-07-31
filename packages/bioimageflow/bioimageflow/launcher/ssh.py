@@ -12,7 +12,7 @@ import subprocess
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import Any
 
 from bioimageflow.parsl import ExecutorBinding, ParslTaskPolicy
 from bioimageflow.storage import canonical_json_bytes
@@ -276,6 +276,18 @@ def _validate_success_result(
     transport: SSHSubmissionTransport,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if operation == "validate-profile":
+        from .profile_validation import RemoteProfileValidationReport
+
+        try:
+            RemoteProfileValidationReport.from_dict(result)
+        except (TypeError, ValueError) as exc:
+            raise SSHTransportError(
+                "remote-protocol",
+                "Cluster profile validation response is invalid.",
+                ambiguous=True,
+            ) from exc
+        return result
     if operation == "allocate-upload":
         if set(result) != {"remote_root", "upload_id"}:
             raise SSHTransportError(
@@ -745,45 +757,13 @@ def submit_cluster_workflow(
             task_policy=task_policy,
             launch=launch,
         ) as bundle:
-            base = {
-                "manifest": bundle.manifest,
-                "staging_root": str(transport.staging_root),
-            }
-            allocated = _retry_mutation(
-                transport,
-                "allocate-upload",
-                base,
-                str(uuid.uuid4()),
+            from .prepared_transport import submit_prepared_cluster_bundle
+
+            return submit_prepared_cluster_bundle(
+                bundle,
+                transport=transport,
+                storage_path=workflow.storage_path.as_posix(),
             )
-            upload_bundle(transport, bundle, allocated["remote_root"])
-            committed = _retry_mutation(
-                transport,
-                "commit-upload",
-                {**base, "upload_id": allocated["upload_id"]},
-                str(uuid.uuid4()),
-            )
-            if (
-                committed["upload_id"] != allocated["upload_id"]
-                or committed["bundle_digest"] != bundle.digest
-            ):
-                raise SSHTransportError(
-                    "remote-protocol",
-                    "Cluster commit response does not match the allocated bundle.",
-                    ambiguous=True,
-                )
-            submitted = _retry_mutation(
-                transport,
-                "submit",
-                {**base, "object_path": committed["object_path"]},
-                str(uuid.uuid4()),
-            )
-            if submitted["storage_path"] != workflow.storage_path.as_posix():
-                raise SSHTransportError(
-                    "remote-protocol",
-                    "Cluster submit response changed Workflow.storage_path.",
-                    ambiguous=True,
-                )
-            return cast(str, submitted["run_id"])
     except SSHTransportError:
         raise
     except (OSError, TypeError, ValueError) as exc:

@@ -59,27 +59,17 @@ that environment:
 The proxy can be addressed by ``ProcessingTool`` instance,
 ``EnvironmentSpec`` instance, or environment name string.
 
-Per-worker environment variables
---------------------------------
+Worker process environment
+--------------------------
 
-``WorkflowEnvironment.worker_env`` is a callable
-``(worker_index: int) -> dict[str, str]`` invoked when each worker
-process is spawned. Use it to assign GPUs, set thread caps, or pass
-worker-specific configuration:
-
-.. code-block:: python
-
-   gpu_tool = MyGPUTool()
-   with Workflow(storage_path="./results") as wf:
-       env = wf.get_environment(gpu_tool)
-       env.max_workers = 4
-       env.worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
+Wetlands 2 does not expose per-worker environment mutation.
+Configure GPU visibility, thread caps, and site-specific variables in the process, container, or scheduler environment that launches the Wetlands workers.
 
 ResourceSpec
 ------------
 
 :class:`~bioimageflow_core.ResourceSpec` declares the resources a tool
-needs. Engines read it to size pools and inject environment variables:
+needs.
 
 .. code-block:: python
 
@@ -99,7 +89,7 @@ Fields:
   meaning no limit beyond ``max_workers``).
 - ``memory`` — string hint for system memory.
 
-The Wetlands backend honours ``gpu``: when a tool's ``ResourceSpec`` has ``gpu >= 1`` and no explicit ``worker_env`` is set on its environment, the backend auto-installs ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``.
+The Wetlands 2 backend enforces effective ``max_concurrent`` while CPU, GPU, memory, and GPU-memory remain planning requirements rather than Wetlands placement guarantees.
 The Parsl backend validates ``cpu``, ``gpu``, ``memory``, and ``gpu_memory`` against the selected executor's attested worker-slot capacity.
 For Parsl row and chunk dispatch, ``max_concurrent`` bounds unfinished submissions for that node.
 
@@ -165,8 +155,8 @@ each pinned to a distinct GPU:
        masks = segment(image=images["path"])
        wf.compute(masks)
 
-Each worker sees ``CUDA_VISIBLE_DEVICES`` set to its zero-based index
-(``0``, ``1``, ``2``, ``3``).
+``ResourceSpec(gpu=1)`` remains a portable requirement, but Wetlands 2 does not provide the former per-worker environment callback.
+GPU visibility must therefore be configured by the environment or process launcher.
 
 Parsl engine
 ------------

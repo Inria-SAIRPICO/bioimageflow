@@ -29,11 +29,10 @@ from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, Proces
 
 
 class TestWorkerTimeoutPlumbing:
-    """Verify the value flows from user code → env_manager.launch()."""
+    """Verify the value flows from user code to Wetlands 2 pool startup."""
 
     def test_env_manager_forwards_worker_timeout_to_launch(self, monkeypatch):
-        """``WetlandsEnvManager.get_or_create`` passes ``worker_timeout`` to
-        ``env.launch(...)``."""
+        """The manager passes ``worker_timeout`` to ``environment.start``."""
         from bioimageflow.env_manager import WetlandsEnvManager
 
         # Patch the shared environment manager so get_or_create doesn't try
@@ -41,12 +40,17 @@ class TestWorkerTimeoutPlumbing:
         launch_calls: list[dict] = []
 
         class _FakeEnv:
-            def launch(self, **kwargs):
+            def start(self, **kwargs):
                 launch_calls.append(kwargs)
+                return object()
+
+        class _Operation:
+            def wait_for(self):
+                return _FakeEnv()
 
         class _FakeManager:
-            def create(self, name, deps):
-                return _FakeEnv()
+            def provision(self, name, spec):
+                return _Operation()
 
         monkeypatch.setattr(
             "bioimageflow.env_manager.get_shared_environment_manager",
@@ -61,22 +65,23 @@ class TestWorkerTimeoutPlumbing:
         assert launch_calls[0].get("worker_timeout") == 17.0
 
     def test_env_manager_omits_worker_timeout_when_none(self, monkeypatch):
-        """When ``worker_timeout=None``, do not pass the kwarg at all.
-
-        This keeps the manager compatible with Wetlands versions that do not
-        accept the keyword.
-        """
+        """Wetlands 2 receives its explicit default ``worker_timeout=None``."""
         from bioimageflow.env_manager import WetlandsEnvManager
 
         launch_calls: list[dict] = []
 
         class _FakeEnv:
-            def launch(self, **kwargs):
+            def start(self, **kwargs):
                 launch_calls.append(kwargs)
+                return object()
+
+        class _Operation:
+            def wait_for(self):
+                return _FakeEnv()
 
         class _FakeManager:
-            def create(self, name, deps):
-                return _FakeEnv()
+            def provision(self, name, spec):
+                return _Operation()
 
         monkeypatch.setattr(
             "bioimageflow.env_manager.get_shared_environment_manager",
@@ -88,4 +93,4 @@ class TestWorkerTimeoutPlumbing:
         mgr.get_or_create(spec, max_workers=1, worker_timeout=None)
 
         assert len(launch_calls) == 1
-        assert "worker_timeout" not in launch_calls[0]
+        assert launch_calls[0]["worker_timeout"] is None

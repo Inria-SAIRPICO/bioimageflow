@@ -516,6 +516,7 @@ class DefaultEngine(
         maximum: int | None = None,
         result_key: str | None = None,
         record_id: str | None = None,
+        diagnostic: Any | None = None,
     ) -> None:
         """Emit a progress event, serialized via ``_progress_lock``."""
         if workflow.on_progress is not None:
@@ -530,6 +531,7 @@ class DefaultEngine(
                 current=current,
                 maximum=maximum,
                 timestamp=time.time(),
+                diagnostic=diagnostic,
             )
             with self._progress_lock:
                 workflow.on_progress(event)

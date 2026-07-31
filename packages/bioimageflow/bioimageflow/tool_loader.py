@@ -10,6 +10,8 @@ import importlib.machinery
 import importlib.util
 import logging
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -368,10 +370,8 @@ def ensure_installed(
 ) -> None:
     """Install a package into the tool store if not already present.
 
-    Uses the shared Wetlands ``EnvironmentManager`` (see
-    :func:`~bioimageflow.env_manager.get_shared_environment_manager`) to
-    run ``pip install --target`` via pixi, so neither ``uv`` nor a
-    system pip is required on ``PATH``.
+    Uses the current orchestrator interpreter's ``pip`` module with an
+    argument-vector subprocess call.
     """
     pkg_dir = store_path / pkg_name / version / pkg_name
     if pkg_dir.exists():
@@ -382,34 +382,33 @@ def ensure_installed(
 
     logger.info("Installing %s==%s into tool store (%s)", pypi_name, version, target)
 
-    from bioimageflow.env_manager import get_shared_environment_manager
-
-    manager = get_shared_environment_manager()
-    executor = manager.command_executor
-    generator = manager.command_generator
-    conda_bin = manager.settings_manager.conda_bin
-
-    commands = generator.get_activate_conda_commands()
-    commands += [
-        f'{conda_bin} exec --spec "pip" -- '
-        f'pip install --target "{target}" "{pypi_name}=={version}"'
-    ]
-
     try:
-        executor.execute_commands_and_get_output(
-            commands, exit_if_command_error=True,
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--target",
+                str(target),
+                f"{pypi_name}=={version}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
-    except Exception as exc:
-        import shutil
+    except (OSError, subprocess.CalledProcessError) as exc:
         shutil.rmtree(target, ignore_errors=True)
+        details = exc.stderr.strip() if isinstance(
+            exc, subprocess.CalledProcessError
+        ) and exc.stderr else str(exc)
         raise RuntimeError(
             f"Failed to install {pypi_name}=={version} into tool store.\n"
-            f"{exc}"
+            f"{details}"
         ) from exc
 
     # Verify the package appeared
     if not pkg_dir.exists():
-        import shutil
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
             f"Installation of {pypi_name}=={version} succeeded but "
@@ -433,9 +432,8 @@ def require_tool_packages(
     statements work for every dependency declared in the script's
     PEP 723 ``# /// script`` block.
 
-    Wetlands configuration (pixi path, etc.) is set once via
-    :func:`~bioimageflow.env_manager.configure_wetlands` — the same
-    configuration is shared with the execution engine.
+    Tool-store installation uses the current orchestrator interpreter and is
+    independent of Wetlands environment configuration.
 
     Parameters
     ----------
@@ -447,7 +445,7 @@ def require_tool_packages(
         ``~/.bioimageflow/tool_packages/`` (or ``$BIOIMAGEFLOW_TOOL_STORE``).
     auto_install
         If ``True`` (default), missing packages are installed
-        automatically via Wetlands' pixi.  Set to ``False``
+        automatically via the current interpreter's ``pip`` module. Set to ``False``
         to raise ``FileNotFoundError`` instead.
     """
     if store_path is None:

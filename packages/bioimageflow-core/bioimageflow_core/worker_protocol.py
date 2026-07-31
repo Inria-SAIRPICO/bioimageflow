@@ -138,6 +138,22 @@ def _require_plain_dict(value: Any, label: str) -> Dict[str, Any]:
     return dict(value)
 
 
+def _encode_portable_value(value: Any) -> Any:
+    """Convert path values recursively without changing ordinary transport values."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            key: _encode_portable_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_encode_portable_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_encode_portable_value(item) for item in value)
+    return value
+
+
 def _require_path(value: Any, label: str) -> str:
     text = _require_text(value, label)
     if not Path(text).is_absolute() or os.path.normpath(text) != text:
@@ -195,7 +211,10 @@ def encode_processing_task(task: ProcessingTaskV1) -> Dict[str, Any]:
         raise TypeError("task must be a ProcessingTaskV1 value.")
     payload = asdict(task)
     payload["tool"] = encode_worker_tool_origin(task.tool)
-    payload["rows"] = [asdict(row) for row in task.rows]
+    payload["rows"] = [
+        _encode_portable_value(asdict(row))
+        for row in task.rows
+    ]
     return payload
 
 

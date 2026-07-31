@@ -22,7 +22,7 @@ declaring the dependencies a tool needs:
        name="torch",
        dependencies={
            "python": "3.12",
-           "pip": ["torch>=2.0", "torchvision"],
+           "pip": ["torch>=2.0", "torchvision>=0.15"],
        },
    )
 
@@ -30,8 +30,8 @@ The ``name`` is a stable identifier — multiple tools sharing the same
 ``name`` must declare **identical** dependencies, or
 :class:`~bioimageflow_core.EnvironmentMismatchError` is raised when a
 workflow containing those reachable tools is planned or computed.
-The ``dependencies`` dict mirrors the Wetlands
-schema; the most common keys are ``python`` and ``pip``.
+BioImageFlow keeps this declaration worker-safe and translates ``python``, ``pip``, ``conda``, ``channels``, and local packages into an immutable Wetlands 2 Pixi recipe in the orchestrator.
+Channel-qualified Conda values such as ``bioimageit::atlas==1.0`` are normalized into a channel plus dependency.
 
 GENERAL_ENV
 -----------
@@ -78,15 +78,14 @@ tool needs per row:
      - Optional string hint, e.g. ``"8GB"``.
    * - ``max_concurrent``
      - ``0``
-     - Parsl bound on unfinished row or chunk tasks for one processing node.
-       Direct and Wetlands do not enforce it; use ``Workflow(storage_path="./results", max_workers=...)`` or ``Workflow.get_environment(...).max_workers`` for Wetlands worker pool sizing.
+     - Per-node bound on unfinished worker tasks.
+       Parsl and Wetlands 2 enforce it; zero means unlimited.
    * - ``memory``
      - ``None``
      - Optional string hint for system memory.
 
-Wetlands reads the spec for one effect:
-
-- When ``gpu >= 1`` and the environment has no explicit ``worker_env``, the engine auto-installs ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}`` so each Wetlands worker is pinned to a distinct GPU.
+Wetlands 2 enforces ``max_concurrent`` in BioImageFlow's submission window.
+Its public API does not expose CPU, GPU, memory, GPU-memory placement, or per-worker environment mutation, so those values remain requirements visible to planning but are not placement guarantees for Wetlands.
 
 Parsl converts the resource declaration into a canonical requirement and validates it against the selected :class:`~bioimageflow.ExecutorBinding`.
 The binding's :class:`~bioimageflow.WorkerSlotCapacity` must satisfy the requested ``cpu``, ``gpu``, ``memory``, and ``gpu_memory``.
@@ -106,15 +105,15 @@ keyed by ``EnvironmentSpec.name``:
    wenv = wf.get_environment(GENERAL_ENV)    # by EnvironmentSpec
    wenv = wf.get_environment("torch")        # by name string
 
-The proxy carries three runtime fields:
+The proxy carries two supported runtime fields:
 
 - ``max_workers`` (int, default ``0`` meaning "use workflow default")
   — pool size for this environment.
-- ``worker_env`` (callable, default ``None``) —
-  ``(worker_index: int) -> dict[str, str]`` injecting per-worker env
-  vars at spawn time.
 - ``worker_timeout`` (float, default ``None``) — last-resort safety
   timeout per row dispatch.
+
+The former ``worker_env`` field remains detectable only to produce an actionable Wetlands 2 migration error.
+Wetlands 2 has no public equivalent and BioImageFlow does not use private Wetlands APIs to emulate it.
 
 Multiple ``get_environment`` calls with the same target name return
 the **same** proxy — edits propagate.
@@ -131,12 +130,12 @@ top of a script, before calling ``require_tool_packages()``,
 
    from bioimageflow import Workflow, configure_wetlands
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
-``wetlands_instance_path`` is where Wetlands stores its process state,
-logs, debug port registry, and bundled Pixi or Micromamba installation.
-When ``conda_path`` is omitted, Wetlands installs Pixi under
-``<wetlands_instance_path>/pixi``.
+``root`` is where Wetlands 2 stores managed Pixi environments, state, and worker metadata.
+Use ``pixi_executable=...`` to select an existing Pixi executable, ``network=...`` for proxy configuration, and ``termination_grace=...`` for worker shutdown.
+``wetlands_instance_path`` is accepted only as a migration alias for ``root``.
+Wetlands 1 ``main_conda_environment_path``, ``debug``, manager selection, and per-worker environment configuration are rejected.
 
 If no explicit path is configured, BioImageFlow resolves the default
 Wetlands instance path in this order:
@@ -152,8 +151,8 @@ You can also pass Wetlands settings to a single workflow:
    wf = Workflow(
        storage_path="./results",
        wetlands_config={
-           "wetlands_instance_path": "./wetlands",
-           "debug": True,
+           "root": "./wetlands",
+           "termination_grace": 7.0,
        },
    )
 

@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from bioimageflow_core.tool import ProcessingTool, BaseTool
 from bioimageflow.validation import (
@@ -15,6 +15,10 @@ from bioimageflow.validation import (
     extract_image_spec,
 )
 from bioimageflow_core.types import check_compatibility
+
+if TYPE_CHECKING:
+    from bioimageflow.resources import NodeResourceOverrides
+    from bioimageflow_core import ResourceSpec
 
 
 class ColumnNotFoundError(Exception):
@@ -159,11 +163,25 @@ class Node:
         args: list[Any] | None = None,
         name: str | None = None,
         output_templates: dict[str, str] | None = None,
+        resource_overrides: "NodeResourceOverrides | None" = None,
     ) -> None:
+        from bioimageflow.resources import NodeResourceOverrides
+
         self.tool = tool
         self._kwargs = kwargs or {}
         self._args: list[Any] = args or []
         self.output_templates: dict[str, str] = dict(output_templates or {})
+        if resource_overrides is not None:
+            if not isinstance(tool, ProcessingTool):
+                raise TypeError(
+                    "resource_overrides apply only to ProcessingTool nodes."
+                )
+            if not isinstance(resource_overrides, NodeResourceOverrides):
+                raise TypeError(
+                    "resource_overrides must be NodeResourceOverrides or None."
+                )
+            resource_overrides.effective(getattr(tool, "resources", None))
+        self._resource_overrides: NodeResourceOverrides | None = resource_overrides
         self.enabled: bool = True
         self._upstream_nodes: set[Node] = set()
         self._column_bindings: dict[str, ColumnRef] = {}
@@ -368,6 +386,34 @@ class Node:
                             node=self._name,
                             field=field_name,
                         ))
+
+    @property
+    def resource_overrides(self) -> "NodeResourceOverrides | None":
+        """Return this node instance's portable worker resource overrides."""
+        return self._resource_overrides
+
+    def set_resource_overrides(
+        self,
+        value: "NodeResourceOverrides | None",
+    ) -> "Node":
+        """Set validated worker overrides and return this node."""
+        from bioimageflow.resources import NodeResourceOverrides
+
+        if not isinstance(self.tool, ProcessingTool):
+            raise TypeError("Worker resources apply only to ProcessingTool nodes.")
+        if value is not None and not isinstance(value, NodeResourceOverrides):
+            raise TypeError("value must be NodeResourceOverrides or None.")
+        if value is not None:
+            value.effective(getattr(self.tool, "resources", None))
+        self._resource_overrides = value
+        return self
+
+    @property
+    def effective_resources(self) -> "ResourceSpec":
+        """Return the declaration/override merge for this node."""
+        from bioimageflow.resources import effective_node_resources
+
+        return effective_node_resources(self)
 
     def _check_type_compat(self, input_field: str, col_ref: ColumnRef) -> None:
         """Check type compatibility between upstream output and this input."""

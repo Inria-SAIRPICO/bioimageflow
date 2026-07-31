@@ -211,7 +211,7 @@ class TestForget:
 
 class TestInstallPackageSeparation:
     def test_install_and_register_are_separate_methods(self) -> None:
-        # Without invoking install_package (which would hit pixi), the
+        # Without invoking install_package (which would access the package index), the
         # registry's API still works for already-on-disk packages —
         # this is the contract that gives GUIs a fast register path.
         reg = ToolRegistry()

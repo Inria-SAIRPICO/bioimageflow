@@ -113,6 +113,13 @@ def _prepare_execution(
     launch = launch_config_from_dict(submission["launch"])
 
     def on_progress(event: ProgressEvent) -> None:
+        if event.diagnostic is not None:
+            control.append_progress(
+                kind="diagnostic",
+                payload=event.diagnostic.to_dict(),
+                expected_claim_epoch=claim_epoch,
+                expected_claim_nonce=claim_nonce,
+            )
         control.append_progress(
             kind="public",
             payload=public_progress_payload(event),

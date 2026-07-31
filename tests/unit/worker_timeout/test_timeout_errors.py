@@ -107,9 +107,9 @@ class TestWorkerTimeoutErrorRaised:
 
         class _PassThroughTask:
             def __init__(self):
-                from wetlands.task import TaskStatus
+                from wetlands import ExecutionState
 
-                self.status = TaskStatus.COMPLETED
+                self.state = ExecutionState.COMPLETED
                 self.result = [{"value": 1.0}]
                 self.timeouts_seen: list[float | None] = []
 

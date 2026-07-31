@@ -26,7 +26,7 @@ Use explicit project-local paths while learning:
 
    from bioimageflow import Workflow, configure_wetlands
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
    with Workflow(storage_path="./results") as wf:
        ...
@@ -130,7 +130,7 @@ Wire the tools together in a :class:`~bioimageflow.Workflow`:
    segment = Segment()
    measure = Measure()
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
    with Workflow(storage_path="./results") as wf:
        raw = loader(folder="/data/experiment_01")

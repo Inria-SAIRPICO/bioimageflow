@@ -118,7 +118,7 @@ class WorkerStreamTool(ProcessingTool):
 # ── Feature 2: GPU-aware worker assignment ────────────────────────
 
 class GpuTool(ProcessingTool):
-    """Declares GPU resources — triggers CUDA_VISIBLE_DEVICES auto-assignment."""
+    """Declares a portable GPU worker requirement."""
     display_name = "GPU Tool"
     environment = gpu_env
     resources = ResourceSpec(gpu=1)

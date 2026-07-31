@@ -118,6 +118,7 @@ def test_configured_logging_routes_wetlands_worker_streams(
         assert len(df) == 1
         captured = capsys.readouterr()
         assert "INFO:worker routine stdout" in captured.out
-        assert "ERROR:worker actual stderr" in captured.err
+        assert "INFO:worker actual stderr" in captured.out
+        assert captured.err == ""
     finally:
         _restore_loggers(snapshot)

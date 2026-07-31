@@ -93,6 +93,40 @@ Wetlands configuration
    :undoc-members:
    :show-inheritance:
 
+Portable resources and distributed planning
+-------------------------------------------
+
+.. automodule:: bioimageflow.resources
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: bioimageflow.planning
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Platform integration contracts
+------------------------------
+
+.. automodule:: bioimageflow.integration
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Submitted execution
+-------------------
+
+.. automodule:: bioimageflow.launcher.prepared
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: bioimageflow.launcher.profile_validation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Validation
 ----------
 

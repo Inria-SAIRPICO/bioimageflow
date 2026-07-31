@@ -136,7 +136,7 @@ requires-dist = [
     { name = "psij-python", marker = "extra == 'psij'", specifier = ">=0.9.11,<0.10" },
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "wetlands", specifier = ">=1.1.4" },
+    { name = "wetlands", specifier = ">=2.0.0,<3" },
 ]
 provides-extras = ["parsl", "psij"]
 
@@ -409,7 +409,7 @@ dev = [
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile", specifier = ">=2023.7.10" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=1.1.4" },
+    { name = "wetlands", specifier = ">=2.0.0,<3" },
 ]
 
 [[package]]
@@ -904,15 +904,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899, upload-time = "2025-03-05T20:05:00.369Z" },
-]
-
-[[package]]
-name = "json5"
-version = "0.13.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/77/e8/a3f261a66e4663f22700bc8a17c08cb83e91fbf086726e7a228398968981/json5-0.13.0.tar.gz", hash = "sha256:b1edf8d487721c0bf64d83c28e91280781f6e21f4a797d3261c7c828d4c165bf", size = 52441, upload-time = "2026-01-01T19:42:14.99Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d7/9e/038522f50ceb7e74f1f991bf1b699f24b0c2bbe7c390dd36ad69f4582258/json5-0.13.0-py3-none-any.whl", hash = "sha256:9a08e1dd65f6a4d4c6fa82d216cf2477349ec2346a38fd70cc11d2557499fbcc", size = 36163, upload-time = "2026-01-01T19:42:13.962Z" },
 ]
 
 [[package]]
@@ -2398,15 +2389,6 @@ wheels = [
 ]
 
 [[package]]
-name = "send2trash"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c5/f0/184b4b5f8d00f2a92cf96eec8967a3d550b52cf94362dad1100df9e48d57/send2trash-2.1.0.tar.gz", hash = "sha256:1c72b39f09457db3c05ce1d19158c2cbef4c32b8bedd02c155e49282b7ea7459", size = 17255, upload-time = "2026-01-14T06:27:36.056Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/78/504fdd027da3b84ff1aecd9f6957e65f35134534ccc6da8628eb71e76d3f/send2trash-2.1.0-py3-none-any.whl", hash = "sha256:0da2f112e6d6bb22de6aa6daa7e144831a4febf2a87261451c4ad849fe9a873c", size = 17610, upload-time = "2026-01-14T06:27:35.218Z" },
-]
-
-[[package]]
 name = "setproctitle"
 version = "1.3.7"
 source = { registry = "https://pypi.org/simple" }
@@ -3193,18 +3175,15 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "1.1.4"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "json5" },
     { name = "packaging" },
     { name = "psutil" },
-    { name = "pyyaml" },
-    { name = "send2trash" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/46/e5308c516fb5f3f39623ba49dd87eb5080aeadde373eebd5f57f44520718/wetlands-1.1.4.tar.gz", hash = "sha256:1e6ad711c5feeb5f6d4f8bb864db97e5df8b9561e0dfd50045bc8537c3ce4b4e", size = 586481, upload-time = "2026-07-24T08:04:47.739Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/34/f5fe4a01a22b4aaafbaa25cd2e73f5ff31642e0d85bd0201c68617ada13a/wetlands-2.0.0.tar.gz", hash = "sha256:979ff3cef3bd4477a5ac9e09a19d6cafea2496fe5e1275d8ed95bd420511ec34", size = 275642, upload-time = "2026-07-31T08:22:37.958Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/34/956cde55f4926887022c2a9df4b5c11876c4a7390fce1e4695264294049b/wetlands-1.1.4-py3-none-any.whl", hash = "sha256:f224763ecefef6659d71bd95ff30d30d31d1f5a1246cb77136d88cbf9b1fae4c", size = 83664, upload-time = "2026-07-24T08:04:46.139Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/8f/56a53574403159ef5896c0a9439a3a4f1df86a86038d03f81170fc416634/wetlands-2.0.0-py3-none-any.whl", hash = "sha256:ad568dd606082be15e5ac6887707b4333a820059eb1a92b5117fb77d0e3e7463", size = 113204, upload-time = "2026-07-31T08:22:36.538Z" },
 ]

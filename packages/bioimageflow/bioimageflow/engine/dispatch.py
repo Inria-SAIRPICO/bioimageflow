@@ -48,8 +48,8 @@ class _DispatchMixin:
     ) -> list[list[Any]]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
-        compiled_node_ordinal = next(
-            ordinal
+        compiled_node, compiled_node_ordinal = next(
+            (node, ordinal)
             for node, ordinal in self._compiled_ordinals.items()
             if node.name == node_name
         )
@@ -78,7 +78,7 @@ class _DispatchMixin:
             compiled_node_ordinal=compiled_node_ordinal,
             row_positions=tuple(range(len(arguments_dicts))),
             row_indexes=row_indexes,
-            resources=getattr(tool, "resources", None) or ResourceSpec(),
+            resources=compiled_node.effective_resources,
         )
         return self._backend.dispatch(self, request)
 
@@ -131,15 +131,7 @@ class _DispatchMixin:
         tool: ProcessingTool,
         workflow: Any,
     ) -> tuple[int, Any, float | None]:
-        """Determine max_workers, worker_env, and worker_timeout for a tool's environment.
-
-        Resolution order:
-        1. Explicit ``get_environment()`` override takes precedence.
-        2. GPU auto-inference: if any tool in the environment declares
-           ``ResourceSpec(gpu >= 1)`` and no explicit ``worker_env`` was set,
-           auto-generate ``worker_env = lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}``.
-        3. Fall back to ``Workflow.max_workers``, no ``worker_env``, no ``worker_timeout``.
-        """
+        """Determine Wetlands 2 pool size and worker health timeout."""
         env_name = tool.environment.name
         env_config = workflow._env_configs.get(env_name)
 
@@ -149,36 +141,15 @@ class _DispatchMixin:
         else:
             max_workers = workflow.max_workers
 
-        # worker_env: explicit override > GPU auto-inference > None
         if env_config and env_config.worker_env is not None:
-            worker_env = env_config.worker_env
-        elif self._env_has_gpu_tool(env_name, workflow):
-
-            def wef(i):
-                return {"CUDA_VISIBLE_DEVICES": str(i)}
-
-            worker_env = wef
-        else:
-            worker_env = None
+            raise ValueError(
+                "WorkflowEnvironment.worker_env is unavailable in Wetlands 2."
+            )
+        worker_env = None
 
         worker_timeout = env_config.worker_timeout if env_config else None
 
         return max_workers, worker_env, worker_timeout
-
-    def _env_has_gpu_tool(self, env_name: str, workflow: Any) -> bool:
-        """Check if any tool in this workflow sharing this env declares gpu >= 1."""
-        for node in workflow._nodes.values():
-            tool = node.tool
-            if (
-                isinstance(tool, ProcessingTool)
-                and hasattr(tool, "environment")
-                and tool.environment.name == env_name
-                and hasattr(tool, "resources")
-                and tool.resources is not None
-                and tool.resources.gpu >= 1
-            ):
-                return True
-        return False
 
     def _dispatch_via_wetlands(
         self,
@@ -191,10 +162,11 @@ class _DispatchMixin:
         batch_context: ExecutionContext,
         invocation_id: str,
         cache_attempt_id: str | None,
+        resources: ResourceSpec | None = None,
     ) -> list[list[Any]]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from bioimageflow.worker_origins import resolve_worker_tool_origin
-        from wetlands.task import TaskStatus, TaskEventType
+        from wetlands import ExecutionEventKind, ExecutionState
 
         assert self._env_manager is not None
         if (
@@ -253,14 +225,21 @@ class _DispatchMixin:
                     f"timeout ({engine_timeout:.0f}s; "
                     f"worker_timeout={worker_timeout}s)"
                 )
-            if task.status == TaskStatus.FAILED:
+            except Exception:
                 _raise_worker_task_error(
                     task,
                     node_name=node_name,
                     tool=tool,
                     row_index=None,
                 )
-            if task.status == TaskStatus.CANCELED:
+            if task.state == ExecutionState.FAILED:
+                _raise_worker_task_error(
+                    task,
+                    node_name=node_name,
+                    tool=tool,
+                    row_index=None,
+                )
+            if task.state == ExecutionState.CANCELED:
                 raise WorkflowCancelledError(
                     "Workflow cancelled during batch execution"
                 )
@@ -295,67 +274,83 @@ class _DispatchMixin:
                 zip(arguments_dicts, row_contexts)
             )
         ]
-        tasks = self._env_manager.map_processing_tasks(
-            env_spec,
-            [encode_processing_task(invocation) for invocation in invocations],
-            max_workers=max_workers,
-            worker_env=worker_env,
-            worker_timeout=worker_timeout,
-        )
+        payloads = [encode_processing_task(invocation) for invocation in invocations]
+        selected_resources = resources or getattr(tool, "resources", None) or ResourceSpec()
+        window = selected_resources.max_concurrent or len(payloads) or 1
+        tasks: list[Any] = []
+        try:
+            for start in range(0, len(payloads), window):
+                active = self._env_manager.map_processing_tasks(
+                    env_spec,
+                    payloads[start : start + window],
+                    max_workers=max_workers,
+                    worker_env=worker_env,
+                    worker_timeout=worker_timeout,
+                )
+                tasks.extend(active)
+                for offset, task in enumerate(active):
+                    row_position = start + offset
 
-        # Attach progress listeners for sub-row progress reporting
-        for i, task in enumerate(tasks):
+                    def _make_listener(row_idx):
+                        def on_event(event):
+                            if event.kind == ExecutionEventKind.UPDATE:
+                                self._emit_progress(
+                                    workflow,
+                                    node_name,
+                                    "row_progress",
+                                    row=row_idx,
+                                    total_rows=len(payloads),
+                                    message=event.message,
+                                    current=event.current,
+                                    maximum=event.maximum,
+                                )
 
-            def _make_listener(row_idx):
-                def on_event(event):
-                    if event.type == TaskEventType.UPDATE:
+                        return on_event
+
+                    task.listen(_make_listener(row_position))
+                for offset, task in enumerate(active):
+                    row_position = start + offset
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError(
+                            "Workflow cancelled by user"
+                        )
+                    try:
+                        task.wait_for(timeout=engine_timeout)
+                    except TimeoutError:
                         self._emit_progress(
                             workflow,
                             node_name,
-                            "row_progress",
-                            row=row_idx,
-                            total_rows=len(tasks),
-                            message=event.task.message,
-                            current=event.task.current,
-                            maximum=event.task.maximum,
+                            "failed",
+                            row=row_position,
+                            total_rows=len(payloads),
                         )
-
-                return on_event
-
-            task.listen(_make_listener(i))
-
-        # Wait and collect results — fail-fast on first error, cancel, or timeout
-        try:
-            for i, task in enumerate(tasks):
-                if workflow.cancel_requested:
-                    raise WorkflowCancelledError("Workflow cancelled by user")
-                try:
-                    task.wait_for(timeout=engine_timeout)
-                except TimeoutError:
-                    self._emit_progress(
-                        workflow, node_name, "failed", row=i, total_rows=len(tasks)
-                    )
-                    raise WorkerTimeoutError(
-                        f"Task for node '{node_name}' row {i} exceeded "
-                        f"engine-side timeout ({engine_timeout:.0f}s; "
-                        f"worker_timeout={worker_timeout}s)"
-                    )
-                if task.status == TaskStatus.FAILED:
-                    _raise_worker_task_error(
-                        task,
-                        node_name=node_name,
-                        tool=tool,
-                        row_index=row_contexts[i].row_index,
-                    )
+                        raise WorkerTimeoutError(
+                            f"Task for node '{node_name}' row {row_position} "
+                            f"exceeded engine-side timeout ({engine_timeout:.0f}s; "
+                            f"worker_timeout={worker_timeout}s)"
+                        )
+                    except Exception:
+                        _raise_worker_task_error(
+                            task,
+                            node_name=node_name,
+                            tool=tool,
+                            row_index=row_contexts[row_position].row_index,
+                        )
+                    if task.state == ExecutionState.FAILED:
+                        _raise_worker_task_error(
+                            task,
+                            node_name=node_name,
+                            tool=tool,
+                            row_index=row_contexts[row_position].row_index,
+                        )
         except (WorkflowCancelledError, Exception):
-            # Cancel all remaining in-flight tasks
-            for t in tasks:
-                if not t.status.is_finished():
-                    t.cancel()
-            for t in tasks:
-                if not t.status.is_finished():
+            for task in tasks:
+                if not task.state.terminal:
+                    task.cancel()
+            for task in tasks:
+                if not task.state.terminal:
                     try:
-                        t.wait_for(timeout=10)
+                        task.wait_for(timeout=10)
                     except Exception:
                         pass
             raise
@@ -364,7 +359,7 @@ class _DispatchMixin:
         raw_results: list[list[Any]] = []
         assert tool.Outputs is not None
         for i, task in enumerate(tasks):
-            if task.status == TaskStatus.CANCELED:
+            if task.state == ExecutionState.CANCELED:
                 continue
             result = decode_processing_result(task.result)
             validate_processing_result(invocations[i], result)

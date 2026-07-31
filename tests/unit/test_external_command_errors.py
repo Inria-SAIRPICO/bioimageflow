@@ -11,6 +11,30 @@ from bioimageflow_core import (
     run_external_command,
     run_external_command_with_staged_output,
 )
+from bioimageflow_core import external
+
+
+def test_subprocess_resolves_cli_next_to_environment_python(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    executable = bin_dir / "environment-tool"
+    executable.write_text("")
+    calls: list[list[str]] = []
+
+    def fake_subprocess_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(external.sys, "executable", str(bin_dir / "python"))
+    monkeypatch.setattr(external.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(external.subprocess, "run", fake_subprocess_run)
+
+    external._run_subprocess(["environment-tool", "--version"], {})
+
+    assert calls == [[str(executable), "--version"]]
 
 
 def test_run_external_command_reports_signal_failures(monkeypatch) -> None:

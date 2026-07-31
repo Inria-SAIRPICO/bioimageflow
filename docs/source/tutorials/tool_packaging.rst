@@ -219,7 +219,7 @@ and registers canonical names so standard imports work:
 
    from bioimageflow import Workflow, configure_wetlands, require_tool_packages
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
    require_tool_packages(__file__)
 
    # Normal imports work after require_tool_packages

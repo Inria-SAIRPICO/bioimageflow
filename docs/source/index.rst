@@ -48,7 +48,7 @@ review checklists lives in :doc:`reference/tool_package_strategy` and
    threshold = Threshold()
    files = Files()
 
-   configure_wetlands(wetlands_instance_path="./wetlands")
+   configure_wetlands(root="./wetlands")
 
    with Workflow(storage_path="./results") as wf:
        raw = files(path="/data/images", pattern="*.tif")

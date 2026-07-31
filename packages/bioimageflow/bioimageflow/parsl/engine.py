@@ -1,5 +1,4 @@
 """Attached Parsl configuration and resource lifecycle."""
-
 from __future__ import annotations
 
 import threading
@@ -13,12 +12,8 @@ from typing import Any
 from bioimageflow.engine import ResourceLifetime
 from .optional_dependency import require_parsl
 from .types import ExecutorBinding, ParslTaskPolicy
-
-
 _EXECUTION_POLICIES = frozenset({"workflow", "parallel", "sequential"})
 _STORAGE_MODES = frozenset({"shared_fs", "staged"})
-
-
 def _resource_lifetime_value(
     value: ResourceLifetime | str,
 ) -> ResourceLifetime:
@@ -258,6 +253,24 @@ class ParslEngine:
         self._prepared_execution: Any | None = None
         self._preflight_complete = False
 
+    @classmethod
+    def from_config_ref(
+        cls,
+        reference: Any,
+        *,
+        executor_bindings: Mapping[str, ExecutorBinding],
+        trusted_factories: Any = None,
+        **engine_options: Any,
+    ) -> "ParslEngine":
+        """Build through the trusted public config boundary."""
+        from .configuration import engine_from_config_ref
+        return engine_from_config_ref(
+            cls,
+            reference,
+            executor_bindings=executor_bindings,
+            trusted_factories=trusted_factories,
+            engine_options=engine_options,
+        )
     @property
     def parsl_config(self) -> Any | None:
         return self._parsl_config

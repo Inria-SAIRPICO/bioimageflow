@@ -29,6 +29,7 @@ OPERATIONS = frozenset(
         "read-progress",
         "refresh",
         "submit",
+        "validate-profile",
     }
 )
 

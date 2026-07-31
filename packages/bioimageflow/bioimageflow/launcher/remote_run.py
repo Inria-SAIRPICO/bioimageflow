@@ -203,6 +203,16 @@ class RemoteWorkflowRun:
                 raise RuntimeError("Remote progress pagination did not advance.")
             cursor = next_cursor
 
+    def diagnostics(self) -> tuple[Any, ...]:
+        """Return structured node failures through the public remote protocol."""
+        from bioimageflow.integration import NodeFailureDiagnostic
+
+        return tuple(
+            NodeFailureDiagnostic.from_dict(event["payload"])
+            for event in self.progress()
+            if event["kind"] == "diagnostic"
+        )
+
     def _read_log(self, stream: str) -> bytes | None:
         from .ssh import execute_cluster_command
 

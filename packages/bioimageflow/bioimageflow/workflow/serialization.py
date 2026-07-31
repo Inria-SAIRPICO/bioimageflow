@@ -130,6 +130,8 @@ class _SerializationMixin:
                     node_info["enabled"] = False
                 if node.output_templates:
                     node_info["output_templates"] = dict(node.output_templates)
+                if node.resource_overrides is not None:
+                    node_info["resource_overrides"] = node.resource_overrides.to_dict()
                 nodes_data.append(node_info)
 
                 for field, col_ref in node._column_bindings.items():

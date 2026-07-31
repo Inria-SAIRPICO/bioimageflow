@@ -38,7 +38,7 @@ LAUNCHER_STATES = frozenset(
     }
 )
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "lost"})
-PROGRESS_KINDS = frozenset({"public", "backend"})
+PROGRESS_KINDS = frozenset({"public", "backend", "diagnostic"})
 LAUNCHER_BACKENDS = frozenset({"local", "manual", "psij"})
 PUBLIC_PROGRESS_SCHEMA = "bioimageflow.progress_event.v1"
 BACKEND_PROGRESS_SCHEMA = "bioimageflow.launcher.backend_event.v1"
@@ -518,6 +518,15 @@ def validate_progress(payload: object) -> dict[str, Any]:
         timestamp = event["timestamp"]
         if type(timestamp) not in {int, float} or not math.isfinite(float(timestamp)):
             raise LauncherSchemaError("payload.timestamp must be a finite number.")
+    elif result["kind"] == "diagnostic":
+        from bioimageflow.integration import NodeFailureDiagnostic
+
+        try:
+            NodeFailureDiagnostic.from_dict(result["payload"])
+        except (TypeError, ValueError) as exc:
+            raise LauncherSchemaError(
+                "Diagnostic progress payload is invalid."
+            ) from exc
     else:
         raw_event = result["payload"]
         _require_mapping(raw_event, field="payload")

@@ -27,10 +27,8 @@ emit debug records. Repeated calls are idempotent for BioImageFlow-owned
 console handlers; ``force=True`` replaces only those handlers and
 leaves unrelated user handlers in place.
 
-``configure_logging()`` also delegates Wetlands console setup to
-``wetlands.logger.enable_console_logging``. Wetlands 1.1.0 routes
-worker stdout to ``INFO`` / stdout and worker stderr to ``ERROR`` /
-stderr.
+``configure_logging()`` also delegates Wetlands console setup to ``wetlands.logger.enable_console_logging``.
+Wetlands 2 forwards worker stdout and stderr through its logging channel.
 
 Adjusting verbosity
 -------------------
