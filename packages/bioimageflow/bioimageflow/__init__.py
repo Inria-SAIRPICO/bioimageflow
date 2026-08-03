@@ -119,6 +119,8 @@ from bioimageflow.launcher import (
     RemoteWorkflowRun as RemoteWorkflowRun,
     RemoteProfileDiagnostic as RemoteProfileDiagnostic,
     RemoteProfileValidationReport as RemoteProfileValidationReport,
+    RemoteNodePathInput as RemoteNodePathInput,
+    RemoteNodePathPlan as RemoteNodePathPlan,
     WorkflowRun as WorkflowRun,
     WorkflowRunFailedError as WorkflowRunFailedError,
     WorkflowRunLostError as WorkflowRunLostError,
@@ -126,6 +128,7 @@ from bioimageflow.launcher import (
     WorkflowRunResultUnavailableError as WorkflowRunResultUnavailableError,
     submit_workflow as submit_workflow,
     prepare_remote_submission as prepare_remote_submission,
+    inspect_remote_node_paths as inspect_remote_node_paths,
     validate_remote_execution_profile as validate_remote_execution_profile,
 )
 
@@ -173,6 +176,8 @@ __all__ = [
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
     "ProgressEvent",
+    "RemoteNodePathInput",
+    "RemoteNodePathPlan",
     "RemoteProfileDiagnostic",
     "RemoteProfileValidationReport",
     "RemoteWorkflowRun",
@@ -212,6 +217,7 @@ __all__ = [
     "get_tool_package_info",
     "get_tool_store_path",
     "get_wetlands_path",
+    "inspect_remote_node_paths",
     "load_versioned_package",
     "plan_distributed_execution",
     "prepare_remote_submission",

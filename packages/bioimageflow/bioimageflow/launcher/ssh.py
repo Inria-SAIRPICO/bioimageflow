@@ -744,8 +744,9 @@ def submit_cluster_workflow(
     task_policy: ParslTaskPolicy | None = None,
     launch: PSIJLaunchConfig,
     pre_launch: PreLaunchScript | None = None,
+    node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
-    """Private WP2 seam returning one remotely allocated launcher run ID."""
+    """Package and transport one workflow through the cluster agent."""
     try:
         with prepare_cluster_bundle(
             workflow,
@@ -759,6 +760,7 @@ def submit_cluster_workflow(
             task_policy=task_policy,
             launch=launch,
             pre_launch=pre_launch,
+            node_input_overrides=node_input_overrides,
         ) as bundle:
             from .prepared_transport import submit_prepared_cluster_bundle
 

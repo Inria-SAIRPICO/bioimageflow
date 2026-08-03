@@ -6,7 +6,7 @@ One scheduler job starts the BioImageFlow orchestrator; Parsl then starts the wo
 
 This guide assumes that you already have:
 
-- a saved workflow with a public input named ``images``;
+- a Python workflow definition with a public input named ``images``;
 - an OpenSSH host alias for the cluster;
 - a writable shared storage directory on the cluster;
 - a site profile module containing a trusted Parsl configuration, executor bindings, SSH transport, and PSI/J launch settings.
@@ -31,16 +31,19 @@ On the cluster, install BioImageFlow, Parsl, PSI/J, and the PSI/J executor plugi
 
    pip install "bioimageflow[parsl,psij]"
 
-Load the workflow and site profile
-----------------------------------
+Build the workflow and load the site profile
+--------------------------------------------
 
-The workflow's storage path is the path seen by the cluster orchestrator and workers, not a laptop directory:
+Define the workflow normally in Python.
+Its storage path is the path seen by the cluster orchestrator and workers, not a laptop directory:
 
 .. code-block:: python
 
    from pathlib import Path
 
    from bioimageflow import Workflow
+   from bioimageflow_common_tools import Files
+   from my_analysis_tools import MeasureImage
    from my_cluster_profile import (
        executor_bindings,
        launch,
@@ -49,13 +52,37 @@ The workflow's storage path is the path seen by the cluster orchestrator and wor
        transport,
    )
 
+   def build_workflow(*, storage_path: str | Path) -> Workflow:
+       workflow = Workflow(name="measure-images", storage_path=storage_path)
+       with workflow:
+           images = workflow.input("images", Path, id="input-images")
+           files = Files()(path=images, name="files")
+           measurements = MeasureImage()(image=files["path"], name="measure")
+           workflow.output(
+               "measurements",
+               measurements["measurements"],
+               id="output-measurements",
+           )
+       return workflow
+
+   workflow = build_workflow(
+       storage_path=Path("/cluster/project/my-workflow/results")
+   )
+
+The factory runs on the laptop to construct the graph.
+BioImageFlow sends the immutable materialized graph and supported custom-tool sources to the cluster; it does not rerun arbitrary workflow-factory code there.
+The actual workflow nodes execute on the cluster.
+
+A workflow saved by a GUI can be loaded instead:
+
+.. code-block:: python
+
    workflow = Workflow.load(
        "workflow.json",
        storage_path=Path("/cluster/project/my-workflow/results"),
    )
 
-The profile values are runtime configuration and are not stored in ``workflow.json``.
-This keeps the workflow portable between local execution and different clusters.
+The profile values remain runtime configuration and are not stored in the Python definition or workflow JSON.
 
 Test the profile without submitting a job
 -----------------------------------------
@@ -107,6 +134,53 @@ Mark laptop files explicitly with :class:`~bioimageflow.LocalUpload`:
 BioImageFlow snapshots and verifies uploaded bytes before scheduler submission.
 The confirmed run consumes that immutable snapshot rather than reading the original laptop path again.
 An ordinary ``Path`` means a path that already exists on the cluster, and a string always remains a string.
+
+Upload paths stored in workflow nodes
+-------------------------------------
+
+A reusable workflow should normally expose data that changes between runs as a public workflow input, as in the example above.
+A GUI-created workflow may instead contain a path directly in a node such as ``Files``.
+Discover every overridable path-shaped node input without reading the laptop filesystem:
+
+.. code-block:: python
+
+   from bioimageflow import inspect_remote_node_paths
+
+   path_plan = inspect_remote_node_paths(workflow)
+   for item in path_plan.inputs:
+       print(
+           item.scoped_node_path,
+           item.input_name,
+           item.current_paths,
+           item.cluster_compatible,
+       )
+
+Choose the meaning explicitly for this invocation and pass a scoped override:
+
+.. code-block:: python
+
+   run = submit_workflow(
+       workflow,
+       node_input_overrides={
+           "files": {
+               "path": LocalUpload(Path("./images")),
+           },
+       },
+       parsl_config=parsl_config,
+       executor_bindings=executor_bindings,
+       shared_runtime_root=shared_runtime_root,
+       launch=launch,
+       transport=transport,
+   )
+
+Nested nodes use the same scoped paths as planning and diagnostics, for example ``"preprocessing/files"``.
+Explicit file lists accept one marker per local file: ``{"files": [LocalUpload(path) for path in selected_files]}``.
+An ordinary absolute ``Path`` in an override selects existing cluster storage without probing the laptop.
+Relative unmarked paths are rejected.
+
+Overrides apply only to unconnected path-shaped inputs and never mutate the original workflow object.
+They are invocation values, so a serialized workflow cannot silently authorize reads from the submitting computer.
+Preparation snapshots them with the same immutable manifest as root ``LocalUpload`` values, and the cluster persists the effective graph with content-addressed installed paths.
 
 Initialize the orchestrator environment when needed
 ---------------------------------------------------

@@ -31,28 +31,40 @@ class TestSerializeConstant:
         assert deserialize_constant({"__type__": "float", "value": 3.14}) == 3.14
 
     def test_list_round_trip(self):
-        assert serialize_constant([1, 2, 3]) == {
-            "__type__": "list", "value": [1, 2, 3],
+        encoded = serialize_constant([1, Path("images/a.tif")])
+        assert encoded == {
+            "__type__": "list",
+            "value": [
+                {"__type__": "int", "value": 1},
+                {"__type__": "path", "value": "images/a.tif"},
+            ],
         }
-        assert deserialize_constant({"__type__": "list", "value": [1, 2, 3]}) == [
-            1, 2, 3,
-        ]
+        assert deserialize_constant(encoded) == [1, Path("images/a.tif")]
 
     def test_tuple_round_trip(self):
-        assert serialize_constant((1, 2)) == {"__type__": "tuple", "value": [1, 2]}
-        out = deserialize_constant({"__type__": "tuple", "value": [1, 2]})
+        encoded = serialize_constant((1, 2))
+        assert encoded == {
+            "__type__": "tuple",
+            "value": [
+                {"__type__": "int", "value": 1},
+                {"__type__": "int", "value": 2},
+            ],
+        }
+        out = deserialize_constant(encoded)
         assert out == (1, 2) and isinstance(out, tuple)
 
     def test_string_round_trip(self):
         assert serialize_constant("hello") == {"__type__": "str", "value": "hello"}
         assert deserialize_constant({"__type__": "str", "value": "hello"}) == "hello"
 
-    def test_path_is_lossy_str_fallback(self):
-        # Path is documented as lossy: it goes through the str() fallback.
+    def test_path_round_trip_is_lossless(self):
         out = serialize_constant(Path("/tmp/x"))
-        assert out == {"__type__": "str", "value": "/tmp/x"}
-        # Round-trip lands on a string, not a Path.
-        assert deserialize_constant(out) == "/tmp/x"
+        assert out == {"__type__": "path", "value": "/tmp/x"}
+        assert deserialize_constant(out) == Path("/tmp/x")
+
+    def test_dict_round_trip_is_recursive(self):
+        value = {"reference": Path("refs/atlas.tif")}
+        assert deserialize_constant(serialize_constant(value)) == value
 
     def test_bool_does_not_become_int(self):
         # bool is a subclass of int in Python; ensure we don't misclassify.
@@ -61,7 +73,8 @@ class TestSerializeConstant:
 
 
 class TestDeserializeUnknownType:
-    def test_unknown_type_falls_back_to_str(self):
-        # An unrecognized __type__ is coerced to str rather than raising —
-        # this lets the wire format evolve without a hard break.
-        assert deserialize_constant({"__type__": "exotic", "value": 7}) == "7"
+    def test_unknown_type_is_rejected(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Unknown workflow constant"):
+            deserialize_constant({"__type__": "exotic", "value": 7})

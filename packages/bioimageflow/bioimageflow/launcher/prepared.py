@@ -278,6 +278,7 @@ def prepare_remote_submission(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     pre_launch: PreLaunchScript | None = None,
+    node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
     lifetime: float = 3600.0,
 ) -> PreparedRemoteSubmission:
     """Prepare immutable remote invocation bytes without network operations."""
@@ -295,6 +296,7 @@ def prepare_remote_submission(
         task_policy=task_policy,
         launch=launch,
         pre_launch=pre_launch,
+        node_input_overrides=node_input_overrides,
     )
     try:
         bundle = context.__enter__()

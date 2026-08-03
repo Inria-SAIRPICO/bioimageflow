@@ -97,6 +97,14 @@ Remote transport and immutable preparation
 .. autoclass:: LocalUpload
    :members:
 
+.. autofunction:: inspect_remote_node_paths
+
+.. autoclass:: RemoteNodePathPlan
+   :members:
+
+.. autoclass:: RemoteNodePathInput
+   :members:
+
 .. autofunction:: prepare_remote_submission
 
 .. autoclass:: PreparedRemoteSubmission

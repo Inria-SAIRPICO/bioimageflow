@@ -171,15 +171,49 @@ Environment Modules, Spack, Conda, virtual environments, containers, and site-sp
 Input meaning
 -------------
 
-Remote root inputs use explicit types:
+Remote path values use explicit types:
 
 - :class:`~bioimageflow.LocalUpload` packages a laptop file or directory;
 - an ordinary ``Path`` is preserved as a cluster path and is never probed on the laptop;
 - a string remains a string even when it resembles a path;
 - a root DataFrame is transported with Parquet and logical digests, and typed ``Path`` cells must be normalized absolute cluster paths.
 
+``LocalUpload`` can be a path-like root input, a path-shaped leaf inside a root list or tuple, or a value in ``node_input_overrides``.
+For example, ``{"files": [LocalUpload(first), LocalUpload(second)]}`` preserves an explicit file order, while ``{"path": LocalUpload(directory)}`` preserves a directory tree.
 Only ``LocalUpload`` values and inline or local-file pre-launch sources read laptop bytes.
 Installed upload objects must remain readable by the orchestrator and relevant workers for the lifetime of every retained run that references them.
+
+Node path discovery and overrides
+---------------------------------
+
+:func:`~bioimageflow.inspect_remote_node_paths` recursively reports every unconnected path-shaped node input using stable scoped node paths.
+The report includes its single/list/tuple shape, nullability, path-picker hint, current values, and whether those values are already valid normalized cluster paths.
+It neither probes the filesystem nor contacts the cluster and declares ``reads_local_files=False`` and ``allocates_resources=False`` in its serializable report.
+
+``submit_workflow()`` and :func:`~bioimageflow.prepare_remote_submission` accept an invocation-only nested mapping:
+
+.. code-block:: python
+
+   node_input_overrides = {
+       "files": {
+           "path": LocalUpload(Path("./images")),
+       },
+       "nested/masks": {
+           "files": [LocalUpload(path) for path in selected_masks],
+       },
+   }
+
+The outer key is a scoped tool-node path and the inner key is an input name.
+Only path-shaped constant or default inputs can be replaced; connected inputs, workflow boundary nodes, unknown fields, and non-path parameters are rejected.
+Ordinary override ``Path`` values must be normalized absolute POSIX cluster paths, while local sources must be explicitly wrapped in ``LocalUpload``.
+
+The laptop validates each target against the live workflow graph before reading any selected upload.
+Preparation copies every selected file or directory into the immutable bundle and omits original laptop paths from the request and manifest.
+The cluster agent independently validates the target and uploaded tree, applies decoded installed paths to a fresh reconstructed graph, and submits that effective graph without mutating the caller's workflow.
+The effective graph retains the content-addressed installed paths, while the prepared manifest binds the request mapping and every uploaded byte through its entry digests and overall bundle digest.
+
+Workflow graph constants use recursive lossless envelopes for ``Path``, list, tuple, and dictionary values.
+Consequently explicit constructs such as ``Files(files=[Path(...), Path(...)])`` serialize without converting paths to ambiguous strings.
 
 Prepare immutable bytes before confirmation
 -------------------------------------------
@@ -210,7 +244,7 @@ Its stable manifest contains relative entry paths, kinds, sizes, SHA-256 digests
 Cluster-resident pre-launch files are listed separately as external sources with their path and optional expected digest; their bytes can only be observed and snapshotted on the cluster.
 No secret values are included.
 
-The prepared object owns temporary read-only snapshots, submits at most once, and never rereads original ``LocalUpload`` or local pre-launch paths.
+The prepared object owns temporary read-only snapshots, submits at most once, and never rereads original root, node-override, or local pre-launch paths.
 It rejects changed staged bytes and expired preparations.
 ``close()`` or context-manager exit removes abandoned or failed local preparation state.
 

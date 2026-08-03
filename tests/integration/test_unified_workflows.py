@@ -446,8 +446,12 @@ def test_from_python_is_fresh_and_calls_exact_factory_once(tmp_path: Path) -> No
     helper.write_text("VALUE = 8\n")
     second = Workflow.from_python(definition, storage_path=tmp_path / "second")
     assert first.name == second.name == "loaded_1"
-    assert first.to_dict()["nodes"][0]["constants"]["values"]["value"] == [3]
-    assert second.to_dict()["nodes"][0]["constants"]["values"]["value"] == [8]
+    assert first.to_dict()["nodes"][0]["constants"]["values"]["value"] == [
+        {"__type__": "int", "value": 3}
+    ]
+    assert second.to_dict()["nodes"][0]["constants"]["values"]["value"] == [
+        {"__type__": "int", "value": 8}
+    ]
 
 
 @pytest.mark.parametrize(

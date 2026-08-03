@@ -18,6 +18,7 @@ from bioimageflow import (
     prepare_remote_submission,
 )
 from bioimageflow.launcher.cluster_bundle import prepare_cluster_bundle
+from bioimageflow_common_tools import Files
 from bioimageflow.parsl import (
     ExecutorBinding,
     ExecutorCapabilities,
@@ -59,6 +60,7 @@ def _prepare(
     inputs: dict,
     *,
     pre_launch: PreLaunchScript | None = None,
+    node_input_overrides: dict | None = None,
 ):
     return prepare_cluster_bundle(
         workflow,
@@ -75,6 +77,7 @@ def _prepare(
             walltime=timedelta(minutes=10),
         ),
         pre_launch=pre_launch,
+        node_input_overrides=node_input_overrides,
     )
 
 
@@ -120,6 +123,30 @@ def test_bundle_rejects_upload_in_non_path_root_field(tmp_path: Path) -> None:
             {"settings": LocalUpload(source)},
         ):
             pass
+
+
+def test_bundle_accepts_uploads_at_nested_root_path_leaves(tmp_path: Path) -> None:
+    first = tmp_path / "first.tif"
+    second = tmp_path / "second.tif"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    workflow = Workflow(storage_path=tmp_path / "cluster-results")
+    with workflow:
+        workflow.input("files", list[Path], id="files")
+
+    with _prepare(
+        tmp_path,
+        workflow,
+        {"files": [LocalUpload(first), LocalUpload(second)]},
+    ) as bundle:
+        request = json.loads((bundle.root / "request.json").read_text())
+
+    encoded = request["inputs"][0]
+    assert encoded["kind"] == "remote_path_value"
+    assert [item["tag"] for item in encoded["value"]["value"]] == [
+        "local_upload",
+        "local_upload",
+    ]
 
 
 def test_bundle_rejects_relative_dataframe_paths_and_upload_cells(
@@ -249,3 +276,98 @@ def test_remote_preparation_exposes_pinned_cluster_pre_launch_source(
         assert PreparedSubmissionManifest.from_dict(payload) == prepared.manifest
     finally:
         prepared.close()
+
+
+def test_bundle_snapshots_node_directory_and_explicit_file_overrides(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "images"
+    directory.mkdir()
+    image = directory / "image.tif"
+    image.write_bytes(b"original pixels")
+    explicit = tmp_path / "mask.tif"
+    explicit.write_bytes(b"original mask")
+    workflow = Workflow(storage_path=tmp_path / "cluster-results")
+    with workflow:
+        Files()(path=directory, name="directory-files")
+        Files()(files=[explicit], name="explicit-files")
+
+    with _prepare(
+        tmp_path,
+        workflow,
+        {},
+        node_input_overrides={
+            "directory-files": {"path": LocalUpload(directory)},
+            "explicit-files": {"files": [LocalUpload(explicit)]},
+        },
+    ) as bundle:
+        request_text = (bundle.root / "request.json").read_text()
+        request = json.loads(request_text)
+        image.write_bytes(b"changed later")
+        explicit.write_bytes(b"changed later")
+
+        assert directory.as_posix() not in request_text
+        assert explicit.as_posix() not in request_text
+        assert "/__bioimageflow_remote_override__/" in request_text
+        assert request["node_input_overrides"][0]["scoped_node_path"] == (
+            "directory-files"
+        )
+        assert request["node_input_overrides"][0]["value"]["tag"] == (
+            "local_upload"
+        )
+        explicit_value = request["node_input_overrides"][1]["value"]
+        assert explicit_value["tag"] == "list"
+        assert explicit_value["value"][0]["tag"] == "local_upload"
+        staged = sorted(
+            path for path in (bundle.root / "uploads").rglob("*.tif")
+        )
+        assert [path.read_bytes() for path in staged] == [
+            b"original pixels",
+            b"original mask",
+        ]
+
+
+def test_bundle_uses_unique_upload_slots_across_root_and_node_values(
+    tmp_path: Path,
+) -> None:
+    root_file = tmp_path / "root.tif"
+    node_file = tmp_path / "node.tif"
+    root_file.write_bytes(b"root")
+    node_file.write_bytes(b"node")
+    workflow = Workflow(storage_path=tmp_path / "cluster-results")
+    with workflow:
+        workflow.input("files", list[Path], id="files")
+        Files()(files=[node_file], name="node-files")
+
+    with _prepare(
+        tmp_path,
+        workflow,
+        {"files": [LocalUpload(root_file)]},
+        node_input_overrides={
+            "node-files": {"files": [LocalUpload(node_file)]},
+        },
+    ) as bundle:
+        request = json.loads((bundle.root / "request.json").read_text())
+        root_path = request["inputs"][0]["value"]["value"][0]["upload_path"]
+        node_path = request["node_input_overrides"][0]["value"]["value"][0][
+            "upload_path"
+        ]
+
+        assert root_path != node_path
+        assert (bundle.root / root_path / "root.tif").read_bytes() == b"root"
+        assert (bundle.root / node_path / "node.tif").read_bytes() == b"node"
+
+
+def test_bundle_rejects_relative_unmarked_node_override(tmp_path: Path) -> None:
+    workflow = Workflow(storage_path=tmp_path / "cluster-results")
+    with workflow:
+        Files()(path=Path("relative/original"), name="files")
+
+    with pytest.raises(ValueError, match="is invalid"):
+        with _prepare(
+            tmp_path,
+            workflow,
+            {},
+            node_input_overrides={"files": {"path": Path("relative/new")}},
+        ):
+            pass

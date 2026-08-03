@@ -106,11 +106,17 @@ def test_transport_submission_returns_remote_run(
         remote_executable=PurePosixPath("/cluster/bin/agent"),
     )
     run_id = "run_1234567812344abc923456789abcdef0"
+    submitted: dict = {}
+
+    def fake_submit(*args, **kwargs):
+        del args
+        submitted.update(kwargs)
+        return run_id
 
     monkeypatch.setattr(
         ssh_module,
         "submit_cluster_workflow",
-        lambda *args, **kwargs: run_id,
+        fake_submit,
     )
     monkeypatch.setattr(
         ssh_module,
@@ -137,10 +143,14 @@ def test_transport_submission_returns_remote_run(
             walltime=timedelta(minutes=10),
         ),
         transport=transport,
+        node_input_overrides={"files": {"path": Path("/cluster/images")}},
     )
 
     assert isinstance(run, RemoteWorkflowRun)
     assert run.id == run_id
+    assert submitted["node_input_overrides"] == {
+        "files": {"path": Path("/cluster/images")}
+    }
     assert not (tmp_path / "launcher").exists()
 
 
@@ -186,6 +196,23 @@ def test_pre_launch_requires_psij_and_cluster_file_requires_transport(
                 walltime=timedelta(minutes=10),
             ),
             pre_launch=PreLaunchScript.from_cluster_file("/shared/init.sh"),
+        )
+
+    assert not (tmp_path / "launcher").exists()
+
+
+def test_node_input_overrides_require_transported_submission(tmp_path: Path) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
+
+    with pytest.raises(ValueError, match="transported submission"):
+        submit_workflow(
+            workflow,
+            parsl_config=_config_ref(),
+            executor_bindings={"threads": _binding()},
+            launch=OrchestratorLaunchConfig(backend="manual"),
+            node_input_overrides={
+                "files": {"path": Path("/cluster/images")},
+            },
         )
 
     assert not (tmp_path / "launcher").exists()

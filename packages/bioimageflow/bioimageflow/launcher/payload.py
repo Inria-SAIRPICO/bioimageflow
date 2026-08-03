@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from bioimageflow.storage import canonical_json_bytes
+from bioimageflow.validation.constants import serialize_constant
 from bioimageflow.workflow import Workflow
 
 from .errors import LauncherProtocolError
@@ -87,6 +88,49 @@ def serialize_workflow_payload(workflow: Workflow) -> dict[str, Any]:
         "digest": _digest_payload(payload),
         "payload": copy.deepcopy(payload),
     }
+
+
+def replace_workflow_payload_constants(
+    value: dict[str, Any],
+    replacements: tuple[tuple[str, str, Any], ...],
+) -> dict[str, Any]:
+    """Replace scoped constants in a fresh payload and bind a new digest."""
+    result = copy.deepcopy(value)
+    payload = result["payload"]
+    graph = payload["workflow"] if result["kind"] == "archive_v1" else payload
+    for scoped_node_path, input_name, replacement in replacements:
+        current = graph
+        parts = scoped_node_path.split("/")
+        for position, part in enumerate(parts):
+            nodes = current.get("nodes")
+            if not isinstance(nodes, list):
+                raise LauncherProtocolError("Submitted workflow graph is malformed.")
+            matches = [
+                node
+                for node in nodes
+                if isinstance(node, dict) and node.get("name") == part
+            ]
+            if len(matches) != 1:
+                raise LauncherProtocolError(
+                    f"Scoped node path {scoped_node_path!r} is not unique."
+                )
+            node = matches[0]
+            if position < len(parts) - 1:
+                nested = node.get("workflow")
+                if not isinstance(nested, dict):
+                    raise LauncherProtocolError(
+                        f"Scoped node path {scoped_node_path!r} is invalid."
+                    )
+                current = nested
+                continue
+            constants = node.get("constants")
+            if not isinstance(constants, dict):
+                raise LauncherProtocolError(
+                    f"Node {scoped_node_path!r} has invalid constants."
+                )
+            constants[input_name] = serialize_constant(replacement)
+    result["digest"] = _digest_payload(payload)
+    return result
 
 
 def load_workflow_payload(

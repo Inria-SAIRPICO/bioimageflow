@@ -29,6 +29,7 @@ from .cluster_upload import (
     validate_manifest,
 )
 from .inputs import decode_cluster_typed_constant
+from .node_inputs import apply_node_input_overrides, validate_remote_path_value
 from .payload import load_workflow_payload
 from .pre_launch import pre_launch_from_bundle_request
 from .repository import (
@@ -120,6 +121,7 @@ def _load_request(object_root: Path) -> dict[str, Any]:
         "inputs",
         "launch",
         "node_routes",
+        "node_input_overrides",
         "parsl_config",
         "psij_pre_launch",
         "schema",
@@ -135,6 +137,101 @@ def _load_request(object_root: Path) -> dict[str, Any]:
             "Submission bundle request schema is invalid.",
         )
     return value
+
+
+def _load_upload_marker(object_root: Path, marker: Any) -> Path:
+    if type(marker) is not dict or set(marker) != {
+        "root_kind",
+        "root_name",
+        "tree",
+        "upload_path",
+    }:
+        raise ValueError("invalid upload marker")
+    base = PurePosixPath(marker["upload_path"])
+    if (
+        base.is_absolute()
+        or len(base.parts) != 2
+        or base.parts[0] != "uploads"
+        or not base.parts[1].isdigit()
+    ):
+        raise ValueError("unsafe upload path")
+    root_name = marker["root_name"]
+    if (
+        type(root_name) is not str
+        or not root_name
+        or unicodedata.normalize("NFC", root_name) != root_name
+        or root_name in {".", ".."}
+        or "/" in root_name
+        or "\\" in root_name
+        or any(character in root_name for character in ("\x00", "\n", "\r"))
+        or marker["root_kind"] not in {"directory", "file"}
+        or type(marker["tree"]) is not list
+    ):
+        raise ValueError("invalid upload marker")
+    path = object_root / Path(*base.parts) / root_name
+    if path.is_symlink() or not path.exists():
+        raise ValueError("installed upload is missing")
+    if marker["root_kind"] == "file" and not path.is_file():
+        raise ValueError("installed upload kind mismatch")
+    if marker["root_kind"] == "directory" and not path.is_dir():
+        raise ValueError("installed upload kind mismatch")
+    _validate_upload_tree(
+        path,
+        root_name=root_name,
+        root_kind=marker["root_kind"],
+        declared=marker["tree"],
+    )
+    return path
+
+
+def _decode_node_override_value(object_root: Path, value: Any) -> Any:
+    if type(value) is not dict or set(value) != {"tag", "value"}:
+        if type(value) is not dict or value.get("tag") != "local_upload":
+            raise ValueError("invalid node override value")
+        return _load_upload_marker(
+            object_root,
+            {key: item for key, item in value.items() if key != "tag"},
+        )
+    tag = value["tag"]
+    payload = value["value"]
+    if tag == "none" and payload is None:
+        return None
+    if tag == "cluster_path" and type(payload) is str:
+        return _absolute_cluster_path(payload, field="node_input_overrides")
+    if tag in {"list", "tuple"} and type(payload) is list:
+        items = [_decode_node_override_value(object_root, item) for item in payload]
+        return items if tag == "list" else tuple(items)
+    raise ValueError("invalid node override value")
+
+
+def _load_node_input_overrides(
+    object_root: Path,
+    workflow: Any,
+    value: Any,
+) -> None:
+    if type(value) is not list:
+        raise ValueError("node_input_overrides must be a list")
+    decoded: list[tuple[str, str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in value:
+        if type(entry) is not dict or set(entry) != {
+            "scoped_node_path",
+            "input_name",
+            "value",
+        }:
+            raise ValueError("invalid node input override")
+        target = (entry["scoped_node_path"], entry["input_name"])
+        if any(type(item) is not str or not item for item in target) or target in seen:
+            raise ValueError("invalid or duplicate node input override target")
+        seen.add(target)
+        decoded.append(
+            (
+                target[0],
+                target[1],
+                _decode_node_override_value(object_root, entry["value"]),
+            )
+        )
+    apply_node_input_overrides(workflow, tuple(decoded))
 
 
 def _load_inputs(
@@ -185,6 +282,29 @@ def _load_inputs(
                     entry["metadata"],
                     preserve_paths=True,
                 )
+            elif kind == "remote_path_value" and set(entry) == {
+                "kind",
+                "name",
+                "value",
+            }:
+                if port.kind != "field":
+                    raise ValueError("remote path values require a field input")
+                decoded = _decode_node_override_value(object_root, entry["value"])
+                schema_type = (
+                    port.schema.get("type")
+                    if type(port.schema) is dict
+                    else None
+                )
+                if port.annotation is Any:
+                    if schema_type == "list" and type(decoded) is not list:
+                        raise ValueError("remote path value must retain list shape")
+                    if schema_type == "tuple" and type(decoded) is not tuple:
+                        raise ValueError("remote path value must retain tuple shape")
+                    if schema_type not in {"list", "tuple"}:
+                        raise ValueError("remote path value has no path container schema")
+                else:
+                    validate_remote_path_value(port.annotation, decoded)
+                result[name] = decoded
             elif kind == "local_upload" and set(entry) == {
                 "kind",
                 "name",
@@ -203,44 +323,15 @@ def _load_inputs(
                     or schema_type in {"ImageFile", "Path"}
                 ):
                     raise ValueError("upload marker is not in a path-like root field")
-                base = PurePosixPath(entry["upload_path"])
-                if (
-                    base.is_absolute()
-                    or len(base.parts) != 2
-                    or base.parts[0] != "uploads"
-                    or not base.parts[1].isdigit()
-                ):
-                    raise ValueError("unsafe upload path")
-                root_name = entry["root_name"]
-                if (
-                    type(root_name) is not str
-                    or not root_name
-                    or unicodedata.normalize("NFC", root_name) != root_name
-                    or root_name in {".", ".."}
-                    or "/" in root_name
-                    or "\\" in root_name
-                    or any(
-                        character in root_name
-                        for character in ("\x00", "\n", "\r")
-                    )
-                    or entry["root_kind"] not in {"directory", "file"}
-                    or type(entry["tree"]) is not list
-                ):
-                    raise ValueError("invalid upload marker")
-                path = object_root / Path(*base.parts) / root_name
-                if path.is_symlink() or not path.exists():
-                    raise ValueError("installed upload is missing")
-                if entry["root_kind"] == "file" and not path.is_file():
-                    raise ValueError("installed upload kind mismatch")
-                if entry["root_kind"] == "directory" and not path.is_dir():
-                    raise ValueError("installed upload kind mismatch")
-                _validate_upload_tree(
-                    path,
-                    root_name=root_name,
-                    root_kind=entry["root_kind"],
-                    declared=entry["tree"],
+                result[name] = _load_upload_marker(
+                    object_root,
+                    {
+                        "root_kind": entry["root_kind"],
+                        "root_name": entry["root_name"],
+                        "tree": entry["tree"],
+                        "upload_path": entry["upload_path"],
+                    },
                 )
-                result[name] = path
             else:
                 raise ValueError("unknown input kind or fields")
         except (OSError, TypeError, ValueError) as exc:
@@ -308,7 +399,7 @@ def submit_bundle(
     object_path: Any,
     manifest: Any,
 ) -> dict[str, Any]:
-    """Bind one request to one run ID and dispatch through the Phase 1b seam."""
+    """Bind one verified immutable request to one launcher run."""
     _ensure_root(staging_root)
     validated_manifest = validate_manifest(manifest)
     expected_object = (
@@ -342,6 +433,11 @@ def submit_bundle(
         workflow = load_workflow_payload(
             request_value["workflow"],
             storage_path=storage_path,
+        )
+        _load_node_input_overrides(
+            expected_object,
+            workflow,
+            request_value["node_input_overrides"],
         )
         bindings = {
             label: ExecutorBinding.from_dict(value)

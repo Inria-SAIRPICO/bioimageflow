@@ -285,6 +285,7 @@ def submit_workflow(
     task_policy: ParslTaskPolicy | None = None,
     launch: LaunchConfig | None = None,
     pre_launch: PreLaunchScript | None = None,
+    node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
     transport: SSHSubmissionTransport | None = None,
 ) -> WorkflowRun | RemoteWorkflowRun:
     """Persist and launch one reconnectable submitted Parsl workflow."""
@@ -312,6 +313,7 @@ def submit_workflow(
             task_policy=task_policy,
             launch=launch,
             pre_launch=pre_launch,
+            node_input_overrides=node_input_overrides,
         )
         return RemoteWorkflowRun._submitted(
             transport,
@@ -320,6 +322,8 @@ def submit_workflow(
         )
     if pre_launch is not None and pre_launch.source_kind == "cluster_file":
         raise ValueError("Cluster pre-launch files require transported submission.")
+    if node_input_overrides is not None:
+        raise ValueError("node_input_overrides require transported submission.")
     return _submit_workflow(
         workflow,
         inputs=inputs,

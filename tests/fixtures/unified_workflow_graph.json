@@ -59,7 +59,10 @@
         "config": {"engine": "direct", "execution": "parallel"}
       },
       "bindings": {
-        "input-values": {"__type__": "list", "value": [7]}
+        "input-values": {
+          "__type__": "list",
+          "value": [{"__type__": "int", "value": 7}]
+        }
       }
     }
   ],

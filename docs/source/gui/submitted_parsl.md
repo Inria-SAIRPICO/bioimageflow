@@ -17,7 +17,7 @@ if not capabilities.capabilities["submitted_remote_parsl"].supported:
     disabled_reason = capabilities.capabilities["submitted_remote_parsl"].reason
 ```
 
-The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, and immutable upload preparation.
+The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, and immutable upload preparation.
 Direct, Wetlands, planning, public value validation, remote-profile protocol support, resource overrides, diagnostics, and local preparation are built in.
 Attached and submitted-local execution require the `parsl` extra.
 Cluster submission requires `parsl`, `psij`, the selected PSI/J executor plugin, and the cluster agent in the remote installation.
@@ -161,6 +161,44 @@ manifest_payload = prepared.manifest.to_dict()
 Preparation copies the exact file or directory bytes, workflow graph, invocation, and launcher values into a private owned bundle.
 The manifest contains stable entry digests, typed external sources, and an overall bundle digest and contains no resolved secrets.
 Changing or deleting the original `LocalUpload` path after preparation cannot change the staged invocation.
+
+## Remote workflow data sources
+
+Use `inspect_remote_node_paths(workflow)` to discover path-shaped constants and defaults recursively.
+Do not special-case `Files`: model files, reference directories, configuration paths, and future tools use the same public contract.
+The operation is deterministic, reads no files, contacts no cluster, and returns scoped node paths consistent with planning and diagnostics.
+
+For every reported input, present an explicit source choice:
+
+- **Upload from this computer** creates `LocalUpload(Path(...))` only after a file or directory selection;
+- **Already on the cluster** creates an ordinary normalized absolute `Path`;
+- an unresolved relative value blocks remote confirmation until the user makes a choice.
+
+Build invocation-only values as a nested mapping:
+
+```python
+node_input_overrides = {
+    "files": {
+        "path": LocalUpload(selected_directory),
+    },
+    "preprocessing/masks": {
+        "files": [LocalUpload(path) for path in selected_masks],
+    },
+}
+```
+
+Pass the same mapping to `prepare_remote_submission()` and the shorter `submit_workflow(..., transport=...)` path.
+Do not mutate private nodes, patch serialized graphs, convert node fields into hidden root inputs, infer local meaning from path existence, or persist `LocalUpload` inside workflow JSON.
+Upload authority belongs to the confirmed invocation, so loading an untrusted workflow never authorizes laptop reads.
+
+The prepared manifest binds the override request and every staged byte through relative entries and the overall bundle digest without exposing original laptop paths.
+After submission, the durable effective graph contains only verified content-addressed cluster paths.
+The original in-memory workflow remains unchanged.
+
+For explicit path lists, preserve ordering and create one `LocalUpload` leaf per selected local file.
+The library assigns collision-safe staging slots even when files share a basename.
+Root path lists use the same recursive leaf semantics.
+Root DataFrames still reject embedded `LocalUpload` values.
 
 ## Orchestrator pre-launch scripts
 

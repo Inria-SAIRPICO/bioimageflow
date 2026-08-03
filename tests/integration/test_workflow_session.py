@@ -24,7 +24,10 @@ def _graph() -> dict:
                 "tool_package_version": None,
                 "constants": {
                     "column_name": {"__type__": "str", "value": "value"},
-                    "values": {"__type__": "list", "value": [1]},
+                    "values": {
+                        "__type__": "list",
+                        "value": [{"__type__": "int", "value": 1}],
+                    },
                 },
             }
         ],

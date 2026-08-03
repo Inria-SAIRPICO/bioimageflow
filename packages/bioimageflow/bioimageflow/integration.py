@@ -369,6 +369,7 @@ def get_execution_capabilities() -> ExecutionCapabilityReport:
             "submitted_remote_parsl": CapabilityStatus(True),
             "psij_launch": optional(psij, "psij"),
             "psij_pre_launch_upload": CapabilityStatus(True),
+            "remote_node_path_overrides": CapabilityStatus(True),
             "remote_profile_validation": CapabilityStatus(True),
             "portable_resource_overrides": CapabilityStatus(True),
             "non_allocating_planning": CapabilityStatus(True),

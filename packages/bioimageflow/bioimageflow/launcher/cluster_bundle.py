@@ -25,13 +25,18 @@ from bioimageflow.validation import is_path_type
 from bioimageflow.workflow import Workflow
 
 from .inputs import encode_cluster_typed_constant
-from .payload import serialize_workflow_payload
+from .node_inputs import (
+    contains_local_upload,
+    normalize_node_input_overrides,
+    validate_remote_path_value,
+)
+from .payload import replace_workflow_payload_constants, serialize_workflow_payload
 from .pre_launch import PreLaunchScript, stage_bundle_pre_launch
 from .submission import _normalize_bindings, _normalize_routes
 from .types import LocalUpload, PSIJLaunchConfig, ParslConfigRef
 
 
-BUNDLE_SCHEMA = "bioimageflow.cluster.submission_bundle.v2"
+BUNDLE_SCHEMA = "bioimageflow.cluster.submission_bundle.v3"
 MANIFEST_SCHEMA = "bioimageflow.cluster.upload_manifest.v1"
 MAX_UPLOAD_FILES = 100_000
 MAX_UPLOAD_DEPTH = 64
@@ -287,6 +292,55 @@ def _cluster_path_string(value: Path | str, *, field: str) -> str:
     return encoded
 
 
+def _encode_node_override_value(
+    value: Any,
+    root: Path,
+    next_upload: list[int],
+) -> dict[str, Any]:
+    if value is None:
+        return {"tag": "none", "value": None}
+    if isinstance(value, LocalUpload):
+        position = next_upload[0]
+        next_upload[0] += 1
+        upload_path = f"uploads/{position}"
+        kind, entries = _walk_upload(value.path, root / upload_path)
+        return {
+            "tag": "local_upload",
+            "root_kind": kind,
+            "root_name": _safe_basename(value.path),
+            "tree": entries,
+            "upload_path": upload_path,
+        }
+    if isinstance(value, Path):
+        return {
+            "tag": "cluster_path",
+            "value": _cluster_path_string(value, field="node_input_overrides"),
+        }
+    if type(value) in {list, tuple}:
+        return {
+            "tag": "list" if type(value) is list else "tuple",
+            "value": [
+                _encode_node_override_value(item, root, next_upload)
+                for item in value
+            ],
+        }
+    raise TypeError("Unsupported remote node path override value.")
+
+
+def _redacted_override_value(value: Any, next_placeholder: list[int]) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (Path, LocalUpload)):
+        position = next_placeholder[0]
+        next_placeholder[0] += 1
+        return Path(f"/__bioimageflow_remote_override__/{position}")
+    if type(value) is list:
+        return [_redacted_override_value(item, next_placeholder) for item in value]
+    if type(value) is tuple:
+        return tuple(_redacted_override_value(item, next_placeholder) for item in value)
+    raise TypeError("Unsupported remote node path override value.")
+
+
 def _manifest(root: Path) -> dict[str, Any]:
     entries = []
     total = 0
@@ -344,6 +398,7 @@ def prepare_cluster_bundle(
     task_policy: ParslTaskPolicy | None,
     launch: PSIJLaunchConfig,
     pre_launch: PreLaunchScript | None = None,
+    node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Iterator[PreparedClusterBundle]:
     """Build one private, self-contained laptop-to-cluster request bundle."""
     if targets is not None and inputs is not None:
@@ -356,6 +411,7 @@ def prepare_cluster_bundle(
         if unknown := set(supplied) - set(ports):
             raise ValueError(f"Unknown workflow input(s): {sorted(unknown)}.")
         encoded_inputs = []
+        next_nested_upload = [len(supplied)]
         for position, (name, value) in enumerate(supplied.items()):
             port = ports[name]
             if isinstance(value, LocalUpload):
@@ -373,6 +429,23 @@ def prepare_cluster_bundle(
                         "root_name": _safe_basename(value.path),
                         "tree": entries,
                         "upload_path": f"uploads/{position}",
+                    }
+                )
+            elif contains_local_upload(value):
+                if port.kind != "field":
+                    raise TypeError(
+                        f"Nested LocalUpload is not allowed for workflow input {name!r}."
+                    )
+                validate_remote_path_value(port.annotation, value)
+                encoded_inputs.append(
+                    {
+                        "kind": "remote_path_value",
+                        "name": name,
+                        "value": _encode_node_override_value(
+                            value,
+                            root,
+                            next_nested_upload,
+                        ),
                     }
                 )
             elif port.kind == "dataframe":
@@ -413,6 +486,32 @@ def prepare_cluster_bundle(
             pre_launch,
             root,
         )
+        normalized_overrides = normalize_node_input_overrides(
+            workflow,
+            node_input_overrides,
+        )
+        next_upload = next_nested_upload
+        encoded_overrides = [
+            {
+                "scoped_node_path": scoped,
+                "input_name": name,
+                "value": _encode_node_override_value(value, root, next_upload),
+            }
+            for scoped, name, value in normalized_overrides
+        ]
+        next_placeholder = [0]
+        redacted_replacements = tuple(
+            (
+                scoped,
+                name,
+                _redacted_override_value(value, next_placeholder),
+            )
+            for scoped, name, value in normalized_overrides
+        )
+        workflow_payload = replace_workflow_payload_constants(
+            serialize_workflow_payload(workflow),
+            redacted_replacements,
+        )
         request_value = {
             "environment_routes": _normalize_routes(
                 environment_routes,
@@ -427,6 +526,7 @@ def prepare_cluster_bundle(
                 labels=labels,
                 field="node_routes",
             ),
+            "node_input_overrides": encoded_overrides,
             "parsl_config": parsl_config.to_dict(),
             "psij_pre_launch": pre_launch_value,
             "schema": BUNDLE_SCHEMA,
@@ -441,7 +541,7 @@ def prepare_cluster_bundle(
             "storage_path": storage_path,
             "targets": None if targets is None else list(targets),
             "task_policy": (task_policy or ParslTaskPolicy()).to_dict(),
-            "workflow": serialize_workflow_payload(workflow),
+            "workflow": workflow_payload,
         }
         (root / "request.json").write_bytes(canonical_json_bytes(request_value))
         manifest = _manifest(root)

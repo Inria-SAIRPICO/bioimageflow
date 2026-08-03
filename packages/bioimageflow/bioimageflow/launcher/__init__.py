@@ -22,6 +22,11 @@ from .prepared import (
     prepare_remote_submission,
 )
 from .pre_launch import PreLaunchScript
+from .node_inputs import (
+    RemoteNodePathInput,
+    RemoteNodePathPlan,
+    inspect_remote_node_paths,
+)
 from .profile_validation import (
     RemoteProfileDiagnostic,
     RemoteProfileValidationReport,
@@ -50,6 +55,8 @@ __all__ = [
     "PreparedSubmissionEntry",
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
+    "RemoteNodePathInput",
+    "RemoteNodePathPlan",
     "RemoteProfileDiagnostic",
     "RemoteProfileValidationReport",
     "RemoteWorkflowRun",
@@ -59,6 +66,7 @@ __all__ = [
     "WorkflowRunLostError",
     "WorkflowRunNotReadyError",
     "WorkflowRunResultUnavailableError",
+    "inspect_remote_node_paths",
     "prepare_remote_submission",
     "submit_workflow",
     "validate_remote_execution_profile",

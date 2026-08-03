@@ -48,8 +48,8 @@ The public integration surface for a BioImageFlow execution UI consists of the f
 - `plan_distributed_execution()` compiles the same recursive processing scope and uses the same cache status, worker-requirement, capacity parser, compatibility, and route functions as Parsl startup. Cached and skipped nodes remain visible without requiring a worker route. The operation records the validated task policy and creates no run, DataFlowKernel, provider allocation, scheduler job, Wetlands environment, or worker.
 - `validate_remote_execution_profile()` invokes the public one-shot cluster protocol to validate connectivity, the remote factory, secrets, retries, executor labels, PSI/J availability, and cluster paths without creating a workflow run or scheduler job.
 - `NodeFailureDiagnostic` is attached to failed `ProgressEvent` callbacks and is persisted as a separate diagnostic progress event for both `WorkflowRun.diagnostics()` and `RemoteWorkflowRun.diagnostics()`.
-- `prepare_remote_submission()` copies all explicit `LocalUpload` and uploaded pre-launch bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original local paths. Cluster-resident pre-launch files remain typed external sources until the cluster agent snapshots them into the launcher run.
-- `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
+- `prepare_remote_submission()` copies all explicit root-input and node-override `LocalUpload` values plus uploaded pre-launch bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original local paths. Cluster-resident pre-launch files remain typed external sources until the cluster agent snapshots them into the launcher run.
+- `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, remote node path overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
 
 Every cross-process report has `to_dict()` and `from_dict()` methods and a versioned schema where applicable.
 Scoped node paths are used consistently by planning, progress, and failure diagnostics.
@@ -2053,9 +2053,23 @@ Laptop-to-cluster submission uses the system OpenSSH and SFTP clients plus the i
 `SSHSubmissionTransport` carries only a host alias or `user@host`, normalized absolute cluster staging root, safe absolute remote executable, and finite timeout.
 OpenSSH retains normal user configuration, agent authentication, `ProxyJump`, and host-key verification; BioImageFlow supplies no credentials, arbitrary SSH options, inline SSH shell fragments, or host-key bypass.
 
-Only a path-like root workflow input explicitly wrapped in `LocalUpload(Path(...))` reads laptop bytes.
+Only a path value explicitly wrapped in `LocalUpload(Path(...))` reads laptop bytes.
+`LocalUpload` is accepted as a path-like root input, recursively at path-shaped leaves inside root lists or tuples, and through invocation-only `node_input_overrides` keyed by scoped tool-node path and input name.
 Ordinary `Path` values remain explicit normalized absolute cluster paths without laptop filesystem probing, and path-looking strings remain strings.
 Root DataFrames use the existing logical/Parquet transport, reject `LocalUpload` cells and relative typed `Path` cells, and preserve string cells.
+
+`inspect_remote_node_paths(workflow)` recursively returns a JSON-safe `bioimageflow.remote_node_path_plan.v1` without reading local files, contacting the cluster, creating a run, or allocating resources.
+Each record contains the scoped node path, input name, path/list/tuple shape, nullability, path-picker hint, current path spellings, and whether those spellings are valid normalized cluster paths.
+Connected fields, workflow boundary nodes, and non-path inputs are not overridable node data sources.
+
+`node_input_overrides={"scope/node": {"field": value}}` exists only on transported `submit_workflow()` and `prepare_remote_submission()` calls.
+Values recursively contain only `Path`, `LocalUpload`, `None`, list, or tuple according to the declared input annotation.
+The laptop validates every target before reading selected uploads, snapshots upload bytes into the immutable bundle, and never serializes original laptop source paths.
+The cluster agent independently verifies each uploaded tree and target, resolves uploaded values to content-addressed installed paths, applies them to a fresh reconstructed workflow, and submits the effective graph without mutating the caller's workflow.
+Unknown, duplicate, connected, workflow-boundary, non-path, type-incompatible, and relative unmarked override values are rejected before launcher allocation or scheduler submission.
+
+Workflow graph constants recursively and losslessly encode `Path`, list, tuple, and dictionary values.
+This includes explicit path collections such as `Files(files=[Path(...), Path(...)])`; unsupported constants are rejected rather than silently stringified.
 `PreLaunchScript.from_text()` and `from_local_file()` are the other explicit laptop-byte boundaries.
 They accept non-empty UTF-8 content up to 64 KiB, reject NUL bytes, symlinks, special files, and concurrent source mutation, preserve bytes without newline normalization, and exclude content and local source paths from representations and serialized metadata.
 `PreLaunchScript.from_cluster_file()` does not probe the laptop; prepared manifests expose its path and optional expected digest as an external source because its observed bytes are not known until submission.
