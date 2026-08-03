@@ -2818,7 +2818,7 @@ node.set_resource_overrides(
 - CPU, GPU, memory, and GPU-memory overrides are requirements and may not fall below the declaration.
 - A non-zero `max_concurrent` override may lower but may not raise a non-zero declared cap. Zero means unlimited only when the declaration permits unlimited execution.
 - `Node.effective_resources` and `effective_node_resources(node)` return the validated merged `ResourceSpec`.
-- `ResourceSpec.max_concurrent` bounds both Wetlands 2 row submission and Parsl submission. Direct execution remains sequential within a node.
+- `ResourceSpec.max_concurrent` bounds both local worker submission and Parsl submission. Direct execution remains sequential within a node.
 - Parsl validates each request against an explicitly attested executor slot and uses `max_concurrent` with `ParslTaskPolicy.max_in_flight` to bound unfinished submissions.
 - Scoped-node routes, environment-identity routes, or one unique compatible binding select the executor; there is no implicit default, GPU, or environment-name route.
 - Tools without an explicit declaration inherit `ResourceSpec()` defaults: one CPU, zero GPUs, no memory floors, and unlimited node concurrency.
@@ -2826,8 +2826,8 @@ node.set_resource_overrides(
 
 `ResourceSpec` lives in `bioimageflow_core.environment` alongside `EnvironmentSpec`.
 
-The Wetlands backend selects the environment pool size from `wf.get_environment(tool).max_workers` when non-zero and otherwise from `Workflow.max_workers`.
-Wetlands 2 has no application-facing per-worker environment callback, so GPU device visibility is the responsibility of the environment or external runtime rather than implicit BioImageFlow mutation.
+The local backend selects the environment pool size from `wf.get_environment(tool).max_workers` when non-zero and otherwise from `Workflow.max_workers`.
+BioImageFlow does not assign environment variables such as `CUDA_VISIBLE_DEVICES` independently to workers in the same local pool, so device visibility is configured by the environment or external runtime.
 
 ---
 

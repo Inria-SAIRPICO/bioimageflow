@@ -1,4 +1,4 @@
-Output Templating
+Name Output Files
 =================
 
 When a :class:`~bioimageflow_core.ProcessingTool` produces file outputs, you

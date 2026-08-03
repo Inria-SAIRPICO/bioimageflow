@@ -74,12 +74,12 @@ Features
    installation
    quickstart
    concepts/index
-   tutorials/index
+   how-to/index
    workflows/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: GUI / Platform Integrators
+   :caption: BioImageFlow GUI Integration
 
    gui/index
 

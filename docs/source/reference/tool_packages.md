@@ -51,4 +51,4 @@ Every public tool and workflow should have package-local documentation and deter
 The main docs include first-party package docs through generated wrapper pages, but the source of truth remains in each package directory.
 
 Custom packages can opt into local documentation builds with `[tool.bioimageflow.docs]` metadata in their `pyproject.toml`.
-See the custom tool package tutorial for the package layout, documentation contract, and test expectations.
+See the [custom tool package how-to guide](../how-to/custom_tool_package) for the package layout, documentation contract, and test expectations.

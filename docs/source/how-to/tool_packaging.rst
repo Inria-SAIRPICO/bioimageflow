@@ -1,5 +1,5 @@
-Tool Packaging and Versioning
-=============================
+Package and Version Tools
+=========================
 
 BioImageFlow distributes tools as standard Python packages. The versioned
 loading system allows multiple versions of the same package to coexist in a

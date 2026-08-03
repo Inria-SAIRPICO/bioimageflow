@@ -1,12 +1,8 @@
 Environments
 ============
 
-This page collects the surface around tool environments — declaration,
-resource requirements, and per-workflow runtime configuration. The
-parallelism tutorial (:doc:`/tutorials/parallelism`) walks through the
-common usage patterns; this reference is the load-bearing one for
-``EnvironmentSpec``, ``GENERAL_ENV``, ``ResourceSpec``, and
-``WorkflowEnvironment``.
+This page documents tool dependency environments and their local runtime configuration.
+The practical guide :doc:`/how-to/run_in_parallel` introduces worker counts, while :doc:`/reference/execution/resources` owns the portable resource contract.
 
 EnvironmentSpec
 ---------------
@@ -30,7 +26,7 @@ The ``name`` is a stable identifier — multiple tools sharing the same
 ``name`` must declare **identical** dependencies, or
 :class:`~bioimageflow_core.EnvironmentMismatchError` is raised when a
 workflow containing those reachable tools is planned or computed.
-BioImageFlow keeps this declaration worker-safe and translates ``python``, ``pip``, ``conda``, ``channels``, and local packages into an immutable Wetlands 2 Pixi recipe in the orchestrator.
+BioImageFlow keeps this declaration worker-safe and translates ``python``, ``pip``, ``conda``, ``channels``, and local packages into an immutable local environment recipe in the orchestrator.
 Channel-qualified Conda values such as ``bioimageit::atlas==1.0`` are normalized into a channel plus dependency.
 
 GENERAL_ENV
@@ -54,43 +50,12 @@ This includes simple source and utility tools such as HTTP downloads implemented
 Do not create one-off environments for these tasks.
 Tools with specialized dependencies such as Cellpose, StarDist, SimpleITK, BioIO, external command-line tools, model runtimes, or packages not included in ``GENERAL_ENV`` declare their own ``EnvironmentSpec``.
 
-ResourceSpec
-------------
+Resource requirements
+---------------------
 
-:class:`~bioimageflow_core.ResourceSpec` declares the resources a
-tool needs per row:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 12 66
-
-   * - Field
-     - Default
-     - Meaning
-   * - ``cpu``
-     - ``1``
-     - CPU cores per row.
-   * - ``gpu``
-     - ``0``
-     - GPUs per row.
-   * - ``gpu_memory``
-     - ``None``
-     - Optional string hint, e.g. ``"8GB"``.
-   * - ``max_concurrent``
-     - ``0``
-     - Per-node bound on unfinished worker tasks.
-       Parsl and Wetlands 2 enforce it; zero means unlimited.
-   * - ``memory``
-     - ``None``
-     - Optional string hint for system memory.
-
-Wetlands 2 enforces ``max_concurrent`` in BioImageFlow's submission window.
-Its public API does not expose CPU, GPU, memory, GPU-memory placement, or per-worker environment mutation, so those values remain requirements visible to planning but are not placement guarantees for Wetlands.
-
-Parsl converts the resource declaration into a canonical requirement and validates it against the selected :class:`~bioimageflow.ExecutorBinding`.
-The binding's :class:`~bioimageflow.WorkerSlotCapacity` must satisfy the requested ``cpu``, ``gpu``, ``memory``, and ``gpu_memory``.
-``max_concurrent`` combines with :class:`~bioimageflow.ParslTaskPolicy.max_in_flight` to bound unfinished tasks; it is not part of slot capacity.
-See :doc:`parsl` for executor attestations and deterministic routing.
+:class:`~bioimageflow_core.ResourceSpec` declares what one ProcessingTool task needs.
+:class:`~bioimageflow.NodeResourceOverrides` adjusts the requirement for one node without mutating the tool class.
+The merge rules, serialization behavior, local guarantees, and Parsl placement contract are documented together in :doc:`execution/resources`.
 
 WorkflowEnvironment and get_environment
 ---------------------------------------
@@ -129,7 +94,7 @@ top of a script, before calling ``require_tool_packages()``,
 
    configure_wetlands(root="./wetlands")
 
-``root`` is where Wetlands 2 stores managed Pixi environments, state, and worker metadata.
+``root`` is where the local engine stores managed environments, state, and worker metadata.
 Use ``pixi_executable=...`` to select an existing Pixi executable, ``network=...`` for proxy configuration, and ``termination_grace=...`` for worker shutdown.
 
 If no explicit path is configured, BioImageFlow resolves the default
@@ -234,6 +199,5 @@ worker processes.
 Hosts should use the public :class:`~bioimageflow.env_manager.WetlandsEnvManager` lifecycle surface described above for worker ownership and status.
 Deeper Wetlands provisioning and process-health details remain implementation-level and should use Wetlands' own APIs when necessary.
 
-Specs.md Appendix A is the dedicated Wetlands page; the parallelism
-tutorial (:doc:`/tutorials/parallelism`) covers how the proxy fields
-interact with row-level parallelism.
+The local execution reference :doc:`execution/local` covers worker ownership and lifecycle.
+The how-to guide :doc:`/how-to/run_in_parallel` shows how environment settings affect row-level parallelism.

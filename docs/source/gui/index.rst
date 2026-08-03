@@ -7,7 +7,7 @@ the incremental editing model, the validation surface, and the tool-schema
 serializers needed to drive a graph from outside the workflow-author API.
 
 Workflow scripts and tool authors should read the
-:doc:`/concepts/index` and :doc:`/tutorials/index` trees instead.
+:doc:`/concepts/index` and :doc:`/how-to/index` trees instead.
 
 .. toctree::
    :maxdepth: 1

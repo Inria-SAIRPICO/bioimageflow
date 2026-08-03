@@ -1,5 +1,5 @@
-Shared Memory
-=============
+Pass Arrays Through Shared Memory
+=================================
 
 BioImageFlow supports zero-copy array transfer between tools using shared
 memory. This avoids writing intermediate arrays to disk, which is significantly

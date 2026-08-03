@@ -1,5 +1,5 @@
-Cancellation
-============
+Cancel a Workflow
+=================
 
 Long-running workflows — interactive GUIs, server-driven pipelines, or
 just any compute that may need to stop mid-flight — should be cancellable.

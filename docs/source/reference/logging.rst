@@ -28,7 +28,7 @@ console handlers; ``force=True`` replaces only those handlers and
 leaves unrelated user handlers in place.
 
 ``configure_logging()`` also delegates Wetlands console setup to ``wetlands.logger.enable_console_logging``.
-Wetlands 2 forwards worker stdout and stderr through its logging channel.
+The local worker runtime forwards worker stdout and stderr through the Wetlands logging channel.
 
 Adjusting verbosity
 -------------------

@@ -145,7 +145,7 @@ Reusing two refs in one downstream tool creates a fan-in:
    overlay = compose(image=raw["path"], mask=thresholded["mask"])
 
 Combining branches with explicit join semantics is covered in
-:doc:`../tutorials/merge_strategies`.
+:doc:`../how-to/merge_strategies`.
 
 Named nodes
 -----------

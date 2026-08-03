@@ -18,7 +18,7 @@ Audience
 --------
 
 This tree is **not** for workflow scripts or tool authors. The Workflow
-Authors tree (:doc:`/concepts/index`, :doc:`/tutorials/index`) covers
+Authors tree (:doc:`/concepts/index`, :doc:`/how-to/index`) covers
 how to build a DAG and write a tool. Pages here assume you are writing
 the host that *carries* those workflows.
 

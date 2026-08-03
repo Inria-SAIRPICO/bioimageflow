@@ -1,5 +1,5 @@
-Merge Strategies
-================
+Combine Workflow Branches
+=========================
 
 When a tool needs data from multiple upstream nodes, the framework must combine
 their DataFrames. ``bioimageflow-common-tools`` provides several merge

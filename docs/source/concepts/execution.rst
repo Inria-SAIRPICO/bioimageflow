@@ -60,9 +60,12 @@ The default engine is ``engine="wetlands"`` with ``execution="parallel"``.
 It runs :class:`~bioimageflow_core.ProcessingTool` methods in isolated Wetlands
 worker environments. In that backend, ``max_workers`` and
 per-environment overrides control worker-process pools and row dispatch.
-See :doc:`../tutorials/parallelism` for ``max_workers``,
+See :doc:`../how-to/run_in_parallel` for ``max_workers``,
 :class:`~bioimageflow_core.ResourceSpec`, and per-environment overrides.
 Use ``execution="sequential"`` for single-node-at-a-time debugging.
+
+Attached and submitted Parsl execution use the same graph, cache, progress, and provenance contracts.
+See :doc:`../reference/execution/index` for execution-mode selection and the distributed reference.
 
 Storage layout
 --------------

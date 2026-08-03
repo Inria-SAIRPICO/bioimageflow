@@ -50,7 +50,8 @@ The selected executor descriptor and scheduler client commands must be available
 Workflow configuration factories and worker tool environments must also be installed or available through their declared shared source paths.
 No hostname, account, queue, credential, home directory, or scheduler command has a library default.
 
-See :doc:`/reference/parsl` for the complete submission example and :doc:`/gui/submitted_parsl` for GUI profile fields.
+Start with :doc:`/how-to/remote_cluster` for a first submission.
+The complete technical contract is in :doc:`/reference/execution/index`, and :doc:`/gui/submitted_parsl` documents integration into a BioImageFlow GUI.
 
 Companion tool packages
 -----------------------
@@ -85,7 +86,7 @@ needed by the workflows you run:
    pip install bioimageflow-restoration-tools
    pip install bioimageflow-tracking-tools
 
-The tutorials that import ``bioimageflow_io_tools`` or
+The how-to guides that import ``bioimageflow_io_tools`` or
 ``bioimageflow_segmentation_tools`` require those corresponding packages in
 addition to ``bioimageflow-common-tools``.
 

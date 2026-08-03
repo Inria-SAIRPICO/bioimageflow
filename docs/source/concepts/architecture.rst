@@ -78,7 +78,7 @@ Key classes:
   :class:`~bioimageflow_common_tools.Collect`
 
 Plus ``WorkflowSession``, ``ToolRegistry``, and the validation surface for
-GUI / platform integrators — see the :doc:`GUI / Platform Integrators tree
+BioImageFlow GUI developers — see the :doc:`BioImageFlow GUI Integration tree
 </gui/index>` for those.
 
 bioimageflow-common-tools

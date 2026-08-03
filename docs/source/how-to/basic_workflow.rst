@@ -1,7 +1,7 @@
-Basic Workflow
-==============
+Build a Basic Workflow
+======================
 
-This tutorial builds a simple linear pipeline: load images, segment them,
+This guide builds a simple linear pipeline: load images, segment them,
 then measure properties of the segmented regions.
 
 Before running

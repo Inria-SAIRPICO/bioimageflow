@@ -1,5 +1,5 @@
-Reusable and Nested Workflows
-=============================
+Build Reusable and Nested Workflows
+===================================
 
 A reusable workflow is an ordinary :class:`~bioimageflow.Workflow` with a public interface.
 Put the definition in a ``build_workflow(storage_path=...)`` factory so each materialization is fresh and receives its runtime storage explicitly.

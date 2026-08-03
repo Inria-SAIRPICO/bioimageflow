@@ -1,7 +1,7 @@
 Writing Custom Tools
 ====================
 
-BioImageFlow has two kinds of tools. This tutorial shows how to write each.
+BioImageFlow has two kinds of tools. This guide shows how to write each.
 
 Workflow-local custom tools
 ---------------------------

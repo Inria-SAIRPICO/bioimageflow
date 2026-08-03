@@ -1,8 +1,7 @@
 Reference
 =========
 
-Reference material shared by both the Workflow Authors and GUI / Platform
-Integrators trees.
+Technical reference material for workflow authors and BioImageFlow GUI developers.
 
 .. toctree::
    :maxdepth: 1
@@ -10,7 +9,7 @@ Integrators trees.
    errors
    logging
    environments
-   parsl
+   execution/index
    parsl_acceptance
    testing
    platform_development
@@ -25,4 +24,4 @@ Integrators trees.
 The exhaustive specification lives in :doc:`/specs`.
 The canonical output and cache storage layout is specified in
 :doc:`output_cache_storage`.
-The concise GUI integration deliverable is :doc:`/gui/submitted_parsl`.
+The general GUI integration guide is :doc:`/gui/submitted_parsl`.

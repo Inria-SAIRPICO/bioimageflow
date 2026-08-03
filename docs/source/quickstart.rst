@@ -12,8 +12,8 @@ state. There are three separate locations:
 
 - ``Workflow(storage_path=...)`` stores workflow outputs, cache metadata, and generated assets.
   The path is required runtime state; it is never serialized into workflow definitions.
-- ``configure_wetlands(root=...)`` stores Wetlands 2's
-  environment state: logs, debug port metadata, the bundled Pixi or
+- ``configure_wetlands(root=...)`` stores local execution state: logs,
+  debug port metadata, the bundled Pixi or
   Micromamba installation, and the isolated tool environments. Call it
   before ``Workflow.compute()``, ``Workflow.load()``, or
   ``require_tool_packages()``.
@@ -128,7 +128,7 @@ Key points:
 - ``Inputs`` fields that receive image data use
   ``Annotated[Path, ImageSpec(...)]``.
 - ``Outputs`` path fields use ``Template(...)`` defaults for **output path templates**
-  (see :doc:`tutorials/output_templating`).
+  (see :doc:`how-to/output_templating`).
 - ``process_row`` receives an :class:`~bioimageflow_core.Arguments` object with
   resolved values for every input and output field.
 
@@ -190,7 +190,7 @@ Next steps
 
 - :doc:`concepts/graph` --- nodes, column references, branching, and source
   tools
-- :doc:`tutorials/custom_tool` --- writing your own ProcessingTool and
+- :doc:`how-to/custom_tool` --- writing your own ProcessingTool and
   DataFrameTool
 - :doc:`reference/environments` --- Wetlands paths, environment
   configuration, and per-environment runtime settings

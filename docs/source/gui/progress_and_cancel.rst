@@ -78,7 +78,7 @@ Workflow.cancel() from a GUI
 :meth:`Workflow.cancel <bioimageflow.Workflow.cancel>` flips a
 thread-safe flag. The engine checks it before each node and between
 rows; in-flight rows have ``task.cancel()`` called on their Wetlands
-handle (cooperative — see :doc:`/tutorials/cancellation`).
+handle (cooperative — see :doc:`/how-to/cancellation`).
 
 The classic GUI wiring:
 
@@ -109,7 +109,7 @@ Cooperative tool-side check
 Long-running ``ProcessingTool.process_row`` implementations should opt
 in to cooperative cancellation by accepting the ``task`` keyword
 argument and checking ``task.cancel_requested`` at safe points. The
-full pattern is documented in :doc:`/tutorials/cancellation`; this
+full pattern is documented in :doc:`/how-to/cancellation`; this
 page only re-states that the engine is the side that *requests*
 cancellation — the tool is the side that *honours* it.
 

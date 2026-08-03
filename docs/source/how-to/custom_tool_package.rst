@@ -1,5 +1,5 @@
-Creating a Custom Tool Package
-==============================
+Create a Custom Tool Package
+============================
 
 Use a custom tool package when tools should be reused across workflows, versioned independently, distributed to other users, or shipped with package-owned documentation and tests.
 For one-project tools that only need to travel with a single workflow, use workflow-local custom tools from :doc:`custom_tool` instead.
