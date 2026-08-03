@@ -68,6 +68,17 @@ Attached Parsl
 .. autoclass:: ExecutorBinding
    :members:
 
+Attached execution context and results
+--------------------------------------
+
+.. autoclass:: WorkflowExecutionContext
+   :members:
+   :no-index:
+
+.. autoclass:: ExecutionProviderOutcome
+   :members:
+   :no-index:
+
 Submitted execution
 -------------------
 
@@ -86,6 +97,18 @@ Submitted execution
 .. autofunction:: submit_workflow
 
 .. autoclass:: WorkflowRun
+   :members:
+
+.. autoclass:: PreparedRunRetry
+   :members:
+
+.. autoclass:: RunRetryPlan
+   :members:
+
+.. autoclass:: RecomputeRequest
+   :members:
+
+.. autoclass:: RetryInvalidation
    :members:
 
 Remote transport and immutable preparation
@@ -143,8 +166,14 @@ Failures
 
 .. autoclass:: WorkflowRunResultUnavailableError
 
+.. autoclass:: WorkflowRunRetryError
+
+.. autoclass:: WorkflowResultDestinationError
+
 .. autoclass:: LauncherError
 
 .. autoclass:: LauncherProtocolError
 
 .. autoclass:: LauncherStateConflictError
+
+.. autoclass:: SSHTransportError

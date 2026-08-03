@@ -565,6 +565,7 @@ class _RuntimeMixin:
 
         run_id = run_context._bind(
             self,
+            target_nodes=tuple(target_nodes),
             on_success=finish_success,
             on_failure=finish_failure,
         )

@@ -92,6 +92,12 @@ Successful submission persists the exact public return before marking the run su
 The return preserves the single DataFrame or ordered mapping shape, exact output node identities, immutable record assets, declared external paths, and self-contained transient assets.
 If an explicitly pruned or corrupted immutable record is needed, ``result()`` raises :class:`~bioimageflow.WorkflowRunResultUnavailableError`.
 
+Result export and retained retries
+----------------------------------
+
+Use ``run.result(destination=...)`` for an immutable portable result bundle; the full integrity and asset-rehydration contract is in :doc:`results`.
+Use ``run.prepare_retry()`` for a non-mutating retry or recomputation preview; terminal-state rules, revision binding, restart-safe confirmation, and uncertainty handling are in :doc:`retries`.
+
 Cancellation and hard termination
 ---------------------------------
 

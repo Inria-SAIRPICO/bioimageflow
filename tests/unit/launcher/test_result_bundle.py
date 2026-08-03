@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +17,7 @@ from bioimageflow import (
     WorkerEnvironmentAttestation,
     WorkerSlotCapacity,
     Workflow,
+    WorkflowExecutionContext,
     submit_workflow,
 )
 from bioimageflow.launcher.cluster_protocol import ClusterProtocolFailure
@@ -27,6 +31,7 @@ from bioimageflow.launcher.result_download import (
     _verify_tree,
 )
 from bioimageflow.launcher.returns import load_public_return_from_bundle
+from bioimageflow.storage import canonical_json_bytes
 
 
 def _binding() -> ExecutorBinding:
@@ -100,6 +105,98 @@ def test_prepare_result_builds_reusable_self_validating_bundle(
     assert result.empty
     paths = {entry["path"] for entry in manifest["entries"]}
     assert not any(path.startswith(("launcher/", "views/", "results/")) for path in paths)
+
+
+def test_local_run_result_destination_is_atomic_and_idempotent(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    run = _successful_run(storage)
+    destination = tmp_path / "download"
+
+    first = run.result(destination=destination)
+    shutil.rmtree(run.control_dir / "return")
+    second = run.result(destination=destination)
+
+    assert isinstance(first, pd.DataFrame) and first.empty
+    assert isinstance(second, pd.DataFrame) and second.empty
+    manifest = _load_manifest(destination / "manifest.json")
+    assert manifest["run_id"] == run.id
+    (destination / "manifest.json").write_text("{}")
+    with pytest.raises(SSHTransportError, match="manifest"):
+        run.result(destination=destination)
+
+
+def test_local_export_rejects_a_different_self_consistent_bundle(
+    tmp_path: Path,
+) -> None:
+    storage = tmp_path / "storage"
+    run = _successful_run(storage)
+    destination = tmp_path / "download"
+    run.result(destination=destination)
+    manifest_path = destination / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    forged = destination / "z-forged"
+    forged.mkdir()
+    manifest["entries"].append(
+        {
+            "digest": f"sha256:{hashlib.sha256(b'').hexdigest()}",
+            "kind": "directory",
+            "path": "z-forged",
+            "size": 0,
+        }
+    )
+    body = {key: value for key, value in manifest.items() if key != "digest"}
+    manifest["digest"] = (
+        f"sha256:{hashlib.sha256(canonical_json_bytes(body)).hexdigest()}"
+    )
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True))
+
+    with pytest.raises(FileExistsError, match="another bundle"):
+        run.result(destination=destination)
+
+
+def test_attached_context_exports_the_same_result_bundle(tmp_path: Path) -> None:
+    workflow = Workflow(storage_path=tmp_path / "storage", engine="direct")
+    context = WorkflowExecutionContext()
+    result = workflow.compute(run_context=context)
+    destination = tmp_path / "attached-download"
+
+    exported = context.export_result(result, destination=destination)
+    repeated = context.export_result(result, destination=destination)
+
+    assert isinstance(exported, pd.DataFrame) and exported.empty
+    assert isinstance(repeated, pd.DataFrame) and repeated.empty
+    manifest = _load_manifest(destination / "manifest.json")
+    assert manifest["run_id"] == context.run_id
+    result["changed"] = pd.Series(dtype="int64")
+    conflicting = tmp_path / "attached-conflict"
+    with pytest.raises(SSHTransportError, match="identity"):
+        context.export_result(result, destination=conflicting)
+    assert not conflicting.exists()
+
+
+def test_attached_context_claims_one_identity_across_concurrent_exports(
+    tmp_path: Path,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path / "storage", engine="direct")
+    context = WorkflowExecutionContext()
+    result = workflow.compute(run_context=context)
+    changed = result.assign(changed=pd.Series(dtype="int64"))
+    destinations = (tmp_path / "first", tmp_path / "second")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = tuple(
+            executor.submit(context.export_result, value, destination=destination)
+            for value, destination in zip((result, changed), destinations, strict=True)
+        )
+        outcomes = []
+        for future in futures:
+            try:
+                outcomes.append(future.result())
+            except SSHTransportError as error:
+                outcomes.append(error)
+
+    assert sum(isinstance(value, SSHTransportError) for value in outcomes) == 1
+    assert sum(path.exists() for path in destinations) == 1
 
 
 def test_prepare_result_rejects_nonterminal_and_overlapping_staging(

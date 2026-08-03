@@ -55,6 +55,22 @@ class WorkflowRunResultUnavailableError(LauncherError):
     code = "workflow-run-result-unavailable"
 
 
+class WorkflowRunRetryError(LauncherError):
+    """Raised when a retained run cannot be retried safely."""
+
+    code = "workflow-run-retry-error"
+
+
+class WorkflowResultDestinationError(FileExistsError):
+    """Structured conflict for an unsafe or already-owned export destination."""
+
+    code = "workflow-result-destination-conflict"
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = dict(details or {})
+
+
 class LauncherProtocolError(LauncherError):
     """Raised when persisted launcher control state is malformed or unsafe."""
 

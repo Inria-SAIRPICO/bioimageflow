@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from bioimageflow import SSHSubmissionTransport
+from bioimageflow import RunRetryPlan, SSHSubmissionTransport
 from bioimageflow.launcher.cluster_bundle import PreparedClusterBundle
 from bioimageflow.launcher.cluster_protocol import RESPONSE_SCHEMA
 from bioimageflow.launcher.ssh import (
@@ -218,6 +218,105 @@ def test_response_loss_is_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert captured.value.code == "remote-protocol"
     assert captured.value.ambiguous is True
+
+
+@pytest.mark.parametrize(
+    ("operation", "extra_arguments", "extra_result"),
+    [
+        ("inspect", {}, {}),
+        ("refresh", {}, {}),
+        ("cancel", {"staging_root": "/cluster/staging"}, {}),
+        (
+            "read-progress",
+            {"after_sequence": 0, "limit": 500},
+            {"events": [], "has_more": False, "next_sequence": 0},
+        ),
+        (
+            "read-logs",
+            {
+                "identity": None,
+                "limit": 1024,
+                "offset": 0,
+                "snapshot_size": None,
+                "stream": "stdout",
+            },
+            {
+                "data": "",
+                "eof": True,
+                "exists": False,
+                "identity": None,
+                "next_offset": 0,
+                "reset": False,
+                "snapshot_size": 0,
+                "stream": "stdout",
+            },
+        ),
+    ],
+)
+def test_v3_retry_observations_cross_every_production_transport_path(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    extra_arguments: dict,
+    extra_result: dict,
+) -> None:
+    request_id = str(uuid.uuid4())
+    parent_id = "run_1234567812344abc923456789abcdef0"
+    retry_id = "run_1234567812344abc923456789abcdeff"
+    storage = "/cluster/results"
+    plan = RunRetryPlan(
+        parent_run_id=parent_id,
+        retry_run_id=retry_id,
+        parent_status="failed",
+        parent_status_revision=3,
+        storage_path=storage,
+        retained_submission_digest="sha256:" + "1" * 64,
+        retained_material_digest="sha256:" + "2" * 64,
+        retained_material_entries=0,
+        cache_selection_revision="sha256:" + "3" * 64,
+        recompute=None,
+        invalidations=(),
+        conflicting_run_ids=(),
+    )
+    result = {
+        "error": None,
+        "retry_plan": plan.to_dict(),
+        "run_id": retry_id,
+        "state": "prepared",
+        "status_revision": 0,
+        "storage_path": storage,
+        "submission_schema": "bioimageflow.launcher.submission.v3",
+        "status_schema": "bioimageflow.launcher.status.v1",
+        "terminal": False,
+        "updated_at": "2026-08-03T12:00:00Z",
+        **extra_result,
+    }
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "error": None,
+                    "ok": True,
+                    "request_id": request_id,
+                    "result": result,
+                    "schema": RESPONSE_SCHEMA,
+                }
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    observed = execute_cluster_command(
+        _transport(),
+        operation,
+        {"run_id": retry_id, "storage_path": storage, **extra_arguments},
+        request_id=request_id,
+    )
+
+    assert observed["retry_plan"] == plan.to_dict()
 
 
 def test_allocate_response_must_bind_exact_server_partial_path(

@@ -17,7 +17,7 @@ if not capabilities.capabilities["submitted_remote_parsl"].supported:
     disabled_reason = capabilities.capabilities["submitted_remote_parsl"].reason
 ```
 
-The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, and immutable upload preparation.
+The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, immutable upload preparation, retained-run retry and recomputation, and local or attached result export.
 Direct, Wetlands, planning, public value validation, remote-profile protocol support, resource overrides, diagnostics, and local preparation are built in.
 Attached and submitted-local execution require the `parsl` extra.
 Cluster submission requires `parsl`, `psij`, the selected PSI/J executor plugin, and the cluster agent in the remote installation.
@@ -330,6 +330,44 @@ run.cancel()
 
 Persist only the transport profile reference, cluster storage path, run ID, and last consumed sequence.
 
+## Retry and recompute confirmation
+
+Only terminal runs—`succeeded`, `failed`, `cancelled`, or `lost`—can create a child run.
+An ordinary retry reuses every valid current cache selection, including successful work published before a failure, cancellation, or lost orchestrator.
+
+Prepare first and display the immutable plan:
+
+```python
+from bioimageflow import RecomputeRequest
+
+recompute = RecomputeRequest(
+    ("analysis/segment",),
+    cascade=True,
+)
+prepared = run.prepare_retry(recompute)
+plan_payload = prepared.plan.to_dict()
+
+show_new_run_id(prepared.plan.retry_run_id)
+show_selected_cache_pointers(prepared.plan.invalidations)
+show_conflicts(prepared.plan.conflicting_run_ids)
+```
+
+Preparation is non-mutating and non-allocating.
+The plan binds the parent state revision, cluster or local storage path, retained submission digest, retained staged-material digest, complete cache-selection revision, scoped invalidations, child run ID, and its own canonical digest.
+Do not enable confirmation while `prepared.can_submit` is false.
+
+For a process or service restart, persist only `plan.to_dict()` alongside the normal run binding, reconstruct it with `RunRetryPlan.from_dict()`, reopen the parent, and call `parent.submit_retry(plan)`.
+The complete plan is also retained with the child submission and is available as `child.retry_plan`; `child.parent_id` survives local and remote reconnect.
+
+Submission rechecks the retained-material digests and parent revision under the storage allocation guard; recomputation additionally rechecks the cache-selection revision and exact invalidation preview.
+It refuses any active attached or submitted execution, durably journals removal of only the selected mutable current pointers, allocates one child run, and then starts the original retained launch configuration.
+The graph, invocation, targets, node-input overrides, custom sources, and pre-launch artifact are cloned from retained bytes rather than caller objects or original laptop paths.
+Run-owned input and bootstrap trees are copied, while verified content-addressed uploads are retained and reused by installed path.
+
+Treat stale material, stale cache selections, or new active executions as a new-confirmation condition: discard the plan and prepare another preview.
+A prepared object is single-use.
+If transport or scheduler submission is uncertain, save `plan.retry_run_id` and reconnect to that exact ID; never create or submit another plan automatically.
+
 ## Structured node failures
 
 Attached execution emits `ProgressEvent(status="failed", diagnostic=NodeFailureDiagnostic(...))`.
@@ -362,8 +400,12 @@ Do not parse exception strings, logs, or task artifact paths.
 | `plan_distributed_execution()` | No | No | No | No | None |
 | `validate_remote_execution_profile()` | On remote validation host | No | No | No | One-shot command exits |
 | `prepare_remote_submission()` | No | No | No | No | `close()` if not submitted |
+| `run.prepare_retry()` | No | No | No | No | Discard the single-use object or retain its JSON-safe plan |
 | `ParslEngine.from_config_ref()` | Yes | No | Not during construction | No | Close engine after execution |
 | `workflow.compute(engine=engine)` | According to engine | Yes | May allocate | Provider-dependent | Engine/resource-lifetime contract |
+| `context.export_result()` | No | No | No | No | None after atomic installation |
+| `WorkflowRun.result(destination=...)` | No | No | No | No | None after atomic installation |
+| `prepared_retry.submit()` or `parent.submit_retry(plan)` | On execution host | Yes | May allocate after orchestrator starts | Retained PSI/J launch may create one orchestrator job | Reconnect/cancel through child run handle |
 | `submit_workflow()` or `prepared.submit()` | On execution host | Yes | May allocate after orchestrator starts | PSI/J launch creates one orchestrator job | Reconnect/cancel through run handle |
 
 ## Wire-format examples
@@ -396,6 +438,40 @@ Capability, validation, plan, diagnostic, and preparation-manifest values are JS
 
 Consumers must use each public `from_dict()` method instead of accepting unknown keys or guessing future schema versions.
 
+A retry preview uses `bioimageflow.run_retry_plan.v1` and contains only JSON-safe paths, revisions, digests, selected record identities, and run IDs.
+It contains no secret value or resolved credential.
+The nested `bioimageflow.recompute_request.v1` records scoped node paths and the downstream-cascade choice.
+
+```json
+{
+  "schema": "bioimageflow.run_retry_plan.v1",
+  "parent_run_id": "run_1234567812344abc923456789abcdef0",
+  "retry_run_id": "run_2234567812344abc923456789abcdef0",
+  "parent_status": "failed",
+  "parent_status_revision": 7,
+  "storage_path": "/cluster/project/results",
+  "retained_submission_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "retained_material_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "retained_material_entries": 12,
+  "cache_selection_revision": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "recompute": {
+    "schema": "bioimageflow.recompute_request.v1",
+    "node_paths": ["analysis/segment"],
+    "cascade": true
+  },
+  "invalidations": [
+    {
+      "node_path": "analysis/segment",
+      "result_key": "6666666666666666666666666666666666666666666666666666666666666666",
+      "record_id": "7777777777777777777777777777777777777777777777777777777777777777",
+      "selection_status": "selected"
+    }
+  ],
+  "conflicting_run_ids": [],
+  "digest": "sha256:0c53401c0a535d9a85ba56ed9da5aee2a968d03b1801899f654ae4a482db005a"
+}
+```
+
 ## Stable execution behavior
 
 Direct and Wetlands execution use the same `Workflow.compute()` entry point and progress model.
@@ -406,10 +482,14 @@ Resource placement does not invalidate cache identity.
 ## Results
 
 Require the user to choose an explicit local destination.
-`run.result(destination=...)` downloads into a private sibling directory, verifies the complete immutable bundle, and atomically installs the destination.
+Both local and remote submitted handles use `run.result(destination=...)` to create the same immutable bundle in a private sibling, verify it completely, and atomically install the destination.
 A destination may be reused only when it is the exact verified bundle for the same run.
 Record-owned and return-owned assets become local paths beneath the destination, including downloaded `SharedArray` backing data.
 Declared external cluster paths remain cluster `Path` values and should be labelled as unavailable locally rather than guessed from their spelling.
+
+For Direct, Wetlands, or attached Parsl, create a `WorkflowExecutionContext`, pass it to `workflow.compute(..., run_context=context)`, and call `context.export_result(result, destination=...)` after success.
+This is a process-local snapshot at export time, so the GUI must call it before mutating the returned DataFrame or deleting transient files.
+Repeating the call for the same installed destination is idempotent.
 
 ## Stable error actions
 
@@ -426,5 +506,7 @@ Declared external cluster paths remain cluster `Path` values and should be label
 | `WorkflowCancelledError` | Show normal cancellation. |
 | `WorkflowRunLostError` | Explain that backend termination was confirmed without proof of normal cleanup. |
 | `WorkflowRunResultUnavailableError`, `result-integrity` | Keep the destination uninstalled and report pruned, missing, corrupt, interrupted, or tampered immutable result data. |
+| `WorkflowRunRetryError`, `remote-retry-conflict` | Keep the parent unchanged; show active-run, stale-revision, or changed-material details and require a new preview. |
+| `remote-retry-submission-uncertain` | Retain the planned child run ID and reconnect; never submit another retry automatically. |
 
 The complete API and operational contract are documented in [Execution Reference](../reference/execution/index) and [Output Cache and Storage Contract](../reference/output_cache_storage).

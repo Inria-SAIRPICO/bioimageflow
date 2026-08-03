@@ -57,11 +57,13 @@ class WorkflowExecutionContext:
         self._cancel_event = threading.Event()
         self._lock = threading.RLock()
         self._binding: object | None = None
+        self._target_nodes: tuple[str, ...] = ()
         self._success_callback: Callable[[], None] | None = None
         self._failure_callback: Callable[[BaseException], None] | None = None
         self._state = "new"
         self._execution_outcomes: dict[str, ExecutionProviderOutcome] = {}
         self._launcher_storage_path: Path | None = None
+        self._result_export_digest: str | None = None
 
     @property
     def cancel_requested(self) -> bool:
@@ -88,6 +90,18 @@ class WorkflowExecutionContext:
     def request_cancel(self) -> None:
         """Request cancellation without affecting any other execution."""
         self._cancel_event.set()
+
+    def export_result(self, value: object, *, destination: str | Path) -> object:
+        """Snapshot and export this successful attached result as a verified bundle."""
+        from bioimageflow.launcher.attached_result import export_attached_result
+
+        return export_attached_result(self, value, destination=destination)
+
+    def _remember_result_export_digest(self, digest: str) -> None:
+        with self._lock:
+            if self._result_export_digest not in {None, digest}:
+                raise RuntimeError("Attached result export identity changed.")
+            self._result_export_digest = digest
 
     def _authorize_launcher_reservation(self, storage_path: str | Path) -> None:
         """Authorize canonical creation for an already reserved submitted run."""
@@ -198,6 +212,7 @@ class WorkflowExecutionContext:
         *,
         on_success: Callable[[], None],
         on_failure: Callable[[BaseException], None],
+        target_nodes: tuple[str, ...] = (),
     ) -> str:
         with self._lock:
             if self._state != "new" or self._binding is not None:
@@ -205,6 +220,7 @@ class WorkflowExecutionContext:
                     "WorkflowExecutionContext is already bound or finalized."
                 )
             self._binding = binding
+            self._target_nodes = target_nodes
             self._success_callback = on_success
             self._failure_callback = on_failure
             self._state = "running"

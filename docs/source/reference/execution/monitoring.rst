@@ -110,3 +110,22 @@ Logs
 ``run.logs()`` returns the currently persisted orchestrator stdout and stderr for human troubleshooting.
 Remote reading assembles stable byte snapshots before decoding replacement text.
 Logs are not a structured progress, diagnostic, status, or result API.
+
+Attached result export
+----------------------
+
+An attached Direct, Wetlands, or Parsl execution can produce the same run-specific verified result bundle as submitted execution:
+
+.. code-block:: python
+
+   context = WorkflowExecutionContext()
+   result = workflow.compute(target, run_context=context)
+   exported = context.export_result(
+       result,
+       destination=downloads / context.run_id,
+   )
+
+The successful context retains the run ID, target binding, and engine-neutral provider outcomes needed to distinguish record-owned, return-owned, and external assets.
+Export uses a private sibling, verifies the complete bundle, and installs the destination atomically.
+It creates no new workflow execution and allocates no engine resources.
+Attached export snapshots the supplied successful result when ``export_result()`` is called, so it is process-local and should run before the caller mutates the DataFrame or removes transient assets.

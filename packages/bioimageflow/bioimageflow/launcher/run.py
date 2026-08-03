@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
@@ -21,6 +21,9 @@ from .repository import LauncherRepository
 from .returns import load_public_return
 from .state import RevisionConflictError
 from .types import LaunchConfig, launch_config_from_dict
+
+if TYPE_CHECKING:
+    from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
 
 
 def _terminate_backend(control: LauncherRunControl, backend: str) -> bool:
@@ -244,11 +247,49 @@ class WorkflowRun:
                 continue
         raise RuntimeError("Cancellation lost repeated concurrent status updates.")
 
-    def result(self) -> Any:
+    @property
+    def parent_id(self) -> str | None:
+        """Return the retained parent run ID for a retry, if any."""
+        value = self._control.read_submission().get("parent_run_id")
+        return str(value) if value is not None else None
+
+    def prepare_retry(
+        self,
+        recompute: "RecomputeRequest | None" = None,
+    ) -> "PreparedRunRetry[WorkflowRun]":
+        """Prepare a single-use revision-bound retry of this terminal run."""
+        from .retry import PreparedRunRetry, prepare_retry_plan
+
+        plan = prepare_retry_plan(self, recompute)
+        return PreparedRunRetry(plan, lambda: self.submit_retry(plan))
+
+    def submit_retry(self, plan: "RunRetryPlan") -> "WorkflowRun":
+        """Submit a serialized retry plan after reconnect or confirmation."""
+        from .retry import RunRetryPlan, submit_retry_plan
+
+        if type(plan) is not RunRetryPlan:
+            raise TypeError("plan must be a RunRetryPlan.")
+        return submit_retry_plan(self, plan)
+
+    @property
+    def retry_plan(self) -> "RunRetryPlan | None":
+        """Return this child run's durable retry provenance, if present."""
+        from .retry import RunRetryPlan
+
+        value = self._control.read_submission().get("retry_plan")
+        return None if value is None else RunRetryPlan.from_dict(value)
+
+    def result(self, *, destination: Path | str | None = None) -> Any:
         """Return the exact persisted public result or its stable state error."""
         self.refresh()
         state = self.status
         if state == "succeeded":
+            if destination is not None:
+                if not isinstance(destination, (str, Path)) or not str(destination):
+                    raise TypeError("destination must be a non-empty path or None.")
+                from .result_download import export_local_result
+
+                return export_local_result(self, Path(destination))
             return load_public_return(
                 self.control_dir,
                 self._storage_path,

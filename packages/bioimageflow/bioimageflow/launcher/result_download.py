@@ -16,6 +16,11 @@ from typing import Any, Mapping
 from bioimageflow.storage import canonical_json_bytes, validate_relative_posix_path
 from bioimageflow.storage.dataframe_transport import file_sha256
 
+from .cluster_protocol import ClusterProtocolFailure
+from .errors import (
+    WorkflowResultDestinationError,
+    WorkflowRunResultUnavailableError,
+)
 from .return_schema import validate_return_manifest_structure
 from .returns import load_public_return_from_bundle
 from .result_bundle import MAX_RESULT_BYTES, MAX_RESULT_DEPTH, MAX_RESULT_ENTRIES
@@ -31,6 +36,26 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _EMPTY_DIGEST = f"sha256:{hashlib.sha256(b'').hexdigest()}"
 RESULT_BUNDLE_SCHEMA = "bioimageflow.cluster.result-bundle.v1"
 MAX_RESULT_MANIFEST_BYTES = 64 * 1024 * 1024
+_LOCAL_EXPORT_RECEIPT_SCHEMA = "bioimageflow.launcher.result-export.v1"
+
+
+def _validate_destination_parent(destination: Path) -> None:
+    parent = destination.parent
+    current = Path(parent.anchor)
+    for part in parent.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except OSError as exc:
+            raise SSHTransportError(
+                "unsafe-destination",
+                "Every result destination parent must already exist.",
+            ) from exc
+        if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+            raise SSHTransportError(
+                "unsafe-destination",
+                "Every result destination parent must be a real directory.",
+            )
 
 
 def _run_sftp(
@@ -369,14 +394,18 @@ def download_result(
         )
     if destination.exists():
         if destination.is_symlink() or not destination.is_dir():
-            raise FileExistsError("Result destination already exists.")
+            raise WorkflowResultDestinationError(
+                "Result destination already exists."
+            )
         manifest = _load_manifest(destination / "manifest.json")
         if (
             manifest["digest"] != digest
             or manifest["run_id"] != response["run_id"]
             or manifest["storage_path"] != response["storage_path"]
         ):
-            raise FileExistsError("Result destination belongs to another bundle.")
+            raise WorkflowResultDestinationError(
+                "Result destination belongs to another bundle."
+            )
         assets = _verify_tree(destination, manifest)
         return load_public_return_from_bundle(
             destination,
@@ -422,7 +451,9 @@ def download_result(
         try:
             os.rename(candidate, destination)
         except FileExistsError:
-            raise FileExistsError("Result destination appeared during download.")
+            raise WorkflowResultDestinationError(
+                "Result destination appeared during download."
+            )
         return load_public_return_from_bundle(
             destination,
             manifest["return_manifest"],
@@ -434,3 +465,162 @@ def download_result(
 
             shutil.rmtree(candidate)
         raise
+
+
+def export_local_result(
+    run: Any,
+    destination: Path,
+    *,
+    expected_digest: str | None = None,
+) -> Any:
+    """Build, verify, and atomically install one local result bundle."""
+    from .result_bundle import _build_candidate, _remove_candidate
+
+    destination = Path(destination).absolute()
+    _validate_destination_parent(destination)
+    parent = destination.parent
+    retained_digest = _load_local_export_receipt(run)
+    if (
+        expected_digest is not None
+        and retained_digest is not None
+        and expected_digest != retained_digest
+    ):
+        raise SSHTransportError(
+            "result-integrity",
+            "Expected result identity conflicts with the retained run receipt.",
+        )
+    expected_digest = expected_digest or retained_digest
+    if destination.exists() and expected_digest is not None:
+        return _load_existing_local_result(
+            run,
+            destination,
+            expected_digest=expected_digest,
+        )
+    candidate = parent / f".{destination.name}.{uuid.uuid4().hex}.partial"
+    candidate.mkdir(mode=0o700)
+    try:
+        try:
+            manifest = _build_candidate(run, candidate)
+        except ClusterProtocolFailure as exc:
+            if exc.code == "result-unavailable":
+                raise WorkflowRunResultUnavailableError(
+                    "The successful workflow return is unavailable.",
+                    details={"run_id": run.id},
+                ) from exc
+            raise SSHTransportError(exc.code, exc.message) from exc
+        loaded = _load_manifest(candidate / "manifest.json")
+        if loaded != manifest:
+            raise SSHTransportError(
+                "result-integrity",
+                "Built result manifest changed before installation.",
+            )
+        assets = _verify_tree(candidate, loaded)
+        if expected_digest is not None and loaded["digest"] != expected_digest:
+            raise SSHTransportError(
+                "result-integrity",
+                "Built result no longer matches its retained export identity.",
+            )
+        _install_local_export_receipt(run, loaded["digest"])
+        if destination.exists():
+            return _load_existing_local_result(
+                run,
+                destination,
+                expected_digest=loaded["digest"],
+            )
+        try:
+            os.rename(candidate, destination)
+        except FileExistsError:
+            raise WorkflowResultDestinationError(
+                "Result destination appeared during export."
+            )
+        return load_public_return_from_bundle(
+            destination,
+            loaded["return_manifest"],
+            {
+                index: destination / path.relative_to(candidate)
+                for index, path in assets.items()
+            },
+        )
+    finally:
+        if candidate.exists() and not candidate.is_symlink():
+            _remove_candidate(candidate)
+
+
+def _load_existing_local_result(
+    run: Any,
+    destination: Path,
+    *,
+    expected_digest: str,
+) -> Any:
+    """Verify and load an already installed local bundle by expected identity."""
+    if destination.is_symlink() or not destination.is_dir():
+        raise WorkflowResultDestinationError("Result destination already exists.")
+    manifest = _load_manifest(destination / "manifest.json")
+    if (
+        manifest["digest"] != expected_digest
+        or manifest["run_id"] != run.id
+        or manifest["storage_path"] != run._storage_path.as_posix()
+    ):
+        raise WorkflowResultDestinationError(
+            "Result destination belongs to another bundle."
+        )
+    assets = _verify_tree(destination, manifest)
+    return load_public_return_from_bundle(
+        destination,
+        manifest["return_manifest"],
+        assets,
+    )
+
+
+def _local_export_receipt_path(run: Any) -> Path:
+    return Path(run.control_dir) / "result_export.json"
+
+
+def _load_local_export_receipt(run: Any) -> str | None:
+    path = _local_export_receipt_path(run)
+    if not path.exists():
+        return None
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("receipt is not a regular file")
+        value = json.loads(path.read_text())
+    except Exception as exc:
+        raise SSHTransportError(
+            "result-integrity",
+            "Retained local result export identity is invalid.",
+        ) from exc
+    if (
+        type(value) is not dict
+        or set(value) != {"bundle_digest", "run_id", "schema", "storage_path"}
+        or value["schema"] != _LOCAL_EXPORT_RECEIPT_SCHEMA
+        or value["run_id"] != run.id
+        or value["storage_path"] != run._storage_path.as_posix()
+        or type(value["bundle_digest"]) is not str
+        or _DIGEST.fullmatch(value["bundle_digest"]) is None
+    ):
+        raise SSHTransportError(
+            "result-integrity",
+            "Retained local result export identity is invalid.",
+        )
+    return str(value["bundle_digest"])
+
+
+def _install_local_export_receipt(run: Any, digest: str) -> None:
+    from .repository import _atomic_create_json
+
+    payload = {
+        "bundle_digest": digest,
+        "run_id": run.id,
+        "schema": _LOCAL_EXPORT_RECEIPT_SCHEMA,
+        "storage_path": run._storage_path.as_posix(),
+    }
+    path = _local_export_receipt_path(run)
+    try:
+        _atomic_create_json(path, payload)
+    except FileExistsError:
+        pass
+    if _load_local_export_receipt(run) != digest:
+        raise SSHTransportError(
+            "result-integrity",
+            "Retained local result export identity conflicts with this bundle.",
+        )

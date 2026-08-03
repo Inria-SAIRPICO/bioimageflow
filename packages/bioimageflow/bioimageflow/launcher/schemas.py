@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 SUBMISSION_SCHEMA = "bioimageflow.launcher.submission.v2"
+RETRY_SUBMISSION_SCHEMA = "bioimageflow.launcher.submission.v3"
 STATUS_SCHEMA = "bioimageflow.launcher.status.v1"
 CLAIM_SCHEMA = "bioimageflow.launcher.claim.v1"
 PROGRESS_SCHEMA = "bioimageflow.launcher.progress.v1"
@@ -88,6 +89,10 @@ SUBMISSION_FIELDS = frozenset(
         "protocol_versions",
     }
 )
+RETRY_SUBMISSION_FIELDS = SUBMISSION_FIELDS | {
+    "parent_run_id",
+    "retry_plan",
+}
 STATUS_FIELDS = frozenset(
     {
         "schema",

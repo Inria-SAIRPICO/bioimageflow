@@ -265,6 +265,25 @@ def _remove_current_selection(
     *,
     node_name: str,
 ) -> InvalidatedSelection | None:
+    selection = _inspect_current_selection(
+        storage,
+        result_key,
+        node_name=node_name,
+    )
+    if selection is None:
+        return None
+    current_path = storage.result_dir(result_key) / "current.json"
+    current_path.unlink()
+    return selection
+
+
+def _inspect_current_selection(
+    storage: "Storage",
+    result_key: str,
+    *,
+    node_name: str,
+) -> InvalidatedSelection | None:
+    """Read one current cache selection without changing it."""
     from bioimageflow.storage import CacheCorruptionError
 
     current_path = storage.result_dir(result_key) / "current.json"
@@ -282,7 +301,6 @@ def _remove_current_selection(
                 selected_record_id = raw["record_id"]
         except (OSError, json.JSONDecodeError):
             selected_record_id = None
-    current_path.unlink()
     return InvalidatedSelection(
         node_name=node_name,
         result_key=result_key,

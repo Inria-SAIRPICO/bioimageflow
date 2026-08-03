@@ -68,6 +68,8 @@ Reference map
    attached_parsl
    routing
    submitted
+   retries
+   results
    remote_cluster
    monitoring
    api

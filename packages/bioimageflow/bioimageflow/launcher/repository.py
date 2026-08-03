@@ -449,6 +449,7 @@ class LauncherRepository:
         *,
         backend: str,
         candidate_dir: str | Path | None = None,
+        allocation_guard_held: bool = False,
     ) -> LauncherRunControl:
         """Atomically install one complete revision-zero control directory.
 
@@ -456,6 +457,9 @@ class LauncherRepository:
         Allocation consumes it, making staged inputs and metadata visible together.
         """
         from .control import LauncherRunControl
+
+        if type(allocation_guard_held) is not bool:
+            raise TypeError("allocation_guard_held must be a bool.")
 
         validated = validate_submission(submission)
         run_id = validated["run_id"]
@@ -486,6 +490,8 @@ class LauncherRepository:
                 "local_process_exit.json",
                 "logs",
                 "return",
+                "result_export.json",
+                "retry_transaction.json",
                 ".control.guard",
             ):
                 if _path_exists(candidate / protected):
@@ -524,13 +530,19 @@ class LauncherRepository:
                 os.close(descriptor)
             (candidate / "claims").mkdir(mode=0o700)
             _sync_directory(candidate)
-            with self.allocation_guard():
+            def install() -> None:
                 if _path_exists(control_dir) or _path_exists(canonical_dir):
                     raise RunAlreadyExistsError(
                         f"Run ID {run_id!r} already exists in a run namespace."
                     )
                 candidate.rename(control_dir)
                 _sync_directory(self.runs_root)
+
+            if allocation_guard_held:
+                install()
+            else:
+                with self.allocation_guard():
+                    install()
         except BaseException:
             if candidate.exists() and not candidate.is_symlink():
                 shutil.rmtree(candidate)

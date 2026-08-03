@@ -25,9 +25,11 @@ OPERATIONS = frozenset(
         "commit-upload",
         "inspect",
         "prepare-result",
+        "prepare-retry",
         "read-logs",
         "read-progress",
         "refresh",
+        "retry",
         "submit",
         "validate-profile",
     }

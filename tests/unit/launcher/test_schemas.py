@@ -10,6 +10,7 @@ from bioimageflow import NodeFailureDiagnostic
 from bioimageflow.launcher.schemas import (
     ERROR_SCHEMA,
     PROGRESS_SCHEMA,
+    RETRY_SUBMISSION_SCHEMA,
     STATUS_SCHEMA,
     LauncherSchemaError,
     new_run_id,
@@ -19,6 +20,7 @@ from bioimageflow.launcher.schemas import (
     validate_status,
     validate_submission,
 )
+from bioimageflow import RunRetryPlan
 from tests.unit.launcher.helpers import (
     backend_progress_payload,
     launcher_submission,
@@ -81,6 +83,34 @@ def _error(run_id: str, **updates: Any) -> dict[str, Any]:
     }
     payload.update(updates)
     return payload
+
+
+def test_retry_submission_records_one_distinct_parent(tmp_path: Path) -> None:
+    run_id = new_run_id()
+    parent_id = new_run_id()
+    payload = launcher_submission(tmp_path, run_id)
+    payload["schema"] = RETRY_SUBMISSION_SCHEMA
+    payload["parent_run_id"] = parent_id
+    payload["retry_plan"] = RunRetryPlan(
+        parent_run_id=parent_id,
+        retry_run_id=run_id,
+        parent_status="failed",
+        parent_status_revision=3,
+        storage_path=tmp_path.resolve().as_posix(),
+        retained_submission_digest="sha256:" + "0" * 64,
+        retained_material_digest="sha256:" + "1" * 64,
+        retained_material_entries=2,
+        cache_selection_revision="sha256:" + "2" * 64,
+        recompute=None,
+        invalidations=(),
+        conflicting_run_ids=(),
+    ).to_dict()
+
+    assert validate_submission(payload)["parent_run_id"] == parent_id
+
+    payload["parent_run_id"] = run_id
+    with pytest.raises(LauncherSchemaError, match="differ"):
+        validate_submission(payload)
 
 
 @pytest.mark.parametrize(

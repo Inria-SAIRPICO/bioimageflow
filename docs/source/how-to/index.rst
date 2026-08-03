@@ -15,6 +15,8 @@ Start with a basic workflow, then choose the guide that matches how or where you
    merge_strategies
    unified_workflows
    cancellation
+   retry_submitted_run
+   export_results
    shared_memory
    custom_tool_package
    tool_packaging

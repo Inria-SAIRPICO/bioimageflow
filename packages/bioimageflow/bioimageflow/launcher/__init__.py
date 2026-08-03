@@ -10,9 +10,12 @@ from .errors import (
     WorkflowRunLostError,
     WorkflowRunNotReadyError,
     WorkflowRunResultUnavailableError,
+    WorkflowRunRetryError,
+    WorkflowResultDestinationError,
 )
 from .run import WorkflowRun
 from .remote_run import RemoteWorkflowRun
+from .ssh import SSHTransportError
 from .submission import submit_workflow
 from .prepared import (
     PreparedRemoteSubmission,
@@ -26,6 +29,12 @@ from .node_inputs import (
     RemoteNodePathInput,
     RemoteNodePathPlan,
     inspect_remote_node_paths,
+)
+from .retry import (
+    PreparedRunRetry,
+    RecomputeRequest,
+    RetryInvalidation,
+    RunRetryPlan,
 )
 from .profile_validation import (
     RemoteProfileDiagnostic,
@@ -52,20 +61,27 @@ __all__ = [
     "ParslConfigRef",
     "PreLaunchScript",
     "PreparedRemoteSubmission",
+    "PreparedRunRetry",
     "PreparedSubmissionEntry",
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
+    "RecomputeRequest",
     "RemoteNodePathInput",
     "RemoteNodePathPlan",
     "RemoteProfileDiagnostic",
     "RemoteProfileValidationReport",
     "RemoteWorkflowRun",
+    "RetryInvalidation",
+    "RunRetryPlan",
     "SSHSubmissionTransport",
+    "SSHTransportError",
+    "WorkflowResultDestinationError",
     "WorkflowRun",
     "WorkflowRunFailedError",
     "WorkflowRunLostError",
     "WorkflowRunNotReadyError",
     "WorkflowRunResultUnavailableError",
+    "WorkflowRunRetryError",
     "inspect_remote_node_paths",
     "prepare_remote_submission",
     "submit_workflow",

@@ -16,7 +16,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bioimageflow import NodeResourceOverrides, ProgressEvent, Workflow
+from bioimageflow import (
+    NodeResourceOverrides,
+    ProgressEvent,
+    Workflow,
+    WorkflowExecutionContext,
+)
 from bioimageflow.engine import DefaultEngine, SequentialEngine, WorkflowCancelledError
 
 from tests.testkit.integration_tools import FileLoader
@@ -78,14 +83,24 @@ class TestRowParallelism:
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
-            df = wf.compute(out)
+            context = WorkflowExecutionContext()
+            df = wf.compute(out, run_context=context)
+            exported = context.export_result(
+                df,
+                destination=workspace / "exported",
+            )
 
             assert len(df) == 3
+            assert len(exported) == 3
             assert "output_path" in df.columns
             assert "value" in df.columns
             for _, row in df.iterrows():
                 assert Path(row["output_path"]).exists()
                 assert row["value"] == 42.0
+            assert all(
+                Path(path).is_relative_to(workspace / "exported")
+                for path in exported["output_path"]
+            )
 
     def test_multi_worker_same_results(self, workspace):
         """max_workers=4 produces the same results as max_workers=1."""

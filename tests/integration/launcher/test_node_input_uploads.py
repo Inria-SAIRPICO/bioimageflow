@@ -14,6 +14,7 @@ from bioimageflow import (
     deserialize_constant,
 )
 from bioimageflow.launcher.cluster_agent import run_agent
+from bioimageflow.launcher.artifacts import build_error_payload
 from bioimageflow.launcher.cluster_bundle import prepare_cluster_bundle
 from bioimageflow.launcher.cluster_protocol import request
 from bioimageflow.launcher.inputs import decode_typed_constant
@@ -135,6 +136,53 @@ def test_nested_node_upload_becomes_immutable_effective_graph_path(
     assert (installed / "image.tif").read_bytes() == b"validated pixels"
     assert "objects/sha256" in installed.as_posix()
     assert source.as_posix() not in json.dumps(submission["workflow"])
+
+    parent_control = LauncherRepository(workflow.storage_path).open(submitted["run_id"])
+    parent_control.commit_terminal(
+        expected_revision=0,
+        expected_claim_epoch=None,
+        new_state="failed",
+        error_payload=build_error_payload(
+            submitted["run_id"],
+            code="test-failure",
+            error=RuntimeError("retry me"),
+        ),
+    )
+    retry_plan = _call(
+        "prepare-retry",
+        {
+            "run_id": submitted["run_id"],
+            "storage_path": workflow.storage_path.as_posix(),
+            "recompute": None,
+        },
+        str(uuid.uuid4()),
+    )
+    retried = _call(
+        "retry",
+        {
+            "storage_path": workflow.storage_path.as_posix(),
+            "plan": retry_plan,
+        },
+        str(uuid.uuid4()),
+    )
+    retried_submission = LauncherRepository(workflow.storage_path).open(
+        retried["run_id"]
+    ).read_submission()
+    retried_root = retried_submission["workflow"]["payload"]
+    retried_nested = next(
+        node for node in retried_root["nodes"] if node["name"] == "nested"
+    )
+    retried_files = next(
+        node
+        for node in retried_nested["workflow"]["nodes"]
+        if node["name"] == "files"
+    )
+    retried_installed = deserialize_constant(retried_files["constants"]["path"])
+
+    assert retried_submission["parent_run_id"] == submitted["run_id"]
+    assert retried_installed == installed
+    assert (retried_installed / "image.tif").read_bytes() == b"validated pixels"
+    assert launches == [submitted["run_id"], retried["run_id"]]
 
 
 def test_nested_local_uploads_in_root_path_list_are_resolved_in_order(

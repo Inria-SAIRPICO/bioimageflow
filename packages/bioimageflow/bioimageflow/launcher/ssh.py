@@ -115,10 +115,20 @@ _RUN_STATES = {
 _OBSERVATION_ERROR_FIELDS = {"code", "exception_type", "message", "run_id"}
 
 
+def _exact_observation_fields(result: Mapping[str, Any]) -> set[str]:
+    fields = set(_OBSERVATION_FIELDS)
+    if result.get("submission_schema") == "bioimageflow.launcher.submission.v3":
+        fields.add("retry_plan")
+    return fields
+
+
 def _validate_observation(
     result: Mapping[str, Any],
     arguments: Mapping[str, Any],
 ) -> None:
+    from .retry_transport import validate_retry_observation
+
+    validate_retry_observation(result)
     if (
         not _OBSERVATION_FIELDS.issubset(result)
         or result["run_id"] != arguments.get("run_id")
@@ -129,7 +139,11 @@ def _validate_observation(
         or type(result["terminal"]) is not bool
         or result["terminal"]
         != (result["state"] in {"succeeded", "failed", "cancelled", "lost"})
-        or result["submission_schema"] != "bioimageflow.launcher.submission.v2"
+        or result["submission_schema"]
+        not in {
+            "bioimageflow.launcher.submission.v2",
+            "bioimageflow.launcher.submission.v3",
+        }
         or result["status_schema"] != "bioimageflow.launcher.status.v1"
         or type(result["updated_at"]) is not str
         or not result["updated_at"]
@@ -277,6 +291,11 @@ def _validate_success_result(
     transport: SSHSubmissionTransport,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    from .retry_transport import validate_retry_result
+
+    retry_result = validate_retry_result(operation, result, arguments)
+    if retry_result is not None:
+        return retry_result
     if operation == "validate-profile":
         from .profile_validation import RemoteProfileValidationReport
 
@@ -313,8 +332,9 @@ def _validate_success_result(
         "cancel",
     }:
         _validate_observation(result, arguments)
+        observation_fields = _exact_observation_fields(result)
         if operation in {"inspect", "refresh", "cancel"}:
-            if set(result) != _OBSERVATION_FIELDS:
+            if set(result) != observation_fields:
                 raise SSHTransportError(
                     "remote-protocol",
                     "Cluster observation response schema is invalid.",
@@ -322,7 +342,7 @@ def _validate_success_result(
                 )
             return result
         if operation == "read-progress":
-            expected = _OBSERVATION_FIELDS | {
+            expected = observation_fields | {
                 "events",
                 "has_more",
                 "next_sequence",
@@ -335,7 +355,7 @@ def _validate_success_result(
                 )
             _validate_progress_result(result, arguments)
             return result
-        expected = _OBSERVATION_FIELDS | {
+        expected = observation_fields | {
             "data",
             "eof",
             "exists",

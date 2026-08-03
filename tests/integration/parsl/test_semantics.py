@@ -19,6 +19,7 @@ from bioimageflow import (
     ParslTaskPolicy,
     WorkerEnvironmentAttestation,
     Workflow,
+    WorkflowExecutionContext,
 )
 from bioimageflow.cache import compute_env_hash
 from bioimageflow.parsl.startup import CORE_REQUIREMENT
@@ -101,8 +102,10 @@ def test_real_parsl_directory_asset_cache_and_output_view(
         parsl_config=_thread_config(tmp_path),
         executor_bindings={"threads": _binding()},
     )
+    context = WorkflowExecutionContext()
 
-    first = workflow.compute(writer, engine=engine)
+    first = workflow.compute(writer, engine=engine, run_context=context)
+    exported = context.export_result(first, destination=tmp_path / "exported")
     second = workflow.compute(writer, engine=engine)
 
     first_path = Path(first.loc["0", "directory"])
@@ -110,6 +113,9 @@ def test_real_parsl_directory_asset_cache_and_output_view(
     assert first_path == second_path
     assert first_path.name == "dataset_0.zarr"
     assert first_path.joinpath("value.txt").read_text() == "12"
+    exported_path = Path(exported.loc["0", "directory"])
+    assert exported_path.is_relative_to(tmp_path / "exported")
+    assert exported_path.joinpath("value.txt").read_text() == "12"
     assert (
         tmp_path
         / "outputs"

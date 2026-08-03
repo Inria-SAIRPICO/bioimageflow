@@ -8,8 +8,13 @@ import pytest
 import bioimageflow.launcher.ssh as ssh_module
 from bioimageflow import (
     NodeFailureDiagnostic,
+    PSIJSubmissionUncertainError,
     RemoteWorkflowRun,
+    RecomputeRequest,
+    RunRetryPlan,
     SSHSubmissionTransport,
+    SSHTransportError,
+    WorkflowRunRetryError,
 )
 
 
@@ -25,10 +30,10 @@ def _transport() -> SSHSubmissionTransport:
     )
 
 
-def _observation(state: str = "running") -> dict:
+def _observation(state: str = "running", run_id: str = RUN_ID) -> dict:
     return {
         "error": None,
-        "run_id": RUN_ID,
+        "run_id": run_id,
         "state": state,
         "status_revision": 2,
         "storage_path": STORAGE,
@@ -207,6 +212,115 @@ def test_cancel_reuses_mutation_retry_path(
     assert run.status == "cancelled"
     assert captured["operation"] == "cancel"
     assert captured["arguments"]["staging_root"] == "/cluster/staging"
+
+
+def test_remote_retry_uses_public_preview_and_idempotent_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retry_id = "run_1234567812344abc923456789abcdeff"
+    plan = RunRetryPlan(
+        parent_run_id=RUN_ID,
+        retry_run_id=retry_id,
+        parent_status="failed",
+        parent_status_revision=4,
+        storage_path=STORAGE,
+        retained_submission_digest="sha256:" + "1" * 64,
+        retained_material_digest="sha256:" + "2" * 64,
+        retained_material_entries=3,
+        cache_selection_revision="sha256:" + "0" * 64,
+        recompute=RecomputeRequest(("nested/tool",), cascade=True),
+        invalidations=(),
+        conflicting_run_ids=(),
+    )
+    calls: list[tuple[str, dict]] = []
+
+    def execute(transport, operation, arguments, *, request_id):
+        del transport, request_id
+        calls.append((operation, arguments))
+        if operation == "inspect":
+            return _observation("failed")
+        assert operation == "prepare-retry"
+        return plan.to_dict()
+
+    def retry(transport, operation, arguments, request_id):
+        del transport, request_id
+        calls.append((operation, arguments))
+        return {
+            **_observation("prepared", retry_id),
+            "retry_plan": plan.to_dict(),
+            "submission_schema": "bioimageflow.launcher.submission.v3",
+        }
+
+    monkeypatch.setattr(ssh_module, "execute_cluster_command", execute)
+    monkeypatch.setattr(ssh_module, "_retry_mutation", retry)
+    run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
+
+    prepared = run.prepare_retry(plan.recompute)
+    retried = prepared.submit()
+
+    assert retried.id == retry_id
+    assert retried.parent_id == RUN_ID
+    reopened = RemoteWorkflowRun(
+        _transport(),
+        STORAGE,
+        retry_id,
+        observation={
+            **_observation("prepared", retry_id),
+            "retry_plan": plan.to_dict(),
+            "submission_schema": "bioimageflow.launcher.submission.v3",
+        },
+    )
+    assert reopened.parent_id == RUN_ID
+    assert reopened.retry_plan == plan
+    assert calls[-1][0] == "retry"
+    assert calls[-1][1]["plan"] == plan.to_dict()
+
+
+def test_remote_retry_translates_public_conflict_and_uncertainty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retry_id = "run_1234567812344abc923456789abcdeff"
+    plan = RunRetryPlan(
+        parent_run_id=RUN_ID,
+        retry_run_id=retry_id,
+        parent_status="failed",
+        parent_status_revision=4,
+        storage_path=STORAGE,
+        retained_submission_digest="sha256:" + "1" * 64,
+        retained_material_digest="sha256:" + "2" * 64,
+        retained_material_entries=3,
+        cache_selection_revision="sha256:" + "0" * 64,
+        recompute=None,
+        invalidations=(),
+        conflicting_run_ids=(),
+    )
+    calls = 0
+
+    def execute(*args, **kwargs):
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        if calls == 1:
+            return _observation("failed")
+        raise SSHTransportError("remote-retry-conflict", "active run")
+
+    monkeypatch.setattr(ssh_module, "execute_cluster_command", execute)
+    run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
+    with pytest.raises(WorkflowRunRetryError, match="active run"):
+        run.prepare_retry()
+
+    monkeypatch.setattr(
+        ssh_module,
+        "_retry_mutation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            SSHTransportError(
+                "remote-retry-submission-uncertain",
+                "scheduler outcome unknown",
+            )
+        ),
+    )
+    with pytest.raises(PSIJSubmissionUncertainError, match="scheduler outcome"):
+        run.submit_retry(plan)
 
 
 @pytest.mark.parametrize("path", ["relative", "//cluster/path", "/cluster/a/../path"])

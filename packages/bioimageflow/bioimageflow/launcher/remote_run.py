@@ -8,18 +8,23 @@ import threading
 import time
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from bioimageflow.engine import WorkflowCancelledError
 
 from .errors import (
+    PSIJSubmissionUncertainError,
     WorkflowRunFailedError,
     WorkflowRunLostError,
     WorkflowRunNotReadyError,
     WorkflowRunResultUnavailableError,
+    WorkflowRunRetryError,
 )
 from .schemas import validate_run_id
 from .types import SSHSubmissionTransport
+
+if TYPE_CHECKING:
+    from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
 
 _PROGRESS_PAGE = 500
 _LOG_PAGE = 256 * 1024
@@ -57,6 +62,8 @@ class RemoteWorkflowRun:
         self._transport = transport
         self._storage_path = _cluster_path(storage_path)
         self.id = validate_run_id(run_id)
+        self._parent_id: str | None = None
+        self._retry_plan: RunRetryPlan | None = None
         self._apply_observation(observation)
 
     @classmethod
@@ -121,6 +128,15 @@ class RemoteWorkflowRun:
         ):
             raise RuntimeError("Remote observation changed the run binding.")
         self._status = str(observation["state"])
+        from .retry import RunRetryPlan
+
+        retry_plan = observation.get("retry_plan")
+        self._retry_plan = (
+            None if retry_plan is None else RunRetryPlan.from_dict(retry_plan)
+        )
+        self._parent_id = (
+            None if self._retry_plan is None else self._retry_plan.parent_run_id
+        )
         error = observation.get("error")
         self._error = dict(error) if isinstance(error, dict) else None
 
@@ -276,6 +292,94 @@ class RemoteWorkflowRun:
             str(uuid.uuid4()),
         )
         self._apply_observation(result)
+
+    @property
+    def parent_id(self) -> str | None:
+        """Return the parent ID when known for this remote retry handle."""
+        return self._parent_id
+
+    @property
+    def retry_plan(self) -> "RunRetryPlan | None":
+        """Return this child run's durable retry provenance, if present."""
+        return self._retry_plan
+
+    def prepare_retry(
+        self,
+        recompute: "RecomputeRequest | None" = None,
+    ) -> "PreparedRunRetry[RemoteWorkflowRun]":
+        """Prepare a revision-bound cluster-local retry without file access."""
+        from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
+        from .ssh import execute_cluster_command
+
+        if recompute is not None and type(recompute) is not RecomputeRequest:
+            raise TypeError("recompute must be a RecomputeRequest or None.")
+        try:
+            payload = execute_cluster_command(
+                self._transport,
+                "prepare-retry",
+                {
+                    **self._arguments(),
+                    "recompute": None if recompute is None else recompute.to_dict(),
+                },
+                request_id=str(uuid.uuid4()),
+            )
+        except Exception as exc:
+            from .ssh import SSHTransportError
+
+            if isinstance(exc, SSHTransportError) and exc.code in {
+                "remote-invalid-retry",
+                "remote-retry-conflict",
+            }:
+                raise WorkflowRunRetryError(
+                    str(exc),
+                    details={"remote_code": exc.code},
+                ) from exc
+            raise
+        plan = RunRetryPlan.from_dict(payload)
+
+        def submit() -> "RemoteWorkflowRun":
+            return self.submit_retry(plan)
+
+        return PreparedRunRetry(plan, submit)
+
+    def submit_retry(self, plan: "RunRetryPlan") -> "RemoteWorkflowRun":
+        """Submit a serialized cluster retry plan after reconnect or confirmation."""
+        from .retry import RunRetryPlan
+        from .ssh import _retry_mutation
+
+        if type(plan) is not RunRetryPlan or plan.parent_run_id != self.id:
+            raise TypeError("plan must be a RunRetryPlan for this parent run.")
+        try:
+            observation = _retry_mutation(
+                self._transport,
+                "retry",
+                {
+                    "plan": plan.to_dict(),
+                    "storage_path": str(self._storage_path),
+                },
+                str(uuid.uuid4()),
+            )
+        except Exception as exc:
+            from .ssh import SSHTransportError
+
+            if isinstance(exc, SSHTransportError):
+                if exc.code == "remote-retry-submission-uncertain":
+                    raise PSIJSubmissionUncertainError(
+                        str(exc),
+                        details={"retry_run_id": plan.retry_run_id},
+                    ) from exc
+                if exc.code in {"remote-invalid-retry", "remote-retry-conflict"}:
+                    raise WorkflowRunRetryError(
+                        str(exc),
+                        details={"remote_code": exc.code},
+                    ) from exc
+            raise
+        return RemoteWorkflowRun(
+            self._transport,
+            self._storage_path,
+            plan.retry_run_id,
+            observation=observation,
+        )
 
     def _raise_result_state(self) -> None:
         if self.status == "failed":

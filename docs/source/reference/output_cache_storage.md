@@ -75,6 +75,7 @@ All paths below are rooted at `Workflow.storage_path`.
           cancel_requested
           error.json
           command.json
+          retry_transaction.json
           logs/
             orchestrator.out
             orchestrator.err
@@ -702,6 +703,8 @@ launcher/v1/
         <frame-id>.parquet
       assets/
         <digest-shard>/<digest>/...
+    result_export.json
+    retry_transaction.json
 ```
 
 `submission.json`, revision-zero `status.json`, and an empty `progress.jsonl` are created before `submit_workflow()` returns.
@@ -720,10 +723,15 @@ An optional `bootstrap/psij-pre-launch.sh` is a read-only run-owned artifact who
 An intent without a receipt is a durable uncertain-submission boundary and is never automatically submitted again.
 `psij/executor/` is the fixed shared PSI/J executor work directory reused by submission and later attachment.
 The `return/` directory does not exist until a complete staged sibling has been validated and atomically installed.
+`result_export.json` is installed on the first local destination export and binds the exact expected bundle digest, run ID, and storage path so later idempotent export does not depend on still-retained source assets.
+`retry_transaction.json` exists only for a v3 retry child and durably binds its run ID and retry-plan digest to one of four phases: `validated`, `invalidated`, `dispatched`, or `uncertain`.
+`validated` permits replay to finish moving the exact selected `current.json` pointers to child-specific hidden backups; `invalidated` makes their absence final and permits best-effort backup cleanup; `dispatched` records successful launcher return; and `uncertain` forbids automatic resubmission.
+An interruption after child allocation is resumed from this file, so partially moved pointers are neither silently restored nor applied to a different retry plan.
 
 The control schemas and exact required fields are:
 
-- `bioimageflow.launcher.submission.v2`: `schema`, `run_id`, `created_at`, `storage_root`, `canonical_view`, `workflow`, `invocation`, `parsl_config`, `executor_bindings`, `node_routes`, `environment_routes`, `shared_runtime_root`, `task_policy`, `launch`, `psij_pre_launch`, and `protocol_versions`.
+- `bioimageflow.launcher.submission.v2`: initial submitted-run metadata with `schema`, `run_id`, `created_at`, `storage_root`, `canonical_view`, `workflow`, `invocation`, `parsl_config`, `executor_bindings`, `node_routes`, `environment_routes`, `shared_runtime_root`, `task_policy`, `launch`, `psij_pre_launch`, and `protocol_versions`.
+- `bioimageflow.launcher.submission.v3`: retained retry metadata with every v2 field plus `parent_run_id` and the complete canonical `retry_plan` that owns its deterministic child run ID, material digests, revisions, and invalidation intent.
 - `bioimageflow.launcher.status.v1`: `schema`, `run_id`, `state`, `revision`, `created_at`, `updated_at`, `backend`, `orchestrator`, `claim_epoch`, `cancel_requested_at`, `hard_termination_requested`, and `error`.
 - `bioimageflow.launcher.claim.v1`: `schema`, `run_id`, `owner`, `backend`, `nonce`, `epoch`, `created_at`, `heartbeat_at`, and `expires_at`.
 - `bioimageflow.launcher.progress.v1`: `schema`, `run_id`, `sequence`, `timestamp`, `kind`, and `payload`.
@@ -734,6 +742,8 @@ The control schemas and exact required fields are:
 - `bioimageflow.launcher.psij_intent.v2`: `schema`, `run_id`, `submit_token`, `created_at`, `executor`, `executor_work_dir`, and `job`, whose optional `pre_launch` descriptor contains the verified absolute run-owned path, size, and digest.
 - `bioimageflow.launcher.psij_job.v1`: `schema`, `run_id`, `submit_token`, `executor`, `native_id`, `created_at`, and `executor_work_dir`.
 - `bioimageflow.launcher.return.v1`: `schema`, `run_id`, `shape`, `mapping_keys`, `frames`, `root_outputs`, and `locators`.
+- `bioimageflow.launcher.result-export.v1`: `schema`, `run_id`, `storage_path`, and `bundle_digest`.
+- `bioimageflow.launcher.retry-transaction.v1`: `schema`, `run_id`, `plan_digest`, and `phase`, where `phase` is exactly `validated`, `invalidated`, `dispatched`, or `uncertain`.
 
 Schema readers require exactly the versioned fields defined above and reject unknown or missing fields.
 Optional values are represented by JSON `null`; fields are not conditionally omitted.
