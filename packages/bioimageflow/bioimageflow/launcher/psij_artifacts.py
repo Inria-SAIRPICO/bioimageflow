@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
 import uuid
 from pathlib import Path
 from typing import Any
@@ -16,8 +19,69 @@ from .schemas import PSIJ_NATIVE_ID_PATTERN, parse_utc_timestamp, utc_timestamp
 from .types import PSIJLaunchConfig
 
 
-INTENT_SCHEMA = "bioimageflow.launcher.psij_intent.v1"
+INTENT_SCHEMA = "bioimageflow.launcher.psij_intent.v2"
 RECEIPT_SCHEMA = "bioimageflow.launcher.psij_job.v1"
+
+
+def _validated_pre_launch(
+    control: LauncherRunControl,
+) -> dict[str, Any] | None:
+    metadata = control.read_submission()["psij_pre_launch"]
+    if metadata is None:
+        return None
+    artifact = metadata["artifact"]
+    path = control.confined_path(artifact["path"], must_exist=True)
+    mode = path.lstat().st_mode
+    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+        raise LauncherProtocolError(
+            "The PSI/J pre-launch artifact must be a regular non-symlink file."
+        )
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise LauncherProtocolError(
+                "The PSI/J pre-launch artifact must be a regular file."
+            )
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > 64 * 1024:
+                raise LauncherProtocolError(
+                    "The PSI/J pre-launch artifact exceeds its size limit."
+                )
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    final = path.lstat()
+    identities = {
+        (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            value.st_mtime_ns,
+        )
+        for value in (opened, after, final)
+    }
+    if len(identities) != 1:
+        raise LauncherProtocolError(
+            "The PSI/J pre-launch artifact changed during validation."
+        )
+    observed = f"sha256:{digest.hexdigest()}"
+    if size != artifact["size"] or observed != artifact["digest"]:
+        raise LauncherProtocolError(
+            "The PSI/J pre-launch artifact does not match its submission metadata."
+        )
+    return {"path": str(path), "size": size, "digest": observed}
 
 
 def _read_artifact(
@@ -47,6 +111,7 @@ def _job_description(
         )
     stdout_path, stderr_path = launcher_log_paths(control)
     directory = None if launch.work_dir is None else str(launch.work_dir)
+    pre_launch = _validated_pre_launch(control)
     return {
         "name": f"bioimageflow-{control.run_id}-{submit_token[:8]}",
         "executable": str(executable),
@@ -54,6 +119,7 @@ def _job_description(
         "directory": directory,
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
+        "pre_launch": pre_launch,
         "resources": {
             "node_count": 1,
             "process_count": 1,
@@ -117,13 +183,13 @@ def validate_intent(
         "directory",
         "stdout_path",
         "stderr_path",
+        "pre_launch",
         "resources",
         "attributes",
     }:
         raise LauncherProtocolError("PSI/J submit intent job fields are invalid.")
     if (
-        job["name"]
-        != f"bioimageflow-{control.run_id}-{payload['submit_token'][:8]}"
+        job["name"] != f"bioimageflow-{control.run_id}-{payload['submit_token'][:8]}"
         or not isinstance(job["arguments"], list)
         or any(type(item) is not str or not item for item in job["arguments"])
     ):
@@ -137,15 +203,16 @@ def validate_intent(
         raise LauncherProtocolError(
             "PSI/J submit intent does not contain the exact orchestrator command."
         )
-    if (
-        job["stdout_path"] != str(stdout_path)
-        or job["stderr_path"] != str(stderr_path)
-    ):
+    if job["stdout_path"] != str(stdout_path) or job["stderr_path"] != str(stderr_path):
         raise LauncherProtocolError(
             "PSI/J submit intent logs are not the confined launcher logs."
         )
     if job["directory"] is not None:
         _validate_absolute(job["directory"], field_name="directory")
+    if job["pre_launch"] != _validated_pre_launch(control):
+        raise LauncherProtocolError(
+            "PSI/J submit intent pre-launch metadata is invalid."
+        )
     resources = job["resources"]
     if not isinstance(resources, dict) or set(resources) != {
         "node_count",
@@ -169,9 +236,7 @@ def validate_intent(
         "account",
     }:
         raise LauncherProtocolError("PSI/J attribute intent is invalid.")
-    persisted_launch = PSIJLaunchConfig.from_dict(
-        control.read_submission()["launch"]
-    )
+    persisted_launch = PSIJLaunchConfig.from_dict(control.read_submission()["launch"])
     described_launch = PSIJLaunchConfig(
         executor=payload["executor"],
         walltime=persisted_launch.walltime,
@@ -182,8 +247,7 @@ def validate_intent(
         hard_cancel_after=persisted_launch.hard_cancel_after,
     )
     if (
-        attributes["duration_seconds"]
-        != persisted_launch.walltime.total_seconds()
+        attributes["duration_seconds"] != persisted_launch.walltime.total_seconds()
         or described_launch != persisted_launch
     ):
         raise LauncherProtocolError(
@@ -230,10 +294,7 @@ def install_intent(
 
 def validate_native_id(value: object) -> str:
     """Validate a persisted scheduler-native PSI/J job identity."""
-    if (
-        type(value) is not str
-        or PSIJ_NATIVE_ID_PATTERN.fullmatch(value) is None
-    ):
+    if type(value) is not str or PSIJ_NATIVE_ID_PATTERN.fullmatch(value) is None:
         raise LauncherProtocolError("PSI/J returned an invalid native job ID.")
     return value
 

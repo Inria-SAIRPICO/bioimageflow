@@ -15,7 +15,7 @@ BioImageFlow GUIs should use the cohesive public preflight surface instead of im
 - :func:`bioimageflow.validate_parsl_config_ref` resolves a trusted configuration factory in an isolated process and validates secrets, retries, and executor labels without creating a DFK or run.
 - :func:`bioimageflow.plan_distributed_execution` uses runtime requirement, compatibility, and routing logic without importing Parsl, allocating workers, submitting a job, or creating a run.
 - :func:`bioimageflow.validate_remote_execution_profile` performs the corresponding non-submitting checks on a remote cluster through the public protocol.
-- :func:`bioimageflow.prepare_remote_submission` binds explicit ``LocalUpload`` values to an immutable, digest-verified, single-use submission.
+- :func:`bioimageflow.prepare_remote_submission` binds explicit ``LocalUpload`` and uploaded pre-launch values to an immutable, digest-verified, single-use submission and identifies cluster-resident pre-launch sources separately.
 
 The complete integration sequence, allocation table, wire examples, diagnostics contract, and lifecycle rules are in :doc:`/gui/submitted_parsl`.
 
@@ -286,9 +286,62 @@ For a caller already running on a cluster login node:
    )
 
 ``PSIJLaunchConfig`` accepts only strict scheduler identifiers and a normalized absolute POSIX working path that exists as a non-symlink directory when initial submission begins.
-It has no native directive, custom attribute, pre-launch script, environment, live PSI/J object, or shell-fragment field.
+It has no native directive, custom attribute, environment, live PSI/J object, or shell-fragment field.
 ``walltime`` is always explicit so PSI/J's default duration is never selected accidentally.
 The queue maps to ``JobAttributes.queue_name`` and the project maps to ``JobAttributes.account``.
+
+Orchestrator pre-launch scripts
+-------------------------------
+
+An optional :class:`~bioimageflow.PreLaunchScript` prepares the environment in which the submitted orchestrator starts.
+It is submission material rather than scheduler configuration, so pass it beside ``launch``:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from bioimageflow import PreLaunchScript, submit_workflow
+
+   run = submit_workflow(
+       workflow,
+       parsl_config=parsl_config,
+       executor_bindings=bindings,
+       launch=launch,
+       pre_launch=PreLaunchScript.from_text(
+           """\
+           source /etc/profile.d/modules.sh
+           module load python
+           """
+       ),
+   )
+
+Use :meth:`~bioimageflow.PreLaunchScript.from_local_file` when the script is a file on the machine making the submission.
+BioImageFlow snapshots that file once before allocation retries and preserves its exact UTF-8 bytes:
+
+.. code-block:: python
+
+   pre_launch = PreLaunchScript.from_local_file(Path("cluster-init.sh"))
+
+For transported execution, :meth:`~bioimageflow.PreLaunchScript.from_cluster_file` names a script already present on the cluster:
+
+.. code-block:: python
+
+   pre_launch = PreLaunchScript.from_cluster_file(
+       "/shared/bioimageflow/site-init.sh",
+       expected_digest="sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+   )
+
+The expected digest is optional.
+When present, the cluster agent rejects different content before launcher-run allocation or scheduler submission.
+When absent, confirmation binds only the cluster path; the agent snapshots the currently observed bytes and records their digest in the immutable run metadata.
+PSI/J always receives the run-owned copy, never the original cluster path.
+
+Scripts must be non-empty UTF-8 and at most 64 KiB.
+NUL bytes, symlinks, special files, concurrent source changes, and digest mismatches are rejected.
+The supported PSI/J launcher sources the file once on the scheduler job's service node before starting the orchestrator, so a shebang is ignored, exported variables and directory changes persist, and an unhandled failure may prevent orchestrator startup.
+The workflow storage path and run artifact must therefore be visible at the same absolute location on that node.
+This script does not initialize Parsl workers; use the selected provider's worker initialization for worker modules, CUDA setup, containers, or environment activation.
+Do not place literal credentials in a script: its source is absent from JSON metadata and structured diagnostics, but the prepared and run-owned files necessarily contain plaintext and anything printed by the script belongs to scheduler-controlled logs.
 
 Before PSI/J submission, BioImageFlow persists an immutable submit intent.
 After PSI/J returns a native job ID, it immediately persists an immutable correlated receipt.
@@ -336,7 +389,8 @@ Omitting transport runs the same cluster-local submission path and returns :clas
 Install OpenSSH ``ssh`` and ``sftp`` on the laptop.
 Install ``bioimageflow[parsl,psij]`` and the selected site PSI/J executor plugin in the cluster environment.
 OpenSSH resolves host aliases, users, keys, agents, ports, ``ProxyJump``, and host-key policy from its normal configuration.
-BioImageFlow uses ``BatchMode=yes`` and provides no password, private-key, host-key bypass, arbitrary option, shell setup, or remote bootstrap field.
+BioImageFlow uses ``BatchMode=yes`` and provides no password, private-key, host-key bypass, arbitrary SSH option, or SSH shell-setup field.
+Use the typed ``PreLaunchScript`` submission value for orchestrator initialization.
 
 The following complete example distinguishes laptop actions from cluster actions:
 
@@ -349,6 +403,7 @@ The following complete example distinguishes laptop actions from cluster actions
 
    from bioimageflow import (
        LocalUpload,
+       PreLaunchScript,
        PSIJLaunchConfig,
        ParslConfigRef,
        RemoteWorkflowRun,
@@ -405,6 +460,9 @@ The following complete example distinguishes laptop actions from cluster actions
            cpu_cores=4,
            hard_cancel_after=300,
        ),
+       pre_launch=PreLaunchScript.from_local_file(
+           Path("./cluster-init.sh")
+       ),
        transport=transport,
    )
 
@@ -431,7 +489,8 @@ The following complete example distinguishes laptop actions from cluster actions
            destination=result_destination
        )
 
-Only :class:`~bioimageflow.LocalUpload` reads laptop file content, and it is valid only for a path-like root workflow input.
+Only explicit :class:`~bioimageflow.LocalUpload` and uploaded :class:`~bioimageflow.PreLaunchScript` values read laptop file content.
+``LocalUpload`` remains valid only for a path-like root workflow input.
 An ordinary ``Path`` is a cluster path.
 A string remains a string even when it resembles a path.
 Root DataFrames use verified Parquet and logical digests; every typed ``Path`` cell must be a normalized absolute cluster path, and string cells are unchanged.
@@ -498,6 +557,9 @@ API
    :members:
 
 .. autoclass:: LocalUpload
+   :members:
+
+.. autoclass:: PreLaunchScript
    :members:
 
 .. autoclass:: SSHSubmissionTransport

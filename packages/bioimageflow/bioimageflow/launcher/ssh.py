@@ -27,6 +27,7 @@ from .cluster_protocol import (
     request,
 )
 from .schemas import validate_run_id
+from .pre_launch import PreLaunchScript
 from .types import PSIJLaunchConfig, ParslConfigRef, SSHSubmissionTransport
 
 
@@ -128,7 +129,7 @@ def _validate_observation(
         or type(result["terminal"]) is not bool
         or result["terminal"]
         != (result["state"] in {"succeeded", "failed", "cancelled", "lost"})
-        or result["submission_schema"] != "bioimageflow.launcher.submission.v1"
+        or result["submission_schema"] != "bioimageflow.launcher.submission.v2"
         or result["status_schema"] != "bioimageflow.launcher.status.v1"
         or type(result["updated_at"]) is not str
         or not result["updated_at"]
@@ -742,6 +743,7 @@ def submit_cluster_workflow(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     launch: PSIJLaunchConfig,
+    pre_launch: PreLaunchScript | None = None,
 ) -> str:
     """Private WP2 seam returning one remotely allocated launcher run ID."""
     try:
@@ -756,6 +758,7 @@ def submit_cluster_workflow(
             shared_runtime_root=shared_runtime_root,
             task_policy=task_policy,
             launch=launch,
+            pre_launch=pre_launch,
         ) as bundle:
             from .prepared_transport import submit_prepared_cluster_bundle
 

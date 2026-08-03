@@ -48,7 +48,7 @@ The public integration surface for a BioImageFlow execution UI consists of the f
 - `plan_distributed_execution()` compiles the same recursive processing scope and uses the same cache status, worker-requirement, capacity parser, compatibility, and route functions as Parsl startup. Cached and skipped nodes remain visible without requiring a worker route. The operation records the validated task policy and creates no run, DataFlowKernel, provider allocation, scheduler job, Wetlands environment, or worker.
 - `validate_remote_execution_profile()` invokes the public one-shot cluster protocol to validate connectivity, the remote factory, secrets, retries, executor labels, PSI/J availability, and cluster paths without creating a workflow run or scheduler job.
 - `NodeFailureDiagnostic` is attached to failed `ProgressEvent` callbacks and is persisted as a separate diagnostic progress event for both `WorkflowRun.diagnostics()` and `RemoteWorkflowRun.diagnostics()`.
-- `prepare_remote_submission()` copies all explicit `LocalUpload` bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original paths.
+- `prepare_remote_submission()` copies all explicit `LocalUpload` and uploaded pre-launch bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original local paths. Cluster-resident pre-launch files remain typed external sources until the cluster agent snapshots them into the launcher run.
 - `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
 
 Every cross-process report has `to_dict()` and `from_dict()` methods and a versioned schema where applicable.
@@ -2024,7 +2024,12 @@ Root DataFrames are stored under the control directory and verified by transport
 `backend="manual"` writes a reproducible shell-free command descriptor and remains prepared until that command is executed.
 `PSIJLaunchConfig` submits exactly one Slurm, PBS, or LSF scheduler job for the orchestrator.
 The cluster environment must contain `bioimageflow[parsl,psij]`, the selected site PSI/J executor plugin, the importable Parsl configuration factory, and every tool environment required by its workers.
-It requires an explicit positive walltime and supports strict queue, project/account, core-count, absolute cluster work-directory, and hard-cancel values without native scheduler directives, scripts, environment strings, or live PSI/J objects.
+It requires an explicit positive walltime and supports strict queue, project/account, core-count, absolute cluster work-directory, and hard-cancel values without native scheduler directives, environment strings, or live PSI/J objects.
+An optional `PreLaunchScript` is supplied to `submit_workflow()` or `prepare_remote_submission()` separately from the JSON-safe `PSIJLaunchConfig`.
+`from_text()` and `from_local_file()` are uploaded and digest-bound during local preparation; `from_cluster_file()` names a normalized absolute cluster path and may include an expected SHA-256 digest.
+The cluster agent securely snapshots a cluster file before launcher allocation, rejects a supplied digest mismatch, and installs every source kind as the same read-only run-owned `bootstrap/psij-pre-launch.sh` artifact.
+The immutable PSI/J intent binds that artifact's confined absolute path, size, and observed digest, and `JobSpec.pre_launch` never receives the original mutable source path.
+The supported PSI/J launcher sources the script once on the scheduler job's service node before the orchestrator executable; exports and directory changes affect the orchestrator, while Parsl worker initialization remains the provider configuration's responsibility.
 Direct scheduler backend aliases and OAR are not supported.
 The PSI/J launcher persists immutable submit intent before external submission and a correlated native-job receipt immediately afterward.
 An intent without a receipt is never automatically resubmitted; it remains prepared with stable uncertain-submission metadata until explicitly cancelled.
@@ -2046,11 +2051,15 @@ Historical result loading never consults `current.json`.
 
 Laptop-to-cluster submission uses the system OpenSSH and SFTP clients plus the installed one-shot `bioimageflow-cluster-agent`.
 `SSHSubmissionTransport` carries only a host alias or `user@host`, normalized absolute cluster staging root, safe absolute remote executable, and finite timeout.
-OpenSSH retains normal user configuration, agent authentication, `ProxyJump`, and host-key verification; BioImageFlow supplies no credentials, arbitrary options, shell fragments, bootstrap commands, or host-key bypass.
+OpenSSH retains normal user configuration, agent authentication, `ProxyJump`, and host-key verification; BioImageFlow supplies no credentials, arbitrary SSH options, inline SSH shell fragments, or host-key bypass.
 
 Only a path-like root workflow input explicitly wrapped in `LocalUpload(Path(...))` reads laptop bytes.
 Ordinary `Path` values remain explicit normalized absolute cluster paths without laptop filesystem probing, and path-looking strings remain strings.
 Root DataFrames use the existing logical/Parquet transport, reject `LocalUpload` cells and relative typed `Path` cells, and preserve string cells.
+`PreLaunchScript.from_text()` and `from_local_file()` are the other explicit laptop-byte boundaries.
+They accept non-empty UTF-8 content up to 64 KiB, reject NUL bytes, symlinks, special files, and concurrent source mutation, preserve bytes without newline normalization, and exclude content and local source paths from representations and serialized metadata.
+`PreLaunchScript.from_cluster_file()` does not probe the laptop; prepared manifests expose its path and optional expected digest as an external source because its observed bytes are not known until submission.
+Without an expected digest, confirmation binds the cluster path but not its pre-submission content; the observed run digest remains durable provenance.
 The workflow's existing absolute cluster `storage_path` travels beside the graph/archive and remains the sole value passed to `Workflow.from_dict`.
 
 The one-shot `bioimageflow.cluster.command.v1` protocol implements upload, submission, bounded observation, cancellation, and result preparation operations with exact JSON schemas and canonical UUID4 operation request IDs.

@@ -17,9 +17,11 @@ from .submission import submit_workflow
 from .prepared import (
     PreparedRemoteSubmission,
     PreparedSubmissionEntry,
+    PreparedSubmissionExternalSource,
     PreparedSubmissionManifest,
     prepare_remote_submission,
 )
+from .pre_launch import PreLaunchScript
 from .profile_validation import (
     RemoteProfileDiagnostic,
     RemoteProfileValidationReport,
@@ -43,8 +45,10 @@ __all__ = [
     "PSIJLaunchConfig",
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
+    "PreLaunchScript",
     "PreparedRemoteSubmission",
     "PreparedSubmissionEntry",
+    "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
     "RemoteProfileDiagnostic",
     "RemoteProfileValidationReport",

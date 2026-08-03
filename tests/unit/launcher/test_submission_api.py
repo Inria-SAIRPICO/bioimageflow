@@ -8,6 +8,7 @@ from bioimageflow import (
     ExecutorCapabilities,
     PSIJLaunchConfig,
     ParslTaskPolicy,
+    PreLaunchScript,
     RemoteWorkflowRun,
     SSHSubmissionTransport,
     WorkerEnvironmentAttestation,
@@ -120,7 +121,7 @@ def test_transport_submission_returns_remote_run(
             "state": "prepared",
             "status_revision": 0,
             "storage_path": workflow.storage_path.as_posix(),
-            "submission_schema": "bioimageflow.launcher.submission.v1",
+            "submission_schema": "bioimageflow.launcher.submission.v2",
             "status_schema": "bioimageflow.launcher.status.v1",
             "terminal": False,
             "updated_at": "2026-07-29T12:00:00Z",
@@ -159,3 +160,32 @@ def test_transport_submission_requires_psij_launch(tmp_path: Path) -> None:
             launch=OrchestratorLaunchConfig(backend="manual"),
             transport=transport,
         )
+
+
+def test_pre_launch_requires_psij_and_cluster_file_requires_transport(
+    tmp_path: Path,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
+
+    with pytest.raises(ValueError, match="PSIJLaunchConfig"):
+        submit_workflow(
+            workflow,
+            parsl_config=_config_ref(),
+            executor_bindings={"threads": _binding()},
+            launch=OrchestratorLaunchConfig(backend="manual"),
+            pre_launch=PreLaunchScript.from_text("echo ready\n"),
+        )
+
+    with pytest.raises(ValueError, match="transported"):
+        submit_workflow(
+            workflow,
+            parsl_config=_config_ref(),
+            executor_bindings={"threads": _binding()},
+            launch=PSIJLaunchConfig(
+                executor="slurm",
+                walltime=timedelta(minutes=10),
+            ),
+            pre_launch=PreLaunchScript.from_cluster_file("/shared/init.sh"),
+        )
+
+    assert not (tmp_path / "launcher").exists()

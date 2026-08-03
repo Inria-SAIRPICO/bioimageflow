@@ -83,8 +83,9 @@ def launcher_submission(
             "work_dir": None,
             "hard_cancel_after": hard_cancel_after,
         },
+        "psij_pre_launch": None,
         "protocol_versions": {
-            "launcher": 1,
+            "launcher": 2,
             "workflow_graph": 1,
             "workflow_archive": 1,
             "parsl_task": 1,

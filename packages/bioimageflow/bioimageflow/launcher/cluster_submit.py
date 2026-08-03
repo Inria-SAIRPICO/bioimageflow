@@ -30,6 +30,7 @@ from .cluster_upload import (
 )
 from .inputs import decode_cluster_typed_constant
 from .payload import load_workflow_payload
+from .pre_launch import pre_launch_from_bundle_request
 from .repository import (
     LauncherRepository,
     RunNotFoundError,
@@ -120,6 +121,7 @@ def _load_request(object_root: Path) -> dict[str, Any]:
         "launch",
         "node_routes",
         "parsl_config",
+        "psij_pre_launch",
         "schema",
         "shared_runtime_root",
         "storage_path",
@@ -353,6 +355,10 @@ def submit_bundle(
         parsl_config = ParslConfigRef.from_dict(request_value["parsl_config"])
         task_policy = ParslTaskPolicy.from_dict(request_value["task_policy"])
         launch = PSIJLaunchConfig.from_dict(request_value["launch"])
+        pre_launch = pre_launch_from_bundle_request(
+            request_value["psij_pre_launch"],
+            expected_object,
+        )
         import_config_factory(parsl_config.factory)
         verify_secret_references(parsl_config)
     except ClusterProtocolFailure:
@@ -428,6 +434,7 @@ def submit_bundle(
                     shared_runtime_root=request_value["shared_runtime_root"],
                     task_policy=task_policy,
                     launch=launch,
+                    pre_launch=pre_launch,
                     preallocated_run_id=run_id,
                     preserve_cluster_paths=True,
                 )

@@ -17,7 +17,7 @@ if not capabilities.capabilities["submitted_remote_parsl"].supported:
     disabled_reason = capabilities.capabilities["submitted_remote_parsl"].reason
 ```
 
-The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, and immutable upload preparation.
+The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, and immutable upload preparation.
 Direct, Wetlands, planning, public value validation, remote-profile protocol support, resource overrides, diagnostics, and local preparation are built in.
 Attached and submitted-local execution require the `parsl` extra.
 Cluster submission requires `parsl`, `psij`, the selected PSI/J executor plugin, and the cluster agent in the remote installation.
@@ -159,8 +159,36 @@ manifest_payload = prepared.manifest.to_dict()
 ```
 
 Preparation copies the exact file or directory bytes, workflow graph, invocation, and launcher values into a private owned bundle.
-The manifest contains stable entry digests and an overall bundle digest and contains no resolved secrets.
+The manifest contains stable entry digests, typed external sources, and an overall bundle digest and contains no resolved secrets.
 Changing or deleting the original `LocalUpload` path after preparation cannot change the staged invocation.
+
+## Orchestrator pre-launch scripts
+
+A GUI may attach one explicit `PreLaunchScript` to a PSI/J submission:
+
+```python
+from bioimageflow import PreLaunchScript
+
+uploaded = PreLaunchScript.from_local_file(selected_local_script)
+pinned_cluster = PreLaunchScript.from_cluster_file(
+    "/shared/bioimageflow/site-init.sh",
+    expected_digest=known_sha256,
+)
+unpinned_cluster = PreLaunchScript.from_cluster_file(
+    "/shared/bioimageflow/site-init.sh"
+)
+```
+
+`from_text()` and `from_local_file()` enter the immutable prepared bundle and appear as digest-bound manifest entries.
+`from_cluster_file()` appears in `manifest.external_sources` with its cluster path and optional expected digest because local preparation cannot observe its bytes.
+Present an unpinned cluster source clearly: confirmation binds its path, while the cluster agent snapshots and records the bytes observed at submission.
+With an expected digest, a mismatch fails before launcher allocation and scheduler submission.
+
+Pass the value to both direct and prepared submission paths through `pre_launch=`.
+BioImageFlow installs every source as one read-only run-owned artifact and gives PSI/J that path, never the original mutable cluster path.
+The script is sourced once on the scheduler job's service node before the orchestrator starts; it is not Parsl worker initialization and its output is not a structured node diagnostic.
+The GUI must not present non-allocating profile validation as proof that the future service node can see the path or execute module, Spack, Conda, or other site commands.
+Do not accept scripts implicitly from workflow archives, and warn against literal secrets because the script artifacts contain plaintext and scheduler logs may contain anything the script prints.
 
 After confirmation, consume the same object exactly once:
 
@@ -192,9 +220,11 @@ A named GUI cluster profile should contain:
 - optional queue and project/account;
 - positive walltime and orchestrator CPU core count;
 - an optional hard-cancel grace period.
+- an optional explicit pre-launch source: inline text, local file, or cluster file with an optional expected digest.
 
 OpenSSH configuration owns the user, port, keys, agent, `ProxyJump`, and host-key policy.
-Do not put credentials, private-key contents, literal secret values, arbitrary SSH options, scheduler directives, shell fragments, or bootstrap commands in a cluster profile.
+Do not put credentials, private-key contents, literal secret values, arbitrary SSH options, or scheduler directives in a cluster profile.
+Represent orchestrator initialization only through the typed `PreLaunchScript` field rather than a generic SSH command or scheduler fragment.
 The cluster environment must already contain `bioimageflow[parsl,psij]`, the selected PSI/J executor plugin, the workflow's configuration factory, and the tool environments used by workers.
 
 ## Input controls

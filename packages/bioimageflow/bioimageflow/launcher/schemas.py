@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SUBMISSION_SCHEMA = "bioimageflow.launcher.submission.v1"
+SUBMISSION_SCHEMA = "bioimageflow.launcher.submission.v2"
 STATUS_SCHEMA = "bioimageflow.launcher.status.v1"
 CLAIM_SCHEMA = "bioimageflow.launcher.claim.v1"
 PROGRESS_SCHEMA = "bioimageflow.launcher.progress.v1"
@@ -84,6 +84,7 @@ SUBMISSION_FIELDS = frozenset(
         "shared_runtime_root",
         "task_policy",
         "launch",
+        "psij_pre_launch",
         "protocol_versions",
     }
 )

@@ -715,6 +715,7 @@ Immutable JSON artifacts are staged, synchronized where supported, and installed
 `local_process.json` records the PID and operating-system process-birth token required to reconnect safely without signaling a reused PID.
 `local_process_exit.json` records the observed exit code and time.
 `psij_intent.json` is installed before the one external scheduler submission and contains the run-correlated submit token and exact safe semantic job description.
+An optional `bootstrap/psij-pre-launch.sh` is a read-only run-owned artifact whose relative path, size, digest, source kind, optional cluster source path, and optional expected digest are recorded in `submission.json`; the intent binds only its verified confined absolute path, size, and digest.
 `psij_job.json` is installed immediately after successful PSI/J submission and correlates that intent with the scheduler-native job ID.
 An intent without a receipt is a durable uncertain-submission boundary and is never automatically submitted again.
 `psij/executor/` is the fixed shared PSI/J executor work directory reused by submission and later attachment.
@@ -722,7 +723,7 @@ The `return/` directory does not exist until a complete staged sibling has been 
 
 The control schemas and exact required fields are:
 
-- `bioimageflow.launcher.submission.v1`: `schema`, `run_id`, `created_at`, `storage_root`, `canonical_view`, `workflow`, `invocation`, `parsl_config`, `executor_bindings`, `node_routes`, `environment_routes`, `shared_runtime_root`, `task_policy`, `launch`, and `protocol_versions`.
+- `bioimageflow.launcher.submission.v2`: `schema`, `run_id`, `created_at`, `storage_root`, `canonical_view`, `workflow`, `invocation`, `parsl_config`, `executor_bindings`, `node_routes`, `environment_routes`, `shared_runtime_root`, `task_policy`, `launch`, `psij_pre_launch`, and `protocol_versions`.
 - `bioimageflow.launcher.status.v1`: `schema`, `run_id`, `state`, `revision`, `created_at`, `updated_at`, `backend`, `orchestrator`, `claim_epoch`, `cancel_requested_at`, `hard_termination_requested`, and `error`.
 - `bioimageflow.launcher.claim.v1`: `schema`, `run_id`, `owner`, `backend`, `nonce`, `epoch`, `created_at`, `heartbeat_at`, and `expires_at`.
 - `bioimageflow.launcher.progress.v1`: `schema`, `run_id`, `sequence`, `timestamp`, `kind`, and `payload`.
@@ -730,7 +731,7 @@ The control schemas and exact required fields are:
 - `bioimageflow.launcher.command.v1`: `schema`, `run_id`, `argv`, `work_dir`, and `secret_refs`.
 - `bioimageflow.launcher.local_process.v1`: `schema`, `run_id`, `pid`, `start_token`, and `started_at`.
 - `bioimageflow.launcher.local_process_exit.v1`: `schema`, `run_id`, `returncode`, and `observed_at`.
-- `bioimageflow.launcher.psij_intent.v1`: `schema`, `run_id`, `submit_token`, `created_at`, `executor`, `executor_work_dir`, and `job`.
+- `bioimageflow.launcher.psij_intent.v2`: `schema`, `run_id`, `submit_token`, `created_at`, `executor`, `executor_work_dir`, and `job`, whose optional `pre_launch` descriptor contains the verified absolute run-owned path, size, and digest.
 - `bioimageflow.launcher.psij_job.v1`: `schema`, `run_id`, `submit_token`, `executor`, `native_id`, `created_at`, and `executor_work_dir`.
 - `bioimageflow.launcher.return.v1`: `schema`, `run_id`, `shape`, `mapping_keys`, `frames`, `root_outputs`, and `locators`.
 

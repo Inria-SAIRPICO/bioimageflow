@@ -8,7 +8,15 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bioimageflow import LocalUpload, PSIJLaunchConfig, ParslConfigRef, Workflow
+from bioimageflow import (
+    LocalUpload,
+    PSIJLaunchConfig,
+    ParslConfigRef,
+    PreLaunchScript,
+    PreparedSubmissionManifest,
+    Workflow,
+    prepare_remote_submission,
+)
 from bioimageflow.launcher.cluster_bundle import prepare_cluster_bundle
 from bioimageflow.parsl import (
     ExecutorBinding,
@@ -45,7 +53,13 @@ def _binding() -> ExecutorBinding:
     )
 
 
-def _prepare(tmp_path: Path, workflow: Workflow, inputs: dict):
+def _prepare(
+    tmp_path: Path,
+    workflow: Workflow,
+    inputs: dict,
+    *,
+    pre_launch: PreLaunchScript | None = None,
+):
     return prepare_cluster_bundle(
         workflow,
         inputs=inputs,
@@ -60,6 +74,7 @@ def _prepare(tmp_path: Path, workflow: Workflow, inputs: dict):
             executor="slurm",
             walltime=timedelta(minutes=10),
         ),
+        pre_launch=pre_launch,
     )
 
 
@@ -89,7 +104,9 @@ def test_bundle_preserves_cluster_paths_strings_dataframe_and_upload(
         assert request["inputs"][0]["root_name"] == "local files"
         assert request["inputs"][1]["kind"] == "dataframe"
         assert bundle.manifest["digest"].startswith("sha256:")
-        assert all("launcher" not in entry["path"] for entry in bundle.manifest["entries"])
+        assert all(
+            "launcher" not in entry["path"] for entry in bundle.manifest["entries"]
+        )
 
 
 def test_bundle_rejects_upload_in_non_path_root_field(tmp_path: Path) -> None:
@@ -140,3 +157,95 @@ def test_bundle_rejects_symlink(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="symlinks"):
         with _prepare(tmp_path, workflow, {"settings": LocalUpload(source)}):
             pass
+
+
+def test_bundle_includes_uploaded_pre_launch_without_json_source(
+    tmp_path: Path,
+) -> None:
+    workflow = _workflow(tmp_path)
+    secret_marker = "source-only-marker"
+
+    with _prepare(
+        tmp_path,
+        workflow,
+        {},
+        pre_launch=PreLaunchScript.from_text(f"export VALUE={secret_marker}\n"),
+    ) as bundle:
+        request = json.loads((bundle.root / "request.json").read_text())
+        script = bundle.root / "bootstrap/psij-pre-launch.sh"
+
+        assert script.read_text() == f"export VALUE={secret_marker}\n"
+        assert secret_marker not in (bundle.root / "request.json").read_text()
+        assert request["psij_pre_launch"]["source_kind"] == "uploaded"
+        assert any(
+            entry["path"] == "bootstrap/psij-pre-launch.sh"
+            for entry in bundle.manifest["entries"]
+        )
+        assert bundle.external_sources == ()
+
+
+def test_bundle_records_unpinned_cluster_pre_launch_as_external_source(
+    tmp_path: Path,
+) -> None:
+    workflow = _workflow(tmp_path)
+
+    with _prepare(
+        tmp_path,
+        workflow,
+        {},
+        pre_launch=PreLaunchScript.from_cluster_file("/shared/site/init.sh"),
+    ) as bundle:
+        request = json.loads((bundle.root / "request.json").read_text())
+
+        assert request["psij_pre_launch"] == {
+            "source_kind": "cluster_file",
+            "source_path": "/shared/site/init.sh",
+            "expected_digest": None,
+            "expected_size": None,
+        }
+        assert bundle.external_sources == (
+            {
+                "kind": "cluster_pre_launch",
+                "path": "/shared/site/init.sh",
+                "expected_digest": None,
+            },
+        )
+        assert not (bundle.root / "bootstrap").exists()
+
+
+def test_remote_preparation_exposes_pinned_cluster_pre_launch_source(
+    tmp_path: Path,
+) -> None:
+    workflow = _workflow(tmp_path)
+    expected = "sha256:" + "a" * 64
+
+    prepared = prepare_remote_submission(
+        workflow,
+        inputs={},
+        targets=None,
+        parsl_config=ParslConfigRef(
+            "tests.unit.launcher.config_factories:build_threads",
+            {},
+        ),
+        executor_bindings={"threads": _binding()},
+        launch=PSIJLaunchConfig(
+            executor="slurm",
+            walltime=timedelta(minutes=5),
+        ),
+        pre_launch=PreLaunchScript.from_cluster_file(
+            "/shared/site/init.sh",
+            expected_digest=expected,
+        ),
+    )
+    try:
+        payload = prepared.manifest.to_dict()
+        assert payload["external_sources"] == [
+            {
+                "kind": "cluster_pre_launch",
+                "path": "/shared/site/init.sh",
+                "expected_digest": expected,
+            }
+        ]
+        assert PreparedSubmissionManifest.from_dict(payload) == prepared.manifest
+    finally:
+        prepared.close()

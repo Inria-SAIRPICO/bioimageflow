@@ -32,7 +32,7 @@ def _observation(state: str = "running") -> dict:
         "state": state,
         "status_revision": 2,
         "storage_path": STORAGE,
-        "submission_schema": "bioimageflow.launcher.submission.v1",
+        "submission_schema": "bioimageflow.launcher.submission.v2",
         "status_schema": "bioimageflow.launcher.status.v1",
         "terminal": state in {"succeeded", "failed", "cancelled", "lost"},
         "updated_at": "2026-07-29T12:00:00Z",

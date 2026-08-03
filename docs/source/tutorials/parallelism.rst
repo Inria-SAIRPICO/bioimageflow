@@ -19,6 +19,49 @@ Two sources of concurrency are available:
 
 DataFrameTools always run in the orchestrator process; their ``transform`` and ``merge_dataframes`` calls are not submitted to workers.
 
+Preparing a remote cluster environment
+--------------------------------------
+
+Remote execution starts one BioImageFlow orchestrator job through PSI/J, then the configured Parsl providers request the worker resources that process rows.
+Some clusters make Python and site libraries available only after loading modules, activating an environment, or running a Spack setup command.
+Use :class:`~bioimageflow.PreLaunchScript` for that one-time orchestrator setup:
+
+.. code-block:: python
+
+   from datetime import timedelta
+
+   from bioimageflow import (
+       PSIJLaunchConfig,
+       PreLaunchScript,
+       submit_workflow,
+   )
+
+   run = submit_workflow(
+       workflow,
+       parsl_config=parsl_config,
+       executor_bindings=bindings,
+       launch=PSIJLaunchConfig(
+           executor="slurm",
+           walltime=timedelta(hours=2),
+           queue="cpu",
+       ),
+       pre_launch=PreLaunchScript.from_text(
+           """\
+           source /etc/profile.d/modules.sh
+           module load python
+           """
+       ),
+       transport=transport,
+   )
+
+Use ``from_local_file(Path("cluster-init.sh"))`` instead when the setup is stored beside the workflow on your computer.
+Use ``from_cluster_file("/shared/site/init.sh")`` when a site administrator already provides the file on the cluster; an optional ``expected_digest="sha256:..."`` pins the expected content.
+BioImageFlow snapshots every form into the run before scheduler submission, so later changes cannot alter that run.
+
+This setup runs once before the orchestrator and does not configure each Parsl worker.
+Worker modules, GPU libraries, containers, and similar per-worker requirements belong in the Parsl provider configuration.
+The full submission, integrity, and reconnect contract is described in :doc:`/reference/parsl`.
+
 Workflow-level Wetlands baseline
 --------------------------------
 
@@ -62,8 +105,8 @@ The proxy can be addressed by ``ProcessingTool`` instance,
 Worker process environment
 --------------------------
 
-Wetlands 2 does not expose per-worker environment mutation.
-Configure GPU visibility, thread caps, and site-specific variables in the process, container, or scheduler environment that launches the Wetlands workers.
+Wetlands worker pools inherit their environment when they start; BioImageFlow does not assign different environment variables to individual workers in the same pool.
+Configure GPU visibility, thread caps, and site-specific variables in the process or container that starts the pool, or use separate declared environments when workers need different settings.
 
 ResourceSpec
 ------------

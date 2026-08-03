@@ -138,6 +138,38 @@ def test_submission_validates_invocation_records(tmp_path: Path) -> None:
         validate_submission(payload)
 
 
+def test_submission_validates_psij_pre_launch_metadata(tmp_path: Path) -> None:
+    payload = launcher_submission(tmp_path, new_run_id(), backend="psij")
+    payload["launch"] = {
+        "backend": "psij",
+        "executor": "slurm",
+        "walltime_seconds": 300.0,
+        "queue": None,
+        "project": None,
+        "cpu_cores": 1,
+        "work_dir": None,
+        "hard_cancel_after": None,
+    }
+    payload["psij_pre_launch"] = {
+        "source_kind": "cluster_file",
+        "source_path": "/shared/init.sh",
+        "expected_digest": "sha256:" + "a" * 64,
+        "artifact": {
+            "path": "bootstrap/psij-pre-launch.sh",
+            "size": 12,
+            "digest": "sha256:" + "b" * 64,
+        },
+    }
+
+    assert validate_submission(payload)["psij_pre_launch"] == payload[
+        "psij_pre_launch"
+    ]
+
+    payload["psij_pre_launch"]["artifact"]["path"] = "../escape.sh"
+    with pytest.raises(LauncherSchemaError, match="artifact.path"):
+        validate_submission(payload)
+
+
 @pytest.mark.parametrize(
     "updates, match",
     [

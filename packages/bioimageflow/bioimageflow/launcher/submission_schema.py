@@ -72,6 +72,10 @@ DATAFRAME_FIELDS = frozenset(
 INDEX_FIELDS = frozenset({"dtypes", "kind", "length", "names"})
 PATH_CELL_FIELDS = frozenset({"column", "row_position"})
 OUTPUT_FIELDS = frozenset({"id", "name"})
+PSIJ_PRE_LAUNCH_FIELDS = frozenset(
+    {"source_kind", "source_path", "expected_digest", "artifact"}
+)
+PSIJ_PRE_LAUNCH_ARTIFACT_FIELDS = frozenset({"path", "size", "digest"})
 
 
 def _validate_workflow(value: object) -> str:
@@ -293,9 +297,7 @@ def _validate_submission_records(result: Mapping[str, Any]) -> None:
     _require_mapping(raw_launch, field="launch")
     assert isinstance(raw_launch, Mapping)
     launch_fields = (
-        PSIJ_LAUNCH_FIELDS
-        if raw_launch.get("backend") == "psij"
-        else LAUNCH_FIELDS
+        PSIJ_LAUNCH_FIELDS if raw_launch.get("backend") == "psij" else LAUNCH_FIELDS
     )
     launch = _exact_object(raw_launch, field="launch", fields=launch_fields)
     try:
@@ -303,17 +305,70 @@ def _validate_submission_records(result: Mapping[str, Any]) -> None:
     except (TypeError, ValueError) as error:
         raise LauncherSchemaError("launch is invalid.") from error
 
+    pre_launch_value = result["psij_pre_launch"]
+    if pre_launch_value is not None:
+        if launch.get("backend") != "psij":
+            raise LauncherSchemaError(
+                "psij_pre_launch requires the PSI/J launch backend."
+            )
+        pre_launch = _exact_object(
+            pre_launch_value,
+            field="psij_pre_launch",
+            fields=PSIJ_PRE_LAUNCH_FIELDS,
+        )
+        source_kind = pre_launch["source_kind"]
+        if source_kind not in {"uploaded", "cluster_file"}:
+            raise LauncherSchemaError("psij_pre_launch.source_kind is invalid.")
+        if source_kind == "uploaded":
+            if (
+                pre_launch["source_path"] is not None
+                or pre_launch["expected_digest"] is not None
+            ):
+                raise LauncherSchemaError(
+                    "Uploaded pre-launch metadata must not retain its source."
+                )
+        else:
+            _validate_absolute_path(
+                pre_launch["source_path"],
+                field="psij_pre_launch.source_path",
+            )
+            expected = pre_launch["expected_digest"]
+            if expected is not None and (
+                type(expected) is not str or SHA256_PATTERN.fullmatch(expected) is None
+            ):
+                raise LauncherSchemaError("psij_pre_launch.expected_digest is invalid.")
+        artifact = _exact_object(
+            pre_launch["artifact"],
+            field="psij_pre_launch.artifact",
+            fields=PSIJ_PRE_LAUNCH_ARTIFACT_FIELDS,
+        )
+        if artifact["path"] != "bootstrap/psij-pre-launch.sh":
+            raise LauncherSchemaError("psij_pre_launch.artifact.path is invalid.")
+        size = artifact["size"]
+        if type(size) is not int or size <= 0 or size > 64 * 1024:
+            raise LauncherSchemaError("psij_pre_launch.artifact.size is invalid.")
+        digest = artifact["digest"]
+        if type(digest) is not str or SHA256_PATTERN.fullmatch(digest) is None:
+            raise LauncherSchemaError("psij_pre_launch.artifact.digest is invalid.")
+
     versions = _exact_object(
         result["protocol_versions"],
         field="protocol_versions",
         fields=PROTOCOL_VERSION_FIELDS,
     )
-    if any(type(version) is not int or version != 1 for version in versions.values()):
-        raise LauncherSchemaError("protocol_versions values must all be integer 1.")
+    expected_versions = {
+        "launcher": 2,
+        "workflow_graph": 1,
+        "workflow_archive": 1,
+        "parsl_task": 1,
+        "parsl_result": 1,
+    }
+    if versions != expected_versions:
+        raise LauncherSchemaError("protocol_versions values are invalid.")
 
 
 def validate_submission_payload(payload: object) -> dict[str, Any]:
-    """Validate and copy a submission-v1 payload and all nested records."""
+    """Validate and copy a submission-v2 payload and all nested records."""
     result = _mapping(
         payload,
         schema=SUBMISSION_SCHEMA,

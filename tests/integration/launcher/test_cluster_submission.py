@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import threading
 import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from bioimageflow import LocalUpload, PSIJLaunchConfig, ParslConfigRef, Workflow
+from bioimageflow import (
+    LocalUpload,
+    PSIJLaunchConfig,
+    ParslConfigRef,
+    PreLaunchScript,
+    Workflow,
+)
 from bioimageflow.launcher.cluster_agent import run_agent
 from bioimageflow.launcher.cluster_bundle import prepare_cluster_bundle
 from bioimageflow.launcher.cluster_protocol import request
@@ -41,9 +48,7 @@ def _binding() -> ExecutorBinding:
 
 
 def _call(operation: str, arguments: dict, request_id: str) -> dict:
-    encoded = canonical_json_bytes(
-        request(operation, arguments, request_id=request_id)
-    )
+    encoded = canonical_json_bytes(request(operation, arguments, request_id=request_id))
     response = json.loads(run_agent(encoded))
     assert response["ok"] is True, response
     return response["result"]
@@ -354,3 +359,75 @@ def test_retry_after_definitive_launch_failure_does_not_become_success(
     assert first["error"]["code"] == "remote-submission-failed"
     assert second["error"]["code"] == "remote-submission-failed"
     assert launches == 1
+
+
+def test_cluster_pre_launch_is_snapshotted_before_idempotent_dispatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workflow = Workflow(storage_path=tmp_path / "results")
+    staging = tmp_path / "transport"
+    source = tmp_path / "site init.sh"
+    content = b"export SITE_ENV=ready\n"
+    source.write_bytes(content)
+    expected = f"sha256:{hashlib.sha256(content).hexdigest()}"
+    observed = []
+
+    def fake_launch(control, launch, *, secret_refs):
+        del launch, secret_refs
+        metadata = control.read_submission()["psij_pre_launch"]
+        artifact = control.confined_path(metadata["artifact"]["path"])
+        observed.append((metadata, artifact.read_bytes()))
+
+    monkeypatch.setattr(
+        "bioimageflow.launcher.backends.launch_orchestrator",
+        fake_launch,
+    )
+    with prepare_cluster_bundle(
+        workflow,
+        inputs=None,
+        targets=None,
+        parsl_config=ParslConfigRef(
+            "tests.unit.launcher.config_factories:build",
+            {"workers": 1},
+        ),
+        executor_bindings={"threads": _binding()},
+        node_routes=None,
+        environment_routes=None,
+        shared_runtime_root=None,
+        task_policy=None,
+        launch=PSIJLaunchConfig(
+            executor="slurm",
+            walltime=timedelta(minutes=10),
+        ),
+        pre_launch=PreLaunchScript.from_cluster_file(
+            source.as_posix(),
+            expected_digest=expected,
+        ),
+    ) as bundle:
+        base = {"manifest": bundle.manifest, "staging_root": staging.as_posix()}
+        allocated = _call("allocate-upload", base, str(uuid.uuid4()))
+        shutil.copytree(
+            bundle.root,
+            Path(allocated["remote_root"]),
+            dirs_exist_ok=True,
+        )
+        committed = _call(
+            "commit-upload",
+            {**base, "upload_id": allocated["upload_id"]},
+            str(uuid.uuid4()),
+        )
+        submit_id = str(uuid.uuid4())
+        arguments = {**base, "object_path": committed["object_path"]}
+        first = _call("submit", arguments, submit_id)
+        source.write_bytes(b"changed after dispatch\n")
+        second = _call("submit", arguments, submit_id)
+
+    assert first == second
+    assert len(observed) == 1
+    metadata, installed = observed[0]
+    assert installed == content
+    assert metadata["source_kind"] == "cluster_file"
+    assert metadata["source_path"] == source.as_posix()
+    assert metadata["expected_digest"] == expected
+    assert metadata["artifact"]["digest"] == expected

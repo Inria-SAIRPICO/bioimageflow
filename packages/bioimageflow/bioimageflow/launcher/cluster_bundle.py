@@ -26,11 +26,12 @@ from bioimageflow.workflow import Workflow
 
 from .inputs import encode_cluster_typed_constant
 from .payload import serialize_workflow_payload
+from .pre_launch import PreLaunchScript, stage_bundle_pre_launch
 from .submission import _normalize_bindings, _normalize_routes
 from .types import LocalUpload, PSIJLaunchConfig, ParslConfigRef
 
 
-BUNDLE_SCHEMA = "bioimageflow.cluster.submission_bundle.v1"
+BUNDLE_SCHEMA = "bioimageflow.cluster.submission_bundle.v2"
 MANIFEST_SCHEMA = "bioimageflow.cluster.upload_manifest.v1"
 MAX_UPLOAD_FILES = 100_000
 MAX_UPLOAD_DEPTH = 64
@@ -44,6 +45,7 @@ class PreparedClusterBundle:
 
     root: Path
     manifest: dict[str, Any]
+    external_sources: tuple[dict[str, Any], ...] = ()
 
     @property
     def digest(self) -> str:
@@ -341,6 +343,7 @@ def prepare_cluster_bundle(
     shared_runtime_root: Path | str | None,
     task_policy: ParslTaskPolicy | None,
     launch: PSIJLaunchConfig,
+    pre_launch: PreLaunchScript | None = None,
 ) -> Iterator[PreparedClusterBundle]:
     """Build one private, self-contained laptop-to-cluster request bundle."""
     if targets is not None and inputs is not None:
@@ -406,6 +409,10 @@ def prepare_cluster_bundle(
             workflow.storage_path,
             field="Workflow.storage_path",
         )
+        pre_launch_value, external_sources = stage_bundle_pre_launch(
+            pre_launch,
+            root,
+        )
         request_value = {
             "environment_routes": _normalize_routes(
                 environment_routes,
@@ -421,6 +428,7 @@ def prepare_cluster_bundle(
                 field="node_routes",
             ),
             "parsl_config": parsl_config.to_dict(),
+            "psij_pre_launch": pre_launch_value,
             "schema": BUNDLE_SCHEMA,
             "shared_runtime_root": (
                 None
@@ -437,6 +445,10 @@ def prepare_cluster_bundle(
         }
         (root / "request.json").write_bytes(canonical_json_bytes(request_value))
         manifest = _manifest(root)
-        yield PreparedClusterBundle(root=root, manifest=manifest)
+        yield PreparedClusterBundle(
+            root=root,
+            manifest=manifest,
+            external_sources=external_sources,
+        )
     finally:
         temporary.cleanup()

@@ -145,6 +145,7 @@ def _build_spec(runtime: Any, job: dict[str, Any]) -> Any:
         queue_name=job["attributes"]["queue_name"],
         account=job["attributes"]["account"],
     )
+    pre_launch = job["pre_launch"]
     return runtime.JobSpec(
         executable=job["executable"],
         arguments=list(job["arguments"]),
@@ -154,6 +155,7 @@ def _build_spec(runtime: Any, job: dict[str, Any]) -> Any:
         stderr_path=Path(job["stderr_path"]),
         resources=resources,
         attributes=attributes,
+        pre_launch=(None if pre_launch is None else Path(pre_launch["path"])),
     )
 
 

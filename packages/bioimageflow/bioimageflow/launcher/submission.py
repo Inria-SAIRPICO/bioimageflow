@@ -15,6 +15,11 @@ from .configuration import import_config_factory, verify_secret_references
 from .errors import PSIJSubmissionUncertainError
 from .inputs import serialize_invocation
 from .payload import serialize_workflow_payload
+from .pre_launch import (
+    PreLaunchScript,
+    install_prepared_pre_launch,
+    prepare_pre_launch,
+)
 from .repository import (
     LauncherRepository,
     RunAlreadyExistsError,
@@ -93,7 +98,7 @@ def _absolute_path(
 
 def _protocol_versions() -> dict[str, int]:
     return {
-        "launcher": 1,
+        "launcher": 2,
         "workflow_graph": 1,
         "workflow_archive": 1,
         "parsl_task": 1,
@@ -150,6 +155,7 @@ def _submit_workflow(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     launch: LaunchConfig | None = None,
+    pre_launch: PreLaunchScript | None = None,
     preallocated_run_id: str | None = None,
     preserve_cluster_paths: bool = False,
 ) -> WorkflowRun:
@@ -163,10 +169,14 @@ def _submit_workflow(
         PSIJLaunchConfig,
     }:
         raise TypeError(
-            "launch must be an OrchestratorLaunchConfig, PSIJLaunchConfig, "
-            "or None."
+            "launch must be an OrchestratorLaunchConfig, PSIJLaunchConfig, or None."
         )
     selected_launch = (launch or OrchestratorLaunchConfig()).normalized()
+    if pre_launch is not None:
+        if type(pre_launch) is not PreLaunchScript:
+            raise TypeError("pre_launch must be a PreLaunchScript or None.")
+        if type(selected_launch) is not PSIJLaunchConfig:
+            raise ValueError("pre_launch requires an explicit PSIJLaunchConfig.")
     if task_policy is not None and type(task_policy) is not ParslTaskPolicy:
         raise TypeError("task_policy must be a ParslTaskPolicy or None.")
 
@@ -191,70 +201,75 @@ def _submit_workflow(
     )
     if payload["kind"] == "archive_v1" and runtime_root is None:
         raise ValueError(
-            "Submitted workflows with custom sources require "
-            "shared_runtime_root."
+            "Submitted workflows with custom sources require shared_runtime_root."
         )
 
     storage_root = workflow.storage_path.resolve(strict=False)
     repository = LauncherRepository(storage_root)
     selected_task_policy = task_policy or ParslTaskPolicy()
-    last_collision: BaseException | None = None
-    attempts = 1 if preallocated_run_id is not None else 8
-    for _attempt in range(attempts):
-        run_id = preallocated_run_id or repository.new_run_id()
-        candidate = repository.create_candidate(run_id)
-        try:
-            invocation = serialize_invocation(
-                workflow,
-                inputs=inputs,
-                targets=targets,
-                control_candidate=candidate,
-                preserve_cluster_paths=preserve_cluster_paths,
-            )
-            created_at = utc_timestamp()
-            submission = {
-                "schema": SUBMISSION_SCHEMA,
-                "run_id": run_id,
-                "created_at": created_at,
-                "storage_root": str(storage_root),
-                "canonical_view": f"views/runs/{run_id}",
-                "workflow": payload,
-                "invocation": invocation,
-                "parsl_config": parsl_config.to_dict(),
-                "executor_bindings": bindings,
-                "node_routes": normalized_node_routes,
-                "environment_routes": normalized_environment_routes,
-                "shared_runtime_root": (
-                    None if runtime_root is None else str(runtime_root)
-                ),
-                "task_policy": selected_task_policy.to_dict(),
-                "launch": selected_launch.to_dict(),
-                "protocol_versions": _protocol_versions(),
-            }
-            control = repository.allocate(
-                submission,
-                backend=selected_launch.backend,
-                candidate_dir=candidate,
-            )
-        except RunAlreadyExistsError as exc:
-            last_collision = exc
-            if candidate.exists() and not candidate.is_symlink():
-                shutil.rmtree(candidate)
-            continue
-        except BaseException:
-            if candidate.exists() and not candidate.is_symlink():
-                shutil.rmtree(candidate)
-            raise
+    with prepare_pre_launch(pre_launch) as prepared_pre_launch:
+        last_collision: BaseException | None = None
+        attempts = 1 if preallocated_run_id is not None else 8
+        for _attempt in range(attempts):
+            run_id = preallocated_run_id or repository.new_run_id()
+            candidate = repository.create_candidate(run_id)
+            try:
+                invocation = serialize_invocation(
+                    workflow,
+                    inputs=inputs,
+                    targets=targets,
+                    control_candidate=candidate,
+                    preserve_cluster_paths=preserve_cluster_paths,
+                )
+                psij_pre_launch = install_prepared_pre_launch(
+                    prepared_pre_launch,
+                    candidate,
+                )
+                created_at = utc_timestamp()
+                submission = {
+                    "schema": SUBMISSION_SCHEMA,
+                    "run_id": run_id,
+                    "created_at": created_at,
+                    "storage_root": str(storage_root),
+                    "canonical_view": f"views/runs/{run_id}",
+                    "workflow": payload,
+                    "invocation": invocation,
+                    "parsl_config": parsl_config.to_dict(),
+                    "executor_bindings": bindings,
+                    "node_routes": normalized_node_routes,
+                    "environment_routes": normalized_environment_routes,
+                    "shared_runtime_root": (
+                        None if runtime_root is None else str(runtime_root)
+                    ),
+                    "task_policy": selected_task_policy.to_dict(),
+                    "launch": selected_launch.to_dict(),
+                    "psij_pre_launch": psij_pre_launch,
+                    "protocol_versions": _protocol_versions(),
+                }
+                control = repository.allocate(
+                    submission,
+                    backend=selected_launch.backend,
+                    candidate_dir=candidate,
+                )
+            except RunAlreadyExistsError as exc:
+                last_collision = exc
+                if candidate.exists() and not candidate.is_symlink():
+                    shutil.rmtree(candidate)
+                continue
+            except BaseException:
+                if candidate.exists() and not candidate.is_symlink():
+                    shutil.rmtree(candidate)
+                raise
 
-        _launch_prepared_control(
-            control,
-            selected_launch,
-            parsl_config=parsl_config,
-        )
-        return WorkflowRun(control)
-    raise RuntimeError(
-        "Could not allocate a unique submitted workflow run ID."
-    ) from last_collision
+            _launch_prepared_control(
+                control,
+                selected_launch,
+                parsl_config=parsl_config,
+            )
+            return WorkflowRun(control)
+        raise RuntimeError(
+            "Could not allocate a unique submitted workflow run ID."
+        ) from last_collision
 
 
 def submit_workflow(
@@ -269,9 +284,12 @@ def submit_workflow(
     shared_runtime_root: Path | str | None = None,
     task_policy: ParslTaskPolicy | None = None,
     launch: LaunchConfig | None = None,
+    pre_launch: PreLaunchScript | None = None,
     transport: SSHSubmissionTransport | None = None,
 ) -> WorkflowRun | RemoteWorkflowRun:
     """Persist and launch one reconnectable submitted Parsl workflow."""
+    if pre_launch is not None and type(pre_launch) is not PreLaunchScript:
+        raise TypeError("pre_launch must be a PreLaunchScript or None.")
     if transport is not None:
         if type(transport) is not SSHSubmissionTransport:
             raise TypeError("transport must be an SSHSubmissionTransport or None.")
@@ -293,12 +311,15 @@ def submit_workflow(
             shared_runtime_root=shared_runtime_root,
             task_policy=task_policy,
             launch=launch,
+            pre_launch=pre_launch,
         )
         return RemoteWorkflowRun._submitted(
             transport,
             workflow.storage_path.as_posix(),
             run_id,
         )
+    if pre_launch is not None and pre_launch.source_kind == "cluster_file":
+        raise ValueError("Cluster pre-launch files require transported submission.")
     return _submit_workflow(
         workflow,
         inputs=inputs,
@@ -310,5 +331,6 @@ def submit_workflow(
         shared_runtime_root=shared_runtime_root,
         task_policy=task_policy,
         launch=launch,
+        pre_launch=pre_launch,
         preserve_cluster_paths=False,
     )
