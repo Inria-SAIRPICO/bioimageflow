@@ -15,11 +15,11 @@ import pytest
 import yaml
 
 from scripts.check_package_release import validate_release
-from scripts.package_status import package_status
 from scripts.release_set import publish_release_set, validate_release_set
 from scripts.release_support import (
     Package,
     ReleaseError,
+    classify_package_release,
     discover_packages,
     parse_release_tag,
     validate_release_artifacts,
@@ -269,18 +269,18 @@ def test_release_set_publishes_validated_artifacts_in_dependency_order(
 def test_status_uses_package_specific_tag_to_detect_changes(tmp_path: Path) -> None:
     root, package = _create_release_repository(tmp_path)
 
-    assert package_status(package, "1.2.3", root)[0] == "up-to-date"
+    assert classify_package_release(package, "1.2.3", root).state == "up-to-date"
 
     (package.directory / "module.py").write_text("value = 1\n")
-    assert package_status(package, "1.2.3", root)[0] == "bump-required"
+    assert classify_package_release(package, "1.2.3", root).state == "bump-required"
 
 
 def test_status_distinguishes_unpublished_pending_and_behind(tmp_path: Path) -> None:
     root, package = _create_release_repository(tmp_path)
 
-    assert package_status(package, None, root)[0] == "unpublished"
-    assert package_status(package, "1.2.2", root)[0] == "pending"
-    assert package_status(package, "1.2.4", root)[0] == "behind"
+    assert classify_package_release(package, None, root).state == "unpublished"
+    assert classify_package_release(package, "1.2.2", root).state == "pending"
+    assert classify_package_release(package, "1.2.4", root).state == "behind"
 
 
 def test_github_release_workflow_coordinates_validated_package_sets() -> None:

@@ -32,6 +32,11 @@ First-party dependency ranges declare the oldest tested compatible version and a
 A downstream package needs a release when it starts using a newer first-party API or when its compatibility range changes.
 A core or orchestrator release alone does not require downstream releases when their declared ranges remain accurate.
 
+The first-party DataFrame tool packages treat `DataFrameTool`, `Passthrough`, public input/output schema serialization, and their tested `Workflow` integration as a stable tool-authoring contract throughout BioImageFlow 0.x.
+Their `bioimageflow>=0.1.6,<1` range therefore allows execution, launcher, and GUI-integration releases without republishing unchanged tools.
+Changing that tool-authoring contract requires updating and releasing the affected tool packages.
+This policy does not extend the compatibility range of `bioimageflow-core`; changing the core SDK boundary requires a separate compatibility review.
+
 ## Check Package Status
 
 Run:
@@ -152,7 +157,7 @@ Commit the versions, dependency ranges, code, and lockfile as one release commit
 uv lock
 uv run ruff check .
 uv run pyright
-uv run pytest tests/unit/test_release_tooling.py tests/unit/test_package_artifacts.py
+uv run pytest tests/unit/test_release_tooling.py tests/unit/test_release_tagging.py tests/unit/test_package_artifacts.py
 git push origin main
 ```
 
@@ -172,18 +177,40 @@ Run an additional resource-dependent suite only when the release changes that ru
 Resource-dependent failures are non-blocking during weekly monitoring, but a manually selected suite is blocking and must pass before release.
 Do not make every package release wait for unrelated datasets, binaries, or models.
 
-Create one annotated tag per selected package at the same validated commit:
+Preview the release set after CI succeeds:
 
 ```bash
-git tag -a bioimageflow-core-v0.1.8 -m "Release bioimageflow-core 0.1.8"
-git tag -a bioimageflow-segmentation-tools-v0.2.0 -m "Release bioimageflow-segmentation-tools 0.2.0"
-uv run --no-project --with packaging python scripts/release_set.py plan \
-  bioimageflow-core-v0.1.8 \
-  bioimageflow-segmentation-tools-v0.2.0
-git push origin bioimageflow-core-v0.1.8 bioimageflow-segmentation-tools-v0.2.0
+uv run --no-project --with packaging python scripts/release_set.py tag --dry-run
 ```
 
-The plan rejects lightweight tags, version mismatches, tags at different commits, an incompatible dependency range within the selected set, or a dirty working tree.
+With no package arguments, the command queries PyPI and selects every package whose local version is newer than PyPI.
+It skips packages that are up to date, unpublished packages that require explicit bootstrap handling, and historical packages whose matching published source tag is unavailable.
+It stops for packages that are behind PyPI, contain unversioned changes after their release tag, or cannot be checked safely.
+
+Pass package names to prepare an intentional independent subset:
+
+```bash
+uv run --no-project --with packaging python scripts/release_set.py tag \
+  --dry-run bioimageflow-core bioimageflow-segmentation-tools
+```
+
+The command verifies that every unselected workspace dependency has a compatible published version.
+It asks the operator to include or bump a dependency when the selected artifact would otherwise be un-installable.
+
+Create every annotated tag locally and atomically push the complete set with:
+
+```bash
+uv run --no-project --with packaging python scripts/release_set.py tag \
+  --push origin bioimageflow-core bioimageflow-segmentation-tools
+```
+
+The JSON output contains `release_tags`, the exact space-separated value required by the GitHub workflow.
+Explicit preview and push commands must repeat the same package names.
+Omit package names from both commands when releasing every pending package discovered automatically.
+`--push` accepts a configured Git remote name, not a URL, so credentials cannot enter output or diagnostics.
+The operation preflights every tag before creating any, accepts exact existing annotated tags idempotently, and rolls back tags created by the current invocation if local creation fails.
+An atomic push failure leaves the validated local tags in place; repair the remote or credentials and rerun the same command.
+The script never falls back to a partial non-atomic push.
 Pushing tags does not publish anything.
 
 ## Publish the Release Set from GitHub

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import subprocess
 import tarfile
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import zipfile
@@ -46,6 +46,24 @@ class Package:
     @property
     def release_tag(self) -> str:
         return f"{self.name}-v{self.version}"
+
+
+PackageReleaseState = Literal[
+    "unpublished",
+    "pending",
+    "behind",
+    "unknown",
+    "bump-required",
+    "up-to-date",
+]
+
+
+@dataclass(frozen=True)
+class PackageReleaseStatus:
+    """One package's local/PyPI/source-tag release state."""
+
+    state: PackageReleaseState
+    detail: str
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -142,6 +160,39 @@ def package_changed_since_tag(root: Path, package: Package, tag: str) -> bool:
         relative_directory,
     )
     return bool(untracked)
+
+
+def classify_package_release(
+    package: Package,
+    remote_version: str | None,
+    root: Path,
+) -> PackageReleaseStatus:
+    """Classify a package once for status reporting and release selection."""
+    if remote_version is None:
+        return PackageReleaseStatus(
+            "unpublished",
+            "Package name does not exist on PyPI",
+        )
+
+    local = Version(package.version)
+    remote = Version(remote_version)
+    if local > remote:
+        return PackageReleaseStatus("pending", "Local version is newer than PyPI")
+    if local < remote:
+        return PackageReleaseStatus("behind", "Local version is older than PyPI")
+
+    tag = package.release_tag
+    if not tag_exists(root, tag):
+        return PackageReleaseStatus(
+            "unknown",
+            f"Published version matches, but release tag {tag} is missing",
+        )
+    if package_changed_since_tag(root, package, tag):
+        return PackageReleaseStatus(
+            "bump-required",
+            f"Package contents changed after {tag}",
+        )
+    return PackageReleaseStatus("up-to-date", f"Matches PyPI and {tag}")
 
 
 def pypi_version(

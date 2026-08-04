@@ -295,6 +295,7 @@ uv run python scripts/package_status.py
 ```
 
 Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and an approval-gated coordinated GitHub Actions publication workflow.
+`scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
 See the [release operator guide](docs/source/reference/releasing.md) for setup and release steps.
 
 ## FAQ

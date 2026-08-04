@@ -8,38 +8,15 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from packaging.version import Version
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.release_support import (  # noqa: E402
-    Package,
     ReleaseError,
+    classify_package_release,
     discover_packages,
-    package_changed_since_tag,
     pypi_version,
-    tag_exists,
 )
-
-
-def package_status(package: Package, remote_version: str | None, root: Path) -> tuple[str, str]:
-    if remote_version is None:
-        return "unpublished", "Package name does not exist on PyPI"
-
-    local = Version(package.version)
-    remote = Version(remote_version)
-    if local > remote:
-        return "pending", "Local version is newer than PyPI"
-    if local < remote:
-        return "behind", "Local version is older than PyPI"
-
-    tag = package.release_tag
-    if not tag_exists(root, tag):
-        return "unknown", f"Published version matches, but release tag {tag} is missing"
-    if package_changed_since_tag(root, package, tag):
-        return "bump-required", f"Package contents changed after {tag}"
-    return "up-to-date", f"Matches PyPI and {tag}"
 
 
 def collect_status(root: Path = ROOT) -> list[dict[str, Any]]:
@@ -47,7 +24,9 @@ def collect_status(root: Path = ROOT) -> list[dict[str, Any]]:
     for package in discover_packages(root):
         try:
             remote = pypi_version(package.name)
-            status, detail = package_status(package, remote, root)
+            classification = classify_package_release(package, remote, root)
+            status = classification.state
+            detail = classification.detail
         except Exception as error:  # Keep reporting the remaining packages.
             remote = None
             status = "error"
