@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow-spot-tools"
-version = "0.1.8"
+version = "0.1.9"
 description = "Spot detection and puncta quantification tools for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "bioimageflow-core>=0.1.6,<0.3",
-    "bioimageflow>=0.1.6,<0.5",
+    "bioimageflow>=0.1.6,<0.6",
     "imageio>=2.31.0",
     "numpy>=1.23.5",
     "pandas>=2.0.0",
