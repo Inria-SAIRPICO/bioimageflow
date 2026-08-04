@@ -49,7 +49,13 @@ class WorkflowRunNotReadyError(LauncherError):
     code = "workflow-run-not-ready"
 
 
-class WorkflowRunResultUnavailableError(LauncherError):
+class WorkflowResultExportError(LauncherError):
+    """Base class for engine-neutral result export failures."""
+
+    code = "workflow-result-export-error"
+
+
+class WorkflowRunResultUnavailableError(WorkflowResultExportError):
     """Raised when a successful historical return can no longer be reconstructed."""
 
     code = "workflow-run-result-unavailable"
@@ -61,14 +67,16 @@ class WorkflowRunRetryError(LauncherError):
     code = "workflow-run-retry-error"
 
 
-class WorkflowResultDestinationError(FileExistsError):
-    """Structured conflict for an unsafe or already-owned export destination."""
+class WorkflowResultDestinationError(WorkflowResultExportError):
+    """Raised when an export destination is unsafe or belongs to another bundle."""
 
     code = "workflow-result-destination-conflict"
 
-    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.details = dict(details or {})
+
+class WorkflowResultIntegrityError(WorkflowResultExportError):
+    """Raised when a result snapshot or bundle fails identity verification."""
+
+    code = "workflow-result-integrity-error"
 
 
 class LauncherProtocolError(LauncherError):

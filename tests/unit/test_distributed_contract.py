@@ -343,7 +343,7 @@ def test_capability_discovery_has_no_live_runtime_values() -> None:
     assert payload["capabilities"]["remote_node_path_overrides"]["supported"]
     assert payload["capabilities"]["submitted_run_retry"]["supported"]
     assert payload["capabilities"]["submitted_recompute"]["supported"]
-    assert payload["capabilities"]["local_result_export"]["supported"]
+    assert payload["capabilities"]["submitted_result_export"]["supported"]
     assert payload["capabilities"]["attached_result_export"]["supported"]
     json.dumps(payload)
     assert ExecutionCapabilityReport.from_dict(payload).to_dict() == payload

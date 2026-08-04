@@ -224,14 +224,14 @@ def test_remote_cluster_composes_transport_agent_launcher_parsl_and_result(
         disconnect_after_first_get,
     )
     with pytest.raises(ConnectionError, match="injected"):
-        reconnected.result(destination=destination)
+        reconnected.export_result(destination)
     assert not destination.exists()
     assert not list(destination.parent.glob(f".{run.id}.*.partial"))
     monkeypatch.setattr(
         "bioimageflow.launcher.result_download._run_sftp",
         original_download,
     )
-    result = reconnected.result(destination=destination)
+    result = reconnected.export_result(destination)
 
     assert list(result) == [
         "incremented",
@@ -295,7 +295,7 @@ def test_remote_cluster_exposes_structured_failure(
     assert cluster.run_queued_job() == "failed"
     run.refresh()
     with pytest.raises(WorkflowRunFailedError, match="remote failure 7"):
-        run.result(destination=tmp_path / "unused")
+        run.export_result(tmp_path / "unused")
     statuses = [
         entry["payload"]["status"]
         for entry in run.progress()

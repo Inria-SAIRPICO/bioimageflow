@@ -20,15 +20,9 @@ def validate_retry_observation(result: Mapping[str, Any]) -> None:
             "Cluster observation retry provenance is invalid.",
             ambiguous=True,
         ) from exc
-    schema = result.get("submission_schema")
-    if (schema == "bioimageflow.launcher.submission.v2" and "retry_plan" in result) or (
-        schema == "bioimageflow.launcher.submission.v3"
-        and (
-            "retry_plan" not in result
-            or parsed is None
-            or parsed.retry_run_id != result.get("run_id")
-            or parsed.storage_path != result.get("storage_path")
-        )
+    if parsed is not None and (
+        parsed.retry_run_id != result.get("run_id")
+        or parsed.storage_path != result.get("storage_path")
     ):
         raise SSHTransportError(
             "remote-protocol",
@@ -46,22 +40,22 @@ def validate_retry_result(
     from .retry import RunRetryPlan
     from .ssh import (
         SSHTransportError,
-        _exact_observation_fields,
+        _OBSERVATION_FIELDS,
         _validate_observation,
     )
 
-    if operation == "prepare-retry":
+    if operation == "plan-retry":
         try:
             plan = RunRetryPlan.from_dict(result)
         except (TypeError, ValueError) as exc:
             raise SSHTransportError(
                 "remote-protocol",
-                "Cluster retry preview response is invalid.",
+                "Cluster retry plan response is invalid.",
                 ambiguous=True,
             ) from exc
         if (
             plan.parent_run_id != arguments.get("run_id")
-            or arguments.get("storage_path") is None
+            or plan.storage_path != arguments.get("storage_path")
         ):
             raise SSHTransportError(
                 "remote-protocol",
@@ -69,7 +63,7 @@ def validate_retry_result(
                 ambiguous=True,
             )
         return result
-    if operation != "retry":
+    if operation != "start-retry":
         return None
     try:
         plan = RunRetryPlan.from_dict(arguments.get("plan"))
@@ -84,7 +78,7 @@ def validate_retry_result(
         "storage_path": arguments.get("storage_path"),
     }
     _validate_observation(result, expected)
-    if set(result) != _exact_observation_fields(result):
+    if set(result) != _OBSERVATION_FIELDS or result["retry_plan"] != plan.to_dict():
         raise SSHTransportError(
             "remote-protocol",
             "Cluster retry response schema is invalid.",

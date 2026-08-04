@@ -12,6 +12,8 @@ from .errors import (
     WorkflowRunResultUnavailableError,
     WorkflowRunRetryError,
     WorkflowResultDestinationError,
+    WorkflowResultExportError,
+    WorkflowResultIntegrityError,
 )
 from .run import WorkflowRun
 from .remote_run import RemoteWorkflowRun
@@ -31,7 +33,6 @@ from .node_inputs import (
     inspect_remote_node_paths,
 )
 from .retry import (
-    PreparedRunRetry,
     RecomputeRequest,
     RetryInvalidation,
     RunRetryPlan,
@@ -61,7 +62,6 @@ __all__ = [
     "ParslConfigRef",
     "PreLaunchScript",
     "PreparedRemoteSubmission",
-    "PreparedRunRetry",
     "PreparedSubmissionEntry",
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
@@ -76,6 +76,8 @@ __all__ = [
     "SSHSubmissionTransport",
     "SSHTransportError",
     "WorkflowResultDestinationError",
+    "WorkflowResultExportError",
+    "WorkflowResultIntegrityError",
     "WorkflowRun",
     "WorkflowRunFailedError",
     "WorkflowRunLostError",

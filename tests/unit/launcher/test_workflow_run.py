@@ -58,14 +58,14 @@ def test_open_refresh_progress_and_prepared_cancel(tmp_path: Path) -> None:
 
     assert run.status == "cancelled"
     with pytest.raises(WorkflowCancelledError):
-        run.result()
+        run.load_result()
 
 
 def test_nonterminal_result_is_not_ready(tmp_path: Path) -> None:
     run, _control = _run(tmp_path)
 
     with pytest.raises(WorkflowRunNotReadyError) as captured:
-        run.result()
+        run.load_result()
 
     assert captured.value.code == "workflow-run-not-ready"
 
@@ -82,7 +82,7 @@ def test_failed_result_carries_persisted_error(tmp_path: Path) -> None:
     )
 
     with pytest.raises(WorkflowRunFailedError) as captured:
-        run.result()
+        run.load_result()
 
     assert captured.value.error["code"] == "workflow-failed"
 
@@ -119,7 +119,7 @@ def test_successful_result_rehydrates_return(tmp_path: Path) -> None:
         new_state="succeeded",
     )
 
-    result = run.result()
+    result = run.load_result()
 
     assert result.at["row", "value"] == 7
 

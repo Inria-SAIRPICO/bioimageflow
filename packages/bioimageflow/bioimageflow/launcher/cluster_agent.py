@@ -21,11 +21,11 @@ from .cluster_upload import allocate_upload, commit_upload, normalized_root
 from .remote_control import (
     cancel_run,
     inspect_run,
+    plan_run_retry,
     read_log_page,
     read_progress_page,
     refresh_run,
-    prepare_run_retry,
-    submit_run_retry,
+    start_run_retry,
 )
 from .result_bundle import prepare_result
 from .profile_validation import validate_profile_on_cluster
@@ -145,19 +145,19 @@ def handle_operation(
             request_id,
             request_digest,
         )
-    if operation == "prepare-retry":
+    if operation == "plan-retry":
         value = _exact_arguments(
             arguments,
             {"recompute", "run_id", "storage_path"},
         )
-        return prepare_run_retry(
+        return plan_run_retry(
             value["storage_path"],
             value["run_id"],
             value["recompute"],
         )
-    if operation == "retry":
+    if operation == "start-retry":
         value = _exact_arguments(arguments, {"plan", "storage_path"})
-        return submit_run_retry(value["storage_path"], value["plan"])
+        return start_run_retry(value["storage_path"], value["plan"])
     if operation == "validate-profile":
         value = _exact_arguments(
             arguments,

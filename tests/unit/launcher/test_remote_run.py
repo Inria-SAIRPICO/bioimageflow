@@ -14,6 +14,8 @@ from bioimageflow import (
     RunRetryPlan,
     SSHSubmissionTransport,
     SSHTransportError,
+    WorkflowResultExportError,
+    WorkflowResultIntegrityError,
     WorkflowRunRetryError,
 )
 
@@ -32,13 +34,13 @@ def _transport() -> SSHSubmissionTransport:
 
 def _observation(state: str = "running", run_id: str = RUN_ID) -> dict:
     return {
+        "schema": "bioimageflow.launcher.run-observation.v1",
         "error": None,
+        "retry_plan": None,
         "run_id": run_id,
         "state": state,
         "status_revision": 2,
         "storage_path": STORAGE,
-        "submission_schema": "bioimageflow.launcher.submission.v2",
-        "status_schema": "bioimageflow.launcher.status.v1",
         "terminal": state in {"succeeded", "failed", "cancelled", "lost"},
         "updated_at": "2026-07-29T12:00:00Z",
     }
@@ -239,7 +241,7 @@ def test_remote_retry_uses_public_preview_and_idempotent_mutation(
         calls.append((operation, arguments))
         if operation == "inspect":
             return _observation("failed")
-        assert operation == "prepare-retry"
+        assert operation == "plan-retry"
         return plan.to_dict()
 
     def retry(transport, operation, arguments, request_id):
@@ -248,15 +250,14 @@ def test_remote_retry_uses_public_preview_and_idempotent_mutation(
         return {
             **_observation("prepared", retry_id),
             "retry_plan": plan.to_dict(),
-            "submission_schema": "bioimageflow.launcher.submission.v3",
         }
 
     monkeypatch.setattr(ssh_module, "execute_cluster_command", execute)
     monkeypatch.setattr(ssh_module, "_retry_mutation", retry)
     run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
 
-    prepared = run.prepare_retry(plan.recompute)
-    retried = prepared.submit()
+    confirmed = run.plan_retry(plan.recompute)
+    retried = run.start_retry(confirmed)
 
     assert retried.id == retry_id
     assert retried.parent_id == RUN_ID
@@ -267,12 +268,11 @@ def test_remote_retry_uses_public_preview_and_idempotent_mutation(
         observation={
             **_observation("prepared", retry_id),
             "retry_plan": plan.to_dict(),
-            "submission_schema": "bioimageflow.launcher.submission.v3",
         },
     )
     assert reopened.parent_id == RUN_ID
     assert reopened.retry_plan == plan
-    assert calls[-1][0] == "retry"
+    assert calls[-1][0] == "start-retry"
     assert calls[-1][1]["plan"] == plan.to_dict()
 
 
@@ -307,7 +307,7 @@ def test_remote_retry_translates_public_conflict_and_uncertainty(
     monkeypatch.setattr(ssh_module, "execute_cluster_command", execute)
     run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
     with pytest.raises(WorkflowRunRetryError, match="active run"):
-        run.prepare_retry()
+        run.plan_retry()
 
     monkeypatch.setattr(
         ssh_module,
@@ -320,7 +320,7 @@ def test_remote_retry_translates_public_conflict_and_uncertainty(
         ),
     )
     with pytest.raises(PSIJSubmissionUncertainError, match="scheduler outcome"):
-        run.submit_retry(plan)
+        run.start_retry(plan)
 
 
 @pytest.mark.parametrize("path", ["relative", "//cluster/path", "/cluster/a/../path"])
@@ -340,4 +340,38 @@ def test_result_requires_absent_destination_parent_to_be_created_by_caller(
     run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
 
     with pytest.raises(Exception, match="not succeeded"):
-        run.result(destination=tmp_path / "result")
+        run.export_result(tmp_path / "result")
+
+
+@pytest.mark.parametrize(
+    ("remote_code", "expected_error"),
+    [
+        ("remote-result-integrity", WorkflowResultIntegrityError),
+        ("remote-result-mutated", WorkflowResultIntegrityError),
+        ("remote-result-too-large", WorkflowResultExportError),
+    ],
+)
+def test_result_preparation_translates_remote_domain_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote_code: str,
+    expected_error: type[Exception],
+) -> None:
+    monkeypatch.setattr(
+        ssh_module,
+        "execute_cluster_command",
+        lambda *args, **kwargs: _observation("succeeded"),
+    )
+    monkeypatch.setattr(
+        ssh_module,
+        "_retry_mutation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            SSHTransportError(remote_code, "sanitized remote failure")
+        ),
+    )
+    run = RemoteWorkflowRun.open(_transport(), STORAGE, RUN_ID)
+
+    with pytest.raises(expected_error) as caught:
+        run.export_result(tmp_path / "result")
+
+    assert caught.value.details["remote_code"] == remote_code

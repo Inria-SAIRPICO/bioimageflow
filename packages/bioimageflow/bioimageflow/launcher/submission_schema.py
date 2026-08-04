@@ -14,8 +14,6 @@ from .schemas import (
     SHA256_PATTERN,
     SUBMISSION_FIELDS,
     SUBMISSION_SCHEMA,
-    RETRY_SUBMISSION_FIELDS,
-    RETRY_SUBMISSION_SCHEMA,
     LauncherSchemaError,
     _exact_object,
     _mapping,
@@ -359,7 +357,7 @@ def _validate_submission_records(result: Mapping[str, Any]) -> None:
         fields=PROTOCOL_VERSION_FIELDS,
     )
     expected_versions = {
-        "launcher": 2,
+        "launcher": 1,
         "workflow_graph": 1,
         "workflow_archive": 1,
         "parsl_task": 1,
@@ -370,43 +368,34 @@ def _validate_submission_records(result: Mapping[str, Any]) -> None:
 
 
 def validate_submission_payload(payload: object) -> dict[str, Any]:
-    """Validate and copy a submission-v2 or retry submission-v3 payload."""
+    """Validate and copy one canonical launcher submission payload."""
     if not isinstance(payload, Mapping):
         raise LauncherSchemaError("submission must be an object.")
     schema = payload.get("schema")
-    fields = (
-        SUBMISSION_FIELDS
-        if schema == SUBMISSION_SCHEMA
-        else RETRY_SUBMISSION_FIELDS
-        if schema == RETRY_SUBMISSION_SCHEMA
-        else frozenset()
-    )
-    if not fields:
+    if schema != SUBMISSION_SCHEMA:
         raise LauncherSchemaError("submission.schema is unsupported.")
-    assert isinstance(schema, str)
     result = _mapping(
         payload,
-        schema=schema,
-        fields=fields,
+        schema=SUBMISSION_SCHEMA,
+        fields=SUBMISSION_FIELDS,
     )
     run_id = validate_run_id(result["run_id"])
-    if schema == RETRY_SUBMISSION_SCHEMA:
-        parent_run_id = validate_run_id(result["parent_run_id"])
-        if parent_run_id == run_id:
-            raise LauncherSchemaError("parent_run_id must differ from run_id.")
+    _validate_absolute_path(result["storage_root"], field="storage_root")
+    retry_value = result["retry_plan"]
+    if retry_value is not None:
         try:
             from .retry import RunRetryPlan
 
-            retry_plan = RunRetryPlan.from_dict(result["retry_plan"])
+            retry_plan = RunRetryPlan.from_dict(retry_value)
         except (TypeError, ValueError) as exc:
             raise LauncherSchemaError("retry_plan is invalid.") from exc
         if (
             retry_plan.retry_run_id != run_id
-            or retry_plan.parent_run_id != parent_run_id
+            or retry_plan.parent_run_id == run_id
+            or retry_plan.storage_path != result["storage_root"]
         ):
             raise LauncherSchemaError("retry_plan run binding is invalid.")
     parse_utc_timestamp(result["created_at"], field="created_at")
-    _validate_absolute_path(result["storage_root"], field="storage_root")
     canonical_view = _validate_relative_posix_path(
         result["canonical_view"],
         field="canonical_view",

@@ -9,10 +9,9 @@ import os
 import re
 import shutil
 import stat
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from bioimageflow.storage import canonical_json_bytes
 
@@ -26,7 +25,7 @@ from .repository import (
     _atomic_write_json,
     _read_json,
 )
-from .schemas import RETRY_SUBMISSION_SCHEMA, TERMINAL_STATES, utc_timestamp, validate_run_id
+from .schemas import SUBMISSION_SCHEMA, TERMINAL_STATES, utc_timestamp, validate_run_id
 from .submission import _launch_prepared_control
 from .types import ParslConfigRef, launch_config_from_dict
 
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
     from .run import WorkflowRun
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_RetryRun = TypeVar("_RetryRun")
 _RETRY_TRANSACTION_SCHEMA = "bioimageflow.launcher.retry-transaction.v1"
 
 @dataclass(frozen=True, slots=True)
@@ -275,37 +273,6 @@ class RunRetryPlan:
         return plan
 
 
-class PreparedRunRetry(Generic[_RetryRun]):
-    """Single-use revision-bound retry prepared from one retained run."""
-
-    def __init__(
-        self,
-        plan: RunRetryPlan,
-        submitter: Callable[[], _RetryRun],
-    ) -> None:
-        if type(plan) is not RunRetryPlan or not callable(submitter):
-            raise TypeError("PreparedRunRetry requires a plan and submit callback.")
-        self.plan = plan
-        self._submitter = submitter
-        self._submitted = False
-
-    @property
-    def submitted(self) -> bool:
-        return self._submitted
-
-    @property
-    def can_submit(self) -> bool:
-        """Whether this object is unused and its preview found no active run."""
-        return not self._submitted and not self.plan.conflicting_run_ids
-
-    def submit(self) -> _RetryRun:
-        """Apply the bound intent and create exactly one new submitted run."""
-        if self._submitted:
-            raise RuntimeError("Prepared retry was already submitted.")
-        self._submitted = True
-        return self._submitter()
-
-
 def _cache_selection_revision(storage_path: Path) -> str:
     digest = hashlib.sha256()
     root = storage_path / "cache" / "v1" / "results"
@@ -422,7 +389,7 @@ def _invalidation_preview(workflow: Any, request: RecomputeRequest | None) -> tu
     )
 
 
-def prepare_retry_plan(run: Any, recompute: RecomputeRequest | None) -> RunRetryPlan:
+def build_retry_plan(run: Any, recompute: RecomputeRequest | None) -> RunRetryPlan:
     """Build one non-mutating retry plan from a retained terminal run."""
     if recompute is not None and type(recompute) is not RecomputeRequest:
         raise TypeError("recompute must be a RecomputeRequest or None.")
@@ -496,9 +463,8 @@ def _clone_submission(run: Any, plan: RunRetryPlan, candidate: Path) -> dict[str
     result = copy.deepcopy(source)
     result.update(
         {
-            "schema": RETRY_SUBMISSION_SCHEMA,
+            "schema": SUBMISSION_SCHEMA,
             "run_id": plan.retry_run_id,
-            "parent_run_id": plan.parent_run_id,
             "retry_plan": plan.to_dict(),
             "created_at": utc_timestamp(),
             "canonical_view": f"views/runs/{plan.retry_run_id}",
@@ -663,7 +629,7 @@ def _launch_or_reconnect_retry(
     _launch_prepared_control(control, launch, parsl_config=config_ref)
 
 
-def submit_retry_plan(run: Any, plan: RunRetryPlan) -> "WorkflowRun":
+def start_retry_plan(run: Any, plan: RunRetryPlan) -> "WorkflowRun":
     """Validate and apply one immutable retry plan, then launch its new run."""
     if type(plan) is not RunRetryPlan or plan.parent_run_id != run.id:
         raise WorkflowRunRetryError("Retry plan does not belong to this run.")
@@ -679,10 +645,7 @@ def submit_retry_plan(run: Any, plan: RunRetryPlan) -> "WorkflowRun":
         pass
     else:
         retained = existing.read_submission()
-        if (
-            retained.get("parent_run_id") != plan.parent_run_id
-            or retained.get("retry_plan") != plan.to_dict()
-        ):
+        if retained.get("retry_plan") != plan.to_dict():
             raise WorkflowRunRetryError("Retry run ID is already owned by another run.")
         control = existing
 
@@ -760,11 +723,10 @@ def submit_retry_plan(run: Any, plan: RunRetryPlan) -> "WorkflowRun":
                     )
             if control is None:
                 assert candidate is not None
-                control = repository.allocate(
+                control = repository._allocate_locked(
                     cloned,
                     backend=launch.backend,
                     candidate_dir=candidate,
-                    allocation_guard_held=True,
                 )
                 candidate = None
             if phase is None:
@@ -793,7 +755,6 @@ def submit_retry_plan(run: Any, plan: RunRetryPlan) -> "WorkflowRun":
 
 
 __all__ = [
-    "PreparedRunRetry",
     "RecomputeRequest",
     "RetryInvalidation",
     "RunRetryPlan",

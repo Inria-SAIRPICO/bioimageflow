@@ -215,5 +215,5 @@ def test_configured_real_psij_site_round_trip(tmp_path: Path) -> None:
     }
     assert len(native_ids) == 1
     destination = tmp_path / "result"
-    result = reopened.result(destination=destination)
+    result = reopened.export_result(destination)
     assert result.at["0", "size"] == len(b"cluster-smoke")

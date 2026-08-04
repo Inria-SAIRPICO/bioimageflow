@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,6 @@ from bioimageflow import NodeFailureDiagnostic
 from bioimageflow.launcher.schemas import (
     ERROR_SCHEMA,
     PROGRESS_SCHEMA,
-    RETRY_SUBMISSION_SCHEMA,
     STATUS_SCHEMA,
     LauncherSchemaError,
     new_run_id,
@@ -85,12 +85,10 @@ def _error(run_id: str, **updates: Any) -> dict[str, Any]:
     return payload
 
 
-def test_retry_submission_records_one_distinct_parent(tmp_path: Path) -> None:
+def test_submission_records_nullable_bound_retry_provenance(tmp_path: Path) -> None:
     run_id = new_run_id()
     parent_id = new_run_id()
     payload = launcher_submission(tmp_path, run_id)
-    payload["schema"] = RETRY_SUBMISSION_SCHEMA
-    payload["parent_run_id"] = parent_id
     payload["retry_plan"] = RunRetryPlan(
         parent_run_id=parent_id,
         retry_run_id=run_id,
@@ -106,10 +104,32 @@ def test_retry_submission_records_one_distinct_parent(tmp_path: Path) -> None:
         conflicting_run_ids=(),
     ).to_dict()
 
-    assert validate_submission(payload)["parent_run_id"] == parent_id
+    validated = validate_submission(payload)
+    assert validated["retry_plan"] == payload["retry_plan"]
 
-    payload["parent_run_id"] = run_id
-    with pytest.raises(LauncherSchemaError, match="differ"):
+    mismatched_storage = copy.deepcopy(payload)
+    mismatched_storage["retry_plan"] = replace(
+        RunRetryPlan.from_dict(payload["retry_plan"]),
+        storage_path=(tmp_path / "other-storage").resolve().as_posix(),
+    ).to_dict()
+    with pytest.raises(LauncherSchemaError, match="binding"):
+        validate_submission(mismatched_storage)
+
+    payload["retry_plan"] = RunRetryPlan(
+        parent_run_id=run_id,
+        retry_run_id=new_run_id(),
+        parent_status="failed",
+        parent_status_revision=3,
+        storage_path=tmp_path.resolve().as_posix(),
+        retained_submission_digest="sha256:" + "0" * 64,
+        retained_material_digest="sha256:" + "1" * 64,
+        retained_material_entries=2,
+        cache_selection_revision="sha256:" + "2" * 64,
+        recompute=None,
+        invalidations=(),
+        conflicting_run_ids=(),
+    ).to_dict()
+    with pytest.raises(LauncherSchemaError, match="binding"):
         validate_submission(payload)
 
 

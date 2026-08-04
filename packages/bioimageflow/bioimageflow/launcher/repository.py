@@ -449,17 +449,28 @@ class LauncherRepository:
         *,
         backend: str,
         candidate_dir: str | Path | None = None,
-        allocation_guard_held: bool = False,
     ) -> LauncherRunControl:
         """Atomically install one complete revision-zero control directory.
 
         A supplied candidate must have been returned by :meth:`create_candidate`.
         Allocation consumes it, making staged inputs and metadata visible together.
         """
-        from .control import LauncherRunControl
+        with self.allocation_guard():
+            return self._allocate_locked(
+                submission,
+                backend=backend,
+                candidate_dir=candidate_dir,
+            )
 
-        if type(allocation_guard_held) is not bool:
-            raise TypeError("allocation_guard_held must be a bool.")
+    def _allocate_locked(
+        self,
+        submission: Mapping[str, Any],
+        *,
+        backend: str,
+        candidate_dir: str | Path | None = None,
+    ) -> LauncherRunControl:
+        """Install a run while the caller owns this repository's allocation guard."""
+        from .control import LauncherRunControl
 
         validated = validate_submission(submission)
         run_id = validated["run_id"]
@@ -530,19 +541,12 @@ class LauncherRepository:
                 os.close(descriptor)
             (candidate / "claims").mkdir(mode=0o700)
             _sync_directory(candidate)
-            def install() -> None:
-                if _path_exists(control_dir) or _path_exists(canonical_dir):
-                    raise RunAlreadyExistsError(
-                        f"Run ID {run_id!r} already exists in a run namespace."
-                    )
-                candidate.rename(control_dir)
-                _sync_directory(self.runs_root)
-
-            if allocation_guard_held:
-                install()
-            else:
-                with self.allocation_guard():
-                    install()
+            if _path_exists(control_dir) or _path_exists(canonical_dir):
+                raise RunAlreadyExistsError(
+                    f"Run ID {run_id!r} already exists in a run namespace."
+                )
+            candidate.rename(control_dir)
+            _sync_directory(self.runs_root)
         except BaseException:
             if candidate.exists() and not candidate.is_symlink():
                 shutil.rmtree(candidate)

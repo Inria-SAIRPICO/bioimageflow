@@ -13,8 +13,8 @@ from .cluster_upload import _ensure_root, _receipt, normalized_root
 from .artifacts import read_error
 from .repository import LauncherCorruptionError, RunNotFoundError
 from .run import WorkflowRun
-from .schemas import validate_run_id
-from .retry import RecomputeRequest, RunRetryPlan, prepare_retry_plan, submit_retry_plan
+from .schemas import REMOTE_RUN_OBSERVATION_SCHEMA, validate_run_id
+from .retry import RecomputeRequest, RunRetryPlan, build_retry_plan, start_retry_plan
 from .errors import PSIJSubmissionUncertainError, WorkflowRunRetryError
 
 MAX_PROGRESS_PAGE = 500
@@ -58,20 +58,17 @@ def _observation(run: WorkflowRun) -> dict[str, Any]:
             }
         except Exception:
             error = None
-    result = {
+    return {
+        "schema": REMOTE_RUN_OBSERVATION_SCHEMA,
         "error": error,
+        "retry_plan": submission["retry_plan"],
         "run_id": run.id,
         "state": status["state"],
         "status_revision": status["revision"],
         "storage_path": submission["storage_root"],
-        "submission_schema": submission["schema"],
-        "status_schema": status["schema"],
         "terminal": status["state"] in _TERMINAL,
         "updated_at": status["updated_at"],
     }
-    if submission["schema"] == "bioimageflow.launcher.submission.v3":
-        result["retry_plan"] = submission["retry_plan"]
-    return result
 
 
 def inspect_run(storage_path: Any, run_id: Any) -> dict[str, Any]:
@@ -241,22 +238,22 @@ def cancel_run(
     return _receipt(root, "cancel", request_id, request_digest, mutate)
 
 
-def prepare_run_retry(storage_path: Any, run_id: Any, recompute: Any) -> dict[str, Any]:
-    """Preview one retained retry without invalidating or allocating."""
+def plan_run_retry(storage_path: Any, run_id: Any, recompute: Any) -> dict[str, Any]:
+    """Plan one retained retry without invalidating or allocating."""
     try:
         request = None if recompute is None else RecomputeRequest.from_dict(recompute)
-        return prepare_retry_plan(_open(storage_path, run_id), request).to_dict()
+        return build_retry_plan(_open(storage_path, run_id), request).to_dict()
     except WorkflowRunRetryError as exc:
         raise ClusterProtocolFailure("retry-conflict", str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise ClusterProtocolFailure("invalid-retry", "Retry request is invalid.") from exc
 
 
-def submit_run_retry(storage_path: Any, plan: Any) -> dict[str, Any]:
-    """Apply one immutable retry plan through cluster-local storage APIs."""
+def start_run_retry(storage_path: Any, plan: Any) -> dict[str, Any]:
+    """Idempotently start one immutable retry plan through cluster-local APIs."""
     try:
         parsed = RunRetryPlan.from_dict(plan)
-        run = submit_retry_plan(
+        run = start_retry_plan(
             _open(storage_path, parsed.parent_run_id),
             parsed,
         )

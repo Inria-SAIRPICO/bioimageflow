@@ -18,6 +18,8 @@ from bioimageflow import (
     WorkerSlotCapacity,
     Workflow,
     WorkflowExecutionContext,
+    WorkflowResultDestinationError,
+    WorkflowResultIntegrityError,
     submit_workflow,
 )
 from bioimageflow.launcher.cluster_protocol import ClusterProtocolFailure
@@ -25,7 +27,6 @@ from bioimageflow.launcher.orchestrator import run_orchestrator
 from bioimageflow.launcher.remote_control import read_log_page, read_progress_page
 from bioimageflow.launcher.result_bundle import prepare_result
 from bioimageflow.launcher.result_download import (
-    SSHTransportError,
     _load_manifest,
     _validate_entries,
     _verify_tree,
@@ -112,17 +113,17 @@ def test_local_run_result_destination_is_atomic_and_idempotent(tmp_path: Path) -
     run = _successful_run(storage)
     destination = tmp_path / "download"
 
-    first = run.result(destination=destination)
+    first = run.export_result(destination)
     shutil.rmtree(run.control_dir / "return")
-    second = run.result(destination=destination)
+    second = run.export_result(destination)
 
     assert isinstance(first, pd.DataFrame) and first.empty
     assert isinstance(second, pd.DataFrame) and second.empty
     manifest = _load_manifest(destination / "manifest.json")
     assert manifest["run_id"] == run.id
     (destination / "manifest.json").write_text("{}")
-    with pytest.raises(SSHTransportError, match="manifest"):
-        run.result(destination=destination)
+    with pytest.raises(WorkflowResultIntegrityError, match="manifest"):
+        run.export_result(destination)
 
 
 def test_local_export_rejects_a_different_self_consistent_bundle(
@@ -131,7 +132,7 @@ def test_local_export_rejects_a_different_self_consistent_bundle(
     storage = tmp_path / "storage"
     run = _successful_run(storage)
     destination = tmp_path / "download"
-    run.result(destination=destination)
+    run.export_result(destination)
     manifest_path = destination / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     forged = destination / "z-forged"
@@ -150,8 +151,8 @@ def test_local_export_rejects_a_different_self_consistent_bundle(
     )
     manifest_path.write_text(json.dumps(manifest, sort_keys=True))
 
-    with pytest.raises(FileExistsError, match="another bundle"):
-        run.result(destination=destination)
+    with pytest.raises(WorkflowResultDestinationError, match="another bundle"):
+        run.export_result(destination)
 
 
 def test_attached_context_exports_the_same_result_bundle(tmp_path: Path) -> None:
@@ -169,7 +170,7 @@ def test_attached_context_exports_the_same_result_bundle(tmp_path: Path) -> None
     assert manifest["run_id"] == context.run_id
     result["changed"] = pd.Series(dtype="int64")
     conflicting = tmp_path / "attached-conflict"
-    with pytest.raises(SSHTransportError, match="identity"):
+    with pytest.raises(WorkflowResultIntegrityError, match="identity"):
         context.export_result(result, destination=conflicting)
     assert not conflicting.exists()
 
@@ -192,10 +193,10 @@ def test_attached_context_claims_one_identity_across_concurrent_exports(
         for future in futures:
             try:
                 outcomes.append(future.result())
-            except SSHTransportError as error:
+            except WorkflowResultIntegrityError as error:
                 outcomes.append(error)
 
-    assert sum(isinstance(value, SSHTransportError) for value in outcomes) == 1
+    assert sum(isinstance(value, WorkflowResultIntegrityError) for value in outcomes) == 1
     assert sum(path.exists() for path in destinations) == 1
 
 
@@ -243,7 +244,7 @@ def test_result_manifest_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     path = tmp_path / "manifest.json"
     path.write_text('{"schema":"one","schema":"two"}')
 
-    with pytest.raises(SSHTransportError, match="malformed"):
+    with pytest.raises(WorkflowResultIntegrityError, match="malformed"):
         _load_manifest(path)
 
 
@@ -254,7 +255,7 @@ def test_result_entries_reject_nonportable_path_collisions() -> None:
         {"digest": digest, "kind": "file", "path": "a.txt", "size": 0},
     ]
 
-    with pytest.raises(SSHTransportError, match="invalid"):
+    with pytest.raises(WorkflowResultIntegrityError, match="invalid"):
         _validate_entries(entries)
 
 

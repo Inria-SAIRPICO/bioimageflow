@@ -377,7 +377,7 @@ def get_execution_capabilities() -> ExecutionCapabilityReport:
             "immutable_upload_preparation": CapabilityStatus(True),
             "submitted_run_retry": CapabilityStatus(True),
             "submitted_recompute": CapabilityStatus(True),
-            "local_result_export": CapabilityStatus(True),
+            "submitted_result_export": CapabilityStatus(True),
             "attached_result_export": CapabilityStatus(True),
         }
     )

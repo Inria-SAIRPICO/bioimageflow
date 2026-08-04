@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
@@ -23,7 +23,7 @@ from .state import RevisionConflictError
 from .types import LaunchConfig, launch_config_from_dict
 
 if TYPE_CHECKING:
-    from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
+    from .retry import RecomputeRequest, RunRetryPlan
 
 
 def _terminate_backend(control: LauncherRunControl, backend: str) -> bool:
@@ -250,26 +250,25 @@ class WorkflowRun:
     @property
     def parent_id(self) -> str | None:
         """Return the retained parent run ID for a retry, if any."""
-        value = self._control.read_submission().get("parent_run_id")
-        return str(value) if value is not None else None
+        plan = self.retry_plan
+        return None if plan is None else plan.parent_run_id
 
-    def prepare_retry(
+    def plan_retry(
         self,
         recompute: "RecomputeRequest | None" = None,
-    ) -> "PreparedRunRetry[WorkflowRun]":
-        """Prepare a single-use revision-bound retry of this terminal run."""
-        from .retry import PreparedRunRetry, prepare_retry_plan
+    ) -> "RunRetryPlan":
+        """Return a non-mutating, serializable retry or recomputation plan."""
+        from .retry import build_retry_plan
 
-        plan = prepare_retry_plan(self, recompute)
-        return PreparedRunRetry(plan, lambda: self.submit_retry(plan))
+        return build_retry_plan(self, recompute)
 
-    def submit_retry(self, plan: "RunRetryPlan") -> "WorkflowRun":
-        """Submit a serialized retry plan after reconnect or confirmation."""
-        from .retry import RunRetryPlan, submit_retry_plan
+    def start_retry(self, plan: "RunRetryPlan") -> "WorkflowRun":
+        """Idempotently start the exact confirmed retry plan."""
+        from .retry import RunRetryPlan, start_retry_plan
 
         if type(plan) is not RunRetryPlan:
             raise TypeError("plan must be a RunRetryPlan.")
-        return submit_retry_plan(self, plan)
+        return start_retry_plan(self, plan)
 
     @property
     def retry_plan(self) -> "RunRetryPlan | None":
@@ -279,22 +278,8 @@ class WorkflowRun:
         value = self._control.read_submission().get("retry_plan")
         return None if value is None else RunRetryPlan.from_dict(value)
 
-    def result(self, *, destination: Path | str | None = None) -> Any:
-        """Return the exact persisted public result or its stable state error."""
-        self.refresh()
+    def _raise_result_state(self) -> NoReturn:
         state = self.status
-        if state == "succeeded":
-            if destination is not None:
-                if not isinstance(destination, (str, Path)) or not str(destination):
-                    raise TypeError("destination must be a non-empty path or None.")
-                from .result_download import export_local_result
-
-                return export_local_result(self, Path(destination))
-            return load_public_return(
-                self.control_dir,
-                self._storage_path,
-                self.id,
-            )
         if state == "failed":
             error = read_error(self._control)
             raise WorkflowRunFailedError(
@@ -319,3 +304,25 @@ class WorkflowRun:
             f"Submitted workflow run {self.id} is {state!r}, not succeeded.",
             details={"run_id": self.id, "state": state},
         )
+
+    def load_result(self) -> Any:
+        """Load the successful typed return directly from local run storage."""
+        self.refresh()
+        if self.status != "succeeded":
+            self._raise_result_state()
+        return load_public_return(
+            self.control_dir,
+            self._storage_path,
+            self.id,
+        )
+
+    def export_result(self, destination: Path | str) -> Any:
+        """Atomically export and rehydrate the successful typed return."""
+        if not isinstance(destination, (str, Path)) or not str(destination):
+            raise TypeError("destination must be a non-empty path.")
+        self.refresh()
+        if self.status != "succeeded":
+            self._raise_result_state()
+        from .result_download import export_local_result
+
+        return export_local_result(self, Path(destination))

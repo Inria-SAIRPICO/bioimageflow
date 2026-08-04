@@ -242,7 +242,7 @@ A later process can open the same run:
 
    status = run.wait(poll_interval=5.0)
    if status == "succeeded":
-       result = run.result(destination=Path("./downloads") / run.id)
+       result = run.export_result(Path("./downloads") / run.id)
    elif status == "failed":
        for diagnostic in run.diagnostics():
            print(diagnostic.scoped_node_path, diagnostic.message)

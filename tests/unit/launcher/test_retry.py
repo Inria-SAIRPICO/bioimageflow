@@ -79,17 +79,17 @@ def test_retry_plan_round_trip_and_retained_submission_clone(tmp_path: Path) -> 
     parent = _submit(workflow)
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
 
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
     assert RunRetryPlan.from_dict(
-        json.loads(json.dumps(prepared.plan.to_dict()))
-    ) == prepared.plan
-    serialized = json.loads(json.dumps(prepared.plan.to_dict()))
+        json.loads(json.dumps(plan.to_dict()))
+    ) == plan
+    serialized = json.loads(json.dumps(plan.to_dict()))
     reopened = type(parent).open(workflow.storage_path, parent.id)
-    retry = reopened.submit_retry(RunRetryPlan.from_dict(serialized))
+    retry = reopened.start_retry(RunRetryPlan.from_dict(serialized))
 
     assert retry.id != parent.id
     assert retry.parent_id == parent.id
-    assert retry.retry_plan == prepared.plan
+    assert retry.retry_plan == plan
     assert retry.status == "prepared"
     original = parent._control.read_submission()
     cloned = retry._control.read_submission()
@@ -119,21 +119,21 @@ def test_retry_plan_detects_retained_submission_and_input_tampering(
     storage = tmp_path / "storage"
     parent = _submit(Workflow(storage_path=storage, engine="direct"))
     assert run_orchestrator(storage, parent.id) == "succeeded"
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
     inputs = parent.control_dir / "inputs"
     inputs.mkdir(exist_ok=True)
     (inputs / "late.bin").write_bytes(b"not-confirmed")
 
     with pytest.raises(WorkflowRunRetryError, match="material changed"):
-        prepared.submit()
+        parent.start_retry(plan)
 
-    second = parent.prepare_retry()
+    second = parent.plan_retry()
     submission = parent._control.read_submission()
     submission["task_policy"]["max_in_flight"] -= 1
     _atomic_write_json(parent.control_dir / "submission.json", submission)
 
     with pytest.raises(WorkflowRunRetryError, match="material changed"):
-        second.submit()
+        parent.start_retry(second)
 
 
 @pytest.mark.parametrize("state", ["succeeded", "failed", "cancelled", "lost"])
@@ -162,9 +162,9 @@ def test_every_terminal_state_has_an_explicit_retry_path(
         status["cancel_requested_at"] = status["updated_at"]
     _atomic_write_json(parent.control_dir / "status.json", status)
 
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
 
-    assert prepared.plan.parent_status == state
+    assert plan.parent_status == state
 
 
 def test_nested_recompute_preview_is_revision_bound(tmp_path: Path) -> None:
@@ -173,35 +173,35 @@ def test_nested_recompute_preview_is_revision_bound(tmp_path: Path) -> None:
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
     request = RecomputeRequest(("nested/generate",), cascade=False)
 
-    prepared = parent.prepare_retry(request)
+    plan = parent.plan_retry(request)
 
-    assert {item.node_path for item in prepared.plan.invalidations} == {
+    assert {item.node_path for item in plan.invalidations} == {
         "nested/generate"
     }
     workflow.invalidate(request.node_paths, cascade=request.cascade)
     with pytest.raises(WorkflowRunRetryError, match="Cache selections changed"):
-        prepared.submit()
+        parent.start_retry(plan)
 
 
 def test_nested_recompute_cascades_and_applies_exact_preview(tmp_path: Path) -> None:
     workflow = _nested_workflow(tmp_path / "storage")
     parent = _submit(workflow)
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
-    prepared = parent.prepare_retry(
+    plan = parent.plan_retry(
         RecomputeRequest(("nested/generate",), cascade=True)
     )
 
-    assert {item.node_path for item in prepared.plan.invalidations} == {
+    assert {item.node_path for item in plan.invalidations} == {
         "nested/filter",
         "nested/generate",
     }
-    retry = prepared.submit()
+    retry = parent.start_retry(plan)
     assert all(
         not (
             Storage(workflow.storage_path).result_dir(item.result_key)
             / "current.json"
         ).exists()
-        for item in prepared.plan.invalidations
+        for item in plan.invalidations
     )
     assert run_orchestrator(workflow.storage_path, retry.id) == "succeeded"
 
@@ -212,11 +212,11 @@ def test_retry_refuses_conflicting_active_run(tmp_path: Path) -> None:
     assert run_orchestrator(storage, parent.id) == "succeeded"
     active = _submit(Workflow(storage_path=storage, engine="direct"))
 
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
 
-    assert prepared.plan.conflicting_run_ids == (active.id,)
+    assert plan.conflicting_run_ids == (active.id,)
     with pytest.raises(WorkflowRunRetryError, match="active execution"):
-        prepared.submit()
+        parent.start_retry(plan)
 
 
 def test_retry_refuses_an_active_attached_execution(tmp_path: Path) -> None:
@@ -232,12 +232,11 @@ def test_retry_refuses_an_active_attached_execution(tmp_path: Path) -> None:
         launcher_reserved=False,
     )
 
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
 
-    assert prepared.plan.conflicting_run_ids == (attached_id,)
-    assert prepared.can_submit is False
+    assert plan.conflicting_run_ids == (attached_id,)
     with pytest.raises(WorkflowRunRetryError, match="active execution"):
-        prepared.submit()
+        parent.start_retry(plan)
 
 
 def test_recompute_rolls_back_invalidation_when_child_allocation_fails(
@@ -247,21 +246,21 @@ def test_recompute_rolls_back_invalidation_when_child_allocation_fails(
     workflow = _nested_workflow(tmp_path / "storage")
     parent = _submit(workflow)
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
-    prepared = parent.prepare_retry(
+    plan = parent.plan_retry(
         RecomputeRequest(("nested/generate",), cascade=False)
     )
-    result_key = prepared.plan.invalidations[0].result_key
+    result_key = plan.invalidations[0].result_key
     current = Storage(workflow.storage_path).result_dir(result_key) / "current.json"
     original = current.read_bytes()
 
     monkeypatch.setattr(
         LauncherRepository,
-        "allocate",
+        "_allocate_locked",
         lambda *args, **kwargs: (_ for _ in ()).throw(OSError("allocation failed")),
     )
 
     with pytest.raises(OSError, match="allocation failed"):
-        prepared.submit()
+        parent.start_retry(plan)
     assert current.read_bytes() == original
 
 
@@ -272,9 +271,9 @@ def test_recompute_resumes_a_partially_journaled_invalidation(
     workflow = _nested_workflow(tmp_path / "storage")
     parent = _submit(workflow)
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
-    plan = parent.prepare_retry(
+    plan = parent.plan_retry(
         RecomputeRequest(("nested/generate",), cascade=True)
-    ).plan
+    )
     from bioimageflow.launcher import retry as retry_module
 
     original_write = retry_module._write_retry_transaction
@@ -293,9 +292,9 @@ def test_recompute_resumes_a_partially_journaled_invalidation(
         interrupt_invalidated,
     )
     with pytest.raises(OSError, match="process loss"):
-        parent.submit_retry(plan)
+        parent.start_retry(plan)
 
-    child = parent.submit_retry(plan)
+    child = parent.start_retry(plan)
 
     assert child.id == plan.retry_run_id
     assert all(
@@ -313,20 +312,20 @@ def test_recompute_journal_removes_a_malformed_current_pointer(
     workflow = _nested_workflow(tmp_path / "storage")
     parent = _submit(workflow)
     assert run_orchestrator(workflow.storage_path, parent.id) == "succeeded"
-    initial = parent.prepare_retry(
+    initial = parent.plan_retry(
         RecomputeRequest(("nested/generate",), cascade=False)
-    ).plan.invalidations[0]
+    ).invalidations[0]
     current = Storage(workflow.storage_path).result_dir(initial.result_key) / "current.json"
     current.write_text("{")
-    prepared = parent.prepare_retry(
+    plan = parent.plan_retry(
         RecomputeRequest(("nested/generate",), cascade=False)
     )
 
-    assert prepared.plan.invalidations[0].selection_status == "corrupt"
-    assert prepared.plan.invalidations[0].record_id is None
-    child = prepared.submit()
+    assert plan.invalidations[0].selection_status == "corrupt"
+    assert plan.invalidations[0].record_id is None
+    child = parent.start_retry(plan)
 
-    assert child.id == prepared.plan.retry_run_id
+    assert child.id == plan.retry_run_id
     assert not current.exists()
 
 
@@ -337,7 +336,7 @@ def test_retry_resumes_an_allocated_child_before_dispatch(
     storage = tmp_path / "storage"
     parent = _submit(Workflow(storage_path=storage, engine="direct"))
     assert run_orchestrator(storage, parent.id) == "succeeded"
-    plan = parent.prepare_retry().plan
+    plan = parent.plan_retry()
     from bioimageflow.launcher import retry as retry_module
 
     original_launch = retry_module._launch_or_reconnect_retry
@@ -356,9 +355,9 @@ def test_retry_resumes_an_allocated_child_before_dispatch(
         interrupt_once,
     )
     with pytest.raises(OSError, match="process loss"):
-        parent.submit_retry(plan)
+        parent.start_retry(plan)
 
-    child = parent.submit_retry(plan)
+    child = parent.start_retry(plan)
 
     assert child.id == plan.retry_run_id
     assert (child.control_dir / "command.json").is_file()
@@ -368,20 +367,20 @@ def test_nonterminal_parent_cannot_be_retried(tmp_path: Path) -> None:
     run = _submit(Workflow(storage_path=tmp_path / "storage", engine="direct"))
 
     with pytest.raises(WorkflowRunRetryError, match="terminal"):
-        run.prepare_retry()
+        run.plan_retry()
 
 
 def test_retry_rejects_stale_parent_status_revision(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     parent = _submit(Workflow(storage_path=storage, engine="direct"))
     assert run_orchestrator(storage, parent.id) == "succeeded"
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
     status = parent._control.read_status()
     status["revision"] += 1
     _atomic_write_json(parent.control_dir / "status.json", status)
 
     with pytest.raises(WorkflowRunRetryError, match="revision"):
-        prepared.submit()
+        parent.start_retry(plan)
 
 
 def test_cluster_agent_retry_is_idempotent_and_reconnectable(
@@ -410,7 +409,7 @@ def test_cluster_agent_retry_is_idempotent_and_reconnectable(
         return response["result"]
 
     plan = call(
-        "prepare-retry",
+        "plan-retry",
         {
             "run_id": parent.id,
             "storage_path": storage.as_posix(),
@@ -419,12 +418,12 @@ def test_cluster_agent_retry_is_idempotent_and_reconnectable(
     )
     retry_id = str(uuid.uuid4())
     first = call(
-        "retry",
+        "start-retry",
         {"storage_path": storage.as_posix(), "plan": plan},
         retry_id,
     )
     second = call(
-        "retry",
+        "start-retry",
         {"storage_path": storage.as_posix(), "plan": plan},
         retry_id,
     )
@@ -441,7 +440,7 @@ def test_retry_submission_uncertainty_is_never_resubmitted(
     storage = tmp_path / "storage"
     parent = _submit(Workflow(storage_path=storage, engine="direct"))
     assert run_orchestrator(storage, parent.id) == "succeeded"
-    prepared = parent.prepare_retry()
+    plan = parent.plan_retry()
     calls = 0
 
     def uncertain(*args, **kwargs):
@@ -456,12 +455,10 @@ def test_retry_submission_uncertainty_is_never_resubmitted(
     )
 
     with pytest.raises(PSIJSubmissionUncertainError):
-        prepared.submit()
-    with pytest.raises(RuntimeError, match="already submitted"):
-        prepared.submit()
+        parent.start_retry(plan)
 
     assert calls == 1
-    retained = parent.open(storage, prepared.plan.retry_run_id)
+    retained = parent.open(storage, plan.retry_run_id)
     assert retained.parent_id == parent.id
-    assert parent.submit_retry(prepared.plan).id == retained.id
+    assert parent.start_retry(plan).id == retained.id
     assert calls == 1

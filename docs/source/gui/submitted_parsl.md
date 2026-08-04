@@ -17,7 +17,9 @@ if not capabilities.capabilities["submitted_remote_parsl"].supported:
     disabled_reason = capabilities.capabilities["submitted_remote_parsl"].reason
 ```
 
-The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, immutable upload preparation, retained-run retry and recomputation, and local or attached result export.
+The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, immutable upload preparation, retained-run retry and recomputation, and submitted or attached result export.
+
+For these workflows, inspect the exact `submitted_run_retry`, `submitted_recompute`, `submitted_result_export`, and `attached_result_export` capability entries.
 Direct, Wetlands, planning, public value validation, remote-profile protocol support, resource overrides, diagnostics, and local preparation are built in.
 Attached and submitted-local execution require the `parsl` extra.
 Cluster submission requires `parsl`, `psij`, the selected PSI/J executor plugin, and the cluster agent in the remote installation.
@@ -335,7 +337,7 @@ Persist only the transport profile reference, cluster storage path, run ID, and 
 Only terminal runs—`succeeded`, `failed`, `cancelled`, or `lost`—can create a child run.
 An ordinary retry reuses every valid current cache selection, including successful work published before a failure, cancellation, or lost orchestrator.
 
-Prepare first and display the immutable plan:
+Plan first and display the immutable confirmation object:
 
 ```python
 from bioimageflow import RecomputeRequest
@@ -344,19 +346,19 @@ recompute = RecomputeRequest(
     ("analysis/segment",),
     cascade=True,
 )
-prepared = run.prepare_retry(recompute)
-plan_payload = prepared.plan.to_dict()
+plan = run.plan_retry(recompute)
+plan_payload = plan.to_dict()
 
-show_new_run_id(prepared.plan.retry_run_id)
-show_selected_cache_pointers(prepared.plan.invalidations)
-show_conflicts(prepared.plan.conflicting_run_ids)
+show_new_run_id(plan.retry_run_id)
+show_selected_cache_pointers(plan.invalidations)
+show_conflicts(plan.conflicting_run_ids)
 ```
 
-Preparation is non-mutating and non-allocating.
+Planning is non-mutating and non-allocating.
 The plan binds the parent state revision, cluster or local storage path, retained submission digest, retained staged-material digest, complete cache-selection revision, scoped invalidations, child run ID, and its own canonical digest.
-Do not enable confirmation while `prepared.can_submit` is false.
+Do not enable confirmation while `plan.conflicting_run_ids` is non-empty.
 
-For a process or service restart, persist only `plan.to_dict()` alongside the normal run binding, reconstruct it with `RunRetryPlan.from_dict()`, reopen the parent, and call `parent.submit_retry(plan)`.
+For a process or service restart, persist only `plan.to_dict()` alongside the normal run binding, reconstruct it with `RunRetryPlan.from_dict()`, reopen the parent, and call `parent.start_retry(plan)`.
 The complete plan is also retained with the child submission and is available as `child.retry_plan`; `child.parent_id` survives local and remote reconnect.
 
 Submission rechecks the retained-material digests and parent revision under the storage allocation guard; recomputation additionally rechecks the cache-selection revision and exact invalidation preview.
@@ -364,8 +366,8 @@ It refuses any active attached or submitted execution, durably journals removal 
 The graph, invocation, targets, node-input overrides, custom sources, and pre-launch artifact are cloned from retained bytes rather than caller objects or original laptop paths.
 Run-owned input and bootstrap trees are copied, while verified content-addressed uploads are retained and reused by installed path.
 
-Treat stale material, stale cache selections, or new active executions as a new-confirmation condition: discard the plan and prepare another preview.
-A prepared object is single-use.
+Treat stale material, stale cache selections, or new active executions as a new-confirmation condition: discard the plan and create another preview.
+Starting the same exact plan is idempotent.
 If transport or scheduler submission is uncertain, save `plan.retry_run_id` and reconnect to that exact ID; never create or submit another plan automatically.
 
 ## Structured node failures
@@ -400,12 +402,12 @@ Do not parse exception strings, logs, or task artifact paths.
 | `plan_distributed_execution()` | No | No | No | No | None |
 | `validate_remote_execution_profile()` | On remote validation host | No | No | No | One-shot command exits |
 | `prepare_remote_submission()` | No | No | No | No | `close()` if not submitted |
-| `run.prepare_retry()` | No | No | No | No | Discard the single-use object or retain its JSON-safe plan |
+| `run.plan_retry()` | No | No | No | No | Retain or discard its JSON-safe plan |
 | `ParslEngine.from_config_ref()` | Yes | No | Not during construction | No | Close engine after execution |
 | `workflow.compute(engine=engine)` | According to engine | Yes | May allocate | Provider-dependent | Engine/resource-lifetime contract |
 | `context.export_result()` | No | No | No | No | None after atomic installation |
-| `WorkflowRun.result(destination=...)` | No | No | No | No | None after atomic installation |
-| `prepared_retry.submit()` or `parent.submit_retry(plan)` | On execution host | Yes | May allocate after orchestrator starts | Retained PSI/J launch may create one orchestrator job | Reconnect/cancel through child run handle |
+| `run.export_result(destination)` | No | No | No | No | None after atomic installation |
+| `parent.start_retry(plan)` | On execution host | Yes | May allocate after orchestrator starts | Retained PSI/J launch may create one orchestrator job | Reconnect/cancel through child run handle |
 | `submit_workflow()` or `prepared.submit()` | On execution host | Yes | May allocate after orchestrator starts | PSI/J launch creates one orchestrator job | Reconnect/cancel through run handle |
 
 ## Wire-format examples
@@ -482,7 +484,7 @@ Resource placement does not invalidate cache identity.
 ## Results
 
 Require the user to choose an explicit local destination.
-Both local and remote submitted handles use `run.result(destination=...)` to create the same immutable bundle in a private sibling, verify it completely, and atomically install the destination.
+Both local and remote submitted handles use `run.export_result(destination)` to create the same immutable bundle in a private sibling, verify it completely, and atomically install the destination.
 A destination may be reused only when it is the exact verified bundle for the same run.
 Record-owned and return-owned assets become local paths beneath the destination, including downloaded `SharedArray` backing data.
 Declared external cluster paths remain cluster `Path` values and should be labelled as unavailable locally rather than guessed from their spelling.
@@ -497,7 +499,7 @@ Repeating the call for the same installed destination is idempotent.
 |---|---|
 | `ssh-unavailable`, `ssh-connection`, `ssh-timeout`, `ssh-command-failed` | Keep the run identity, show transport unavailable, and offer reconnect or retry. |
 | `ssh-authentication`, `ssh-host-key` | Ask the user to repair normal OpenSSH configuration outside the application. |
-| `sftp-*`, `unsafe-upload-target`, `unsafe-destination` | Keep partial content hidden and ask for a safe path or retry. |
+| `sftp-*`, `unsafe-upload-target` | Keep partial content hidden and ask for a safe path or retry. |
 | `remote-protocol`, `remote-invalid-*` | Stop automatic retries unless the error says the operation is retryable; report a client/cluster installation mismatch or invalid request. |
 | `PSIJSubmissionUncertainError` | Retain the prepared run and run ID, warn that submission may have happened, and never offer automatic resubmission. |
 | PSI/J executor unavailable or scheduler rejection | Ask the user to select an installed site executor or correct queue, project, walltime, and resource fields. |
@@ -505,7 +507,8 @@ Repeating the call for the same installed destination is idempotent.
 | `WorkflowRunFailedError` | Show the persisted structured workflow error and logs. |
 | `WorkflowCancelledError` | Show normal cancellation. |
 | `WorkflowRunLostError` | Explain that backend termination was confirmed without proof of normal cleanup. |
-| `WorkflowRunResultUnavailableError`, `result-integrity` | Keep the destination uninstalled and report pruned, missing, corrupt, interrupted, or tampered immutable result data. |
+| `WorkflowRunResultUnavailableError`, `WorkflowResultIntegrityError` | Keep the destination uninstalled and report pruned, missing, corrupt, interrupted, or tampered immutable result data. |
+| `WorkflowResultDestinationError` | Ask for a safe empty destination or reuse the exact verified bundle for that run. |
 | `WorkflowRunRetryError`, `remote-retry-conflict` | Keep the parent unchanged; show active-run, stale-revision, or changed-material details and require a new preview. |
 | `remote-retry-submission-uncertain` | Retain the planned child run ID and reconnect; never submit another retry automatically. |
 

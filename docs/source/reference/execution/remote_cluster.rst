@@ -281,7 +281,7 @@ Reconnect using only the transport profile, cluster storage path, and saved run 
    )
 
 ``progress()``, ``diagnostics()``, ``logs()``, ``wait()``, and ``cancel()`` are bounded public operations.
-``result(destination=...)`` downloads to a private sibling, verifies the immutable manifest and every digest, and atomically installs the destination.
+``export_result(destination)`` downloads to a private sibling, verifies the immutable manifest and every digest, and atomically installs the destination.
 Record-owned and return-owned assets become local; declared external cluster paths remain cluster ``Path`` values.
 
 Retry and recompute remotely
@@ -291,15 +291,15 @@ Use the same retained-run API as submitted-local execution:
 
 .. code-block:: python
 
-   prepared = run.prepare_retry()
-   retry = prepared.submit()
+   plan = run.plan_retry()
+   retry = run.start_retry(plan)
 
-For selected recomputation, pass ``RecomputeRequest(("nested/node",), cascade=True)`` and show ``prepared.plan.invalidations`` before confirmation.
-Preparation and submission execute as public bounded cluster operations.
+For selected recomputation, pass ``RecomputeRequest(("nested/node",), cascade=True)`` and show ``plan.invalidations`` before confirmation.
+Planning and starting execute as public bounded cluster operations.
 The cluster clones the retained workflow, copies run-owned input and bootstrap trees, reuses retained content-addressed uploads, checks active executions and revisions, applies the journaled cache-pointer invalidation, and creates a new run with ``parent_id``.
 No laptop input is reread and the caller never accesses remote storage directly.
 
-If transport or scheduler submission becomes uncertain, retain ``prepared.plan.retry_run_id`` and reconnect to that exact run.
+If transport or scheduler submission becomes uncertain, retain ``plan.retry_run_id`` and reconnect to that exact run.
 Do not automatically prepare or submit another retry.
 
 PSI/J submission integrity

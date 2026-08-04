@@ -85,12 +85,13 @@ def launcher_submission(
         },
         "psij_pre_launch": None,
         "protocol_versions": {
-            "launcher": 2,
+            "launcher": 1,
             "workflow_graph": 1,
             "workflow_archive": 1,
             "parsl_task": 1,
             "parsl_result": 1,
         },
+        "retry_plan": None,
     }
 
 

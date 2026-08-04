@@ -50,8 +50,8 @@ The public integration surface for a BioImageFlow execution UI consists of the f
 - `NodeFailureDiagnostic` is attached to failed `ProgressEvent` callbacks and is persisted as a separate diagnostic progress event for both `WorkflowRun.diagnostics()` and `RemoteWorkflowRun.diagnostics()`.
 - `prepare_remote_submission()` copies all explicit root-input and node-override `LocalUpload` values plus uploaded pre-launch bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original local paths. Cluster-resident pre-launch files remain typed external sources until the cluster agent snapshots them into the launcher run.
 - `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, remote node path overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
-- `WorkflowRun.prepare_retry()` and `RemoteWorkflowRun.prepare_retry()` produce a strict JSON-safe `RunRetryPlan` for any retained terminal run. Ordinary retries reuse current cache selections; `RecomputeRequest` previews exact scoped selections and optional downstream cascade. The plan binds canonical storage, parent status revision, cache-selection revision, retained submission digest, and retained staged-material digest. `submit_retry(plan)` is the restart-safe public confirmation boundary. Submission rejects active executions, durably journals invalidation of only current pointers, clones the retained invocation, copies run-owned input and bootstrap trees, reuses verified content-addressed uploads without rereading laptop paths, and records the complete plan and parent run ID. Remote mutation uses only the public cluster protocol, and uncertain submission is never automatically repeated.
-- `WorkflowRun.result(destination=...)`, `RemoteWorkflowRun.result(destination=...)`, and `WorkflowExecutionContext.export_result()` expose one verified, atomic, idempotent result-bundle contract. Owned assets are rehydrated beneath the destination and declared external paths remain external values. The no-argument local submitted result API remains storage-backed.
+- `WorkflowRun.plan_retry()` and `RemoteWorkflowRun.plan_retry()` produce a strict JSON-safe `RunRetryPlan` for any retained terminal run. Ordinary retries reuse current cache selections; `RecomputeRequest` previews exact scoped selections and optional downstream cascade. The plan binds canonical storage, parent status revision, cache-selection revision, retained submission digest, and retained staged-material digest. `start_retry(plan)` is the idempotent restart-safe public confirmation boundary. Starting rejects active executions, durably journals invalidation of only current pointers, clones the retained invocation, copies run-owned input and bootstrap trees, reuses verified content-addressed uploads without rereading laptop paths, and records the complete plan. Remote mutation uses only the public cluster protocol, and uncertain submission is never automatically repeated.
+- `WorkflowRun.export_result(destination)`, `RemoteWorkflowRun.export_result(destination)`, and `WorkflowExecutionContext.export_result()` expose one verified, atomic, idempotent result-bundle contract. Owned assets are rehydrated beneath the destination and declared external paths remain external values. `WorkflowRun.load_result()` is a separate local-only storage-backed read operation.
 
 Every cross-process report has `to_dict()` and `from_dict()` methods and a versioned schema where applicable.
 Scoped node paths are used consistently by planning, progress, and failure diagnostics.
@@ -2039,16 +2039,17 @@ Receipt-backed clients reconstruct the same executor and fixed shared PSI/J work
 Launcher backends start only the orchestrator; Parsl providers allocate workers.
 
 `WorkflowRun.open(storage_path, run_id)` reconnects without process-local state.
-Its `status`, `refresh()`, `progress()`, `logs()`, `cancel()`, `prepare_retry()`, `submit_retry()`, and `result()` methods read durable launcher artifacts.
+Its `status`, `refresh()`, `progress()`, `logs()`, `cancel()`, `plan_retry()`, `start_retry()`, `load_result()`, and `export_result()` methods read durable launcher artifacts.
+Every submitted run uses `bioimageflow.launcher.submission.v1` with nullable `retry_plan`, and every bounded remote observation uses the single fixed `bioimageflow.launcher.run-observation.v1` shape with the same nullable provenance.
 Status uses `prepared`, `starting`, `running`, `finalizing`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `lost`.
 Every state mutation is a guarded revision and claim-epoch compare-and-swap.
 
 Only terminal `succeeded`, `failed`, `cancelled`, and `lost` submitted runs are retryable.
-`prepare_retry()` creates no run or resource allocation and mutates no cache pointer.
+`plan_retry()` creates no run or resource allocation and mutates no cache pointer.
 Its strict `bioimageflow.run_retry_plan.v1` binds the canonical storage path, parent status revision, retained submission digest, retained `inputs/` and `bootstrap/` material digest and entry count, cache-selection revision, optional scoped `RecomputeRequest`, exact selected current pointers, active-run conflicts, deterministic child run ID, and canonical plan digest.
 The plan contains no resolved secret and round-trips through `to_dict()` and `from_dict()`.
-`submit_retry(plan)` is the restart-safe public confirmation boundary for local and remote handles.
-Under the shared allocation guard it revalidates all bindings, refuses active attached or submitted executions, atomically allocates the v3 child submission, and journals resumable removal of the exact current pointers before invoking the retained launch configuration.
+`start_retry(plan)` is the idempotent restart-safe public confirmation boundary for local and remote handles.
+Under the shared allocation guard it revalidates all bindings, refuses active attached or submitted executions, atomically allocates the child submission, and journals resumable removal of the exact current pointers before invoking the retained launch configuration.
 The child-owned `bioimageflow.launcher.retry-transaction.v1` records `validated`, `invalidated`, `dispatched`, or `uncertain`; replay finishes partial pointer moves, cleans hidden backups on a best-effort basis after durable invalidation, dispatches only when no backend attempt marker exists, and never automatically repeats an uncertain submission.
 The child clones the exact retained graph, invocation, targets, node overrides, and custom sources, copies run-owned input and bootstrap content, and reuses verified content-addressed uploads without reading original laptop paths.
 It exposes the full retry plan and parent ID after reconnect.
@@ -2063,9 +2064,10 @@ A successful submitted run persists its exact public DataFrame or ordered mappin
 Record-backed path cells address exact immutable record IDs, external paths remain typed external references, and transient owned assets are copied into the return.
 Historical result loading never consults `current.json`.
 
-`WorkflowRun.result(destination=...)` and `RemoteWorkflowRun.result(destination=...)` build or download the same immutable verified result bundle through a private sibling and atomic destination installation.
+`WorkflowRun.export_result(destination)` and `RemoteWorkflowRun.export_result(destination)` build or download the same immutable verified result bundle through a private sibling and atomic destination installation.
+`WorkflowRun.load_result()` reads the local retained return without exporting it.
 An existing destination is idempotent only when its full expected bundle digest, run ID, storage binding, manifest, and entry digests match.
-Conflicting destinations raise structured `WorkflowResultDestinationError`, integrity and transport failures expose stable `SSHTransportError.code` values, and unavailable retained assets raise `WorkflowRunResultUnavailableError`.
+All export failures derive from `WorkflowResultExportError`; destination conflicts raise `WorkflowResultDestinationError`, bundle verification raises `WorkflowResultIntegrityError`, actual SSH/SFTP failures raise `SSHTransportError`, and unavailable retained assets raise `WorkflowRunResultUnavailableError`.
 `WorkflowExecutionContext.export_result(value, destination=...)` creates the same bundle for a successful attached Direct, Wetlands, or Parsl run from engine-neutral provider outcomes.
 Attached export snapshots the caller-supplied successful value at export time and must occur before caller mutation or transient-asset removal; a repeated export to the installed destination uses its retained expected digest.
 
@@ -3014,11 +3016,13 @@ from bioimageflow import (
     ParslConfigRef, OrchestratorLaunchConfig, PSIJLaunchConfig,
     SSHSubmissionTransport, LocalUpload,
     WorkflowRun, RemoteWorkflowRun, submit_workflow,
-    PreparedRunRetry, RunRetryPlan, RecomputeRequest, RetryInvalidation,
+    RunRetryPlan, RecomputeRequest, RetryInvalidation,
     BackendNotSupportedError, PSIJSubmissionUncertainError,
     WorkflowRunFailedError, WorkflowRunLostError,
     WorkflowRunNotReadyError, WorkflowRunResultUnavailableError,
-    WorkflowRunRetryError, WorkflowResultDestinationError, SSHTransportError,
+    WorkflowRunRetryError, WorkflowResultExportError,
+    WorkflowResultDestinationError, WorkflowResultIntegrityError,
+    SSHTransportError,
     LauncherError, LauncherProtocolError, LauncherStateConflictError,
     WorkflowNode,
     # Versioned tool loading and PEP 723 support

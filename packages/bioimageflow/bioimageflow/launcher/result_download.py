@@ -19,6 +19,8 @@ from bioimageflow.storage.dataframe_transport import file_sha256
 from .cluster_protocol import ClusterProtocolFailure
 from .errors import (
     WorkflowResultDestinationError,
+    WorkflowResultExportError,
+    WorkflowResultIntegrityError,
     WorkflowRunResultUnavailableError,
 )
 from .return_schema import validate_return_manifest_structure
@@ -47,13 +49,11 @@ def _validate_destination_parent(destination: Path) -> None:
         try:
             mode = current.lstat().st_mode
         except OSError as exc:
-            raise SSHTransportError(
-                "unsafe-destination",
+            raise WorkflowResultDestinationError(
                 "Every result destination parent must already exist.",
             ) from exc
         if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-            raise SSHTransportError(
-                "unsafe-destination",
+            raise WorkflowResultDestinationError(
                 "Every result destination parent must be a real directory.",
             )
 
@@ -113,8 +113,7 @@ def _load_manifest(path: Path) -> dict[str, Any]:
             parse_constant=_reject_nonfinite,
         )
     except Exception as exc:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Downloaded result manifest is malformed.",
         ) from exc
     try:
@@ -127,20 +126,17 @@ def _load_manifest(path: Path) -> dict[str, Any]:
             "schema",
             "storage_path",
         }:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Downloaded result manifest schema is invalid.",
             )
         if value["schema"] != RESULT_BUNDLE_SCHEMA:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Downloaded result manifest version is unsupported.",
             )
         body = {key: value[key] for key in value if key != "digest"}
         expected = f"sha256:{hashlib.sha256(canonical_json_bytes(body)).hexdigest()}"
         if value["digest"] != expected:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Downloaded result manifest digest is invalid.",
             )
         return_manifest = validate_return_manifest_structure(
@@ -154,16 +150,14 @@ def _load_manifest(path: Path) -> dict[str, Any]:
             or value["storage_path"].startswith("//")
             or str(PurePosixPath(value["storage_path"])) != value["storage_path"]
         ):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Downloaded result manifest has inconsistent run binding.",
             )
         return value
-    except SSHTransportError:
+    except WorkflowResultIntegrityError:
         raise
     except Exception as exc:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Downloaded result manifest structure is invalid.",
         ) from exc
 
@@ -183,8 +177,7 @@ def _reject_nonfinite(value: str) -> None:
 
 def _validate_entries(value: Any) -> list[dict[str, Any]]:
     if type(value) is not list or len(value) > MAX_RESULT_ENTRIES:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result bundle file list is invalid.",
         )
     result: list[dict[str, Any]] = []
@@ -193,15 +186,13 @@ def _validate_entries(value: Any) -> list[dict[str, Any]]:
     total = 0
     for raw in value:
         if type(raw) is not dict or set(raw) != {"digest", "kind", "path", "size"}:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle entry schema is invalid.",
             )
         try:
             relative = validate_relative_posix_path(raw["path"])
         except (TypeError, ValueError) as exc:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle entry path is unsafe.",
             ) from exc
         if (
@@ -217,29 +208,25 @@ def _validate_entries(value: Any) -> list[dict[str, Any]]:
             or type(raw["digest"]) is not str
             or _DIGEST.fullmatch(raw["digest"]) is None
         ):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle entry value is invalid.",
             )
         if raw["kind"] == "directory" and (
             raw["size"] != 0 or raw["digest"] != _EMPTY_DIGEST
         ):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle directory entry is invalid.",
             )
         seen.add(relative)
         folded.add(relative.casefold())
         total += raw["size"]
         if total > MAX_RESULT_BYTES:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle exceeds the aggregate byte limit.",
             )
         result.append(dict(raw))
     if [entry["path"] for entry in result] != sorted(seen):
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result bundle entries are not in canonical order.",
         )
     return result
@@ -251,15 +238,13 @@ def _validate_record_assets(
     root: Path,
 ) -> dict[int, Path]:
     if type(value) is not list:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result record-asset map is invalid.",
         )
     result: dict[int, Path] = {}
     for item in value:
         if type(item) is not dict or set(item) != {"locator_index", "path"}:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result record-asset entry is invalid.",
             )
         index = item["locator_index"]
@@ -270,15 +255,13 @@ def _validate_record_assets(
             or return_manifest["locators"][index]["kind"] != "record_asset"
             or index in result
         ):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result record-asset locator is invalid.",
             )
         try:
             relative = validate_relative_posix_path(item["path"])
         except (TypeError, ValueError) as exc:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result record-asset path is unsafe.",
             ) from exc
         result[index] = root / relative
@@ -288,8 +271,7 @@ def _validate_record_assets(
         if locator["kind"] == "record_asset"
     }
     if set(result) != expected:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result record-asset map is incomplete.",
         )
     return result
@@ -307,29 +289,26 @@ def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
         mode = path.lstat().st_mode
         entry = by_path.get(relative)
         if entry is None or stat.S_ISLNK(mode):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Result bundle contains an unexpected or unsafe path.",
             )
         if entry["kind"] == "directory":
             if not stat.S_ISDIR(mode):
-                raise SSHTransportError("result-integrity", "Result directory is invalid.")
+                raise WorkflowResultIntegrityError("Result directory is invalid.")
         elif (
             not stat.S_ISREG(mode)
             or path.stat().st_size != entry["size"]
             or file_sha256(path) != entry["digest"]
         ):
-            raise SSHTransportError("result-integrity", "Result file digest is invalid.")
+            raise WorkflowResultIntegrityError("Result file digest is invalid.")
     expected = {entry["path"] for entry in entries}
     if actual != expected:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result bundle has missing or extra paths.",
         )
     frame_paths = {frame["path"] for frame in manifest["return_manifest"]["frames"]}
     if not frame_paths.issubset(expected):
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result bundle is missing a declared return frame.",
         )
     record_assets = _validate_record_assets(
@@ -338,8 +317,7 @@ def _verify_tree(root: Path, manifest: Mapping[str, Any]) -> dict[int, Path]:
         root,
     )
     if any(path.relative_to(root).as_posix() not in expected for path in record_assets.values()):
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Result record-asset map names an undeclared path.",
         )
     return record_assets
@@ -388,8 +366,7 @@ def download_result(
             unsafe_parent = True
             break
     if unsafe_parent:
-        raise SSHTransportError(
-            "unsafe-destination",
+        raise WorkflowResultDestinationError(
             "Every result destination parent must be a real non-symlink directory.",
         )
     if destination.exists():
@@ -428,8 +405,7 @@ def download_result(
             or manifest["run_id"] != response["run_id"]
             or manifest["storage_path"] != response["storage_path"]
         ):
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Downloaded result does not match the requested run.",
             )
         entries = _validate_entries(manifest["entries"])
@@ -485,8 +461,7 @@ def export_local_result(
         and retained_digest is not None
         and expected_digest != retained_digest
     ):
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Expected result identity conflicts with the retained run receipt.",
         )
     expected_digest = expected_digest or retained_digest
@@ -507,17 +482,18 @@ def export_local_result(
                     "The successful workflow return is unavailable.",
                     details={"run_id": run.id},
                 ) from exc
-            raise SSHTransportError(exc.code, exc.message) from exc
+            raise WorkflowResultExportError(
+                exc.message,
+                details={"internal_code": exc.code},
+            ) from exc
         loaded = _load_manifest(candidate / "manifest.json")
         if loaded != manifest:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Built result manifest changed before installation.",
             )
         assets = _verify_tree(candidate, loaded)
         if expected_digest is not None and loaded["digest"] != expected_digest:
-            raise SSHTransportError(
-                "result-integrity",
+            raise WorkflowResultIntegrityError(
                 "Built result no longer matches its retained export identity.",
             )
         _install_local_export_receipt(run, loaded["digest"])
@@ -585,8 +561,7 @@ def _load_local_export_receipt(run: Any) -> str | None:
             raise ValueError("receipt is not a regular file")
         value = json.loads(path.read_text())
     except Exception as exc:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Retained local result export identity is invalid.",
         ) from exc
     if (
@@ -598,8 +573,7 @@ def _load_local_export_receipt(run: Any) -> str | None:
         or type(value["bundle_digest"]) is not str
         or _DIGEST.fullmatch(value["bundle_digest"]) is None
     ):
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Retained local result export identity is invalid.",
         )
     return str(value["bundle_digest"])
@@ -620,7 +594,6 @@ def _install_local_export_receipt(run: Any, digest: str) -> None:
     except FileExistsError:
         pass
     if _load_local_export_receipt(run) != digest:
-        raise SSHTransportError(
-            "result-integrity",
+        raise WorkflowResultIntegrityError(
             "Retained local result export identity conflicts with this bundle.",
         )

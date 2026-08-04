@@ -99,9 +99,6 @@ Submitted execution
 .. autoclass:: WorkflowRun
    :members:
 
-.. autoclass:: PreparedRunRetry
-   :members:
-
 .. autoclass:: RunRetryPlan
    :members:
 
@@ -169,6 +166,10 @@ Failures
 .. autoclass:: WorkflowRunRetryError
 
 .. autoclass:: WorkflowResultDestinationError
+
+.. autoclass:: WorkflowResultExportError
+
+.. autoclass:: WorkflowResultIntegrityError
 
 .. autoclass:: LauncherError
 

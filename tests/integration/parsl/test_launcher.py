@@ -115,7 +115,7 @@ def test_local_launcher_runs_in_separate_process_and_reconnects(
     assert run.control_dir == tmp_path / "launcher" / "v1" / "runs" / run.id
     assert run.view_dir == tmp_path / "views" / "runs" / run.id
     reopened = WorkflowRun.open(tmp_path, run.id)
-    result = reopened.result()
+    result = reopened.load_result()
     assert isinstance(result, pd.DataFrame)
     assert result.empty
 
@@ -184,7 +184,7 @@ def test_submitted_root_inputs_execute_and_reconnect(
         if (run.control_dir / "error.json").is_file()
         else "",
     )
-    result = WorkflowRun.open(tmp_path, run.id).result()
+    result = WorkflowRun.open(tmp_path, run.id).load_result()
     assert result["result"].to_dict() == expected
     public = [
         entry["payload"]
@@ -214,7 +214,7 @@ def test_submitted_ad_hoc_targets_preserve_requested_order(
     _wait_terminal(run)
 
     assert run.status == "succeeded", run.logs()
-    result = run.result()
+    result = run.load_result()
     assert list(result) == ["second", "first"]
     assert result["second"].at["0", "value"] == 10
     assert result["first"].at["0", "value"] == 2
@@ -242,7 +242,7 @@ def test_submitted_archive_custom_source_executes(
     _wait_terminal(run)
 
     assert run.status == "succeeded", run.logs()
-    assert run.result().at["archive", "value"] == 7
+    assert run.load_result().at["archive", "value"] == 7
 
 
 def test_submitted_remote_failure_and_progress_are_persisted(
@@ -264,7 +264,7 @@ def test_submitted_remote_failure_and_progress_are_persisted(
 
     assert run.status == "failed", run.logs()
     with pytest.raises(WorkflowRunFailedError) as captured:
-        run.result()
+        run.load_result()
     assert "remote failure 13" in str(captured.value)
     statuses = [
         entry["payload"]["status"]

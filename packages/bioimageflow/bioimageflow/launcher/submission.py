@@ -98,7 +98,7 @@ def _absolute_path(
 
 def _protocol_versions() -> dict[str, int]:
     return {
-        "launcher": 2,
+        "launcher": 1,
         "workflow_graph": 1,
         "workflow_archive": 1,
         "parsl_task": 1,
@@ -245,6 +245,7 @@ def _submit_workflow(
                     "launch": selected_launch.to_dict(),
                     "psij_pre_launch": psij_pre_launch,
                     "protocol_versions": _protocol_versions(),
+                    "retry_plan": None,
                 }
                 control = repository.allocate(
                     submission,

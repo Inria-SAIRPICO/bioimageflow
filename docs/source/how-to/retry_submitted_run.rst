@@ -7,16 +7,16 @@ Once it reaches ``succeeded``, ``failed``, ``cancelled``, or ``lost``, you can c
 Retry unfinished work
 ---------------------
 
-Open the retained run and prepare a retry:
+Open the retained run, inspect its plan, and start it after confirmation:
 
 .. code-block:: python
 
    from bioimageflow import WorkflowRun
 
    previous = WorkflowRun.open(storage_path, saved_run_id)
-   prepared = previous.prepare_retry()
-   print("new run:", prepared.plan.retry_run_id)
-   retry = prepared.submit()
+   plan = previous.plan_retry()
+   print("new run:", plan.retry_run_id)
+   retry = previous.start_retry(plan)
 
 The retry has a new run ID, and ``retry.parent_id`` identifies ``previous.id``.
 Successful cached nodes are reused, while failed, cancelled, or unfinished work runs again.
@@ -32,17 +32,17 @@ Use :class:`~bioimageflow.RecomputeRequest` when cached work must run again:
 
    from bioimageflow import RecomputeRequest
 
-   prepared = previous.prepare_retry(
+   plan = previous.plan_retry(
        RecomputeRequest(
            ("preprocessing/normalize",),
            cascade=True,
        )
    )
 
-   for selected in prepared.plan.invalidations:
+   for selected in plan.invalidations:
        print(selected.node_path, selected.record_id)
 
-   retry = prepared.submit()
+   retry = previous.start_retry(plan)
 
 Scoped paths use ``/`` for nested workflows.
 With ``cascade=True``, BioImageFlow also selects downstream cache pointers; with ``cascade=False``, it selects only the named nodes.
@@ -62,13 +62,13 @@ The plan is strict JSON-safe data and can cross a service restart:
 
    from bioimageflow import RunRetryPlan, WorkflowRun
 
-   saved_plan = prepared.plan.to_dict()
+   saved_plan = plan.to_dict()
 
    # Later, possibly in a new process:
    previous = WorkflowRun.open(storage_path, saved_plan["parent_run_id"])
-   retry = previous.submit_retry(RunRetryPlan.from_dict(saved_plan))
+   retry = previous.start_retry(RunRetryPlan.from_dict(saved_plan))
 
-A :class:`~bioimageflow.PreparedRunRetry` is single-use.
+``start_retry()`` is idempotent for the child ID and complete plan.
 If scheduler submission has an uncertain outcome, keep its planned run ID and reconnect to that ID; never submit it again automatically.
 
 Retry a remote run
@@ -81,10 +81,10 @@ The same calls work through a :class:`~bioimageflow.RemoteWorkflowRun`:
    from bioimageflow import RemoteWorkflowRun
 
    previous = RemoteWorkflowRun.open(transport, cluster_storage, saved_run_id)
-   prepared = previous.prepare_retry(
+   plan = previous.plan_retry(
        RecomputeRequest(("segmentation/model",), cascade=True)
    )
-   retry = prepared.submit()
+   retry = previous.start_retry(plan)
 
 The cluster performs the preview, revision checks, journaled invalidation, retained invocation cloning, run-owned byte copying, content-addressed upload reuse, and launch.
 The caller does not inspect remote launcher files or issue SSH filesystem commands.

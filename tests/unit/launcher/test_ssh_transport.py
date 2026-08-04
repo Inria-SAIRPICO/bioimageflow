@@ -253,7 +253,7 @@ def test_response_loss_is_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     ],
 )
-def test_v3_retry_observations_cross_every_production_transport_path(
+def test_retry_observations_cross_every_production_transport_path(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
     extra_arguments: dict,
@@ -278,14 +278,13 @@ def test_v3_retry_observations_cross_every_production_transport_path(
         conflicting_run_ids=(),
     )
     result = {
+        "schema": "bioimageflow.launcher.run-observation.v1",
         "error": None,
         "retry_plan": plan.to_dict(),
         "run_id": retry_id,
         "state": "prepared",
         "status_revision": 0,
         "storage_path": storage,
-        "submission_schema": "bioimageflow.launcher.submission.v3",
-        "status_schema": "bioimageflow.launcher.status.v1",
         "terminal": False,
         "updated_at": "2026-08-03T12:00:00Z",
         **extra_result,

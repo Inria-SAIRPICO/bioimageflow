@@ -7,13 +7,13 @@ It creates a child run from retained material rather than reconstructing an invo
 Ordinary retry
 --------------
 
-Every terminal submitted run can prepare a child execution:
+Every terminal submitted run can plan and start a child execution:
 
 .. code-block:: python
 
-   prepared = run.prepare_retry()
-   inspect(prepared.plan)
-   retry = prepared.submit()
+   plan = run.plan_retry()
+   inspect(plan)
+   retry = run.start_retry(plan)
 
 The child receives a fresh run ID and retains ``parent_id`` and ``retry_plan`` after reconnect.
 An ordinary retry preserves current cache selections, so successful work is reused and remaining work is attempted again.
@@ -32,11 +32,11 @@ Scoped recomputation
 
 .. code-block:: python
 
-   prepared = run.prepare_retry(
+   plan = run.plan_retry(
        RecomputeRequest(("analysis/segment",), cascade=True)
    )
 
-``prepared.plan.invalidations`` is the exact non-mutating preview of current cache pointers selected for removal.
+``plan.invalidations`` is the exact non-mutating preview of current cache pointers selected for removal.
 ``cascade=True`` includes transitive downstream nodes; ``cascade=False`` selects only the named scope.
 Immutable record directories are never deleted.
 
@@ -55,14 +55,14 @@ Plan identity
 - active-run conflicts observed during preview;
 - a canonical SHA-256 digest over the complete plan.
 
-The child v3 submission retains the complete strict plan.
+Every submission uses the same schema, with ``retry_plan`` set to ``null`` for an original run or the complete strict plan for a retry child.
 No resolved secret or credential enters the plan, retained submission, representation, or diagnostic.
 
 Allocation and concurrency
 --------------------------
 
-Preparation briefly takes the storage allocation guard for a consistent read but creates no run, invalidates nothing, starts no DataFlowKernel or worker, and submits no scheduler job.
-``PreparedRunRetry.can_submit`` is false when preparation observed an active execution.
+Planning briefly takes the storage allocation guard for a consistent read but creates no run, invalidates nothing, starts no DataFlowKernel or worker, and submits no scheduler job.
+``plan.conflicting_run_ids`` reports active executions observed during planning.
 
 Submission takes the same guard, refuses any active attached or submitted execution, and verifies the storage binding, parent revision, and retained submission and material digests.
 For recomputation, it also verifies the cache-selection revision and exact preview.
@@ -74,24 +74,23 @@ Stale plans fail with :class:`~bioimageflow.WorkflowRunRetryError`; callers must
 Restart-safe confirmation
 -------------------------
 
-The convenience object is process-local and single-use, but the plan is JSON-safe:
+The plan is JSON-safe and is the only confirmation object:
 
 .. code-block:: python
 
-   payload = prepared.plan.to_dict()
+   payload = plan.to_dict()
 
    # After a process restart:
    plan = RunRetryPlan.from_dict(payload)
    parent = WorkflowRun.open(plan.storage_path, plan.parent_run_id)
-   child = parent.submit_retry(plan)
+   child = parent.start_retry(plan)
 
-Remote code uses ``RemoteWorkflowRun.open(...)`` and the same ``submit_retry(plan)`` method.
+Remote code uses ``RemoteWorkflowRun.open(...)`` and the same ``start_retry(plan)`` method.
 Remote preview and mutation are bounded public cluster-agent operations; callers never inspect launcher storage or issue arbitrary filesystem commands.
 
 Submission uncertainty
 ----------------------
 
-``PreparedRunRetry.submit()`` marks itself consumed before calling the launcher.
 The plan owns one deterministic child ID, and the retained child owns the complete plan, making duplicate protocol delivery idempotent.
 If transport or scheduler submission may have succeeded, BioImageFlow never authorizes automatic resubmission.
 Reconnect to ``plan.retry_run_id`` and inspect its durable state.

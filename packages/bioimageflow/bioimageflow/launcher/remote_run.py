@@ -19,12 +19,14 @@ from .errors import (
     WorkflowRunNotReadyError,
     WorkflowRunResultUnavailableError,
     WorkflowRunRetryError,
+    WorkflowResultExportError,
+    WorkflowResultIntegrityError,
 )
 from .schemas import validate_run_id
 from .types import SSHSubmissionTransport
 
 if TYPE_CHECKING:
-    from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
+    from .retry import RecomputeRequest, RunRetryPlan
 
 _PROGRESS_PAGE = 500
 _LOG_PAGE = 256 * 1024
@@ -303,12 +305,12 @@ class RemoteWorkflowRun:
         """Return this child run's durable retry provenance, if present."""
         return self._retry_plan
 
-    def prepare_retry(
+    def plan_retry(
         self,
         recompute: "RecomputeRequest | None" = None,
-    ) -> "PreparedRunRetry[RemoteWorkflowRun]":
-        """Prepare a revision-bound cluster-local retry without file access."""
-        from .retry import PreparedRunRetry, RecomputeRequest, RunRetryPlan
+    ) -> "RunRetryPlan":
+        """Return a non-mutating cluster-local retry or recomputation plan."""
+        from .retry import RecomputeRequest, RunRetryPlan
         from .ssh import execute_cluster_command
 
         if recompute is not None and type(recompute) is not RecomputeRequest:
@@ -316,7 +318,7 @@ class RemoteWorkflowRun:
         try:
             payload = execute_cluster_command(
                 self._transport,
-                "prepare-retry",
+                "plan-retry",
                 {
                     **self._arguments(),
                     "recompute": None if recompute is None else recompute.to_dict(),
@@ -335,15 +337,10 @@ class RemoteWorkflowRun:
                     details={"remote_code": exc.code},
                 ) from exc
             raise
-        plan = RunRetryPlan.from_dict(payload)
+        return RunRetryPlan.from_dict(payload)
 
-        def submit() -> "RemoteWorkflowRun":
-            return self.submit_retry(plan)
-
-        return PreparedRunRetry(plan, submit)
-
-    def submit_retry(self, plan: "RunRetryPlan") -> "RemoteWorkflowRun":
-        """Submit a serialized cluster retry plan after reconnect or confirmation."""
+    def start_retry(self, plan: "RunRetryPlan") -> "RemoteWorkflowRun":
+        """Idempotently start the exact confirmed cluster retry plan."""
         from .retry import RunRetryPlan
         from .ssh import _retry_mutation
 
@@ -352,7 +349,7 @@ class RemoteWorkflowRun:
         try:
             observation = _retry_mutation(
                 self._transport,
-                "retry",
+                "start-retry",
                 {
                     "plan": plan.to_dict(),
                     "storage_path": str(self._storage_path),
@@ -402,7 +399,7 @@ class RemoteWorkflowRun:
             details={"run_id": self.id, "state": self.status},
         )
 
-    def result(self, *, destination: Path | str) -> Any:
+    def export_result(self, destination: Path | str) -> Any:
         """Atomically download and rehydrate the successful typed return."""
         if not isinstance(destination, (str, Path)) or not str(destination):
             raise TypeError("destination must be a non-empty local path.")
@@ -427,6 +424,16 @@ class RemoteWorkflowRun:
                 raise WorkflowRunResultUnavailableError(
                     "The successful remote workflow return is unavailable.",
                     details={"run_id": self.id},
+                ) from exc
+            if exc.code in {"remote-result-integrity", "remote-result-mutated"}:
+                raise WorkflowResultIntegrityError(
+                    "The remote result snapshot failed integrity verification.",
+                    details={"run_id": self.id, "remote_code": exc.code},
+                ) from exc
+            if exc.code == "remote-result-too-large":
+                raise WorkflowResultExportError(
+                    "The remote result exceeds the supported export limits.",
+                    details={"run_id": self.id, "remote_code": exc.code},
                 ) from exc
             raise
         return download_result(

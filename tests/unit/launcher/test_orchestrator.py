@@ -75,7 +75,7 @@ def test_manual_orchestrator_executes_and_reconnects_zero_output_run(
     )
 
     run.refresh()
-    result = run.result()
+    result = run.load_result()
     assert terminal == "succeeded"
     assert run.status == "succeeded"
     assert isinstance(result, pd.DataFrame)

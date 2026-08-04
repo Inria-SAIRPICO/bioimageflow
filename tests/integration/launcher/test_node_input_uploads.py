@@ -149,7 +149,7 @@ def test_nested_node_upload_becomes_immutable_effective_graph_path(
         ),
     )
     retry_plan = _call(
-        "prepare-retry",
+        "plan-retry",
         {
             "run_id": submitted["run_id"],
             "storage_path": workflow.storage_path.as_posix(),
@@ -158,7 +158,7 @@ def test_nested_node_upload_becomes_immutable_effective_graph_path(
         str(uuid.uuid4()),
     )
     retried = _call(
-        "retry",
+        "start-retry",
         {
             "storage_path": workflow.storage_path.as_posix(),
             "plan": retry_plan,
@@ -179,7 +179,7 @@ def test_nested_node_upload_becomes_immutable_effective_graph_path(
     )
     retried_installed = deserialize_constant(retried_files["constants"]["path"])
 
-    assert retried_submission["parent_run_id"] == submitted["run_id"]
+    assert retried_submission["retry_plan"]["parent_run_id"] == submitted["run_id"]
     assert retried_installed == installed
     assert (retried_installed / "image.tif").read_bytes() == b"validated pixels"
     assert launches == [submitted["run_id"], retried["run_id"]]
