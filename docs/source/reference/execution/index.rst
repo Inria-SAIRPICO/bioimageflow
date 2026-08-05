@@ -4,6 +4,35 @@ Execution Reference
 BioImageFlow keeps graph planning, cache publication, progress, and provenance independent of the system that performs processing work.
 The execution mode determines where :class:`~bioimageflow_core.ProcessingTool` tasks run and who owns their resources.
 
+The main names used in this section
+-----------------------------------
+
+You do not need prior knowledge of Parsl, PSI/J, or cluster schedulers to read this section.
+These names describe different jobs:
+
+**BioImageFlow orchestrator**
+   The Python process that understands the workflow.
+   It decides which nodes need to run, handles DataFrames and caching, records progress, and publishes results.
+
+**Worker**
+   A process that performs the image-processing work for one or more :class:`~bioimageflow_core.ProcessingTool` tasks.
+
+**Parsl**
+   An optional Python task-execution library used by BioImageFlow for distributed execution.
+   The orchestrator gives processing tasks to Parsl, and Parsl sends them to configured worker pools called *executors*.
+
+**PSI/J**
+   A Python interface for starting and controlling jobs through cluster schedulers such as Slurm, PBS, and LSF.
+   BioImageFlow uses PSI/J to start one orchestrator job on a cluster; it does not use PSI/J for each workflow node.
+
+**Cluster scheduler**
+   The site service, such as Slurm, that queues jobs and assigns cluster machines to them.
+
+**Execution profile**
+   A convenient name for a saved group of execution settings, such as the cluster address, Parsl configuration, executor descriptions, and PSI/J launch settings.
+   ``Profile`` is not a BioImageFlow class.
+   A script, application, or GUI may store these public values in its own configuration format and give the group a name such as ``my-cluster``.
+
 Choose an execution mode
 ------------------------
 
