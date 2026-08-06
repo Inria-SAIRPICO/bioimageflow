@@ -3,8 +3,8 @@
 ## Status
 
 This document proposes a future BioImageFlow public API.
-It is an example-led description of the experience we want, not the current API or the final launcher protocol specification.
-Names may change after usability and technical review.
+It is the reviewed, example-led description of the experience we want, not the current released API.
+The corresponding normative implementation target is [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md).
 
 ## The experience we want
 
@@ -388,7 +388,7 @@ It does not replace the setup script, which exposes site software such as Python
 | The cluster cannot reach package indexes | `from_wheelhouse()` | compatible wheels and an exact lock |
 | The site supplies a complete tested Python | `from_existing_python()` | the versioned interpreter path from the administrator |
 | The project has standardized Python lock data | `from_pylock()` | `pylock.toml` and required local project sources |
-| The project has only `pyproject.toml` | `from_pyproject()` | the manifest, accepting that the first deployment resolves versions |
+| The project has only `pyproject.toml` | Not in the first implementation | create a uv or standard Python lock before deployment |
 
 For a new internet-connected project, start with the locked uv example.
 Use an administrator-managed Python when site policy forbids user installations, and use a wheelhouse when the cluster is offline.
@@ -475,18 +475,13 @@ The lock contents and local project sources contribute to deployment identity.
 
 ### Bare `pyproject.toml`
 
-```python
-environment = ClusterEnvironment.from_pyproject("pyproject.toml")
-```
-
 A bare `pyproject.toml` is a project manifest, not an exact lock.
 It commonly contains version ranges and leaves transitive resolution to the installer.
 
-BioImageFlow may resolve it once in a temporary deployment, record the complete hashed resolution, and include that resolution in the published deployment identity.
-The manifest alone therefore does not predict a deployment ID: resolving it at a later time may produce a different deployment, while reuse of a published deployment always means reuse of the same recorded resolution.
-Validation and confirmation must describe this source as reproducible only after resolution.
+The first implementation therefore requires the user to create a uv lock or standard Python lock instead of exposing `from_pyproject()`.
+A later adapter may resolve once and publish the complete hashed resolution, but it needs a separate confirmation design because the manifest alone cannot predict the deployment ID.
 
-The preferred implementation order is locked uv projects, locked Pixi projects, existing Python, offline wheelhouse with a lock, standardized `pylock.toml`, and bare `pyproject.toml`.
+The first implementation covers locked uv projects, locked Pixi projects, existing Python, offline wheelhouses with a lock, and standardized `pylock.toml`.
 Dedicated adapters for Poetry, PDM, Conda-lock, Spack manifests, and container recipes are valid later extensions, not requirements for the first public experience.
 
 ## Explicit lifecycle operations
@@ -698,7 +693,10 @@ This proposal does not:
 Reusable templates remain valuable documentation and may later become convenience builders.
 They are not a substitute for the programmable Parsl configuration escape hatch.
 
-## Open design questions for review
+## Questions carried into technical review
+
+The normative technical specification resolves these questions for the first implementation.
+They remain here as the design record that motivated those decisions.
 
 1. How can BioImageFlow validate the required `runtime.worker_init` for every managed provider-backed executor before allocation without relying on unstable Parsl internals?
 2. Is `WorkerSlot` enough for the common configuration, or should a managed executor infer CPU capacity from known Parsl executor fields while leaving memory and GPU values explicit?
@@ -715,7 +713,7 @@ They are not a substitute for the programmable Parsl configuration escape hatch.
 The later normative specification is ready for implementation only when it defines observable behavior and conformance tests for all of the following:
 
 - On a fresh Slurm account satisfying the prerequisites, the golden uv example installs BioImageFlow without administrator action, validates, plans, submits, reconnects from a new laptop process, and downloads a verified result.
-- Repeating equivalent complete deployment inputs reuses the same published deployment, while changing any identity-bearing environment, setup, verified BioImageFlow bootstrap input, Parsl source, or generated bare-manifest resolution creates a different deployment.
+- Repeating equivalent complete deployment inputs reuses the same published deployment, while changing any identity-bearing environment, setup, verified BioImageFlow bootstrap input, or Parsl source creates a different deployment.
 - Every `ClusterEnvironment` constructor selected for the initial normative specification has a fixture that either produces the promised environment or fails before scheduler submission with a structured explanation, and reports whether its source is locked, resolved-once, or externally managed.
 - A selected `SetupScript` is applied consistently to bootstrap, validation, the orchestrator, and worker initialization, and its exact bytes or pinned cluster digest appear in confirmation and deployment identity.
 - `prepare()` owns immutable copies of workflow and invocation inputs, `deploy()` owns immutable copies of local deployment sources, and later modification or deletion of the originals cannot alter submission.

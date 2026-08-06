@@ -41,8 +41,8 @@ For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-ap
 
 ### 1.1.1 Public Distributed-Execution Integration Contract
 
-An example-led proposal for redesigning the remote-cluster experience is available in [Remote cluster experience and public API proposal](remote_cluster_experience_spec.md).
-That proposal describes a possible future API and is not part of the current normative contract.
+The reviewed redesign is described by [Remote cluster experience and public API proposal](remote_cluster_experience_spec.md) and its corresponding [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md).
+These documents define the next implementation target and do not describe the current released API until that implementation is complete.
 
 The public integration surface for a BioImageFlow execution UI consists of the following values and operations:
 

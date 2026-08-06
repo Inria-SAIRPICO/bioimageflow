@@ -104,3 +104,4 @@ Features
    reference/index
    specs
    remote_cluster_experience_spec
+   remote_cluster_technical_spec
