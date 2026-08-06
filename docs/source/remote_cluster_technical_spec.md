@@ -35,9 +35,10 @@ The following decisions resolve the open questions in the experience proposal.
 3. A bare `pyproject.toml` environment is not part of the first implementation because resolution after confirmation would weaken reproducibility and complicate offline behavior.
 4. `from_existing_python()` accepts versioned or unversioned absolute paths, but always labels them externally managed and binds each plan to a fresh observed attestation.
    Submission MUST fail if that attestation changes after confirmation.
-5. A published BioImageFlow installation uses a verified wheel for the exact running version.
-   An editable or unreleased checkout is built into a non-editable wheel locally, and that wheel's digest defines the bootstrap artifact.
-6. uv and Pixi local project members are captured as built distribution artifacts selected by their build metadata, never by recursively uploading an entire repository.
+5. A published BioImageFlow installation uses a verified, target-compatible wheel for the exact running version.
+   An editable or unreleased checkout is built into a non-editable wheel locally, that exact wheel's digest defines the authoritative artifact, and deployment fails rather than substituting an index copy or rebuilding different bytes on the cluster.
+6. uv and Pixi local project members are captured as immutable distribution inputs selected by their build metadata, never by recursively uploading an entire repository.
+   A target-compatible wheel is used when preparation can build one, while a native project may instead be captured as an exact source distribution and built in the unpublished cluster candidate under the locked build rules in Section 6.1.
 7. Mutable cluster-resident setup scripts are not supported initially.
    Every cluster-resident setup source requires an expected SHA-256 digest.
 8. Remote results default to `<cluster.root>/results/<workflow-id>`.
@@ -68,6 +69,7 @@ RemoteCluster(
 ```
 
 `host` is an OpenSSH alias or `user@host` value without embedded options.
+It MUST be one non-empty argument, MUST NOT begin with `-`, and MUST NOT contain whitespace, control characters, a URI scheme, or an SSH command or option fragment.
 `root` and `results_root` are normalized absolute POSIX paths.
 `root` MUST identify a dedicated user-controlled subtree.
 The first implementation restricts the root used in the stable SSH command to the safe token characters `[A-Za-z0-9._/+:@-]` and rejects whitespace or shell metacharacters.
@@ -86,9 +88,9 @@ The serialized form contains secret reference names but never resolved values.
 `ClusterEnvironment` is a frozen tagged value with these first-version constructors:
 
 ```python
-ClusterEnvironment.from_uv_project(path, *, groups=(), extras=(), package=None)
-ClusterEnvironment.from_pixi_project(path, *, environment="default")
-ClusterEnvironment.from_pylock(lock, *, project=None, groups=(), extras=())
+ClusterEnvironment.from_uv_project(path, *, groups=(), extras=(), package=None, auth_refs=None)
+ClusterEnvironment.from_pixi_project(path, *, environment="default", auth_refs=None)
+ClusterEnvironment.from_pylock(lock, *, project=None, groups=(), extras=(), auth_refs=None)
 ClusterEnvironment.from_wheelhouse(path, *, lock)
 ClusterEnvironment.from_existing_python(path)
 ```
@@ -98,6 +100,11 @@ Unrecognized environment formats MUST fail without fallback guessing.
 
 The value records only local source locations and non-secret selection options before preparation.
 Its prepared representation replaces local paths with immutable artifact entries and digests.
+When a selected source distribution requires a target-side build, the prepared representation also contains the locked build plan defined in Section 6.1.
+
+`auth_refs` maps adapter-declared credential slot names to cluster environment-variable names matching `[A-Za-z_][A-Za-z0-9_]*`.
+Each slot binds one canonical index, channel, or artifact-host identity and one adapter-supported credential role; unknown, duplicate, unused, or endpoint-mismatched slots fail before installation.
+The mapping and reference names are identity-bearing, while resolved values are late-bound only for bounded artifact retrieval and follow Section 14.
 
 The serialized schema is `bioimageflow.cluster_environment.v1`.
 
@@ -131,6 +138,12 @@ The same verified script is sourced before:
 BioImageFlow appends deployment activation after the setup script.
 The setup script MUST NOT be used as a package installation hook or mutate a published deployment.
 
+The setup digest pins the script bytes, not the mutable Modules, Spack, interpreter, driver, library, or executable targets that those bytes select.
+After sourcing the script, BioImageFlow records a bounded setup-realization attestation containing the resolved Python executable and interpreter identity plus only non-secret executable, library, tool-origin, and virtual-package facts required by the selected adapters or workflow.
+It MUST NOT infer module or Spack environment identity by parsing arbitrary shell source, treat module names as immutable versions, or persist a general environment dump.
+The build-time attestation is retained with the deployment, a fresh login-node attestation is bound into validation and planning, and the observable applicable subset is compared again in the orchestrator and each managed worker.
+A changed required observable fact fails with `external-environment-changed`; facts that cannot be observed without allocation remain explicitly unverified until the corresponding runtime acknowledgement.
+
 Setup source bytes and local source paths MUST be absent from `repr()`.
 Serialized public values contain source kind, size, and digest, plus a cluster path only for a pinned cluster source.
 
@@ -138,7 +151,8 @@ Serialized public values contain source kind, size, and digest, plus a cluster p
 
 `SchedulerJob` describes only the orchestrator allocation.
 
-Its first-version scheduler values are `"slurm"`, `"pbs"`, and `"lsf"`, subject to installed PSI/J executor support on the target.
+Its first-version scheduler values are `"slurm"`, `"pbs"`, and `"lsf"`.
+Accepting one of those syntax values means only that BioImageFlow implements its normalized job schema; actual support requires the exact scheduler-adapter and PSI/J compatibility checks in Sections 10.2 and 19.
 
 It contains:
 
@@ -176,12 +190,13 @@ ParslConfiguration.from_file(
 No parent directory is uploaded implicitly.
 
 Local configuration sources are snapshotted, validated as regular files or packages, installed under a deployment-owned generated module name, and included in deployment identity.
+Package snapshots MUST use an explicit relative-file manifest and reject symlinks, hard links, special files, path aliases, mutation during capture, and configured file-count or byte limits.
 
 An advanced `from_module("module:function", ...)` constructor MAY refer to code already provided by an externally managed environment.
 Its module distribution and observed environment attestation become plan-critical external claims.
 
 `kwargs` contains finite JSON-safe values.
-`secret_refs` maps factory argument names to cluster environment-variable names or versioned secret-provider references.
+`secret_refs` maps Python-identifier factory argument names to cluster environment-variable names matching `[A-Za-z_][A-Za-z0-9_]*` in the first implementation.
 The same argument MUST NOT occur in both mappings.
 
 `ParslConfiguration` has schema `bioimageflow.parsl_configuration.v1`.
@@ -215,6 +230,9 @@ Only sanitized validation facts and normalized executor bindings cross process b
 
 The factory MAY import Parsl and construct executors and providers.
 It MUST NOT load or initialize a DataFlowKernel, submit a job, create a workflow run, start workers, open a listening service, or mutate the published deployment.
+
+These restrictions are a trusted-code contract, not behavior BioImageFlow can prove for arbitrary Python.
+BioImageFlow MUST prevent its own validation runtime from creating a run, DataFlowKernel, or scheduler submission and MUST detect supported Parsl initialization paths where practical, but a factory that reaches an undeclared scheduler client or subprocess is outside the managed contract.
 
 It MUST be deterministic for the deployment, declared arguments, secret-presence state, and documented runtime values.
 Secret values MAY affect authentication configuration but MUST NOT change executor labels, bindings, retry policy, or routing claims.
@@ -265,6 +283,14 @@ cluster.apply_cleanup(plan) -> ClusterCleanupReport
 `PreparedClusterInvocation` and `RemoteExecutionPlan` are context-manageable and explicitly closable.
 `RemoteExecutionPlan.submit()` returns `RemoteWorkflowRun` and is the only plan mutation.
 
+`ClusterDeployment` is a receipt for remote retained state, not an owner of laptop files or a deletion capability.
+`PreparedClusterInvocation` owns its local snapshot, and one active `RemoteExecutionPlan` at a time holds an exclusive lease that prevents those bytes from being closed or expired while needed.
+`RemoteWorkflowRun` owns no laptop files; after remote allocation it refers only to the gateway's durable run record and retained remote objects.
+
+When `from_dict()` reconstructs a value whose public form intentionally omits private source locations, owned bytes, a cluster client, or another required live resource, the result is a detached summary rather than an operational owner.
+A detached value remains inspectable and serializable, but an operation requiring omitted state MUST fail with `local-state-unavailable` instead of consulting an original path or guessing how to recreate the state.
+After a plan has begun remote mutation, recovery from its detached summary uses `cluster.attach(summary.run_id)`; before mutation, the caller must retain the live prepared invocation and plan or create new ones.
+
 Public methods use keyword-only consequential options.
 They MUST reject unknown options rather than silently forwarding them to SSH, PSI/J, Parsl, uv, Pixi, or a scheduler.
 
@@ -301,10 +327,18 @@ The implementation MAY add versioned intermediate directories but MUST preserve 
 
 Every managed path MUST be normalized, absolute after joining to `root`, confined to its namespace, and traversed without following symlinks.
 
+The existing root itself MUST be a real directory owned by the effective SSH user and MUST NOT be group- or world-writable.
+Creation of a missing root MUST open and validate its existing parent before creating the final directory with `0700`; an existing symlink or non-directory at the requested root fails.
+Once validated, every descendant operation MUST be relative to an open directory handle, or use an equivalently race-resistant mechanism, with no check-then-use path resolution.
+Regular files that carry executable code, control state, receipts, manifests, or immutable objects MUST have a link count of one when published and whenever reused.
+
 The gateway MUST reject a symlink in any managed path component, an existing special file, unexpected ownership, group- or world-writable control or deployment directories, and hard-link or rename operations that escape a managed namespace.
+It MUST compare the opened object's device, inode, type, owner, mode, and expected identity with the inventory or manifest immediately before publication, reuse, or deletion.
 
 New private directories use mode `0700`, regular control files use `0600`, and executable wrappers use `0700`, subject only to a more restrictive filesystem policy.
 Remote processes run as the SSH user and MUST NOT request privilege, change ownership, or weaken permissions.
+
+Atomic publication and receipt updates MUST use a temporary sibling in the same managed namespace, flush file contents and the containing directory before acknowledgement, and never overwrite an unequal published identity.
 
 The selected root and results root MUST be visible at identical absolute paths from the login node, orchestrator, and managed worker nodes.
 Non-allocating validation records compute-node visibility as unverified until worker startup.
@@ -328,36 +362,52 @@ Remote execution always uses the selected remote results root.
 ### 5.1 Prerequisites
 
 The initial bootstrap requires OpenSSH, SFTP, non-interactive Bash, a SHA-256 utility, and a compatible Python made visible by the selected setup script.
+Managed uv and `pylock.toml` environments use an explicitly attested compatible interpreter made visible by setup and MUST NOT trigger an implicit Python download; a Pixi lock may instead supply its selected Python package.
 These are site prerequisites, not packages BioImageFlow attempts to install with privilege.
 
 ### 5.2 Bootstrap boundary
 
 The laptop package contains or constructs a versioned bootstrap artifact with a published digest and protocol range.
 
+The authoritative bootstrap and gateway bytes are the immutable resources in the exact local BioImageFlow distribution, or artifacts built from the exact snapshotted local checkout for an unreleased version.
+Bootstrap MUST NOT fetch executable control-plane code by version name or accept a server-provided replacement artifact.
+The client verifies its snapshot against the local distribution manifest when one exists, records its computed digest before contact, and requires the remote candidate to match that digest.
+These digests detect accidental or account-local modification; authenticity relies on the user's local BioImageFlow installation and ordinary SSH host-key verification, and compromise of either is outside this trust boundary.
+
 Bootstrap uses system OpenSSH and SFTP with argument arrays and `shell=False` locally.
 It honors the user's ordinary SSH configuration, agent, jump hosts, and host-key policy.
 It MUST NOT accept passwords, private-key bytes, arbitrary SSH option strings, or host-key bypass values.
+All library-selected SSH options precede the validated destination, the destination remains exactly one argument, and the remote command is one library-owned constant argument with no user-derived text.
+Timeouts and other supported connection settings MUST be range-checked scalars rendered by BioImageFlow rather than forwarded strings.
+SFTP MUST use the same destination and connection policy, and every command operand MUST be either a client-generated safe local temporary name or the confined server-issued path whose components use a fixed safe-token grammar.
+No user value may be inserted into an SFTP batch-language command.
 
 Before a gateway exists, the only permitted remote command is a library-owned constant Bash bootstrap program.
 User values are transferred through a length-delimited stdin envelope or safe encoded data fields, never interpolated as executable shell text.
 
-The bootstrap program may:
+Bootstrap is a resumable sequence of bounded invocations rather than one long-lived remote process.
+The first invocation probes or creates the root and returns a server-generated upload token, SFTP transfers only to the corresponding partial path, and a later invocation verifies and publishes the candidate.
+Each bootstrap mutation carries an operation ID and request digest in a minimal bootstrap receipt namespace so a lost acknowledgement repeats the same step instead of creating another candidate.
+`deploy()` and the deployment phase of `cluster.submit()` snapshot the setup source, gateway artifact, BioImageFlow artifact, and all other local deployment inputs before the first bootstrap invocation.
+
+The bootstrap program may, across those invocations:
 
 1. validate or create the dedicated root with private permissions;
 2. allocate a private server-named partial upload location;
-3. receive bootstrap artifacts through SFTP;
+3. authorize bootstrap artifact transfer to that partial location through SFTP;
 4. verify sizes, SHA-256 digests, file types, and confined paths;
 5. verify and source the setup script;
-6. invoke the discovered Python to install a versioned gateway candidate;
+6. invoke the discovered Python to install a versioned control-plane gateway candidate that is independent of any workflow deployment;
 7. atomically publish that gateway;
 8. return a canonical JSON capability response.
 
 It MUST NOT submit a scheduler job, install outside `root`, invoke `sudo`, modify shell startup files, or install workflow dependencies.
+It MUST run with a fixed non-interactive Bash entry, explicitly source only the verified setup candidate, and never evaluate request data with `eval`, command substitution, shell expansion, or generated shell source.
 
 ### 5.3 Stable gateway entry
 
 After bootstrap, `<root>/gateway/entry` is the stable remote command used by `RemoteCluster`.
-It is a small root-owned dispatcher, not a daemon.
+It is a small cluster-root-owned dispatcher, not a daemon.
 SSH invokes it once per bounded request and it exits after one response.
 
 Each immutable gateway publication binds its bootstrap setup digest, Python identity, executable environment, gateway artifact digest, and supported protocols.
@@ -365,7 +415,12 @@ The stable entry sources the gateway-owned verified setup copy when necessary an
 It does not depend on the caller retaining a `SetupScript` object or rerun environment discovery during attachment.
 
 The dispatcher selects an immutable compatible gateway implementation by protocol version or retained run metadata.
+A gateway publication has a stable publication ID and manifest digest, and the dispatcher MUST verify its manifest, interpreter, setup copy, entry point, and content digests before every selection.
+For a retained run, selection MUST use the exact gateway publication recorded by that run unless a declared protocol adapter with an identical run-operation contract is explicitly recorded for that publication.
+The laptop accepts a selected gateway only when its version, protocol range, and artifact digest match either the gateway artifact in the current local distribution or an immutable compatibility-catalog entry shipped in that distribution.
+Compatibility by version string or protocol number alone is insufficient, and an unknown digest fails with `gateway-untrusted` without mutation.
 A guarded gateway upgrade MAY atomically update dispatcher metadata, but MUST NOT modify an immutable gateway or change the deployment bound to an existing run.
+Only a configuration-complete `deploy()` or `cluster.submit()` MAY bootstrap or upgrade the gateway; `check_connection()`, `attach()`, and run operations MUST NOT do so implicitly.
 
 This stable entry is what permits `RemoteCluster(host=..., root=...).attach(run_id)` without the original project files or setup object.
 
@@ -379,10 +434,28 @@ Each response contains the matching request ID, success or failure status, struc
 Mutating operations also carry a stable operation ID and canonical request digest.
 The gateway persists an operation receipt before acknowledging a completed mutation.
 Repeating an equal operation returns the same logical result, while reusing an operation ID with different bytes fails with `operation-conflict`.
+Receipts are gateway-created `0600` records that bind operation name, canonical request digest, phase, affected identities, result or diagnostic digest, and monotonically guarded revision.
+The gateway MUST durably publish and re-read a receipt before acknowledging the mutation and MUST NOT accept an uploaded or client-authored receipt as authority.
+A missing, malformed, permission-unsafe, or digest-inconsistent receipt after a mutation may have occurred fails closed with `operation-record-tampered`; it MUST NOT be deleted, reconstructed from client claims, or treated as proof that retrying a scheduler submission is safe.
 
 Uploads use only server-issued partial paths.
 Publication verifies the complete manifest and atomically renames a confined candidate.
 Client-supplied absolute upload destinations are forbidden.
+
+### 5.5 Upload and archive validation
+
+Before accepting bytes, the gateway MUST validate a canonical manifest whose declared aggregate size, entry count, per-entry size, logical path lengths, and nesting depth are within its advertised limits.
+Logical entry names are normalized relative POSIX paths and MUST reject absolute paths, empty or dot components, `..`, backslashes, platform drive prefixes, duplicate names, Unicode normalization aliases, and file/directory prefix conflicts.
+
+Each upload is written to a newly created regular partial file with `0600`, no followed links, and an enforced byte ceiling.
+The gateway MUST reject early EOF, trailing bytes, digest or size mismatch, link-count changes, and replacement during verification.
+Only a fully verified object may enter the immutable object namespace, and a failed or interrupted partial is never considered an object or executable input.
+
+Every BioImageFlow-managed ZIP, tar archive, source bundle, result bundle, or wheel inspected outside a package manager MUST be validated before extraction.
+Validation MUST reject encrypted or multi-volume archives, absolute or escaping member names, duplicate or aliased members, symlink, hard-link, device, FIFO, socket, sparse, or unsupported member types, and any archive whose compressed bytes, expanded bytes, entry count, path length, nesting depth, or compression ratio exceeds an advertised limit.
+Extraction occurs only into a new private candidate using race-resistant relative operations, applies normalized private modes rather than archived ownership or permission metadata, and publishes only after the extracted manifest matches the expected digest set.
+
+Package build hooks and installed package code remain trusted executable code, but their input archives still require the hashes and format validation promised by the selected environment adapter.
 
 ## 6. Environment preparation
 
@@ -393,10 +466,21 @@ Every managed environment MUST include compatible exact versions of BioImageFlow
 The submitted client BioImageFlow artifact is authoritative.
 If an environment lock resolves an incompatible BioImageFlow version, deployment fails with `bioimageflow-version-conflict` rather than silently selecting one side.
 
-Local editable packages are built into wheels before deployment.
-Editable installs and mutable source-tree imports are forbidden in a published deployment.
+Every selected local project is captured before deployment as either an exact target-compatible wheel or an exact source distribution produced through its declared build backend.
+Editable installs, direct installation from local directories, and mutable source-tree imports are forbidden in a published deployment.
 
-Build output, installer version, selected groups or extras, target platform, lock data, and artifact digests are identity-bearing.
+Each environment adapter MUST select exact installer and build-frontend artifacts compatible with the bootstrap interpreter and target.
+Their tool identities, versions, artifact filenames, sizes, SHA-256 digests, and retrieval endpoint identities are prepared inputs; an unpinned `latest` tool, ambient installer, or installer-selected build tool MUST NOT be used.
+The artifacts are uploaded or retrieved only through the hash-verified artifact rules for that adapter.
+
+Before any source distribution is built on the cluster, the adapter MUST produce a locked target build plan.
+The plan binds the source-distribution digest, target operating system, architecture, Python implementation and ABI, build-backend entry point, backend path and configuration settings, exact installer and build-frontend artifacts, and the complete isolated build-requirement closure as distribution names, versions, artifact filenames, sizes, SHA-256 digests, and non-secret endpoint identities.
+Requirements returned by a PEP 517 dynamic build hook MUST already match entries in that closure; a hook MUST NOT add, resolve, or download an unlisted requirement.
+The gateway builds in a new private isolated environment containing only that closure, with dependency resolution and implicit network retrieval disabled, then validates the resulting wheel and records its filename, size, tags, and SHA-256 digest before installation.
+A missing, unhashed, incompatible, or additional build requirement fails with `environment-build-lock-incomplete`, and the candidate is never published.
+
+Installer and build-tool artifacts, locked build plans, build output, selected groups or extras, target platform, lock data, setup-realization facts used by the build, and artifact digests are identity-bearing.
+Because a target-built wheel digest is known only after the isolated build, preparation has a build-input key while `cluster.deploy()` returns the final deployment ID after recording that digest; no plan may refer to the candidate or build-input key as a deployment ID.
 Package installation is non-interactive and MUST NOT update a supplied lock.
 
 ### 6.2 uv projects
@@ -409,6 +493,8 @@ The lock MUST be installed with frozen semantics.
 Local workspace members selected by the resolution are built through their declared build backends into immutable distributions.
 Files included by those build artifacts are captured; unrelated repository files are not uploaded.
 An unpackageable local dependency fails before remote installation.
+Any member sent as a source distribution MUST have a complete locked target build plan derived from the uv project and lock inputs under Section 6.1.
+If uv cannot select the required target build closure without changing `uv.lock`, preparation fails instead of resolving it during deployment.
 
 ### 6.3 Pixi projects
 
@@ -417,8 +503,17 @@ An unpackageable local dependency fails before remote installation.
 The selected environment MUST contain a target matching the observed cluster platform.
 Installation uses locked or frozen Pixi semantics and MUST NOT re-solve on the cluster.
 
+Preparation records the manifest-declared ordered channel set, channel priority mode, canonical non-secret channel identities, and any PyPI index identities that contributed to the selected lock environment.
+It MUST reject a lock created under a different channel configuration, undeclared channels supplied by user or system Pixi configuration, and channel or index redirection to an identity not bound by the prepared inputs.
+Credentials may vary only through matching `auth_refs`; they MUST NOT change endpoint identity or package selection.
+
+Preparation also records the exact target platform and normalized virtual-package assumptions used by the selected lock, including version or build constraints for facts such as the operating system, libc, and CUDA when present.
+After the setup script, deployment MUST compare every adapter-observable assumption with the login-node realization before installation; an unsatisfied assumption fails with `environment-platform-incompatible`.
+Validation binds a fresh observation, the orchestrator repeats the applicable comparison before Parsl initialization, and each managed worker repeats the applicable subset before accepting tasks.
+An assumption that cannot be observed in a given non-allocating context MUST be reported as unverified rather than satisfied.
+
 A compatible Pixi bootstrap artifact is verified and installed under the cluster root when required.
-Conda and PyPI artifacts selected by Pixi are recorded in the deployment manifest.
+The Pixi bootstrap artifact and all Conda and PyPI artifacts selected by Pixi are pinned by version, filename, size, SHA-256 digest, and canonical non-secret endpoint identity in the deployment manifest.
 
 ### 6.4 Standard Python locks
 
@@ -426,6 +521,8 @@ Conda and PyPI artifacts selected by Pixi are recorded in the deployment manifes
 The selected dependency groups, extras, environment markers, Python requirement, artifact URLs or local artifacts, sizes, and hashes are validated before publication.
 
 Mutable VCS references, unhashed archives, or unsupported local-directory entries fail unless preparation converts them into an immutable built artifact.
+If any selected project or dependency requires a target-side build, preparation MUST derive the complete locked build-requirement closure required by Section 6.1 from the lock and immutable project inputs.
+When the supplied `pylock.toml` cannot represent that closure, or the adapter cannot prove it without resolution, preparation fails with `environment-build-lock-incomplete`; the user must supply target-compatible wheels or choose a supported lock adapter that locks the build closure.
 
 ### 6.5 Offline wheelhouses
 
@@ -463,14 +560,15 @@ Its identity-bearing section contains:
 
 - schema and deployment protocol versions;
 - observed cluster operating system, architecture, and Python ABI target;
-- setup source kind and digest;
-- environment kind, selections, manifest and lock digests, resolved package set, and artifact digests;
+- setup source kind and digest plus the build-time setup-realization attestation;
+- environment kind, selections, manifest and lock digests, resolved package set, channel and index identities, target and virtual-package assumptions, and artifact digests;
 - exact BioImageFlow bootstrap distribution and gateway compatibility digests;
 - Parsl source bundle digest, factory name, JSON-safe arguments, and secret reference names;
 - generated factory-runtime contract version;
-- supported managed provider-adapter versions;
-- installer and build-tool versions that affect output;
-- selected local project distribution digests.
+- selected scheduler and managed provider-adapter identities and versions;
+- exact installer, build-frontend, and build-requirement artifact identities and digests;
+- locked target build plans and selected local project source-distribution and wheel digests;
+- target-built wheel filenames, tags, sizes, and digests.
 
 Secret values, timestamps, temporary paths, hostnames that do not affect compatibility, and scheduler queue availability are excluded.
 The deployment ID is `sha256:<hex>` over canonical JSON bytes of the identity-bearing section.
@@ -490,12 +588,18 @@ absent → preparing → installing → validating → published
 Only `published` is visible to planning and submission.
 Candidates use server-generated private names and become visible through one atomic publication.
 
-Concurrent attempts for the same deployment ID coordinate through an ownership record.
-They either reuse a verified published deployment, wait for the active installer, or replace a provably abandoned candidate.
+Concurrent attempts with no target-side builds coordinate directly by deployment ID.
+Attempts requiring target-side builds first coordinate by the canonical build-input key and operation ID, then compute and publish under the final deployment ID after recording every build output digest.
+They either reuse a verified published deployment or completed equal build receipt, wait for the active installer, or replace a provably abandoned candidate.
 They MUST NOT merge partial files.
+
+Deployment upload, build, and publication are journaled by build-input key when present, final deployment ID when known, and operation ID.
+A repeated equal `deploy()` resumes verified completed transfers, reuses a published deployment, or discards an abandoned mutable installation candidate and starts a fresh candidate; it never continues an installer inside a partially mutated environment.
 
 Every published content-owned deployment is made read-only and verified against its manifest before reuse.
 A mismatch reports `deployment-tampered`; BioImageFlow MUST NOT repair it in place.
+The same fail-closed rule applies to immutable gateways, objects, run records, indexes, and operation receipts: the gateway may remove an unreferenced partial candidate, but MUST NOT silently repair, replace, quarantine, or delete corrupted published state.
+When corruption affects allocation or scheduler certainty, diagnostics report allocation state `unknown` and retry safety `unsafe` or `same-attempt-only` as applicable.
 
 `cluster.deploy()` creates no workflow run, initializes no DataFlowKernel, allocates no worker, and submits no scheduler job.
 
@@ -506,6 +610,7 @@ A mismatch reports `deployment-tampered`; BioImageFlow MUST NOT repair it in pla
 Factory import and invocation occur in a short-lived child process inside the selected deployment.
 The process uses a bounded timeout, a private temporary directory, a minimal inherited environment, and resolved secret references.
 It is isolation for cleanup and diagnostics, not a security sandbox for untrusted code.
+Resolved values MUST reach the child through a private bounded handoff or pipe, never command-line arguments, process titles, generated source, or inherited variables other than the explicitly implemented secret channel.
 
 The child returns only a sanitized normalized validation payload.
 Live Parsl objects are discarded when the child exits.
@@ -527,10 +632,14 @@ Validation requires:
 
 Missing secret references are reported by reference name only.
 Resolved values are redacted from child stdout, stderr, exceptions, tracebacks, reports, and representations controlled by BioImageFlow.
+When secrets are present, arbitrary child output MUST NOT enter a public diagnostic unless it has passed the bounded redaction policy in Section 14; otherwise the public diagnostic uses a stable generic message and points to a private restricted log, if one is retained.
 
 ### 8.2 Managed provider adapters
 
-Each supported executor or provider adapter is versioned and declares compatible Parsl package versions and concrete public types, how to read the public worker-initialization field, how to compare it with `runtime.worker_init`, which provider settings can be normalized safely, and whether the provider supports the required shared-root and nested-submission topology.
+Each supported executor or provider adapter is versioned and declares compatible Parsl package versions and concrete public types, the provider's worker-scheduler family, compatible orchestrator scheduler families, how to read the public worker-initialization field, how to compare it with `runtime.worker_init`, which provider settings can be normalized safely, and whether the provider supports the required shared-root and nested-submission topology.
+
+Provider support is evaluated for the exact tuple of Parsl version, executor type, provider type, provider-adapter version, worker-scheduler family, orchestrator scheduler family, and normalized topology claims.
+Matching a class name, accepting a scheduler string, or finding an importable provider package alone MUST NOT be reported as support.
 
 Unknown or incompatible types fail with `unsupported-managed-provider`.
 The implementation MUST NOT fall back to private attribute probing or assume worker initialization was applied.
@@ -547,7 +656,7 @@ A difference fails the run before DataFlowKernel creation with `parsl-configurat
 
 ### 8.4 Worker startup acknowledgement
 
-Before a managed executor route accepts workflow tasks, at least one worker on that route MUST acknowledge the exact deployment ID, setup and activation marker, BioImageFlow core compatibility, shared storage visibility, tool-origin availability, observable declared devices, and connectivity to the orchestrator.
+Before a managed executor route accepts workflow tasks, at least one worker on that route MUST acknowledge the exact deployment ID, setup and activation marker, applicable setup-realization and virtual-package facts, BioImageFlow core compatibility, shared storage visibility, tool-origin availability, observable declared devices, and connectivity to the orchestrator.
 
 The acknowledgement is a runtime check and may require an allocated worker.
 It is not part of non-allocating validation.
@@ -576,11 +685,11 @@ Preparation copies all local meaning-bearing bytes into a private local director
 Later changes or deletion of the originals cannot affect the prepared invocation.
 
 The handle is context-manageable, explicitly closable, and has a finite configurable lifetime.
-Closing or expiry removes only unsubmitted private local copies.
+Closing or expiry while no plan lease exists removes only its private local copies.
 
-Planning retains the prepared handle.
-Successful or uncertain submission consumes it and transfers ownership to the run attempt.
-A definitively rejected pre-submission attempt MAY leave it reusable when the structured result explicitly says no remote mutation occurred.
+A successful `plan()` call gives the returned plan an exclusive submission lease on the snapshot without duplicating its bytes.
+A planning failure acquires no lease, and closing an unsubmitted plan releases its lease so the same immutable preparation can be replanned after expiry or rejection.
+One prepared invocation can seed only one active plan at a time; each plan still defines a distinct stable attempt and run ID.
 
 ### 9.3 Input semantics
 
@@ -604,7 +713,8 @@ The public workflow construction API MUST permit the storage-free golden example
 ### 10.1 Connection check
 
 `cluster.check_connection()` tests OpenSSH reachability and, when present, gateway protocol compatibility.
-It writes no remote file, invokes no user setup or factory code, and submits no job.
+It writes no remote file, invokes no caller-supplied setup or factory code, and submits no job.
+An installed stable gateway MAY source the immutable setup copy already bound to that gateway, because some gateway interpreters cannot start without site initialization.
 
 On a fresh root it reports that bootstrap is required rather than bootstrapping implicitly.
 
@@ -612,11 +722,16 @@ On a fresh root it reports that bootstrap is required rather than bootstrapping 
 
 `cluster.validate(deployment=...)` requires a published deployment.
 
-It validates gateway and deployment integrity, setup and Python invocation, environment or external attestation, trusted Parsl factory behavior, referenced secrets, `retries=0`, executor labels and bindings, managed provider adapters, PSI/J support, paths, launch values, and shared-storage declarations.
+It validates gateway and deployment integrity, setup realization and Python invocation, environment or external attestation, trusted Parsl factory behavior, referenced secrets, `retries=0`, executor labels and bindings, managed provider adapters, PSI/J support, paths, launch values, and shared-storage declarations.
 
-It creates no workflow run, initializes no DataFlowKernel, allocates no worker, and submits no scheduler job.
+Scheduler validation MUST resolve the requested normalized scheduler to one named BioImageFlow scheduler-adapter version and one PSI/J executor descriptor in the exact installed PSI/J core and scheduler-plugin versions.
+For each managed route it MUST then evaluate the provider-support tuple from Section 8.2 and report separately whether the orchestrator adapter is implemented, the PSI/J descriptor is installed and compatible, the provider adapter is implemented and compatible, and shared-root or nested-submission claims remain runtime-unverified.
+An unsupported orchestrator combination fails with `unsupported-scheduler-adapter`; an unsupported managed worker combination fails with `unsupported-managed-provider`.
 
-`ClusterValidationReport` has schema `bioimageflow.cluster_validation_report.v1` and contains deployment ID, attestation digest, normalized bindings, verified/declared/unverified facts, sanitized diagnostics, validity and expiry metadata, and relevant gateway, adapter, and protocol versions.
+BioImageFlow creates no workflow run, initializes no DataFlowKernel, allocates no worker, and submits no scheduler job during validation.
+Setup scripts and Parsl factories remain trusted code whose undeclared external side effects are outside that guarantee, as described in Section 3.6.
+
+`ClusterValidationReport` has schema `bioimageflow.cluster_validation_report.v1` and contains deployment ID, setup-realization and environment attestation digests, normalized bindings, the per-orchestrator and per-route scheduler/provider evidence above, verified/declared/unverified facts, sanitized diagnostics, validity and expiry metadata, and relevant gateway, adapter, runtime, plugin, and protocol versions.
 
 The report MUST state that compute-node mounts, worker networking, nested submission policy, queue availability, future quotas, and hardware cannot be proven without allocation.
 
@@ -624,23 +739,24 @@ The report MUST state that compute-node mounts, worker networking, nested submis
 
 `cluster.plan(prepared, deployment=..., validation=None)` returns `RemoteExecutionPlan`.
 
-When `validation` is omitted or stale, planning MAY perform the same non-mutating remote validation.
-It MUST NOT deploy, install, create a run, submit a job, initialize a DataFlowKernel, or allocate a worker implicitly.
+When `validation` is omitted or stale, planning MAY perform the same bounded remote validation.
+It MUST NOT deploy, install, create a run, submit a job, initialize a DataFlowKernel, or allocate a worker through any BioImageFlow-controlled path.
 
 Planning uses the same recursive scope compilation, effective node requirements, environment compatibility, storage compatibility, tool-origin compatibility, executor capacity comparison, task policy, cache selection, and route selection as runtime dispatch.
 
 For every scoped `ProcessingTool` node it returns scoped node path, effective resources, compatible executor labels, selected route and reason, environment/origin/storage compatibility, cache status, and structured incompatibility reasons.
 `DataFrameTool` nodes remain visible as orchestrator work and expose no worker resource override.
 
-The plan binds prepared invocation digest, deployment and external attestation, validation evidence and expiry, normalized factory claims, routing and cache revision, scheduler job, remote storage, stable submission attempt ID, and preallocated run ID.
+The plan binds the cluster destination (`host` and normalized `root`), prepared invocation digest, deployment and external attestation, validation evidence and expiry, normalized factory claims, routing and cache revision, scheduler job, remote storage, stable submission attempt ID, and preallocated run ID.
 Its schema is `bioimageflow.remote_execution_plan.v1`.
+Its plan digest is the SHA-256 digest of the canonical public plan payload with the `plan_digest` field omitted; private owned bytes and live clients are never digest inputs.
 
 ### 10.4 Plan lifetime
 
 A plan has a finite expiry.
 Expiry never changes its recorded meaning, but prevents submission until the user creates and confirms a new plan.
 
-The plan owns or references the prepared local bytes needed for submission.
+The plan holds an exclusive lease on the prepared local bytes needed for submission and owns a private local recovery record for its stable attempt and run IDs.
 Its public confirmation summary is JSON-safe, but deserializing that summary alone does not recreate missing local owned bytes.
 
 ## 11. Submission and idempotency
@@ -649,14 +765,19 @@ Its public confirmation summary is JSON-safe, but deserializing that summary alo
 
 `plan.submit()` is the confirmation boundary.
 
-It MUST verify local prepared bytes and plan digest, verify the exact deployment, revalidate external and plan-critical claims, upload only prepared objects, allocate the preselected run and attempt IDs durably, persist submission and scheduler intent, submit one PSI/J orchestrator job, persist its correlated receipt when available, and return `RemoteWorkflowRun`.
+It MUST verify local prepared bytes and plan digest, verify the exact deployment, and revalidate external and plan-critical claims before its first mutation.
+Its first remote mutation durably allocates the preselected run and attempt IDs and installs an attachable run record before any upload or scheduler action.
+It then uploads only prepared objects, binds their durable references to that run, persists submission and scheduler intent, submits one PSI/J orchestrator job, persists its correlated receipt when available, and returns `RemoteWorkflowRun`.
 
 It MUST NOT reread original workflow, configuration, setup, project, or input paths.
 It MUST NOT silently regenerate routes or select a different deployment.
 
 ### 11.2 Convenient submission
 
-`cluster.submit(workflow, ...)` is exactly the composition of deployment preparation, invocation preparation, validation, planning, and `plan.submit()`.
+Before its first network operation, `cluster.submit(workflow, ...)` snapshots all local environment, setup, Parsl, workflow, tool-source, and input bytes needed by the composed operation.
+It then performs deployment publication or reuse, validation, planning, and `plan.submit()` from those snapshots.
+Failure during the initial local snapshot creates no remote state.
+No later phase rereads the original paths.
 
 It creates one plan and one stable attempt.
 An internal retry caused by a lost acknowledgement reuses that attempt and MUST NOT prepare or plan again.
@@ -669,8 +790,18 @@ Those callbacks do not change semantics.
 The submission attempt ID is generated before the first mutating remote request.
 All submission mutations are journaled under that ID.
 
+The durable attempt phases are `allocated`, `uploading`, `ready`, `scheduler-intent`, `submitted`, `rejected`, `cancelled`, and `uncertain`.
+Every phase transition records the exact plan digest, run ID, deployment ID, invocation digest, and referenced object identities before acknowledging the transition.
+
 Repeating `plan.submit()` returns the original run when accepted, resumes a safe incomplete transfer or pre-submit phase, reconnects to a known scheduler receipt, or reports `submission-uncertain` without resubmitting when scheduler acceptance cannot be disproved.
 It never creates a second run ID or scheduler job.
+After pre-submission cancellation has durably moved the attempt to `cancelled`, repeating `plan.submit()` returns the original cancelled run without resuming uploads or submitting a job.
+
+Once the first mutating request is sent, the plan is sealed to its preallocated run and attempt IDs rather than becoming generally consumed.
+The plan MUST retain its verified local prepared bytes while they are required to resume an incomplete upload or recover an acknowledgement.
+`close()` MAY release the plan's snapshot lease only after the gateway confirms that all required objects and run references are durable, or after cancellation of the allocated run durably reaches `cancelled` before `scheduler-intent` and the gateway confirms that no scheduler submission is possible.
+Closing a sealed plan without either proof MUST preserve its snapshot lease and recoverable local attempt record or fail with a structured `attempt-still-uncertain` diagnostic.
+No ownership of laptop bytes transfers to `RemoteWorkflowRun`; the run becomes independently attachable when its remote record is allocated, and independently executable when its retained object references are complete.
 
 `RemoteSubmissionUncertainError` contains host, root, run ID, attempt ID, stable category, sanitized message, and `next_action`.
 It contains no secret value or live remote object.
@@ -685,6 +816,11 @@ It never receives an original mutable setup path or mutable deployment alias.
 
 The orchestrator revalidates factory claims before Parsl initialization and records its exact launch environment in run provenance.
 
+Immediately before PSI/J submission, the gateway resolves every environment-variable secret reference and writes the values to a run-private `0600` handoff file outside identity-bearing manifests and operation receipts.
+The PSI/J job receives only the confined handoff path, and the deployment-owned launch wrapper reads and unlinks the file before invoking user code.
+The gateway MUST remove an unclaimed handoff after definite scheduler rejection, and cleanup MUST treat a handoff for an accepted or uncertain submission as run-owned protected state.
+The orchestrator fails with `secret-reference-missing` if the handoff is absent or malformed and MUST NOT write its contents to logs or durable metadata.
+
 ## 12. Run state, observation, and control
 
 ### 12.1 Run states
@@ -692,7 +828,7 @@ The orchestrator revalidates factory claims before Parsl initialization and reco
 The durable run states remain `prepared`, `starting`, `running`, `finalizing`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `lost`.
 
 State changes use guarded revisions and claim epochs.
-Only terminal success, failure, cancellation, or loss may start a retry plan.
+Only terminal success, failure, cancellation, or loss may be the parent of a `RunRetryPlan` or `start_retry()` operation.
 
 The run binds the exact cluster root, storage path, deployment ID, invocation digest, execution-plan digest, attempt ID, scheduler intent, and scheduler receipt.
 
@@ -700,6 +836,10 @@ The run binds the exact cluster root, storage path, deployment ID, invocation di
 
 `cluster.attach(run_id)` requires only host, root, connection policy, and run ID.
 It MUST NOT require the original workflow, environment definition, setup source, Parsl source, or local prepared bytes.
+
+The gateway resolves the run ID through the confined `<root>/runs` index and verifies the indexed storage, deployment, invocation, attempt, and gateway bindings before returning an observation.
+It MUST NOT search arbitrary result roots, infer storage from the run ID, or reconstruct a missing run record.
+Attachment to an allocated but not yet submitted run reports its durable attempt phase and recovery guidance; it does not resume an upload without the originating plan's owned bytes.
 
 Attachment is read-only until the caller explicitly invokes a mutating operation such as cancellation, retry, result preparation, or deletion.
 It creates no new run or scheduler job.
@@ -721,11 +861,14 @@ Consumers MUST NOT parse logs to obtain failure structure.
 Cancellation is idempotent.
 It durably records `cancel_requested` before signaling the orchestrator or scheduler.
 
+For an allocated run whose attempt has not reached `scheduler-intent`, cancellation MUST atomically prevent later submission, move the attempt to `cancelled`, and move the run to `cancelled` without contacting the scheduler.
+That durable confirmation permits the originating plan to release its snapshot lease.
+
 Cooperative cancellation is attempted first.
 Scheduler cancellation uses the retained PSI/J receipt after the configured grace period.
 Confirmed forced termination records `lost` when worker and writer cleanup cannot be proven.
 
-Calling cancel on a terminal run returns its terminal state without creating an error or new action.
+Calling `cancel()` on a terminal run returns `None`, refreshes the handle to the unchanged terminal observation, and creates no error or new action.
 
 ### 12.5 Retry
 
@@ -733,14 +876,15 @@ The current public `RunRetryPlan` and recomputation semantics remain authoritati
 A remote retry reuses the retained deployment, invocation, input objects, and setup material after digest verification.
 It never reads original laptop paths.
 
-If the retained external Python attestation no longer matches, retry planning reports incompatibility and requires an explicit new deployment or a later acknowledgement extension.
+If the retained external Python attestation no longer matches, retry planning reports incompatibility and cannot produce a `RunRetryPlan` for that retained submission.
+Selecting a different deployment starts a new top-level submission rather than changing or continuing a retry plan, because `RunRetryPlan` clones the exact retained submission.
 
 ## 13. Results and downloads
 
 A successful run installs its exact public return before entering `succeeded`.
 Historical result loading never consults mutable current-cache pointers.
 
-`run.download_result(destination)` prepares and downloads the existing verified portable result bundle.
+`run.download_result(destination)` is the `RemoteCluster` name for the current `RemoteWorkflowRun.export_result(destination)` contract: it prepares and downloads the existing verified portable result bundle and returns the rehydrated typed public result.
 
 It MUST bind the exact run and return digest, include DataFrames and owned explanatory assets, retain declared external cluster paths as typed references, transfer through a private sibling, verify every entry, publish atomically, reject unrelated destinations, accept identical destinations idempotently, and safely retry interrupted transfer.
 
@@ -754,6 +898,14 @@ Secret reference names and their argument mapping are identity-bearing.
 
 BioImageFlow MUST redact values it resolves from manifests, schemas, public representations, structured diagnostics and events, controlled logs, child-process exception payloads, and operation receipts.
 Missing secrets are reported only by reference name.
+
+Secret resolution is bounded by advertised per-value and aggregate byte limits, rejects NUL-containing values, and occurs only for the named operation immediately before the trusted process needs the values.
+Values MUST NOT appear in SSH, SFTP, PSI/J, scheduler, or child-process command arguments, generated source, identity inputs, or durable request and receipt bodies.
+Private handoff files are created without replacement, confined to the owning operation or run, and removed after successful read or definite non-use as specified in Section 11.4.
+
+Redaction of BioImageFlow-controlled text MUST replace exact resolved byte sequences before persistence or return and MUST bound captured output before redaction.
+BioImageFlow cannot reliably identify transformed, encoded, fragmented, derived, or independently reread secret material emitted by trusted code; callers MUST treat setup, factory, build, workflow, and scheduler-wrapper output as potentially sensitive.
+Implementations MUST NOT describe redaction as protection against deliberate exfiltration by trusted executable code.
 
 Setup scripts, Parsl factories, workflow code, package build hooks, scheduler wrappers, and cluster administrators are trusted executable parties.
 BioImageFlow does not claim to sandbox them or prevent them from reading secrets made available to their process.
@@ -782,19 +934,34 @@ It creates no mutation.
 
 `apply_cleanup()` revalidates every candidate and reference revision before deletion.
 Any changed candidate is skipped with a structured conflict rather than broadening deletion.
+Deletion MUST use the already validated namespace directory handle, compare the target's device, inode, type, owner, mode, link count, identity digest, and reference revision with the plan, and refuse mount points, symlinks, special files, or unmanifested descendants.
+After revalidation, the gateway first atomically renames the exact candidate to a private deletion tombstone in the same namespace and durably removes its index reference; resumable unlinking then operates only beneath that tombstone without following links.
 
 Cleanup MUST refuse to remove a deployment referenced by an active run, an object referenced by a retained run or retry plan, a transfer with an active lease, or a run record not explicitly selected for terminal-run deletion.
 
 Terminal-run deletion records the loss of attachment, diagnostics, retry, and possibly result availability.
 Cleanup accepts no recursive arbitrary path supplied by the user.
 All deletion targets come from gateway inventory and remain confined to managed namespaces.
+Cleanup MUST protect the stable gateway entry, every gateway publication required by a retained run or recoverable operation, and operation receipts whose absence could make submission retry safety uncertain.
 
 ### 15.3 Quota diagnostics
 
 Deployment, upload, and submission estimate required bytes and inode counts when possible.
 Failures use stable `quota-bytes`, `quota-inodes`, or `insufficient-space` categories and preserve safely reusable completed objects.
 
+### 15.4 Resource and denial-of-service bounds
+
+Gateway capabilities MUST report hard limits for canonical request bytes and nesting, manifest entries, logical path length and depth, single and aggregate upload bytes, archive expansion and compression ratio, captured subprocess output, validation time and child processes, concurrent transfers and mutations, retained temporary bytes, and inventory page size.
+Every parser and operation MUST enforce the applicable limit incrementally, before durable allocation when possible, and return `resource-limit-exceeded` without publishing partial state.
+Unknown-length streams, decompression, hashing, diagnostics capture, and recursive inventory MUST remain subject to byte, entry, time, and depth ceilings rather than relying only on declared sizes.
+Per-root concurrency controls MUST be bounded and fair enough that repeated probes or abandoned uploads cannot indefinitely block attachment, cancellation, or receipt recovery.
+These limits protect one user-owned root from accidental or hostile inputs processed through its gateway; they do not provide tenant isolation from other code running as the same cluster account.
+
 ## 16. Operation effects
+
+This table describes effects initiated by BioImageFlow itself.
+Setup scripts, package build hooks, and Parsl factories are trusted executable code and can violate the declared contract; BioImageFlow rejects detected violations on supported paths but cannot prove the absence of arbitrary undeclared side effects.
+The trusted-code column lists operation-specific user code after gateway startup; any cluster-contacting operation MAY first source the immutable setup copy bound to the selected gateway as stated in Section 5.3.
 
 | Operation | Contacts cluster | Writes remote state | Runs trusted user code | Submits scheduler job | Creates run | Allocates workers |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -802,7 +969,7 @@ Failures use stable `quota-bytes`, `quota-inodes`, or `insufficient-space` categ
 | `deploy()` | Yes | When absent | Setup and package builds | No | No | No |
 | `prepare()` | No | No | Workflow serialization only | No | No | No |
 | `validate()` | Yes | Temporary bounded state only | Setup and Parsl factory | No | No | No |
-| `plan()` | Maybe | No | Factory only if validation refreshes | No | No | No |
+| `plan()` | Maybe | Temporary bounded state if validation refreshes | Factory only if validation refreshes | No | No | No |
 | `plan.submit()` | Yes | Yes | Setup, factory, orchestrator | Yes | Yes | Later through Parsl |
 | `cluster.submit()` | Yes | Yes | All composed phases | Yes | Yes | Later through Parsl |
 | `attach()` and inspection | Yes | No | No | No | No | No |
@@ -811,7 +978,7 @@ Failures use stable `quota-bytes`, `quota-inodes`, or `insufficient-space` categ
 | `plan_cleanup()` | Yes | No | No | No | No | No |
 | `apply_cleanup()` | Yes | Deletes selected state | No | No | No | No |
 
-Temporary files created by validation are not durable remote state and MUST be removed before the operation returns.
+Temporary files created by validation are not durable remote state and MUST be removed before the operation returns, including on failure or timeout.
 Because setup, factory, and package build hooks are trusted code, their own undeclared side effects cannot be prevented by this contract.
 
 ## 17. Diagnostics
@@ -827,19 +994,25 @@ The first implementation defines at least these categories:
 - `ssh-timeout`;
 - `bootstrap-prerequisite-missing`;
 - `cluster-root-unsafe`;
+- `configuration-incomplete`;
+- `local-state-unavailable`;
 - `setup-failed`;
 - `setup-digest-mismatch`;
 - `environment-lock-invalid`;
+- `environment-build-lock-incomplete`;
 - `environment-artifact-missing`;
 - `environment-platform-incompatible`;
 - `bioimageflow-version-conflict`;
 - `deployment-install-failed`;
 - `deployment-tampered`;
+- `gateway-untrusted`;
+- `operation-record-tampered`;
 - `external-environment-changed`;
 - `secret-reference-missing`;
 - `parsl-factory-failed`;
 - `parsl-retries-enabled`;
 - `executor-label-mismatch`;
+- `unsupported-scheduler-adapter`;
 - `unsupported-managed-provider`;
 - `worker-initialization-missing`;
 - `route-incompatible`;
@@ -848,11 +1021,14 @@ The first implementation defines at least these categories:
 - `parsl-configuration-changed`;
 - `scheduler-rejected`;
 - `submission-uncertain`;
+- `attempt-still-uncertain`;
 - `worker-startup-failed`;
 - `protocol-incompatible`;
 - `operation-conflict`;
+- `resource-limit-exceeded`;
 - `quota-bytes`;
 - `quota-inodes`;
+- `insufficient-space`;
 - `result-integrity-failed`;
 - `cleanup-conflict`.
 
@@ -881,6 +1057,8 @@ The public plan summary follows this shape:
 ```json
 {
   "schema": "bioimageflow.remote_execution_plan.v1",
+  "host": "alice@login.example.edu",
+  "cluster_root": "/cluster/project/alice/bioimageflow",
   "attempt_id": "7b8f61d4-2777-4d58-a952-f6601bb1de39",
   "run_id": "0d87dd5b-f27a-4794-8ee0-c59eb972f44b",
   "deployment_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -924,7 +1102,7 @@ The public plan summary follows this shape:
 
 The live plan additionally owns or references prepared bytes and the cluster client needed by `submit()`.
 Those private resources are not reconstructed by `from_dict()`.
-A deserialized summary is suitable for persistence, display, comparison, and later recovery lookup, but cannot submit without rebinding the retained local preparation through an explicit public recovery operation.
+A deserialized summary is suitable for persistence, display, comparison, and recovery through `cluster.attach(run_id)` after remote mutation begins, but it cannot call `submit()` or recover an unallocated attempt.
 
 ### 18.3 Gateway request and receipt example
 
@@ -987,6 +1165,11 @@ An unsupported version fails before mutation with `protocol-incompatible`.
 
 Capability inspection MUST NOT import Parsl, PSI/J, uv, Pixi, scheduler plugins, or SSH libraries eagerly.
 
+Laptop capability inspection reports only client implementation availability and MUST NOT claim that a scheduler or provider is installed or usable on an uncontacted cluster.
+Gateway capability discovery reports protocol and adapter schema versions, not support for a concrete deployment runtime.
+Only `ClusterValidationReport` may report a requested scheduler/provider combination as validated, and it MUST key that result by the exact scheduler-adapter, PSI/J core and executor-plugin, Parsl, executor, provider, and provider-adapter identities and versions described in Section 10.2.
+Queue availability, nested scheduler submission, service-node policy, compute-node storage visibility, and worker hardware remain unverified until the operation that can observe them; they MUST NOT be collapsed into a boolean `supported` capability.
+
 The laptop installs remote orchestration support through `bioimageflow[cluster]`.
 This extra provides bootstrap and environment-preparation support but does not require a local Parsl DataFlowKernel or local PSI/J scheduler plugin during ordinary workflow construction or capability inspection.
 
@@ -1019,33 +1202,39 @@ The current cluster protocol MAY be migrated internally when its immutable uploa
 
 ### 21.1 Public values and serialization
 
-Tests MUST cover strict construction and round trips for public JSON-safe values, secret rejection and redaction, normalized paths/scheduler values/resources, and optional dependency inspection without Parsl or PSI/J imports.
+Tests MUST cover strict construction and round trips for public JSON-safe values, detached-summary behavior when private state is omitted, `local-state-unavailable` failures without original-path reads, secret rejection and redaction, normalized paths/scheduler values/resources, complete registration of every normative diagnostic category, and optional dependency inspection without Parsl or PSI/J imports.
 
 ### 21.2 Preparation and identity
 
-Tests MUST prove immutable local snapshots, stable and sensitive deployment identity, exclusion of timestamps and secret values, non-editable wheel creation, bounded uv/Pixi source capture, tamper rejection, and concurrent equal deployment publication.
+Tests MUST prove immutable local snapshots, stable and sensitive deployment identity, exclusion of timestamps and secret values, non-editable wheel creation, target-side source-distribution builds with pinned build closures and output digests, bounded uv/Pixi source capture, tamper rejection, and concurrent equal deployment publication through build-input and final deployment identities.
 
 ### 21.3 Environment adapters
 
 Tests MUST cover successful and failing fixtures for locked uv, locked Pixi, `pylock.toml`, offline wheelhouse, and existing Python.
-They MUST include stale locks, missing artifacts, hash mismatches, unsupported platforms, incompatible Python, conflicting BioImageFlow versions, forbidden source distributions in offline mode, and changed external attestations.
+They MUST include stale locks, missing or additional build requirements, dynamic build-hook requirements outside the locked closure, installer or build-tool drift, target-built wheel digest changes, hash mismatches, unsupported platforms, incompatible Python, conflicting BioImageFlow versions, forbidden source distributions in offline mode, and changed external attestations.
+Pixi fixtures MUST cover channel order and priority, endpoint substitution, credential-independent endpoint identity, virtual-package satisfaction on the login node, and an assumption that remains unverified until orchestrator or worker acknowledgement.
+`pylock.toml` fixtures MUST prove that an unrepresentable target build closure fails with `environment-build-lock-incomplete` rather than resolving on the cluster.
 
 ### 21.4 Bootstrap and security
 
 Tests MUST cover fresh-root bootstrap, stable-gateway reconnect, setup failure and digest mismatch, shell metacharacters in data, symlink traversal, special files, unsafe permissions, interrupted publication, protocol negotiation, request-size limits, and operation receipts.
-Tests MUST demonstrate that user values cannot become bootstrap shell syntax and that no operation writes outside approved roots.
+Tests MUST also cover leading-option SSH destinations, SFTP operand safety, hard-link and rename races, archive traversal and expansion bombs, unknown gateway digests, corrupt receipts after uncertain scheduler intent, and incremental resource ceilings.
+Tests MUST demonstrate that user values cannot become bootstrap shell syntax, that cross-version selection uses a locally trusted artifact digest, and that no operation writes outside approved roots.
 
 ### 21.5 Factory validation and planning
 
-Tests MUST cover factory cleanup, secret redaction, retries rejection, label mismatch, distinct bindings, provider adapters, worker initialization, forbidden Parsl initialization, launch-time drift, recursive portable overrides, planning/runtime routing consistency, and proof of zero scheduler/DFK/run/worker allocation.
+Tests MUST cover factory cleanup, bounded secret redaction and its documented transformed-output limit, secret absence from process arguments and receipts, retries rejection, label mismatch, distinct bindings, provider adapters, worker initialization, forbidden Parsl initialization, launch-time drift, recursive portable overrides, planning/runtime routing consistency, and proof that BioImageFlow-controlled validation and planning paths create no scheduler submission, DFK, run, or worker allocation.
+They MUST distinguish accepted scheduler syntax, client adapter implementation, installed PSI/J descriptors, validated exact scheduler/provider tuples, and runtime-unverified topology claims.
+They MUST also change a Module or Spack target behind unchanged setup bytes and prove that changed required observable facts fail while facts unavailable before allocation remain labeled unverified.
 
 ### 21.6 Submission and reconnection
 
-Tests MUST cover successful planned submission, lost acknowledgements before and after durable allocation, equal resubmission returning one run, uncertain PSI/J acceptance without resubmission, attachment without project files, gateway negotiation, cancellation in every state, retry without original paths, and equivalent attached/reconnected parallel-node diagnostics.
+Tests MUST cover successful planned submission, plan-digest stability and sensitivity to the cluster target and stable IDs, lost acknowledgements before and after durable allocation, equal resubmission returning one run, cancellation of a sealed pre-submission plan followed by safe lease release and non-resumption, uncertain PSI/J acceptance without resubmission, attachment without project files, gateway negotiation, cancellation in every state, retry without original paths, and equivalent attached/reconnected parallel-node diagnostics.
 
 ### 21.7 Results and cleanup
 
 Tests MUST cover verified download, interrupted retry, corruption, destination conflicts, idempotent identical destinations, external path preservation, atomic publication, cleanup planning, reference conflicts, active-run protection, retained attachment, transfer leases, explicit run deletion, namespace confinement, and quota diagnostics.
+Cleanup fixtures MUST include replacement races, mount points, unknown descendants, required old gateways, uncertainty-preserving receipts, and recovery of a partially unlinked deletion tombstone.
 
 ### 21.8 End-to-end acceptance
 
@@ -1058,7 +1247,7 @@ The authoritative acceptance suite includes:
 5. an administrator-managed Python with attestation drift detection;
 6. prepare, confirmation, submit, disconnect, attach, progress, cancellation, diagnostics, retry, download, and cleanup using public APIs only.
 
-PBS and LSF require scheduler-adapter integration fixtures and at least one real or hermetic acceptance environment before their capability is reported as supported.
+Each of Slurm, PBS, and LSF requires scheduler-adapter integration fixtures and at least one real or hermetic acceptance environment before the corresponding exact compatibility tuple may be reported as validated; shipping syntax support alone is only an implemented client capability.
 
 ## 22. Implementation sequence
 
