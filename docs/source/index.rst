@@ -103,3 +103,4 @@ Features
 
    reference/index
    specs
+   remote_cluster_experience_spec

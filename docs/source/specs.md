@@ -41,6 +41,9 @@ For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-ap
 
 ### 1.1.1 Public Distributed-Execution Integration Contract
 
+An example-led proposal for redesigning the remote-cluster experience is available in [Remote cluster experience and public API proposal](remote_cluster_experience_spec.md).
+That proposal describes a possible future API and is not part of the current normative contract.
+
 The public integration surface for a BioImageFlow execution UI consists of the following values and operations:
 
 - `NodeResourceOverrides`, `Node.resource_overrides`, `Node.set_resource_overrides()`, `Node.effective_resources`, and `effective_node_resources()` provide portable per-instance worker requirements for `ProcessingTool` nodes.
