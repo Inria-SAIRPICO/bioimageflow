@@ -136,7 +136,7 @@ requires-dist = [
     { name = "psij-python", marker = "extra == 'psij'", specifier = ">=0.9.11,<0.10" },
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "wetlands", specifier = ">=2.0.0,<3" },
+    { name = "wetlands", specifier = ">=2.3.3,<3" },
 ]
 provides-extras = ["parsl", "psij"]
 
@@ -409,7 +409,7 @@ dev = [
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile", specifier = ">=2023.7.10" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=2.0.0,<3" },
+    { name = "wetlands", specifier = ">=2.3.3,<3" },
 ]
 
 [[package]]
@@ -3175,7 +3175,7 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "2.0.0"
+version = "2.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
@@ -3183,7 +3183,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/34/f5fe4a01a22b4aaafbaa25cd2e73f5ff31642e0d85bd0201c68617ada13a/wetlands-2.0.0.tar.gz", hash = "sha256:979ff3cef3bd4477a5ac9e09a19d6cafea2496fe5e1275d8ed95bd420511ec34", size = 275642, upload-time = "2026-07-31T08:22:37.958Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/cf/55cc7c904c273077f8d0d8d42218145b28c4cea3d2877d0b3890e748acdc/wetlands-2.3.3.tar.gz", hash = "sha256:8fe278dca5877f731913ba6f291d8eee7b3bcfa1e1d35e9bdc9f6823c295eb7f", size = 309077, upload-time = "2026-08-07T10:33:44.903Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/8f/56a53574403159ef5896c0a9439a3a4f1df86a86038d03f81170fc416634/wetlands-2.0.0-py3-none-any.whl", hash = "sha256:ad568dd606082be15e5ac6887707b4333a820059eb1a92b5117fb77d0e3e7463", size = 113204, upload-time = "2026-07-31T08:22:36.538Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/85/193fa8f26c3a1fabd9a3eb6cc451c2c49ff3320d219e61cc5f155b2f6d79/wetlands-2.3.3-py3-none-any.whl", hash = "sha256:673e71392eacadf69155386cb6100d9ad7a43d60600c7db9f22267e57ba64469", size = 124481, upload-time = "2026-08-07T10:33:45.913Z" },
 ]
