@@ -20,11 +20,11 @@ detection, or deconvolution.
 ## Outputs
 
 - `output_image`: median-filtered intensity image. The default template is
-  `{input_image.stem}_filtered{ext}`.
+  `{input_image.stem}_filtered.tif`.
 
 ## Assumptions
 
-- The selected dimensional mode matches the input image layout.
+- Select the dimensional mode that matches the input image layout; the external binary validates the image dimensionality.
 - Radius values are tuned to preserve objects of interest.
 - `radius_z` is ignored in `2D` mode and `radius_t` is used only in `4D` mode.
 
@@ -62,6 +62,7 @@ The wrapper writes `median.tif` and returns that path. The example invokes
 ## Failure Modes
 
 - The selected `simgmedian*` command is missing.
-- Image dimensionality does not match the selected mode.
+- The mode is unsupported or a radius is not a non-negative integer.
+- The external binary rejects an image whose dimensionality does not match the selected mode.
 - Radius values remove desired structures or create excessive smoothing.
 - The subprocess exits non-zero or cannot write the output.

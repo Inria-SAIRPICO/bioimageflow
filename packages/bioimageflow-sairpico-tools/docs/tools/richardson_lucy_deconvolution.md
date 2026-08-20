@@ -22,13 +22,13 @@ available.
 ## Outputs
 
 - `output_image`: deconvolved intensity image. The default template is
-  `{input_image.stem}_deconvolved{ext}`.
+  `{input_image.stem}_deconvolved.tif`.
 
 ## Assumptions
 
 - Non-3D modes use the scalar `sigma` parameter rather than an explicit PSF.
 - `3D` mode requires `psf_image` to exist before the subprocess is started.
-- The input image layout matches the selected SAIRPICO mode.
+- Select the SAIRPICO mode that matches the input image layout; the external binary validates the image dimensionality.
 
 ## Dependencies and Core Libraries
 
@@ -66,6 +66,7 @@ wrapper invokes `simgrichardsonlucy2d` with `-sigma 1.2`, `-niter 3`,
 ## Failure Modes
 
 - Selected SAIRPICO command is not installed.
+- The mode is unsupported or numeric and boolean parameters fail validation.
 - `3D` mode is requested without an existing `psf_image`.
 - The command exits with a non-zero status because of unsupported input shape,
   format, or parameter values.

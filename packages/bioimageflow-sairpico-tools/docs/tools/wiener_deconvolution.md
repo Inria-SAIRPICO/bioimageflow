@@ -19,11 +19,11 @@ sigma-based 2D approximation or a measured/synthetic 3D PSF is available.
 ## Outputs
 
 - `output_image`: deconvolved image. The default template is
-  `{input_image.stem}_deconvolved{ext}`.
+  `{input_image.stem}_deconvolved.tif`.
 
 ## Assumptions
 
-- The chosen mode matches the input image dimensionality.
+- Select the mode that matches the input image dimensionality; the external binary validates the image layout.
 - `3D` mode uses `psf_image`; non-3D modes use `sigma`.
 - The regularization scale is appropriate for the image intensity range.
 
@@ -61,6 +61,7 @@ command starts with `simgwiener2d` and includes `-sigma 1.5` and
 ## Failure Modes
 
 - Missing SAIRPICO command or incompatible runtime platform.
+- The mode or a numeric or boolean parameter fails validation.
 - Missing PSF file for `3D` mode.
 - Non-zero subprocess exit due to unsupported image data or parameters.
 - Output path cannot be created or written.

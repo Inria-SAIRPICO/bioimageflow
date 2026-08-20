@@ -21,6 +21,10 @@ BioImageFlow wrappers for the SAIRPICO command-line tools from
 The SAIRPICO deconvolution CLIs expose a `-lambda` option.
 Because `lambda` is a reserved Python keyword, BioImageFlow exposes this parameter as `regularization_lambda` in Python and schemas while still passing `-lambda` to the underlying CLIs.
 
+Mode values are validated against explicit executable mappings before a subprocess starts.
+Numeric and boolean parameters are likewise validated for direct `process_row()` calls, not only through generated workflow schemas.
+All image-output defaults use fixed `.tif` templates because their `ImageSpec` declarations promise TIFF output.
+
 ## Environments
 
 The package declares three `EnvironmentSpec` instances:
@@ -29,7 +33,7 @@ The package declares three `EnvironmentSpec` instances:
   median denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0`, used by
   `CImgDenoising`.
-- `hotspot`: `bioimageit::hotspot==1.0.0`, used by `HotspotDetection`.
+- `hotspot`: `bioimageit::hotspot==1.0.0` plus pinned NumPy, SciPy, imageio, and tifffile dependencies, used by `HotspotDetection` and `HotspotToSpots`.
 
 The original SAIRPICO inventory listed platform selectors for these packages:
 
@@ -37,9 +41,7 @@ The original SAIRPICO inventory listed platform selectors for these packages:
 - `cimgdenoising`: `osx-64`, `win-64`.
 - `hotspot`: `osx-64`, `osx-arm64`, `win-64`, `linux-64`.
 
-These are conda-backed command wrappers. Unit tests validate schemas, command
-construction, diagnostic environment/version reports, and hotspot table
-conversion without requiring the real binaries. The environment/version checks
-are package diagnostics, not public BioImageFlow workflow tools. Synthetic CLI
-execution is limited to subprocess monkeypatching because the SAIRPICO binaries
-are not Python library calls and may not be available on every platform.
+These are conda-backed command wrappers.
+Unit tests validate schemas, argument validation, command construction, diagnostic environment/version reports, and hotspot table conversion without requiring the real binaries.
+The environment/version checks are package diagnostics, not public BioImageFlow workflow tools.
+Synthetic CLI execution is limited to subprocess monkeypatching because the SAIRPICO binaries are not Python library calls and may not be available on every platform.

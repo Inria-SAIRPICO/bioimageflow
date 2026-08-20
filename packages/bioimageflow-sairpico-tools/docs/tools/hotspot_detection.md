@@ -19,7 +19,7 @@ the primary controls.
 ## Outputs
 
 - `output_image`: hotspot image. The default template is
-  `{input_image.stem}_hotspot{ext}`.
+  `{input_image.stem}_hotspot.tif`.
 
 ## Assumptions
 
@@ -32,7 +32,7 @@ the primary controls.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core processing and image schema classes.
-- SAIRPICO `hotspot` environment with `bioimageit::hotspot==1.0.0`.
+- SAIRPICO `hotspot` environment with `bioimageit::hotspot==1.0.0` and pinned scientific image I/O dependencies.
 - External command: `hotSpotDetection`.
 
 ## Minimal Example
@@ -60,6 +60,7 @@ example invokes `hotSpotDetection` with `-m 3`, `-n 5`, and `-pv 0.2`.
 ## Failure Modes
 
 - `hotSpotDetection` is not available in the active environment.
+- Patch and neighborhood sizes are not positive integers, or the p-value is not finite and between `0.0` and `1.0`.
 - Input image format or dimensionality is unsupported by the binary.
 - Threshold parameters produce no useful detections or excessive detections.
 - The subprocess exits non-zero or output writing fails.
