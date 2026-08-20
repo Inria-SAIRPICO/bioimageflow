@@ -1,15 +1,14 @@
 # SummarizeTable
 
-`SummarizeTable` summarizes numeric columns in an upstream table using count,
-mean, min, max, and sum.
+`SummarizeTable` summarizes numeric columns in an upstream table using count, mean, min, max, and sum.
 
 Inputs are optional `group_by` and optional comma-separated `columns`.
 Omitting `columns` selects all numeric columns except `group_by`; an explicitly empty selection is invalid.
 With `group_by`, the output has one row per group and columns named `<column>_<stat>`.
 Without it, the output has one row per selected column and outputs named `column`, `value_count`, `value_mean`, `value_min`, `value_max`, and `value_sum`.
 
-Use it to aggregate object-level measurements into per-image or per-condition
-tables. Missing requested columns raise a `ValueError`.
+Use it to aggregate object-level measurements into per-image or per-condition tables.
+Missing requested columns raise a `ValueError`.
 
 ## Dependencies and Core Libraries
 
@@ -30,8 +29,7 @@ summary = SummarizeTable().transform(table, Arguments(group_by="sample", columns
 
 ## Expected Results
 
-Grouped output columns use `<column>_count`, `<column>_mean`, `<column>_min`,
-`<column>_max`, and `<column>_sum`.
+Grouped output columns use `<column>_count`, `<column>_mean`, `<column>_min`, `<column>_max`, and `<column>_sum`.
 
 ## Failure Modes
 

@@ -2,8 +2,8 @@
 
 `IntensityProperties` computes intensity statistics inside each positive label using scikit-image region measurements.
 
-Inputs are `label_image` and `intensity_image`. Outputs are `label`,
-`mean_intensity`, `min_intensity`, `max_intensity`, and `sum_intensity`.
+Inputs are `label_image` and `intensity_image`.
+Outputs are `label`, `mean_intensity`, `min_intensity`, `max_intensity`, and `sum_intensity`.
 
 Use it for per-cell, per-nucleus, or per-spot intensity measurements when the label and intensity images are already aligned.
 Shape mismatches and non-finite intensity values raise `ValueError`; label `0` is ignored.
@@ -14,8 +14,7 @@ BioImageFlow core APIs, imageio, NumPy, and scikit-image.
 
 ## Assumptions
 
-The label and intensity images are aligned, have identical shape, and represent
-one 2D plane.
+The label and intensity images are aligned, have identical shape, and represent one 2D plane.
 
 ## Minimal Example
 

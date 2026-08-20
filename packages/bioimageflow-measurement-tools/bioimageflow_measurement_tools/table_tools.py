@@ -45,13 +45,22 @@ class SummarizeTable(DataFrameTool):
         if schema is None:
             return None
         settings = inputs or {}
-        group_by = settings.get("group_by") or None
-        excluded = {group_by} if isinstance(group_by, str) else set()
+        group_by = settings.get("group_by")
+        if group_by is not None:
+            if not isinstance(group_by, str) or not (group_by := group_by.strip()):
+                return None
+        excluded = {group_by} if group_by else set()
         columns = _schema_columns(schema, settings.get("columns"), excluded=excluded)
         if columns is None:
             return None
         if group_by:
             if group_by not in schema:
+                return None
+            output_names = [
+                group_by,
+                *(f"{column}_{stat}" for column in columns for stat in _DEFAULT_STATS),
+            ]
+            if len(output_names) != len(set(output_names)):
                 return None
             result = {group_by: schema[group_by]}
             for column in columns:
@@ -71,7 +80,9 @@ class SummarizeTable(DataFrameTool):
         table = pd.DataFrame(df)
         grouped_by = getattr(arguments, "group_by", None)
         if grouped_by is not None:
-            grouped_by = str(grouped_by).strip()
+            if not isinstance(grouped_by, str):
+                raise ValueError("group_by must be a column name string.")
+            grouped_by = grouped_by.strip()
             if not grouped_by:
                 raise ValueError("group_by must be a non-empty column name when provided.")
             if grouped_by not in table.columns:
@@ -132,7 +143,9 @@ class AggregatePerImage(DataFrameTool):
             return None
         settings = inputs or {}
         group_by = settings.get("group_by", "image")
-        if not isinstance(group_by, str) or not group_by or group_by not in schema:
+        if not isinstance(group_by, str) or not (group_by := group_by.strip()):
+            return None
+        if group_by not in schema:
             return None
         columns = _schema_columns(schema, settings.get("columns"), excluded={group_by})
         if columns is None:
@@ -156,7 +169,10 @@ class AggregatePerImage(DataFrameTool):
         import pandas as pd
 
         table = pd.DataFrame(df)
-        group_by = str(getattr(arguments, "group_by", "image")).strip()
+        group_by = getattr(arguments, "group_by", "image")
+        if not isinstance(group_by, str):
+            raise ValueError("group_by must be a column name string.")
+        group_by = group_by.strip()
         if not group_by:
             raise ValueError("group_by must be a non-empty column name.")
         if group_by not in table.columns:
@@ -218,7 +234,14 @@ class NormalizeFeatures(DataFrameTool):
         settings = inputs or {}
         columns = _schema_columns(schema, settings.get("columns"))
         suffix = settings.get("suffix", "_normalized")
-        if columns is None or not isinstance(suffix, str) or not suffix:
+        method = settings.get("method", "zscore")
+        if (
+            columns is None
+            or not isinstance(method, str)
+            or method.strip().lower() not in {"zscore", "robust", "minmax"}
+            or not isinstance(suffix, str)
+            or not suffix
+        ):
             return None
         output_names = [f"{column}{suffix}" for column in columns]
         if len(output_names) != len(set(output_names)) or any(
@@ -233,11 +256,14 @@ class NormalizeFeatures(DataFrameTool):
 
         table = pd.DataFrame(df).copy()
         columns = _requested_columns(table, getattr(arguments, "columns", None))
-        method = str(getattr(arguments, "method", "zscore")).strip().lower()
+        method = getattr(arguments, "method", "zscore")
+        if not isinstance(method, str):
+            raise ValueError("method must be one of: zscore, robust, minmax")
+        method = method.strip().lower()
         if method not in {"zscore", "robust", "minmax"}:
             raise ValueError("method must be one of: zscore, robust, minmax")
-        suffix = str(getattr(arguments, "suffix", "_normalized"))
-        if not suffix:
+        suffix = getattr(arguments, "suffix", "_normalized")
+        if not isinstance(suffix, str) or not suffix:
             raise ValueError("suffix must not be empty.")
         output_columns = [f"{column}{suffix}" for column in columns]
         _reject_output_collisions([*table.columns, *output_columns])

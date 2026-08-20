@@ -200,13 +200,18 @@ class IntensityProperties(ProcessingTool):
         if not np.isfinite(intensities).all():
             raise ValueError("intensity_image must contain only finite values.")
         dense, original_ids = dense_labels(labels)
+        intensity_sums = np.bincount(
+            dense.ravel(),
+            weights=intensities.ravel(),
+            minlength=len(original_ids) + 1,
+        )
         return [
             self.Outputs(
                 label=int(original_ids[region.label - 1]),
                 mean_intensity=float(region.intensity_mean),
                 min_intensity=float(region.intensity_min),
                 max_intensity=float(region.intensity_max),
-                sum_intensity=float(region.intensity_mean * region.area),
+                sum_intensity=float(intensity_sums[region.label]),
             )
             for region in regionprops(dense, intensity_image=intensities)
         ]

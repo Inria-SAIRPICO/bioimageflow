@@ -13,6 +13,5 @@ Lightweight measurement tools:
 - `AggregatePerImage`: object-level table aggregation by image/sample.
 - `NormalizeFeatures`: z-score, robust, and min-max feature scaling.
 
-The package avoids heavy image-analysis dependencies in its current baseline
-tool set and uses NumPy/Pandas implementations for predictable synthetic-test
-coverage.
+Worker-side image tools use imageio, NumPy, and scikit-image from BioImageFlow's general execution environment.
+Main-process table tools use pandas and the `DataFrameTool` API.

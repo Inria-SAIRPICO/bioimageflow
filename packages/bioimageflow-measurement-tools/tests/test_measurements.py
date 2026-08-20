@@ -93,6 +93,7 @@ def test_measurement_tools_schema_and_synthetic_execution(tmp_path: Path) -> Non
     )
     assert [row.label for row in measurements] == [1, 2]
     assert measurements[0].mean_intensity == float(intensity[labels == 1].mean())
+    assert measurements[0].sum_intensity == float(intensity[labels == 1].sum())
 
     counts = CountLabels().process_row(Arguments(label_image=labels_path))
     assert counts.label_count == 2
@@ -270,6 +271,14 @@ def test_table_tools_validate_selection_and_output_collisions() -> None:
     colliding = table.assign(area_normalized=3.0)
     with pytest.raises(ValueError, match="collisions"):
         NormalizeFeatures().transform(colliding, Arguments(columns="area"))
+    with pytest.raises(ValueError, match="column name string"):
+        SummarizeTable().transform(table, Arguments(group_by=1, columns="area"))
+    with pytest.raises(ValueError, match="column name string"):
+        AggregatePerImage().transform(
+            table, Arguments(group_by=1, columns="area", stats="mean")
+        )
+    with pytest.raises(ValueError, match="method must be"):
+        NormalizeFeatures().transform(table, Arguments(columns="area", method=1))
 
 
 def test_normalization_preserves_missing_values_and_zeroes_constants() -> None:
@@ -315,3 +324,34 @@ def test_table_tools_resolve_configured_output_schemas() -> None:
     )
     assert normalized is not None
     assert list(normalized) == ["sample", "area", "area_z"]
+
+
+def test_table_schema_resolution_matches_runtime_validation() -> None:
+    from bioimageflow_measurement_tools import (
+        AggregatePerImage,
+        NormalizeFeatures,
+        SummarizeTable,
+    )
+
+    upstream = {
+        "sample": {"type": "str", "default": None, "image_spec": None},
+        "area": {"type": "float", "default": None, "image_spec": None},
+        "area_count": {"type": "float", "default": None, "image_spec": None},
+    }
+    summary = SummarizeTable.resolve_merge_schema(
+        [upstream], {"group_by": " sample ", "columns": "area"}
+    )
+    assert summary is not None
+    assert list(summary)[0] == "sample"
+    assert SummarizeTable.resolve_merge_schema(
+        [upstream], {"group_by": "area_count", "columns": "area"}
+    ) is None
+
+    aggregate = AggregatePerImage.resolve_merge_schema(
+        [upstream], {"group_by": " sample ", "columns": "area", "stats": "mean"}
+    )
+    assert aggregate is not None
+    assert list(aggregate)[0] == "sample"
+    assert NormalizeFeatures.resolve_merge_schema(
+        [upstream], {"columns": "area", "method": "unknown"}
+    ) is None

@@ -31,8 +31,7 @@ The output is the upstream table plus normalized feature columns.
 
 ## Dependencies and Core Libraries
 
-pandas, NumPy-compatible numeric operations, and BioImageFlow's `DataFrameTool`
-API.
+pandas, NumPy-compatible numeric operations, and BioImageFlow's `DataFrameTool` API.
 
 ## Assumptions
 
@@ -40,8 +39,7 @@ Selected columns are numeric and the table fits in memory.
 
 ## Expected Results
 
-Synthetic feature tables produce deterministic scaled values and retain row
-order.
+Synthetic feature tables produce deterministic scaled values and retain row order.
 
 ## Failure Modes
 
