@@ -184,12 +184,14 @@ class SelectDimensions(ProcessingTool):
         ] = Template("{input_image.stem}_selected{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        selected, _ = select_indices(
+        selected, remaining_axes = select_indices(
             read_raster(arguments.input_image),
             axis_order=arguments.layout,
             selections={"C": arguments.channel, "Z": arguments.z, "T": arguments.timepoint},
         )
-        output_path = write_raster(selected, arguments.output_image)
+        output_path = write_raster(
+            selected, arguments.output_image, axes=remaining_axes
+        )
         return self.Outputs(output_image=output_path)
 
 
@@ -212,12 +214,16 @@ class SelectTimepoint(ProcessingTool):
         output_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(display_name="Selected timepoint")] = Template("{input_image.stem}_t{timepoint}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        selected, _ = select_indices(
+        selected, remaining_axes = select_indices(
             read_raster(arguments.input_image),
             axis_order=arguments.layout,
             selections={"T": arguments.timepoint},
         )
-        return self.Outputs(output_image=write_raster(selected, arguments.output_image))
+        return self.Outputs(
+            output_image=write_raster(
+                selected, arguments.output_image, axes=remaining_axes
+            )
+        )
 
 
 class SelectChannel(ProcessingTool):
@@ -239,12 +245,16 @@ class SelectChannel(ProcessingTool):
         output_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(display_name="Selected channel")] = Template("{input_image.stem}_c{channel}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        selected, _ = select_indices(
+        selected, remaining_axes = select_indices(
             read_raster(arguments.input_image),
             axis_order=arguments.layout,
             selections={"C": arguments.channel},
         )
-        return self.Outputs(output_image=write_raster(selected, arguments.output_image))
+        return self.Outputs(
+            output_image=write_raster(
+                selected, arguments.output_image, axes=remaining_axes
+            )
+        )
 
 
 class SelectZRange(ProcessingTool):
@@ -267,11 +277,15 @@ class SelectZRange(ProcessingTool):
         output_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY}), GUIMeta(display_name="Selected Z range")] = Template("{input_image.stem}_z{start_z}_{stop_z}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        selected, _ = select_axis_range(
+        selected, remaining_axes = select_axis_range(
             read_raster(arguments.input_image),
             axis_order=arguments.layout,
             axis="Z",
             start=arguments.start_z,
             stop=arguments.stop_z,
         )
-        return self.Outputs(output_image=write_raster(selected, arguments.output_image))
+        return self.Outputs(
+            output_image=write_raster(
+                selected, arguments.output_image, axes=remaining_axes
+            )
+        )

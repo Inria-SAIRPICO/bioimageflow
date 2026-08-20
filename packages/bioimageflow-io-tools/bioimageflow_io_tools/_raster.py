@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from ._axes import validate_nonnegative_index
+from ._axes import normalize_axis_order, validate_nonnegative_index
 
 
 def read_raster(input_image: Path | str) -> Any:
@@ -32,7 +32,12 @@ def read_scene(input_image: Path | str, scene: int) -> Any:
     raise IndexError(f"Scene index {scene} is only available for multi-series TIFF files.")
 
 
-def write_raster(data: Any, output_path: Path | str) -> Path:
+def write_raster(
+    data: Any,
+    output_path: Path | str,
+    *,
+    axes: str | None = None,
+) -> Path:
     import imageio.v3 as iio
     import numpy as np
 
@@ -44,9 +49,15 @@ def write_raster(data: Any, output_path: Path | str) -> Path:
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     array = np.asarray(data)
+    normalized_axes = (
+        normalize_axis_order(axes, tuple(array.shape)) if axes is not None else None
+    )
     kwargs: dict[str, Any] = {}
-    if is_tiff_path(path) and is_grayscale_stack(array):
-        kwargs["photometric"] = "minisblack"
+    if is_tiff_path(path):
+        if normalized_axes is not None and normalized_axes.endswith("S"):
+            kwargs["photometric"] = "rgb"
+        elif is_grayscale_stack(array):
+            kwargs["photometric"] = "minisblack"
     iio.imwrite(path, array, **kwargs)
     return path
 

@@ -70,6 +70,11 @@ class ConvertImageFormat(ProcessingTool):
             if arguments.scene is not None
             else read_raster(arguments.input_image)
         )
+        output_axes = (
+            normalize_axis_order(arguments.input_layout, tuple(data.shape))
+            if arguments.input_layout is not None
+            else None
+        )
         selections = {
             "C": arguments.channel,
             "Z": arguments.z,
@@ -78,12 +83,12 @@ class ConvertImageFormat(ProcessingTool):
         if any(index is not None for index in selections.values()):
             if arguments.input_layout is None:
                 raise ValueError("input_layout is required for C, Z, or T selection.")
-            data, _ = select_indices(
+            data, output_axes = select_indices(
                 data,
                 axis_order=arguments.input_layout,
                 selections=selections,
             )
-        output_path = write_raster(data, arguments.output_image)
+        output_path = write_raster(data, arguments.output_image, axes=output_axes)
         return self.Outputs(output_image=output_path)
 
 

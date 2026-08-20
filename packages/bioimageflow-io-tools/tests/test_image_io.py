@@ -253,6 +253,36 @@ def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path)
         )
 
 
+def test_convert_image_format_preserves_declared_rgb_sample_axis(tmp_path: Path) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools import ConvertImageFormat
+
+    source = tmp_path / "animated.gif"
+    output = tmp_path / "animated.tif"
+    data = np.zeros((2, 4, 5, 3), dtype=np.uint8)
+    data[0, ..., 0] = 255
+    data[1, ..., 1] = 255
+    iio.imwrite(source, data)
+
+    ConvertImageFormat().process_row(
+        Arguments(
+            input_image=source,
+            output_image=output,
+            input_layout="TYXS",
+            scene=None,
+            channel=None,
+            z=None,
+            timepoint=None,
+        )
+    )
+
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].shape == data.shape
+        assert len(tif.pages) == 2
+        assert all(page.photometric.name == "RGB" for page in tif.pages)
+
+
 def test_bioio_convert_image_uses_bioio_plugins_and_selection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
