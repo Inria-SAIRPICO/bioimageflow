@@ -3,7 +3,7 @@
 `StarDistSegmenter` wraps StarDist 2D pretrained models for star-convex nuclei
 or cell-like objects. It supports fluorescence models and an H&E RGB model.
 
-Inputs include `input_image`, `model_name`, optional `channel`, probability and
+Inputs include `input_image`, `model_name`, optional `channel`, explicit `channel_axis`, probability and
 NMS thresholds, and normalization percentiles. Outputs are `mask` and
 `object_count`. Core dependencies are TensorFlow, StarDist, imageio, NumPy, and
 tifffile in an isolated environment.
@@ -29,6 +29,7 @@ imageio, NumPy, and tifffile in the isolated StarDist environment.
 
 Objects are reasonably star-convex and match the selected pretrained model's
 domain, such as fluorescence nuclei or H&E nuclei.
+Three-dimensional fluorescence input uses `channel` from the declared axis; H&E input requires RGB or RGBA on that axis.
 
 ## Minimal Example
 

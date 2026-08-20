@@ -36,6 +36,7 @@ imageio, NumPy, SciPy distance transforms, and scikit-image watershed helpers.
 ## Assumptions
 
 Foreground objects are brighter/non-zero and have separable distance peaks.
+Pixels must be strictly greater than `threshold` to enter the foreground mask.
 
 ## Expected Results
 

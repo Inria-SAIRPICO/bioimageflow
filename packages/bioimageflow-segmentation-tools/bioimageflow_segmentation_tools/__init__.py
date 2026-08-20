@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from .classical import SplitTouchingObjects as SplitTouchingObjects
     from .classical import ThresholdSegment as ThresholdSegment
     from .classical import WatershedSegment as WatershedSegment
-    from .nninteractive import nnInteractive as nnInteractive
     from .stardist_segmenter import StarDistSegmenter as StarDistSegmenter
 
 
@@ -25,7 +24,6 @@ _EXPORTS = {
     "FilterLabels": ("classical", "FilterLabels"),
     "LocalThresholdSegment": ("classical", "LocalThresholdSegment"),
     "OtsuThresholdSegment": ("classical", "OtsuThresholdSegment"),
-    "nnInteractive": ("nninteractive", "nnInteractive"),
     "PostprocessLabels": ("classical", "PostprocessLabels"),
     "SplitTouchingObjects": ("classical", "SplitTouchingObjects"),
     "StarDistSegmenter": ("stardist_segmenter", "StarDistSegmenter"),
@@ -45,7 +43,6 @@ __all__ = [
     "StarDistSegmenter",
     "ThresholdSegment",
     "WatershedSegment",
-    "nnInteractive",
 ]
 
 

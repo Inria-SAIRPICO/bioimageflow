@@ -3,6 +3,7 @@
 `OtsuThresholdSegment` computes a global threshold with
 `skimage.filters.threshold_otsu`, creates a foreground mask, and labels
 connected components.
+Components use face connectivity, and `above=True` selects values strictly greater than the computed threshold.
 
 Inputs are `input_image` and `above`. Outputs are `labels`, `object_count`, and
 the computed `threshold`.

@@ -37,8 +37,8 @@ imageio, NumPy, and scikit-image region-properties measurement.
 
 ## Assumptions
 
-Background is `0`. Solidity and eccentricity are applied only to 2D inputs; 3D
-inputs still support area, border, and intensity filters.
+Background is `0`. Solidity and eccentricity are defined only for 2D inputs; volumetric inputs must leave those two settings at their defaults and can use area, border, and intensity filters.
+Label IDs must be finite, integral, non-negative values.
 
 ## Expected Results
 

@@ -16,8 +16,7 @@ BioImageFlow core APIs, imageio, and NumPy.
 
 ## Assumptions
 
-Input labels are integer-like arrays, label `0` is background, and size is
-measured in pixels or voxels.
+Input labels are finite, integral, non-negative arrays, label `0` is background, and size is measured in pixels or voxels.
 
 ## Minimal Example
 

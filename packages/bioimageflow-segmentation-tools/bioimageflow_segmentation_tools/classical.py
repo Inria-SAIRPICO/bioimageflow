@@ -1,6 +1,5 @@
 """Lightweight classical segmentation tools."""
 
-from collections import deque
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -19,96 +18,27 @@ from bioimageflow_core import (
     Template,
 )
 
-
-def _neighbors(index: tuple[int, ...], shape: tuple[int, ...]) -> list[tuple[int, ...]]:
-    neighbors = []
-    for axis, coordinate in enumerate(index):
-        if coordinate > 0:
-            lower = list(index)
-            lower[axis] -= 1
-            neighbors.append(tuple(lower))
-        if coordinate + 1 < shape[axis]:
-            upper = list(index)
-            upper[axis] += 1
-            neighbors.append(tuple(upper))
-    return neighbors
-
-
-def _label_connected(mask: Any) -> Any:
-    import numpy as np
-
-    foreground = np.asarray(mask, dtype=bool)
-    labels = np.zeros(foreground.shape, dtype=np.uint32)
-    next_label = 1
-
-    for start in np.argwhere(foreground):
-        start_index = tuple(int(v) for v in start)
-        if labels[start_index] != 0:
-            continue
-
-        queue: deque[tuple[int, ...]] = deque([start_index])
-        labels[start_index] = next_label
-        while queue:
-            current = queue.popleft()
-            for neighbor in _neighbors(current, foreground.shape):
-                if foreground[neighbor] and labels[neighbor] == 0:
-                    labels[neighbor] = next_label
-                    queue.append(neighbor)
-
-        next_label += 1
-
-    return labels
-
-
-def _relabel_sequential(labels: Any, min_size: int = 0) -> tuple[Any, int]:
-    import numpy as np
-
-    source = np.asarray(labels)
-    output = np.zeros(source.shape, dtype=np.uint32)
-    next_label = 1
-    for label in np.unique(source):
-        label_int = int(label)
-        if label_int == 0:
-            continue
-        mask = source == label_int
-        if int(mask.sum()) < min_size:
-            continue
-        output[mask] = next_label
-        next_label += 1
-    return output, next_label - 1
-
-
-def _write_labels(path: Path, labels: Any) -> None:
-    import imageio.v3 as iio
-    import numpy as np
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    array = np.asarray(labels)
-    kwargs = {"photometric": "minisblack"} if array.ndim >= 3 else {}
-    iio.imwrite(str(path), array, **kwargs)
+from ._arrays import (
+    finite_float,
+    integer_parameter,
+    object_count,
+    relabel_sequential,
+    validate_image,
+    validate_labels,
+    write_labels,
+)
 
 
 def _label_skimage(mask: Any) -> Any:
     import numpy as np
     from skimage import measure
 
-    return np.asarray(measure.label(mask)).astype("uint32", copy=False)
-
-
-def _distance_transform(mask: Any) -> Any:
-    try:
-        from scipy import ndimage as ndi
-
-        return ndi.distance_transform_edt(mask)
-    except ImportError:
-        from skimage.morphology import medial_axis
-
-        _, distance = medial_axis(mask, return_distance=True)
-        return distance
+    return np.asarray(measure.label(mask, connectivity=1)).astype("uint32", copy=False)
 
 
 def _distance_watershed(mask: Any, min_distance: int) -> tuple[Any, int]:
     import numpy as np
+    from scipy import ndimage as ndi
     from skimage import measure
     from skimage.feature import peak_local_max
     from skimage.segmentation import watershed
@@ -117,23 +47,29 @@ def _distance_watershed(mask: Any, min_distance: int) -> tuple[Any, int]:
     if not foreground.any():
         return np.zeros(foreground.shape, dtype=np.uint32), 0
 
-    distance = _distance_transform(foreground)
+    marker_distance = integer_parameter(min_distance, name="min_distance", minimum=1)
+    distance = np.asarray(ndi.distance_transform_edt(foreground), dtype=np.float64)
     peak_coordinates = peak_local_max(
         distance,
         labels=foreground,
-        min_distance=max(1, int(min_distance)),
+        min_distance=marker_distance,
         exclude_border=False,
     )
     markers = np.zeros(foreground.shape, dtype=np.uint32)
-    for marker_label, coordinate in enumerate(peak_coordinates, start=1):
-        markers[tuple(int(value) for value in coordinate)] = marker_label
-    if markers.max() == 0:
-        markers = np.asarray(measure.label(foreground)).astype("uint32", copy=False)
+    if peak_coordinates.size:
+        marker_indices = tuple(peak_coordinates[:, axis] for axis in range(foreground.ndim))
+        markers[marker_indices] = np.arange(
+            1, len(peak_coordinates) + 1, dtype=np.uint32
+        )
+    else:
+        markers = np.asarray(measure.label(foreground, connectivity=1)).astype(
+            "uint32", copy=False
+        )
 
     labels = np.asarray(watershed(-distance, markers, mask=foreground)).astype(
         "uint32", copy=False
     )
-    return labels, int(labels.max())
+    return labels, object_count(labels)
 
 
 class ThresholdSegment(ProcessingTool):
@@ -166,7 +102,7 @@ class ThresholdSegment(ProcessingTool):
             float,
             GUIMeta(
                 display_name="Threshold",
-                description="Pixels greater than or equal to this value become foreground.",
+                description="Pixels strictly greater than this value become foreground.",
                 group="general",
             ),
         ] = 0.5
@@ -174,7 +110,7 @@ class ThresholdSegment(ProcessingTool):
             bool,
             GUIMeta(
                 display_name="Use values above threshold",
-                description="When false, pixels less than or equal to the threshold become foreground.",
+                description="When false, pixels at or below the threshold become foreground.",
                 group="general",
             ),
         ] = True
@@ -190,7 +126,7 @@ class ThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_threshold_labels{ext}")
+        ] = Template("{input_image.stem}_threshold_labels.tif")
         object_count: Annotated[
             int,
             GUIMeta(
@@ -202,17 +138,21 @@ class ThresholdSegment(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
-        image = iio.imread(str(arguments.input_image))
+        image = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
+        threshold = finite_float(arguments.threshold, name="threshold")
         if arguments.above:
-            foreground = image >= arguments.threshold
+            foreground = image > threshold
         else:
-            foreground = image <= arguments.threshold
-        labels = _label_connected(foreground)
-        object_count = int(labels.max())
+            foreground = image <= threshold
+        labels = _label_skimage(foreground)
 
         labels_path = Path(arguments.labels)
-        _write_labels(labels_path, labels)
-        return self.Outputs(labels=labels_path, object_count=object_count)
+        write_labels(labels_path, labels)
+        return self.Outputs(labels=labels_path, object_count=object_count(labels))
 
 
 class OtsuThresholdSegment(ProcessingTool):
@@ -258,7 +198,7 @@ class OtsuThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_otsu_labels{ext}")
+        ] = Template("{input_image.stem}_otsu_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
         threshold: Annotated[float, GUIMeta(display_name="Otsu threshold")]
 
@@ -266,15 +206,19 @@ class OtsuThresholdSegment(ProcessingTool):
         import imageio.v3 as iio
         from skimage.filters import threshold_otsu
 
-        image = iio.imread(str(arguments.input_image))
+        image = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
         threshold = float(threshold_otsu(image))
-        foreground = image > threshold if getattr(arguments, "above", True) else image <= threshold
+        foreground = image > threshold if arguments.above else image <= threshold
         labels = _label_skimage(foreground)
         labels_path = Path(arguments.labels)
-        _write_labels(labels_path, labels)
+        write_labels(labels_path, labels)
         return self.Outputs(
             labels=labels_path,
-            object_count=int(labels.max()),
+            object_count=object_count(labels),
             threshold=threshold,
         )
 
@@ -348,28 +292,34 @@ class LocalThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_local_threshold_labels{ext}")
+        ] = Template("{input_image.stem}_local_threshold_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
         from skimage.filters import threshold_sauvola
 
-        block_size = int(getattr(arguments, "block_size", 15))
+        block_size = integer_parameter(arguments.block_size, name="block_size", minimum=3)
         if block_size < 3 or block_size % 2 == 0:
             raise ValueError("block_size must be an odd integer greater than or equal to 3.")
-        image = iio.imread(str(arguments.input_image))
+        image = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
+        k = finite_float(arguments.k, name="k")
+        offset = finite_float(arguments.offset, name="offset")
         threshold = threshold_sauvola(
             image,
             window_size=block_size,
-            k=getattr(arguments, "k", 0.2),
+            k=k,
         )
-        threshold = threshold - float(getattr(arguments, "offset", 0.0))
-        foreground = image > threshold if getattr(arguments, "above", True) else image <= threshold
+        threshold = threshold - offset
+        foreground = image > threshold if arguments.above else image <= threshold
         labels = _label_skimage(foreground)
         labels_path = Path(arguments.labels)
-        _write_labels(labels_path, labels)
-        return self.Outputs(labels=labels_path, object_count=int(labels.max()))
+        write_labels(labels_path, labels)
+        return self.Outputs(labels=labels_path, object_count=object_count(labels))
 
 
 class WatershedSegment(ProcessingTool):
@@ -379,7 +329,7 @@ class WatershedSegment(ProcessingTool):
     display_name = "Watershed Segment"
     documentation = (
         "Segment thresholded foreground regions. When marker labels are supplied, "
-        "foreground pixels are assigned to the nearest marker by graph distance."
+        "intensity topography guides foreground assignment to those markers."
     )
     category = Category.SEGMENTATION
     tags = ["segmentation", "watershed", "classical"]
@@ -415,7 +365,7 @@ class WatershedSegment(ProcessingTool):
             float,
             GUIMeta(
                 display_name="Foreground threshold",
-                description="Pixels greater than or equal to this value are segmented.",
+                description="Pixels strictly greater than this value are segmented.",
                 group="general",
             ),
         ] = 0.5
@@ -431,7 +381,7 @@ class WatershedSegment(ProcessingTool):
                 display_name="Label image",
                 description="Watershed segmentation label image.",
             ),
-        ] = Template("{input_image.stem}_watershed_labels{ext}")
+        ] = Template("{input_image.stem}_watershed_labels.tif")
         object_count: Annotated[
             int,
             GUIMeta(
@@ -446,30 +396,34 @@ class WatershedSegment(ProcessingTool):
         from skimage import measure
         from skimage.segmentation import watershed
 
-        image = iio.imread(str(arguments.input_image))
-        foreground = image >= arguments.threshold
-        markers_value = getattr(arguments, "markers_image", "")
+        image = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
+        threshold = finite_float(arguments.threshold, name="threshold")
+        foreground = image > threshold
+        markers_value = arguments.markers_image
         if markers_value is None or str(markers_value) == "":
-            markers = np.asarray(measure.label(foreground)).astype(
+            markers = np.asarray(measure.label(foreground, connectivity=1)).astype(
                 "uint32", copy=False
             )
         else:
-            markers = iio.imread(str(markers_value))
-            if markers.shape != foreground.shape:
-                raise ValueError(
-                    "markers_image must have the same shape as input_image "
-                    f"({markers.shape} != {foreground.shape})"
-                )
+            markers = validate_labels(
+                iio.imread(str(markers_value)),
+                name="markers_image",
+                expected_shape=foreground.shape,
+            )
 
         labels = watershed(
             -image.astype("float32", copy=False), markers, mask=foreground
         )
         labels = labels.astype("uint32", copy=False)
-        object_count = int(np.count_nonzero(np.unique(labels)))
+        count = object_count(labels)
 
         labels_path = Path(arguments.labels)
-        _write_labels(labels_path, labels)
-        return self.Outputs(labels=labels_path, object_count=object_count)
+        write_labels(labels_path, labels)
+        return self.Outputs(labels=labels_path, object_count=count)
 
 
 class DistanceWatershedSegment(ProcessingTool):
@@ -499,7 +453,7 @@ class DistanceWatershedSegment(ProcessingTool):
             float,
             GUIMeta(
                 display_name="Foreground threshold",
-                description="Pixels greater than or equal to this value are segmented.",
+                description="Pixels strictly greater than this value are segmented.",
                 group="general",
             ),
         ] = 0.5
@@ -525,19 +479,24 @@ class DistanceWatershedSegment(ProcessingTool):
                 display_name="Label image",
                 description="Distance watershed label image.",
             ),
-        ] = Template("{input_image.stem}_distance_watershed_labels{ext}")
+        ] = Template("{input_image.stem}_distance_watershed_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
-        image = iio.imread(str(arguments.input_image))
+        image = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
+        threshold = finite_float(arguments.threshold, name="threshold")
         labels, object_count = _distance_watershed(
-            image >= getattr(arguments, "threshold", 0.5),
-            min_distance=getattr(arguments, "min_distance", 5),
+            image > threshold,
+            min_distance=arguments.min_distance,
         )
         labels_path = Path(arguments.labels)
-        _write_labels(labels_path, labels)
+        write_labels(labels_path, labels)
         return self.Outputs(labels=labels_path, object_count=object_count)
 
 
@@ -586,32 +545,38 @@ class SplitTouchingObjects(ProcessingTool):
                 display_name="Output labels",
                 description="Split label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_split{ext}")
+        ] = Template("{labels.stem}_split.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
         import numpy as np
 
-        source = iio.imread(str(arguments.labels))
+        from skimage.measure import regionprops
+
+        source = validate_labels(iio.imread(str(arguments.labels)))
+        source, _ = relabel_sequential(source)
+        min_distance = integer_parameter(
+            arguments.min_distance,
+            name="min_distance",
+            minimum=1,
+        )
         output = np.zeros(source.shape, dtype=np.uint32)
         next_label = 1
-        for label in np.unique(source):
-            label_int = int(label)
-            if label_int == 0:
-                continue
+        for region in regionprops(source):
+            source_view = source[region.slice]
             split, _ = _distance_watershed(
-                source == label_int,
-                min_distance=getattr(arguments, "min_distance", 5),
+                source_view == region.label,
+                min_distance=min_distance,
             )
-            for split_label in np.unique(split):
-                if int(split_label) == 0:
-                    continue
-                output[split == split_label] = next_label
-                next_label += 1
+            split_count = object_count(split)
+            output_view = output[region.slice]
+            foreground = split > 0
+            output_view[foreground] = split[foreground] + (next_label - 1)
+            next_label += split_count
 
         output_path = Path(arguments.output_labels)
-        _write_labels(output_path, output)
+        write_labels(output_path, output)
         return self.Outputs(output_labels=output_path, object_count=next_label - 1)
 
 
@@ -646,7 +611,10 @@ class FilterLabels(ProcessingTool):
         ] = False
         intensity_image: Annotated[
             Path | str | None,
-            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
+            ImageSpec(
+                semantics={Semantic.INTENSITY},
+                layouts={Layout.PLANAR, Layout.VOLUMETRIC},
+            ),
             GUIMeta(
                 display_name="Intensity image",
                 description="Optional image used for mean-intensity filtering.",
@@ -674,7 +642,7 @@ class FilterLabels(ProcessingTool):
                 display_name="Output labels",
                 description="Filtered label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_filtered{ext}")
+        ] = Template("{labels.stem}_filtered.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -682,49 +650,70 @@ class FilterLabels(ProcessingTool):
         import numpy as np
         from skimage.measure import regionprops
 
-        source = iio.imread(str(arguments.labels))
+        source = validate_labels(iio.imread(str(arguments.labels)))
+        source, _ = relabel_sequential(source)
+        min_area = integer_parameter(arguments.min_area, name="min_area")
+        max_area = integer_parameter(arguments.max_area, name="max_area")
+        if max_area and max_area < min_area:
+            raise ValueError("max_area must be zero or greater than or equal to min_area.")
+        min_mean_intensity = finite_float(
+            arguments.min_mean_intensity,
+            name="min_mean_intensity",
+        )
+        min_solidity = finite_float(arguments.min_solidity, name="min_solidity")
+        max_eccentricity = finite_float(
+            arguments.max_eccentricity,
+            name="max_eccentricity",
+        )
+        if not 0.0 <= min_solidity <= 1.0:
+            raise ValueError("min_solidity must be between 0 and 1.")
+        if not 0.0 <= max_eccentricity <= 1.0:
+            raise ValueError("max_eccentricity must be between 0 and 1.")
+        if source.ndim != 2 and (min_solidity != 0.0 or max_eccentricity != 1.0):
+            raise ValueError(
+                "min_solidity and max_eccentricity are only defined for planar labels; "
+                "use their defaults for volumetric labels."
+            )
         intensity = None
-        intensity_path = getattr(arguments, "intensity_image", "")
+        intensity_path = arguments.intensity_image
         if intensity_path is not None and str(intensity_path) != "":
-            intensity = iio.imread(str(intensity_path))
+            intensity = validate_image(
+                iio.imread(str(intensity_path)),
+                name="intensity_image",
+                dimensions=(source.ndim,),
+            )
             if intensity.shape != source.shape:
-                raise ValueError("intensity_image must have the same shape as labels.")
+                raise ValueError(
+                    f"intensity_image must have shape {source.shape}; got {intensity.shape}."
+                )
 
         output = np.zeros(source.shape, dtype=np.uint32)
         next_label = 1
         for region in regionprops(source, intensity_image=intensity):
-            if region.area < getattr(arguments, "min_area", 0):
+            if region.area < min_area:
                 continue
-            max_area = getattr(arguments, "max_area", 0)
             if max_area and region.area > max_area:
                 continue
-            if getattr(arguments, "remove_border_touching", False) and _touches_border(
+            if arguments.remove_border_touching and _touches_border(
                 region.bbox,
                 source.shape,
             ):
                 continue
             if (
                 intensity is not None
-                and region.mean_intensity < getattr(arguments, "min_mean_intensity", 0.0)
+                and region.mean_intensity < min_mean_intensity
             ):
                 continue
-            if source.ndim == 2 and getattr(region, "solidity", 1.0) < getattr(
-                arguments,
-                "min_solidity",
-                0.0,
-            ):
+            if source.ndim == 2 and region.solidity < min_solidity:
                 continue
-            if source.ndim == 2 and getattr(region, "eccentricity", 0.0) > getattr(
-                arguments,
-                "max_eccentricity",
-                1.0,
-            ):
+            if source.ndim == 2 and region.eccentricity > max_eccentricity:
                 continue
-            output[source == region.label] = next_label
+            output_view = output[region.slice]
+            output_view[region.image] = next_label
             next_label += 1
 
         output_path = Path(arguments.output_labels)
-        _write_labels(output_path, output)
+        write_labels(output_path, output)
         return self.Outputs(output_labels=output_path, object_count=next_label - 1)
 
 
@@ -775,7 +764,7 @@ class PostprocessLabels(ProcessingTool):
                 display_name="Output labels",
                 description="Filtered label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_postprocessed{ext}")
+        ] = Template("{labels.stem}_postprocessed.tif")
         object_count: Annotated[
             int,
             GUIMeta(
@@ -787,12 +776,13 @@ class PostprocessLabels(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
-        labels = iio.imread(str(arguments.labels))
-        relabeled, object_count = _relabel_sequential(labels, arguments.min_size)
+        labels = validate_labels(iio.imread(str(arguments.labels)))
+        min_size = integer_parameter(arguments.min_size, name="min_size")
+        relabeled, count = relabel_sequential(labels, min_size=min_size)
 
         output_path = Path(arguments.output_labels)
-        _write_labels(output_path, relabeled)
-        return self.Outputs(output_labels=output_path, object_count=object_count)
+        write_labels(output_path, relabeled)
+        return self.Outputs(output_labels=output_path, object_count=count)
 
 
 def _touches_border(bbox: tuple[int, ...], shape: tuple[int, ...]) -> bool:

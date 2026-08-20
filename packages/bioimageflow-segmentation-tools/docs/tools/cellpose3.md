@@ -4,7 +4,7 @@
 It segments 2D intensity or channel images and writes a label mask.
 
 Inputs include `input_image`, `diameter`, `model_type`, Cellpose channel
-selectors, `flow_threshold`, and `cellprob_threshold`. Outputs are `mask` and
+selectors, explicit `channel_axis`, `flow_threshold`, and `cellprob_threshold`. Outputs are `mask` and
 `cell_count`. The core dependency is `cellpose==3.1.1.1`, isolated in its own
 environment spec.
 
@@ -45,8 +45,7 @@ cellpose = Cellpose3()(
 
 ## Expected Results
 
-At runtime with Cellpose installed, `mask` is a label image and `cell_count`
-equals the maximum non-background label.
+At runtime with Cellpose installed, `mask` is a label image and `cell_count` equals the number of distinct positive label IDs.
 
 ## Failure Modes
 

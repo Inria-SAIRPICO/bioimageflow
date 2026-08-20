@@ -14,7 +14,6 @@ from bioimageflow_segmentation_tools import (
     DistanceWatershedSegment,
     FilterLabels,
     LocalThresholdSegment,
-    nnInteractive,
     OtsuThresholdSegment,
     PostprocessLabels,
     SplitTouchingObjects,
@@ -25,7 +24,6 @@ from bioimageflow_segmentation_tools import (
 SEGMENTATION_TOOLS = [
     Cellpose3,
     CellposeSAM,
-    nnInteractive,
     StarDistSegmenter,
     ThresholdSegment,
     OtsuThresholdSegment,
@@ -55,10 +53,28 @@ def test_segmentation_package_all_exports_only_public_tools() -> None:
         "StarDistSegmenter",
         "ThresholdSegment",
         "WatershedSegment",
-        "nnInteractive",
     ]
     assert "classical" not in segmentation.__all__
     assert all(issubclass(getattr(segmentation, name), BaseTool) for name in segmentation.__all__)
+
+
+def test_label_output_templates_use_tiff() -> None:
+    output_fields = [
+        (Cellpose3, "mask"),
+        (CellposeSAM, "mask"),
+        (StarDistSegmenter, "mask"),
+        (ThresholdSegment, "labels"),
+        (OtsuThresholdSegment, "labels"),
+        (LocalThresholdSegment, "labels"),
+        (WatershedSegment, "labels"),
+        (DistanceWatershedSegment, "labels"),
+        (SplitTouchingObjects, "output_labels"),
+        (FilterLabels, "output_labels"),
+        (PostprocessLabels, "output_labels"),
+    ]
+
+    for tool, field_name in output_fields:
+        assert str(getattr(tool.Outputs, field_name)).endswith(".tif")
 
 
 @pytest.mark.parametrize("tool_cls", SEGMENTATION_TOOLS, ids=lambda c: c.__name__)
