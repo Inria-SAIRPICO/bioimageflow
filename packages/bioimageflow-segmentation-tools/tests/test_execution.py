@@ -421,6 +421,22 @@ def test_split_touching_objects_splits_each_clumped_label(tmp_path: Path) -> Non
     assert set(np.unique(labels)) == {0, 1, 2}
 
 
+def test_split_touching_objects_handles_sparse_uint32_ids(tmp_path: Path) -> None:
+    input_path = tmp_path / "sparse_clumps.tif"
+    output_path = tmp_path / "split.tif"
+    labels_in = np.zeros((5, 5), dtype=np.uint32)
+    labels_in[1:4, 1:4] = np.iinfo(np.uint32).max
+    iio.imwrite(input_path, labels_in)
+
+    result = SplitTouchingObjects().process_row(
+        Arguments(labels=input_path, output_labels=output_path, min_distance=5)
+    )
+
+    labels = iio.imread(output_path)
+    assert result.object_count == 1
+    assert set(np.unique(labels)) == {0, 1}
+
+
 def test_filter_labels_removes_by_area_border_and_intensity(tmp_path: Path) -> None:
     input_path = tmp_path / "labels.tif"
     intensity_path = tmp_path / "intensity.tif"
@@ -456,6 +472,32 @@ def test_filter_labels_removes_by_area_border_and_intensity(tmp_path: Path) -> N
     assert output[2, 2] == 1
     assert output[1, 5] == 0
     assert output[6, 6] == 0
+
+
+def test_filter_labels_handles_sparse_uint32_ids(tmp_path: Path) -> None:
+    input_path = tmp_path / "sparse_labels.tif"
+    output_path = tmp_path / "filtered.tif"
+    labels = np.zeros((5, 5), dtype=np.uint32)
+    labels[1:4, 1:4] = np.iinfo(np.uint32).max
+    iio.imwrite(input_path, labels)
+
+    result = FilterLabels().process_row(
+        Arguments(
+            labels=input_path,
+            output_labels=output_path,
+            min_area=1,
+            max_area=0,
+            remove_border_touching=False,
+            intensity_image="",
+            min_mean_intensity=0.0,
+            min_solidity=0.0,
+            max_eccentricity=1.0,
+        )
+    )
+
+    output = iio.imread(output_path)
+    assert result.object_count == 1
+    assert set(np.unique(output)) == {0, 1}
 
 
 def test_filter_labels_handles_volumetric_labels_with_default_shape_filters(

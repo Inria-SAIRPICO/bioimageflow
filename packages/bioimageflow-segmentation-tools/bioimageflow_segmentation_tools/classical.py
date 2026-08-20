@@ -329,7 +329,7 @@ class WatershedSegment(ProcessingTool):
     display_name = "Watershed Segment"
     documentation = (
         "Segment thresholded foreground regions. When marker labels are supplied, "
-        "foreground pixels are assigned to the nearest marker by graph distance."
+        "intensity topography guides foreground assignment to those markers."
     )
     category = Category.SEGMENTATION
     tags = ["segmentation", "watershed", "classical"]
@@ -555,6 +555,7 @@ class SplitTouchingObjects(ProcessingTool):
         from skimage.measure import regionprops
 
         source = validate_labels(iio.imread(str(arguments.labels)))
+        source, _ = relabel_sequential(source)
         min_distance = integer_parameter(
             arguments.min_distance,
             name="min_distance",
@@ -650,6 +651,7 @@ class FilterLabels(ProcessingTool):
         from skimage.measure import regionprops
 
         source = validate_labels(iio.imread(str(arguments.labels)))
+        source, _ = relabel_sequential(source)
         min_area = integer_parameter(arguments.min_area, name="min_area")
         max_area = integer_parameter(arguments.max_area, name="max_area")
         if max_area and max_area < min_area:
