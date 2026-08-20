@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from bioimageflow import DataFrameTool, Passthrough
 from bioimageflow_core import Category, GUIMeta, IOModel
 
-from ._validation import finite_float, require_columns
+from ._validation import finite_float, require_columns, validated_numeric_column
 
 
 class NearestNeighborLink(DataFrameTool):
@@ -46,32 +46,16 @@ class NearestNeighborLink(DataFrameTool):
 
         result = df.copy()
         for column in required:
-            try:
-                values = np.asarray(
-                    pd.to_numeric(result[column], errors="raise"), dtype=np.float64
-                )
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"{tool_name} column {column!r} must be numeric."
-                ) from exc
-            if not np.isfinite(values).all():
-                raise ValueError(
-                    f"{tool_name} column {column!r} must contain only finite values."
-                )
             if column in {"frame", "label"}:
-                if not np.equal(values, np.floor(values)).all():
-                    raise ValueError(
-                        f"{tool_name} column {column!r} must contain only integers."
-                    )
                 minimum = 0 if column == "frame" else 1
-                if (values < minimum).any():
-                    qualifier = "non-negative" if column == "frame" else "positive"
-                    raise ValueError(
-                        f"{tool_name} column {column!r} must contain only {qualifier} integers."
-                    )
-                result[column] = values.astype(np.int64)
+                result[column] = validated_numeric_column(
+                    result,
+                    column,
+                    tool_name,
+                    integer_minimum=minimum,
+                )
             else:
-                result[column] = values
+                result[column] = validated_numeric_column(result, column, tool_name)
 
         grouping_column = (
             "source_label_image" if "source_label_image" in result.columns else None

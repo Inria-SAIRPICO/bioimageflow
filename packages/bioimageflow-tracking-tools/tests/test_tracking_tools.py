@@ -195,6 +195,15 @@ def test_nearest_neighbor_link_rejects_invalid_values(
         NearestNeighborLink().transform(pd.DataFrame([row]), Arguments())
 
 
+def test_nearest_neighbor_link_rejects_out_of_range_integer_columns() -> None:
+    objects = pd.DataFrame(
+        [{"frame": 0, "label": 10**30, "y": 0.0, "x": 0.0}]
+    )
+
+    with pytest.raises(ValueError, match="int64 range"):
+        NearestNeighborLink().transform(objects, Arguments())
+
+
 def test_removed_tracking_adapters_are_not_public_package_api() -> None:
     import bioimageflow_tracking_tools as tracking_tools
 
@@ -671,6 +680,15 @@ def test_track_metrics_distinguishes_path_and_net_displacement() -> None:
     assert result.iloc[0]["net_speed"] == 0.0
     assert result.iloc[0]["mean_step_speed"] == 2.25
     assert result.iloc[0]["mean_area"] == 4.0
+
+
+def test_track_metrics_rejects_out_of_range_track_ids() -> None:
+    tracks = pd.DataFrame(
+        [{"track_id": 10**30, "frame": 0, "y": 0.0, "x": 0.0, "area": 1}]
+    )
+
+    with pytest.raises(ValueError, match="int64 range"):
+        TrackMetrics().transform(tracks, Arguments())
 
 
 def test_track_quality_names_duplicate_assignment_conflicts_truthfully() -> None:
