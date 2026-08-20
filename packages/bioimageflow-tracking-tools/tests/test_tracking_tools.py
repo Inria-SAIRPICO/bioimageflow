@@ -125,6 +125,24 @@ def test_nearest_neighbor_link_starts_new_tracks_after_a_frame_gap() -> None:
     assert result["track_id"].tolist() == [1, 2]
 
 
+def test_nearest_neighbor_link_is_independent_of_index_and_preserves_columns() -> None:
+    objects = pd.DataFrame(
+        [
+            {"frame": 1, "label": 1, "y": 0.0, "x": 1.0, "_bif_input_order": "a"},
+            {"frame": 0, "label": 1, "y": 0.0, "x": 0.0, "_bif_input_order": "b"},
+            {"frame": 1, "label": 2, "y": 10.0, "x": 10.0, "_bif_input_order": "c"},
+        ],
+        index=["duplicate", "duplicate", "duplicate"],
+    )
+
+    result = NearestNeighborLink().transform(objects, Arguments(max_distance=2.0))
+
+    assert result.index.tolist() == objects.index.tolist()
+    assert result["_bif_input_order"].tolist() == ["a", "b", "c"]
+    assert result["track_id"].tolist() == [1, 1, 2]
+    assert result["track_count"].tolist() == [2, 2, 2]
+
+
 @pytest.mark.parametrize("column,value", [("frame", 0.5), ("label", 0), ("x", np.inf)])
 def test_nearest_neighbor_link_rejects_invalid_values(
     column: str, value: float

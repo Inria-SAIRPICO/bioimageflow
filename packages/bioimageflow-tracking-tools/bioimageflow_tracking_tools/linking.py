@@ -82,24 +82,22 @@ class NearestNeighborLink(DataFrameTool):
             result["track_count"] = pd.Series(dtype=np.int64)
             return result
 
-        result["_bif_input_order"] = np.arange(len(result))
-        result = result.sort_values(
-            ["frame", "label", "_bif_input_order"], kind="stable"
-        )
-        assignments = pd.Series(index=result.index, dtype=np.int64)
+        frames = result["frame"].to_numpy(dtype=np.int64)
+        labels = result["label"].to_numpy(dtype=np.int64)
+        input_positions = np.arange(len(result), dtype=np.int64)
+        sorted_positions = np.lexsort((input_positions, labels, frames))
+        assignments = np.empty(len(result), dtype=np.int64)
         next_track_id = 1
         previous_frame: int | None = None
-        previous_indices: list[Any] = []
+        previous_positions = np.empty(0, dtype=np.int64)
 
-        for frame_value, frame_objects in result.groupby("frame", sort=True):
+        for frame_value in np.unique(frames[sorted_positions]):
             frame = int(frame_value)
-            current_indices = frame_objects.index.tolist()
-            current_tracks: dict[Any, int] = {}
+            current_positions = sorted_positions[frames[sorted_positions] == frame]
+            current_tracks: dict[int, int] = {}
             if previous_frame is not None and frame == previous_frame + 1:
-                previous_points = result.loc[previous_indices, ["y", "x"]].to_numpy(
-                    float
-                )
-                current_points = frame_objects[["y", "x"]].to_numpy(float)
+                previous_points = result.iloc[previous_positions][["y", "x"]].to_numpy(float)
+                current_points = result.iloc[current_positions][["y", "x"]].to_numpy(float)
                 distances = cdist(previous_points, current_points)
                 # Invalid edges cost more than all valid edges combined, so assignment
                 # maximizes the valid link count before minimizing total distance.
@@ -111,19 +109,20 @@ class NearestNeighborLink(DataFrameTool):
                     previous_rows.tolist(), current_columns.tolist(), strict=True
                 ):
                     if distances[previous_row, current_column] <= max_distance:
-                        current_index = current_indices[current_column]
-                        current_tracks[current_index] = int(
-                            assignments.loc[previous_indices[previous_row]]
+                        current_position = int(current_positions[current_column])
+                        current_tracks[current_position] = int(
+                            assignments[previous_positions[previous_row]]
                         )
 
-            for index in current_indices:
-                if index not in current_tracks:
-                    current_tracks[index] = next_track_id
+            for position_value in current_positions:
+                position = int(position_value)
+                if position not in current_tracks:
+                    current_tracks[position] = next_track_id
                     next_track_id += 1
-                assignments.loc[index] = current_tracks[index]
+                assignments[position] = current_tracks[position]
             previous_frame = frame
-            previous_indices = current_indices
+            previous_positions = current_positions
 
-        result["track_id"] = assignments.astype(np.int64)
+        result["track_id"] = assignments
         result["track_count"] = int(result["track_id"].nunique())
-        return result.sort_values("_bif_input_order").drop(columns="_bif_input_order")
+        return result
