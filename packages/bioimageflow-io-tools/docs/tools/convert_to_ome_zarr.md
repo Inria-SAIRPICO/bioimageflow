@@ -1,33 +1,20 @@
 # ConvertToOmeZarr
 
-`ConvertToOmeZarr` reads an image file and converts it to a single-scale,
-uncompressed OME-Zarr v2 directory. It is intentionally lightweight and useful
-for smoke-tested workflow demos, simple local handoffs, and validating that
-downstream tools can consume an NGFF-like directory.
-
-For production multiscale pyramids, chunk tuning, compression, or very large
-datasets, use a future BioIO or ome-zarr-backed converter instead.
+`ConvertToOmeZarr` writes a single-scale OME-Zarr v2 store with the maintained `bioio-ome-zarr` writer and then reopens it through BioIO to verify shape and dtype.
 
 ## Inputs
 
 - `input_image`: image file to convert.
+- `dimension_order`: optional axis order.
+  Reader-provided axes are used when they are unambiguous; otherwise this input is required.
 
 ## Outputs
 
-- `output_image`: converted OME-Zarr directory, defaulting to
-  `{input_image.stem}.ome.zarr`.
+- `output_image`: OME-Zarr directory, defaulting to `{input_image.stem}.ome.zarr`.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, imageio for reading, NumPy, and the package's minimal
-OME-Zarr v2 writer.
-
-## Assumptions
-
-The input image is small enough for the lightweight single-scale writer and has
-already been sliced to the desired array. This converter creates a minimal
-OME-Zarr v2 directory for deterministic workflow exchange, not a production
-multiscale NGFF export.
+BioIO, the pinned BioIO reader plugins, and `bioio-ome-zarr` run in the tool's dedicated environment.
 
 ## Minimal Example
 
@@ -36,17 +23,18 @@ from bioimageflow_core import Arguments
 from bioimageflow_io_tools import ConvertToOmeZarr
 
 ConvertToOmeZarr().process_row(
-    Arguments(input_image="selected_plane.tif", output_image="selected_plane.ome.zarr")
+    Arguments(
+        input_image="volume.tif",
+        dimension_order="ZYX",
+        output_image="volume.ome.zarr",
+    )
 )
 ```
 
 ## Expected Results
 
-The output directory contains `.zgroup`, `.zattrs`, a `0/.zarray` metadata file,
-and the first array chunk. Metadata includes a single multiscales entry.
+The writer creates valid NGFF metadata and image data that BioIO can reopen with the declared shape and dtype.
 
 ## Failure Modes
 
-Unreadable inputs and filesystem write failures stop execution. The converter
-does not build pyramids, compression, or chunk layouts optimized for large
-production data.
+Ambiguous source axes without `dimension_order`, invalid axes, writer errors, and round-trip shape or dtype mismatches stop execution.

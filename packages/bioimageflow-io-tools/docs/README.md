@@ -6,12 +6,9 @@ Lightweight image IO tools:
   axes guess.
 - `ValidateImageLayout`: checks that a declared axis layout matches an image
   and includes required axes.
-- `ConvertImageFormat`: converts images to ordinary imageio outputs,
-  OME-TIFF, or minimal OME-Zarr based on the output suffix, with optional scene
-  and dimension selection before export.
+- `ConvertImageFormat`: converts between ordinary imageio formats, with optional scene and dimension selection before export.
 - `ConvertToOmeTiff`: converts an image file to OME-TIFF with `tifffile`.
-- `ConvertToOmeZarr`: converts an image file to a single-scale uncompressed
-  OME-Zarr/Zarr v2 directory.
+- `ConvertToOmeZarr`: writes OME-Zarr v2 through the maintained BioIO writer and verifies it by reopening.
 - `SelectScene`: extracts scene 0 from ordinary images or a TIFF series by
   index.
 - `SelectTimepoint`: selects one T index from a declared layout.

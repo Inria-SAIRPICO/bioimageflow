@@ -87,15 +87,7 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     assert ome_tiff.output_image == ome_tiff_output
     assert tifffile_shape(ome_tiff_output) == (4, 5)
 
-    zarr_output = tmp_path / "selected.ome.zarr"
-    ome_zarr = ConvertToOmeZarr().process_row(
-        Arguments(input_image=selected_output, output_image=zarr_output)
-    )
-    assert ome_zarr.output_image == zarr_output
-    assert (zarr_output / ".zgroup").exists()
-    assert (zarr_output / ".zattrs").exists()
-    assert (zarr_output / "0" / ".zarray").exists()
-    assert (zarr_output / "0" / "0.0").exists()
+    assert ConvertToOmeZarr.environment.name == "bioio-all"
 
 
 def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> None:
@@ -112,8 +104,8 @@ def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> Non
     assert metadata.shape == [2, 3, 4, 5]
     assert metadata.dtype == "uint16"
     assert metadata.ndim == 4
-    assert metadata.axes == "CZYX"
-    assert metadata.channel_names == ["channel_0", "channel_1"]
+    assert metadata.axes == "??YX"
+    assert metadata.channel_names == []
     assert metadata.pixel_sizes == {"X": None, "Y": None, "Z": None}
 
 
@@ -143,6 +135,27 @@ def test_read_image_metadata_reports_ome_tiff_pixel_sizes(tmp_path: Path) -> Non
     assert metadata.shape == [4, 5]
     assert metadata.axes == "YX"
     assert metadata.pixel_sizes == {"X": 0.2, "Y": 0.3, "Z": 0.4}
+
+
+def test_read_image_metadata_uses_headers_and_reports_rgb_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "rgb.tif"
+    iio.imwrite(source, np.zeros((4, 5, 3), dtype=np.uint8))
+
+    def fail_imread(*args: object, **kwargs: object) -> None:
+        raise AssertionError("metadata inspection must not read the pixel array")
+
+    monkeypatch.setattr(iio, "imread", fail_imread)
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+    assert metadata.shape == [4, 5, 3]
+    assert metadata.axes == "YXS"
+    assert metadata.channel_names == ["red", "green", "blue"]
 
 
 def test_validate_image_layout_checks_length_required_axes_and_sizes(tmp_path: Path) -> None:
@@ -176,8 +189,6 @@ def test_validate_image_layout_checks_length_required_axes_and_sizes(tmp_path: P
 
 
 def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path) -> None:
-    import tifffile
-
     from bioimageflow_io_tools import ConvertImageFormat
 
     data = np.arange(2 * 3 * 4 * 5, dtype=np.uint16).reshape(2, 3, 4, 5)
@@ -200,39 +211,18 @@ def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path)
     assert result.output_image == tiff_output
     np.testing.assert_array_equal(iio.imread(tiff_output), data[1, 2])
 
-    ome_tiff_output = tmp_path / "converted.ome.tiff"
-    ConvertImageFormat().process_row(
-        Arguments(
-            input_image=source,
-            output_image=ome_tiff_output,
-            input_layout="CZYX",
-            scene=None,
-            channel=1,
-            z=2,
-            timepoint=None,
-            dimension_order="YX",
+    with pytest.raises(ValueError, match="ordinary image formats"):
+        ConvertImageFormat().process_row(
+            Arguments(
+                input_image=source,
+                output_image=tmp_path / "converted.ome.tiff",
+                input_layout="CZYX",
+                scene=None,
+                channel=1,
+                z=2,
+                timepoint=None,
+            )
         )
-    )
-    with tifffile.TiffFile(ome_tiff_output) as tif:
-        assert tif.series[0].axes == "YX"
-        np.testing.assert_array_equal(tif.series[0].asarray(), data[1, 2])
-
-    ome_zarr_output = tmp_path / "converted.ome.zarr"
-    zarr_result = ConvertImageFormat().process_row(
-        Arguments(
-            input_image=source,
-            output_image=ome_zarr_output,
-            input_layout="CZYX",
-            scene=None,
-            channel=1,
-            z=2,
-            timepoint=None,
-            dimension_order=None,
-        )
-    )
-    assert zarr_result.output_image == ome_zarr_output
-    assert (ome_zarr_output / ".zattrs").exists()
-    assert (ome_zarr_output / "0" / ".zarray").exists()
 
 
 def test_bioio_convert_image_uses_bioio_plugins_and_selection(
@@ -248,7 +238,12 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
     saves: list[tuple[np.ndarray, str, str]] = []
 
     class FakeBioImage:
-        dims = "TCZYX"
+        class dims:
+            T = 2
+            C = 3
+            Z = 4
+
+        scenes = ("0", "1", "2")
         shape = data.shape
         dtype = data.dtype
 
@@ -260,9 +255,9 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
             self.scene = scene
 
         def get_image_data(self, dim_order: str, **dim_kwargs: int) -> np.ndarray:
-            assert dim_order == "TCZYX"
+            assert dim_order == "YX"
             assert dim_kwargs == {"C": 1, "Z": 2, "T": 0}
-            return data[0:1, 1:2, 2:3]
+            return data[0, 1, 2]
 
     class FakeOmeTiffWriter:
         @staticmethod
@@ -318,6 +313,51 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
     assert saved_path == str(output)
     assert saved_dim_order == "YX"
     np.testing.assert_array_equal(saved_array, data[0, 1, 2])
+
+
+def test_convert_to_ome_zarr_uses_writer_and_reopens_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bioimageflow_io_tools import ConvertToOmeZarr
+
+    source = tmp_path / "source.tif"
+    output = tmp_path / "output.ome.zarr"
+    data = np.arange(20, dtype=np.uint16).reshape(4, 5)
+    iio.imwrite(source, data)
+    writer_arguments: dict[str, object] = {}
+
+    class FakeBioImage:
+        def __init__(self, path: Path) -> None:
+            assert path == output
+
+        def get_image_dask_data(self, dim_order: str) -> np.ndarray:
+            assert dim_order == "YX"
+            return data
+
+    class FakeOMEZarrWriter:
+        def __init__(self, **kwargs: object) -> None:
+            writer_arguments.update(kwargs)
+
+        def write_full_volume(self, array: np.ndarray) -> None:
+            np.testing.assert_array_equal(array, data)
+            output.mkdir()
+
+    bioio_module = types.ModuleType("bioio")
+    bioio_module.BioImage = FakeBioImage
+    ome_zarr_writers = types.ModuleType("bioio_ome_zarr.writers")
+    ome_zarr_writers.OMEZarrWriter = FakeOMEZarrWriter
+    monkeypatch.setitem(sys.modules, "bioio", bioio_module)
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr", types.ModuleType("bioio_ome_zarr"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr.writers", ome_zarr_writers)
+
+    result = ConvertToOmeZarr().process_row(
+        Arguments(input_image=source, output_image=output)
+    )
+
+    assert result.output_image == output
+    assert writer_arguments["zarr_format"] == 2
+    assert writer_arguments["axes_names"] == ["y", "x"]
 
 
 def test_select_scene_supports_ordinary_images_and_tiff_series(tmp_path: Path) -> None:
@@ -397,6 +437,25 @@ def test_explicit_axis_selectors_slice_declared_layouts(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="has no T axis"):
         SelectTimepoint().process_row(
             Arguments(input_image=zyx_source, layout="ZYX", timepoint=0, output_image=tmp_path / "bad.tif")
+        )
+
+    with pytest.raises(IndexError, match="C index -1"):
+        SelectChannel().process_row(
+            Arguments(input_image=source, layout="TCYX", channel=-1, output_image=tmp_path / "negative.tif")
+        )
+    with pytest.raises(IndexError, match="C index 3"):
+        SelectChannel().process_row(
+            Arguments(input_image=source, layout="TCYX", channel=3, output_image=tmp_path / "too_large.tif")
+        )
+    with pytest.raises(ValueError, match="must be non-empty"):
+        SelectZRange().process_row(
+            Arguments(
+                input_image=zyx_source,
+                layout="ZYX",
+                start_z=2,
+                stop_z=2,
+                output_image=tmp_path / "empty.tif",
+            )
         )
 
 

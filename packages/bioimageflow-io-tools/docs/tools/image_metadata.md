@@ -1,9 +1,7 @@
 # ReadImageMetadata
 
-`ReadImageMetadata` reads an image and returns lightweight metadata for
-ingestion checks. It reports `shape`, `dtype`, `ndim`, and a pragmatic `axes`
-guess derived from dimensionality, generated channel names, and available
-pixel-size metadata.
+`ReadImageMetadata` inspects image headers without loading the full pixel array when the reader supports it.
+It reports reader-provided `shape`, `dtype`, axes, channel names, and physical pixel sizes.
 
 ## Inputs
 
@@ -12,10 +10,8 @@ pixel-size metadata.
 ## Outputs
 
 - `shape`, `dtype`, and `ndim`: array metadata read from the file.
-- `axes`: pragmatic axis guess using common BioImageFlow defaults: `YX`, `ZYX`,
-  `CZYX`, and `TCZYX`.
-- `channel_names`: generated names such as `channel_0` when a C axis is
-  inferred.
+- `axes`: reader-provided axes, `YXS` for channel-last RGB(A), and `?` for each ambiguous dimension.
+- `channel_names`: metadata names, generated C-axis names, or RGB(A) sample names when available.
 - `pixel_sizes`: X, Y, and Z physical pixel sizes when TIFF metadata exposes
   them; otherwise `None`.
 
@@ -25,9 +21,7 @@ imageio, tifffile, NumPy, and Python XML parsing for OME-TIFF metadata.
 
 ## Assumptions
 
-This is a lightweight reader. It does not normalize metadata across every
-microscopy container, and axis names are guesses unless the file format exposes
-stronger metadata.
+This is a lightweight reader and does not invent biological meanings for unnamed dimensions.
 
 Use it before layout validation or conversion when a workflow needs to branch
 or report basic image properties.
@@ -44,9 +38,7 @@ assert metadata.axes == "CZYX"
 
 ## Expected Results
 
-Synthetic 4D fixtures report the expected shape, dtype, `CZYX` axes, generated
-channel names, and empty pixel sizes. Real OME-TIFF images should additionally
-populate pixel sizes when physical-size tags are present.
+Unannotated multidimensional TIFFs report ambiguous leading axes, while OME-TIFF axes and physical sizes are preserved.
 
 ## Failure Modes
 

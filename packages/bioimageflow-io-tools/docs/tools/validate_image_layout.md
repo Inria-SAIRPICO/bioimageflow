@@ -27,9 +27,8 @@ downstream workflow rows do not continue with ambiguous dimensions.
 
 ## Assumptions
 
-Valid axis names are limited to `T`, `C`, `Z`, `Y`, and `X`. The tool validates
-the declared layout against the array shape; it does not infer whether the
-declaration is biologically correct.
+Valid axis names are `T`, `C`, `Z`, `Y`, `X`, and a final RGB(A) sample axis `S`.
+The tool validates the declared layout against the array shape; it does not infer whether the declaration is biologically correct.
 
 Use it before tools that depend on a declared layout, especially explicit time,
 channel, or Z selection.
