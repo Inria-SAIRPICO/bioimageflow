@@ -7,6 +7,9 @@ Install-time libraries for the public tools are BioImageFlow, pandas, imageio, N
 Image-processing tools use the shared `GENERAL_ENV`, which pins imageio, scikit-image, NumPy, and Pillow for worker execution.
 The package is intended for users who need to assemble or inspect workflows without installing deep-learning dependencies.
 
+`ExtractChannel` is no longer exported by this package.
+Use `SelectChannel` from `bioimageflow-io-tools` instead.
+
 ## Public Tools
 
 - [Files](tools/files.md): create a source table from an explicit file list or a directory scan.

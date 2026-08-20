@@ -206,3 +206,15 @@ def test_connected_components_uses_face_connectivity(tmp_path: Path) -> None:
     labels = iio.imread(result.output_image)
     assert result.num_labels == 3
     assert set(np.unique(labels)) == {0, 1, 2, 3}
+
+
+def test_connected_components_rejects_unsupported_dimensions(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "four-dimensional.tif"
+    iio.imwrite(input_image, np.zeros((2, 2, 2, 2), dtype=np.uint8))
+
+    with pytest.raises(ValueError, match="2D or 3D"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+        )

@@ -26,7 +26,9 @@ Connectivity is one orthogonal step in any dimension: 4-connected in 2D and 6-co
 from bioimageflow_core import Arguments
 from bioimageflow_common_tools import ConnectedComponents
 
-ConnectedComponents().process_row(Arguments(input_image="binary.tif"))
+ConnectedComponents().process_row(
+    Arguments(input_image="binary.tif", output_image="binary_labels.tif")
+)
 ```
 
 ## Expected Results

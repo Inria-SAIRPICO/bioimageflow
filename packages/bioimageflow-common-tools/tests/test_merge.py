@@ -219,3 +219,9 @@ class TestCollect:
         assert list(result.columns) == ["value", "value_2", "value_1"]
         assert schema is not None
         assert list(schema) == list(result.columns)
+
+    def test_single_table_rejects_duplicate_columns(self):
+        duplicate = pd.DataFrame([[1, 2]], columns=["value", "value"])
+
+        with pytest.raises(ValueError, match="duplicate column"):
+            Collect().merge_dataframes([duplicate], Arguments())

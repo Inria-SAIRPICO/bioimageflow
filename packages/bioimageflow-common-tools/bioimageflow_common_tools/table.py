@@ -48,9 +48,21 @@ def _parse_rename_mapping(value: str | None) -> dict[str, str]:
 
 
 def _validate_column_selection(
+    available_columns: Any,
     columns: list[str],
     rename_mapping: dict[str, str],
 ) -> list[str]:
+    available = list(available_columns)
+    duplicated_available = list(dict.fromkeys(
+        column
+        for index, column in enumerate(available)
+        if column in available[:index]
+    ))
+    if duplicated_available:
+        raise ValueError(
+            "Upstream table contains duplicate column name(s): "
+            f"{', '.join(str(column) for column in duplicated_available)}."
+        )
     duplicates = list(dict.fromkeys(
         column for index, column in enumerate(columns) if column in columns[:index]
     ))
@@ -271,7 +283,7 @@ class SelectColumns(DataFrameTool):
             raise KeyError(f"Missing column(s): {', '.join(missing)}")
 
         rename_mapping = _parse_rename_mapping(arguments.rename_mapping)
-        _validate_column_selection(columns, rename_mapping)
+        _validate_column_selection(df.columns, columns, rename_mapping)
         return df.loc[:, columns].rename(columns=rename_mapping).copy()
 
     @classmethod
@@ -284,7 +296,7 @@ class SelectColumns(DataFrameTool):
         if missing:
             return None
         rename_mapping = _parse_rename_mapping((inputs or {}).get("rename_mapping", ""))
-        final_names = _validate_column_selection(columns, rename_mapping)
+        final_names = _validate_column_selection(upstream, columns, rename_mapping)
         return {
             final_name: upstream[column]
             for column, final_name in zip(columns, final_names)

@@ -151,6 +151,20 @@ class TestFiles:
 
         assert nested_file in {Path(path) for path in result["path"]}
 
+    def test_unmatched_scan_preserves_output_schema(self, image_dir: Path) -> None:
+        result = Files().transform(
+            None,
+            Arguments(
+                path=image_dir,
+                files=None,
+                pattern="*.does-not-exist",
+                recursive=False,
+            ),
+        )
+
+        assert result.empty
+        assert list(result.columns) == ["path"]
+
     @pytest.mark.parametrize(
         ("arguments", "message"),
         [
@@ -366,3 +380,76 @@ class TestMosaic:
             assert mosaic.size == (4, 2)
             assert mosaic.getpixel((0, 0)) == (0, 200, 0, 255)
             assert mosaic.getpixel((2, 0)) == (255, 0, 0, 128)
+
+    def test_preserves_uint16_grayscale_values(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "uint16.tif"
+        output = tmp_path / "mosaic.png"
+        pixels = np.array([[0, 256], [1000, 65535]], dtype=np.uint16)
+        iio.imwrite(input_path, pixels)
+
+        Mosaic().process_batch([
+            Arguments(
+                input_image=input_path,
+                columns=1,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
+            )
+        ])
+
+        with Image.open(output) as mosaic:
+            assert mosaic.mode == "I;16"
+            np.testing.assert_array_equal(np.asarray(mosaic), pixels)
+
+    def test_preserves_palette_transparency(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "palette.png"
+        output = tmp_path / "mosaic.png"
+        palette = Image.new("P", (2, 1))
+        palette.putpalette([255, 0, 0, 0, 255, 0] + [0] * (256 * 3 - 6))
+        palette.putdata([0, 1])
+        palette.info["transparency"] = 0
+        palette.save(input_path)
+
+        Mosaic().process_batch([
+            Arguments(
+                input_image=input_path,
+                columns=1,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
+            )
+        ])
+
+        with Image.open(output) as mosaic:
+            assert mosaic.mode == "RGBA"
+            assert mosaic.getpixel((0, 0)) == (255, 0, 0, 0)
+            assert mosaic.getpixel((1, 0)) == (0, 255, 0, 255)
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("columns", 1.5, "Columns must be a positive integer"),
+            ("tile_width", 0, "Tile width must be a positive integer"),
+            ("tile_height", True, "Tile height must be a positive integer"),
+        ],
+    )
+    def test_rejects_non_positive_integer_layout_settings(
+        self,
+        tmp_path: Path,
+        field: str,
+        value: object,
+        message: str,
+    ) -> None:
+        input_path = tmp_path / "input.png"
+        iio.imwrite(input_path, np.zeros((2, 2), dtype=np.uint8))
+        values = {
+            "input_image": input_path,
+            "columns": 1,
+            "tile_width": None,
+            "tile_height": None,
+            "mosaic_path": tmp_path / "mosaic.png",
+        }
+        values[field] = value
+
+        with pytest.raises(ValueError, match=message):
+            Mosaic().process_batch([Arguments(**values)])

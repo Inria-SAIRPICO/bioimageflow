@@ -21,6 +21,11 @@ Install-time libraries are BioImageFlow, pandas, imageio, NumPy, and Pillow.
 Image-processing tools use the shared `GENERAL_ENV`, which pins imageio, scikit-image, NumPy, and Pillow for worker execution.
 New domain-specific tools should live in their own packages instead of expanding this package's scope.
 
+## Migration
+
+`ExtractChannel` has moved out of this package.
+Use `SelectChannel` from `bioimageflow-io-tools` for channel selection.
+
 ## Tests
 
 ```bash

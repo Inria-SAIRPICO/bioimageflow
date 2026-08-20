@@ -63,7 +63,6 @@ class Mosaic(ProcessingTool):
         )] = None
 
     class Outputs(IOModel):
-        
         mosaic_path: Annotated[
             Path,
             ImageSpec(
@@ -71,8 +70,8 @@ class Mosaic(ProcessingTool):
                 layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
             ),
             GUIMeta(
-            display_name="Mosaic image",
-            description="Composite mosaic image (grid of all input tiles).",
+                display_name="Mosaic image",
+                description="Composite mosaic image (grid of all input tiles).",
             ),
         ] = Template("{node_name}_mosaic.png")
         image_count: Annotated[int, GUIMeta(
@@ -92,19 +91,20 @@ class Mosaic(ProcessingTool):
             return []
 
         first = arguments_list[0]
-        columns = int(first.columns)
-        tile_width = first.tile_width
-        tile_height = first.tile_height
-        if columns < 1:
-            raise ValueError("Columns must be at least 1.")
-        if tile_width is not None and tile_width < 1:
-            raise ValueError("Tile width must be at least 1 when provided.")
-        if tile_height is not None and tile_height < 1:
-            raise ValueError("Tile height must be at least 1 when provided.")
+        columns = _positive_integer(first.columns, "Columns")
+        tile_width = _optional_positive_integer(first.tile_width, "Tile width")
+        tile_height = _optional_positive_integer(first.tile_height, "Tile height")
+        output_path = Path(first.mosaic_path)
         for args in arguments_list[1:]:
-            settings = (int(args.columns), args.tile_width, args.tile_height)
+            settings = (
+                _positive_integer(args.columns, "Columns"),
+                _optional_positive_integer(args.tile_width, "Tile width"),
+                _optional_positive_integer(args.tile_height, "Tile height"),
+            )
             if settings != (columns, tile_width, tile_height):
                 raise ValueError("Mosaic layout settings must be identical for every row.")
+            if Path(args.mosaic_path) != output_path:
+                raise ValueError("Mosaic output path must be identical for every row.")
 
         images = []
         try:
@@ -137,15 +137,11 @@ class Mosaic(ProcessingTool):
                 y = (idx // cols) * cell_height
                 tile = img if img.mode == mode else img.convert(mode)
                 try:
-                    if mode == "RGBA":
-                        canvas.alpha_composite(tile, (x, y))
-                    else:
-                        canvas.paste(tile, (x, y))
+                    canvas.paste(tile, (x, y))
                 finally:
                     if tile is not img:
                         tile.close()
 
-            output_path = Path(first.mosaic_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 canvas.save(str(output_path))
@@ -165,8 +161,26 @@ class Mosaic(ProcessingTool):
 def _mosaic_mode(images: list[Any]) -> str:
     """Choose a PNG-compatible mode without discarding color or transparency."""
     modes = {image.mode for image in images}
-    if modes & {"LA", "PA", "RGBA"}:
+    if any(_has_transparency(image) for image in images):
         return "RGBA"
     if not modes <= {"1", "L"}:
+        if modes <= {"1", "L", "I", "I;16", "I;16B", "I;16L", "I;16N"}:
+            return "I;16"
         return "RGB"
     return "L"
+
+
+def _has_transparency(image: Any) -> bool:
+    return image.mode in {"LA", "PA", "RGBA"} or "transparency" in image.info
+
+
+def _positive_integer(value: Any, name: str) -> int:
+    from numbers import Integral
+
+    if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(value)
+
+
+def _optional_positive_integer(value: Any, name: str) -> int | None:
+    return None if value is None else _positive_integer(value, name)

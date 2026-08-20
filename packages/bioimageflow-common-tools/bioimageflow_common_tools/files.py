@@ -92,4 +92,4 @@ class Files(DataFrameTool):
             files = sorted(path for path in candidates if path.is_file())
 
         rows = [{"path": str(path.resolve())} for path in files]
-        return pd.DataFrame(rows)
+        return pd.DataFrame(rows, columns=pd.Index(["path"]))

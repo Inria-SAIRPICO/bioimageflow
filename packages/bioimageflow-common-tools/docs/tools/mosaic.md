@@ -9,7 +9,7 @@ The core library is Pillow.
 
 Use it for quick visual QC of image batches or restored/segmented outputs.
 Without an explicit tile size, each grid cell uses the widest and tallest loaded tile, so differently sized images do not overlap.
-Grayscale input remains grayscale, RGB input remains RGB, and any alpha-bearing tile produces an RGBA mosaic.
+8-bit and 16-bit grayscale input remains grayscale, RGB input remains RGB, and any alpha-bearing tile produces an RGBA mosaic.
 Large batches or very large tiles can create a large in-memory canvas.
 
 ## Dependencies and Core Libraries

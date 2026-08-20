@@ -187,3 +187,13 @@ def test_select_columns_rejects_duplicate_rename_sources():
             df,
             Arguments(columns="sample", rename_mapping="sample:first,sample:second"),
         )
+
+
+def test_select_columns_rejects_duplicate_upstream_columns():
+    df = pd.DataFrame([["A", "B"]], columns=["sample", "sample"])
+
+    with pytest.raises(ValueError, match="Upstream table contains duplicate"):
+        SelectColumns().transform(
+            df,
+            Arguments(columns="sample", rename_mapping=""),
+        )

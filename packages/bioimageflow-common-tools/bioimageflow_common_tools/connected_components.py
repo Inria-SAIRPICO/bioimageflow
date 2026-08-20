@@ -74,8 +74,18 @@ class ConnectedComponents(ProcessingTool):
 
         print("Computing connected components...")
         foreground = iio.imread(str(arguments.input_image)) > 0
-        labeled_array: Any = label(foreground, connectivity=1, return_num=False)
-        num_labels = int(labeled_array.max(initial=0))
+        if foreground.ndim not in {2, 3}:
+            raise ValueError(
+                "Input image must be a 2D or 3D binary image; "
+                f"got shape {foreground.shape}."
+            )
+        labeled_result: Any = label(
+            foreground,
+            connectivity=1,
+            return_num=True,
+        )
+        labeled_array, num_labels = labeled_result
+        num_labels = int(num_labels)
         if num_labels > np.iinfo(np.uint32).max:
             raise OverflowError("Connected-component count exceeds uint32 capacity.")
         labeled_array = labeled_array.astype(np.uint32, copy=False)

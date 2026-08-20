@@ -333,6 +333,7 @@ class Collect(DataFrameTool):
         if not dfs:
             return pd.DataFrame()
         if len(dfs) == 1:
+            _require_unique_columns(dfs[0].columns, "Upstream table 1")
             return dfs[0].copy()
         result = dfs[0].copy()
         for df in dfs[1:]:
