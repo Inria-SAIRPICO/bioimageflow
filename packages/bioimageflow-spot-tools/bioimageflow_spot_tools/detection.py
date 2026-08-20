@@ -56,21 +56,36 @@ def _local_maxima(
             return_num=True,
         ),
     )
-    candidates = []
-    for plateau in range(1, plateau_count + 1):
-        coordinates = np.argwhere(plateau_labels == plateau)
-        y, x = min((int(y), int(x)) for y, x in coordinates)
-        candidates.append((y, x))
+    foreground_indices = np.flatnonzero(maxima_mask)
+    plateau_ids = plateau_labels.ravel()[foreground_indices]
+    first_indices = np.full(plateau_count + 1, score.size, dtype=np.intp)
+    np.minimum.at(first_indices, plateau_ids, foreground_indices)
+    candidates = [
+        tuple(int(value) for value in np.unravel_index(flat_index, score.shape))
+        for flat_index in first_indices[1:]
+    ]
     candidates.sort(key=lambda yx: (-float(score[yx]), yx[0], yx[1]))
 
     accepted: list[tuple[int, int]] = []
+    bucket_size = min_distance + 1
+    occupied_buckets: dict[tuple[int, int], list[tuple[int, int]]] = {}
     for y, x in candidates:
+        bucket_y, bucket_x = y // bucket_size, x // bucket_size
+        nearby = (
+            accepted_coordinate
+            for nearby_bucket_y in range(bucket_y - 1, bucket_y + 2)
+            for nearby_bucket_x in range(bucket_x - 1, bucket_x + 2)
+            for accepted_coordinate in occupied_buckets.get(
+                (nearby_bucket_y, nearby_bucket_x), []
+            )
+        )
         if any(
             max(abs(y - accepted_y), abs(x - accepted_x)) <= min_distance
-            for accepted_y, accepted_x in accepted
+            for accepted_y, accepted_x in nearby
         ):
             continue
         accepted.append((y, x))
+        occupied_buckets.setdefault((bucket_y, bucket_x), []).append((y, x))
     return sorted(accepted)
 
 

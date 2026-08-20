@@ -42,6 +42,7 @@ matches = SpotColocalization().merge_dataframes(
 
 For each group, matching first maximizes the number of one-to-one pairs within `max_distance`, then minimizes total distance among maximum-cardinality matchings.
 The output dataframe contains one row per matched reference/query pair and repeats `matched_count` for each group.
+If either input table is empty, the output is an empty table with the declared match columns.
 
 ## Failure Modes
 

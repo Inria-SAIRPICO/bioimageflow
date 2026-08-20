@@ -142,6 +142,17 @@ def test_local_maxima_keeps_borders_and_selects_one_deterministic_plateau_pixel(
     assert maxima == [(0, 0), (3, 3)]
 
 
+def test_local_maxima_applies_chebyshev_suppression_across_spatial_buckets() -> None:
+    score = np.zeros((12, 12), dtype=np.float32)
+    score[2, 2] = 4
+    score[4, 4] = 3
+    score[6, 6] = 2
+
+    maxima = spot_detection._local_maxima(score, threshold=1, min_distance=2)
+
+    assert maxima == [(2, 2), (6, 6)]
+
+
 def test_detect_spots_rejects_invalid_filter_parameters(tmp_path: Path) -> None:
     input_image = _spot_image(tmp_path / "puncta.tif")
 
@@ -655,7 +666,7 @@ def test_spots_to_labels_rounds_half_up_and_counts_visible_labels(
 
 @pytest.mark.parametrize(
     "spot_id",
-    [0, -1, 1.5, int(np.iinfo(np.uint32).max) + 1],
+    [0, -1, 1.5, int(np.iinfo(np.uint32).max) + 1, 10**1000],
 )
 def test_spot_label_renderers_reject_invalid_label_ids(
     tmp_path: Path,
@@ -670,12 +681,12 @@ def test_spot_label_renderers_reject_invalid_label_ids(
         label_mode=True,
     )
 
-    with pytest.raises(ValueError, match="positive integer|<="):
+    with pytest.raises(ValueError, match="finite number|positive integer|<="):
         RenderSpots().process_batch(
             [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")]
         )
 
-    with pytest.raises(ValueError, match="positive integer|<="):
+    with pytest.raises(ValueError, match="finite number|positive integer|<="):
         SpotsToLabels().process_batch(
             [Arguments(**vars(spot), label_image=tmp_path / "labels.tif")]
         )
@@ -830,6 +841,33 @@ def test_spot_colocalization_rejects_unrelated_index_lineage() -> None:
             ],
             Arguments(max_distance=2.0),
         )
+
+
+@pytest.mark.parametrize("empty_input", [0, 1])
+def test_spot_colocalization_accepts_an_empty_channel(empty_input: int) -> None:
+    tables = [
+        pd.DataFrame(
+            {"spot_id": [1], "y": [5.0], "x": [5.0]},
+            index=_index(["image::0"]),
+        ),
+        pd.DataFrame(columns=["spot_id", "y", "x"]),
+    ]
+    if empty_input == 0:
+        tables.reverse()
+
+    result = SpotColocalization().merge_dataframes(
+        tables,
+        Arguments(max_distance=2.0),
+    )
+
+    assert result.empty
+    assert list(result.columns) == [
+        "group",
+        "reference_spot_id",
+        "query_spot_id",
+        "distance",
+        "matched_count",
+    ]
 
 
 def test_spot_quality_metrics_reports_snr_and_nearest_neighbor(tmp_path: Path) -> None:

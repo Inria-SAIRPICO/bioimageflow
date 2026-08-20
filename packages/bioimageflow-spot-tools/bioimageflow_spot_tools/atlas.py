@@ -2,7 +2,6 @@
 
 import tempfile
 import time
-import math
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -23,6 +22,8 @@ from bioimageflow_core import (
     run_external_command,
     run_external_command_with_staged_output,
 )
+
+from .validation import finite_float, integral_value
 
 atlas_env = EnvironmentSpec(
     name="atlas",
@@ -165,25 +166,22 @@ class AtlasSpotDetection(ProcessingTool):
     ) -> Any:
         gaussian_std = arguments.gaussian_std
         if gaussian_std is not None:
-            numeric_std = float(gaussian_std)
-            if (
-                not math.isfinite(numeric_std)
-                or not numeric_std.is_integer()
-                or numeric_std < 0
-            ):
-                raise ValueError("gaussian_std must be a non-negative integer.")
-            gaussian_std = int(numeric_std)
+            gaussian_std = integral_value(
+                gaussian_std,
+                "gaussian_std",
+                minimum=0,
+            )
 
         p_value = arguments.p_value
         if p_value is not None:
-            p_value = float(p_value)
-            if not math.isfinite(p_value) or not 0 <= p_value <= 1:
+            p_value = finite_float(p_value, "p_value")
+            if not 0 <= p_value <= 1:
                 raise ValueError("p_value must be finite and between 0 and 1.")
 
         area_lim = arguments.area_lim
         if area_lim is not None:
-            area_lim = float(area_lim)
-            if not math.isfinite(area_lim) or area_lim < 0:
+            area_lim = finite_float(area_lim, "area_lim")
+            if area_lim < 0:
                 raise ValueError("area_lim must be finite and >= 0.")
 
         input_path = Path(arguments.input_image)

@@ -9,7 +9,7 @@ def finite_float(value: Any, name: str) -> float:
 
     try:
         result = float(value)
-    except (TypeError, ValueError) as error:
+    except (OverflowError, TypeError, ValueError) as error:
         raise ValueError(f"{name} must be a finite number.") from error
     if not np.isfinite(result):
         raise ValueError(f"{name} must be a finite number.")

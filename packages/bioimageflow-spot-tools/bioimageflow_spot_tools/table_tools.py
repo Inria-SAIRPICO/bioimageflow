@@ -518,7 +518,11 @@ class SpotColocalization(DataFrameTool):
         reference_groups = self._group_spots(reference_df, group_by)
         query_groups = self._group_spots(query_df, group_by)
         shared_groups = sorted(set(reference_groups) & set(query_groups))
-        if not shared_groups and (len(reference_df) > 0 or len(query_df) > 0):
+        if (
+            not shared_groups
+            and len(reference_df) > 0
+            and len(query_df) > 0
+        ):
             raise ValueError(
                 "SpotColocalization found no shared groups between reference and "
                 "query tables. Provide group_by when the tables do not share "
