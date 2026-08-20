@@ -24,6 +24,8 @@ RenderSpots().process_batch([
 
 The output image marks each spot coordinate.
 Every input row receives the same aggregate image path and count so the collective tool preserves BioImageFlow batch cardinality.
+When `reference_image` is connected, rows are grouped by reference image and rendered independently.
+Use an output template containing `{reference_image.stem}` when a batch contains multiple reference images so that groups cannot overwrite one another.
 Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows overwrite earlier rows where disks overlap.
 With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
 In label mode, `spot_count` is the number of distinct positive labels visible in the final image.
@@ -32,5 +34,5 @@ When the upstream spot table is empty, `RenderSpots` still writes a blank image 
 
 ## Failure Modes
 
-Missing coordinates, malformed shapes, out-of-bounds coordinates, or unwritable output paths raise errors.
+Missing coordinates, malformed shapes, out-of-bounds coordinates, conflicting per-group settings or output paths, or unwritable output paths raise errors.
 In label mode, `spot_id` must be a positive integer no larger than the `uint32` maximum.

@@ -419,6 +419,75 @@ def test_collective_spot_renderers_preserve_workflow_batch_cardinality(
     assert int(iio.imread(labels_result.iloc[0]["label_image"]).max()) == 3
 
 
+def test_render_spots_keeps_mixed_empty_reference_images_independent(
+    tmp_path: Path,
+) -> None:
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    _spot_image(image_dir / "populated.tif")
+    iio.imwrite(image_dir / "empty.tif", np.zeros((24, 20), dtype=np.float32))
+
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
+        files = Files()(path=image_dir, pattern="*.tif", name="files")
+        detected = DetectSpots()(
+            input_image=files["path"],
+            method="local_maxima",
+            threshold=1.0,
+            min_distance=3,
+            name="detect",
+        )
+        rendered = RenderSpots()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            reference_image=files["path"],
+            name="render",
+            output_templates={
+                "output_image": "{reference_image.stem}_rendered.tif"
+            },
+        )
+        result = wf.compute(rendered)
+
+    assert result["output_image"].nunique() == 2
+    by_name = {
+        Path(path).name: (int(count), iio.imread(path))
+        for path, count in zip(
+            result["output_image"],
+            result["spot_count"],
+            strict=True,
+        )
+    }
+    assert by_name["empty_rendered.tif"][0] == 0
+    assert by_name["empty_rendered.tif"][1].shape == (24, 20)
+    assert int(by_name["empty_rendered.tif"][1].max()) == 0
+    assert by_name["populated_rendered.tif"][0] == 3
+    assert int(by_name["populated_rendered.tif"][1].max()) == 3
+
+
+def test_render_spots_rejects_output_collision_between_reference_images(
+    tmp_path: Path,
+) -> None:
+    first = _spot_image(tmp_path / "first.tif")
+    second = _spot_image(tmp_path / "second.tif")
+    output = tmp_path / "rendered.tif"
+
+    with pytest.raises(ValueError, match="multiple reference images"):
+        RenderSpots().process_batch(
+            [
+                Arguments(
+                    spot_id=index,
+                    y=12,
+                    x=10,
+                    reference_image=reference,
+                    radius=0,
+                    label_mode=True,
+                    output_image=output,
+                )
+                for index, reference in enumerate((first, second), start=1)
+            ]
+        )
+
+
 def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) -> None:
     result = RenderSpots().process_batch(
         [

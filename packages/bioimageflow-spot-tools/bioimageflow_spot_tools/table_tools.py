@@ -280,45 +280,88 @@ class RenderSpots(ProcessingTool):
         *,
         context: Any = None,
     ) -> Any:
-        import imageio.v3 as iio
-        import numpy as np
-
         if not arguments_list:
             return []
-        arguments = arguments_list[0]
-        shape = _shape_from_arguments(arguments)
-        label_mode = bool(getattr(arguments, "label_mode", True))
-        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
-        image = np.zeros(shape, dtype=np.uint32 if label_mode else np.uint8)
-        rows = [
-            row_arguments
-            for row_arguments in arguments_list
-            if _has_spot_coordinate(row_arguments)
-        ]
-        if not rows:
+        if not any(_has_spot_coordinate(arguments) for arguments in arguments_list):
             return [
                 _blank_rendered_spots_output(self, arguments)
                 for arguments in arguments_list
             ]
-        for index, row_arguments in enumerate(rows, start=1):
-            spot_id = getattr(row_arguments, "spot_id", None)
+
+        grouped_positions: dict[Path | None, list[int]] = {}
+        for position, arguments in enumerate(arguments_list):
+            reference = getattr(arguments, "reference_image", None)
+            source = Path(reference) if reference is not None else None
+            grouped_positions.setdefault(source, []).append(position)
+
+        output_sources: dict[Path, Path | None] = {}
+        rendered: list[list[Any]] = [[] for _ in arguments_list]
+        for source, positions in grouped_positions.items():
+            rows = [arguments_list[position] for position in positions]
+            outputs = {Path(arguments.output_image) for arguments in rows}
+            if len(outputs) != 1:
+                raise ValueError(
+                    "RenderSpots rows for one reference_image must reference the "
+                    "same output_image."
+                )
+            output = next(iter(outputs))
+            previous_source = output_sources.setdefault(output, source)
+            if previous_source != source:
+                raise ValueError(
+                    "RenderSpots cannot write multiple reference images to the "
+                    "same output_image. Use an output template containing "
+                    "{reference_image.stem}."
+                )
+
+            coordinate_rows = [row for row in rows if _has_spot_coordinate(row)]
+            if coordinate_rows:
+                group_output = self._render_group(coordinate_rows)
+            else:
+                group_output = _blank_rendered_spots_output(self, rows[0])
+            for position in positions:
+                rendered[position] = group_output
+        return rendered
+
+    def _render_group(self, rows: list[Arguments]) -> list[Any]:
+        import imageio.v3 as iio
+        import numpy as np
+
+        arguments = rows[0]
+        shape = _shape_from_arguments(arguments)
+        label_mode = bool(getattr(arguments, "label_mode", True))
+        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
+        output = Path(arguments.output_image)
+
+        for row in rows[1:]:
+            row_shape = _shape_from_arguments(row)
+            row_label_mode = bool(getattr(row, "label_mode", True))
+            row_radius = integral_value(getattr(row, "radius", 0), "radius", minimum=0)
+            if (row_shape, row_label_mode, row_radius) != (
+                shape,
+                label_mode,
+                radius,
+            ):
+                raise ValueError(
+                    "RenderSpots rows for one reference_image must use the same "
+                    "shape, label_mode, and radius."
+                )
+
+        image = np.zeros(shape, dtype=np.uint32 if label_mode else np.uint8)
+        for index, row in enumerate(rows, start=1):
+            spot_id = getattr(row, "spot_id", None)
             if spot_id is None:
                 spot_id = index
             value = positive_uint32_id(spot_id) if label_mode else 1
             _, _, y, x = pixel_coordinate(
-                getattr(row_arguments, "y", None),
-                getattr(row_arguments, "x", None),
+                getattr(row, "y", None),
+                getattr(row, "x", None),
                 shape,
             )
             _draw_disk(image, y, x, radius, value)
-        output = Path(arguments.output_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, image)
         spot_count = _rendered_label_count(image) if label_mode else len(rows)
-        return [
-            [self.Outputs(output_image=output, spot_count=spot_count)]
-            for _ in arguments_list
-        ]
+        return [self.Outputs(output_image=output, spot_count=spot_count)]
 
 
 class MaskToLabels(ProcessingTool):
