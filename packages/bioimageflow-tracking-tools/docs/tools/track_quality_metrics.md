@@ -4,7 +4,7 @@
 
 The tool is a `DataFrameTool`: pass an upstream track dataframe positionally, then configure `min_track_length`.
 The input dataframe must contain `track_id`, `frame`, and `label`.
-Outputs are `track_count`, `gap_count`, `split_count`, `merge_count`, and `short_track_fraction`.
+Outputs are `track_count`, `gap_count`, `duplicate_track_frame_count`, `object_assignment_conflict_count`, and `short_track_fraction`.
 No quality CSV artifact is written.
 
 ## Dependencies and Core Libraries
@@ -28,7 +28,10 @@ quality = TrackQualityMetrics().transform(tracks, Arguments(min_track_length=3))
 
 ## Expected Results
 
-The output dataframe contains one summary row with quality counters and short-track fraction.
+`gap_count` counts missing frame slots inside tracks.
+`duplicate_track_frame_count` counts excess rows assigned to the same track and frame.
+`object_assignment_conflict_count` counts excess assignments of the same source `(frame, label)` object.
+These are table consistency counters, not biological split or merge events; lineage metrics require explicit lineage data.
 
 ## Failure Modes
 

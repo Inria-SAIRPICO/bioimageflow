@@ -1,86 +1,15 @@
-"""Tracking table filters, validation, rendering, and summaries."""
+"""Tracking table filtering, validation, and quality metrics."""
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
-from bioimageflow_core import (
-    Arguments,
-    Category,
-    Connectable,
-    GENERAL_ENV,
-    GUIMeta,
-    ImageSpec,
-    IOModel,
-    Layout,
-    ProcessingTool,
-    RowConsumption,
-    Semantic,
-    Template,
-)
+from bioimageflow import DataFrameTool, Passthrough
+from bioimageflow_core import Category, GUIMeta, IOModel
 
-if TYPE_CHECKING:
-    from bioimageflow import DataFrameTool as DataFrameTool
-    from bioimageflow import Passthrough as Passthrough
-else:
-    try:
-        from bioimageflow import DataFrameTool as DataFrameTool
-        from bioimageflow import Passthrough as Passthrough
-    except ModuleNotFoundError:
-        class DataFrameTool:  # type: ignore[no-redef]
-            """Unavailable outside the orchestrator environment."""
-
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                raise RuntimeError(
-                    "DataFrameTool classes require the bioimageflow orchestrator package."
-                )
-
-        class Passthrough(IOModel):  # type: ignore[no-redef]
-            """Fallback schema base for worker-only imports."""
-
-
-def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
-    missing = sorted(columns - set(df.columns))
-    if missing:
-        raise ValueError(
-            f"{tool_name} input table is missing required column(s): "
-            f"{', '.join(repr(column) for column in missing)}."
-        )
-
-
-def _float(row: dict[str, Any], column: str, default: float | None = None) -> float:
-    value = row.get(column, "")
-    if value in {"", None}:
-        if default is None:
-            raise ValueError(f"Track table row is missing required column {column!r}.")
-        return default
-    return float(value)
-
-
-def _int(row: dict[str, Any], column: str, default: int | None = None) -> int:
-    float_default = float(default) if default is not None else None
-    return int(round(_float(row, column, float_default)))
-
-
-def _positive_uint32(row: dict[str, Any], column: str) -> int:
-    import numpy as np
-
-    raw_value = _float(row, column)
-    if not np.isfinite(raw_value) or not raw_value.is_integer():
-        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
-    value = int(raw_value)
-    if value <= 0:
-        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
-    if value > np.iinfo(np.uint32).max:
-        raise ValueError(f"{column} must be <= {np.iinfo(np.uint32).max}.")
-    return value
-
-
-def _argument(arguments: Arguments, name: str, default: Any) -> Any:
-    return getattr(arguments, name, default)
+from ._validation import finite_float, require_columns, validate_tracking_columns
 
 
 class FilterObjects(DataFrameTool):
-    """Filter object tables by area, frame, intensity, and position."""
+    """Filter object rows using only the requested bounds."""
 
     display_name = "Filter Objects"
     documentation = "Filter object tables by area, frame, intensity, and position."
@@ -103,130 +32,72 @@ class FilterObjects(DataFrameTool):
         object_count: Annotated[int, GUIMeta("Object count")]
 
     def transform(self, df: Any, arguments: Any) -> Any:
-        _require_columns(df, {"frame", "label", "y", "x", "area"}, "FilterObjects")
-        mask = None
+        import numpy as np
+        import pandas as pd
+
         checks = [
-            ("area", _argument(arguments, "min_area", None), _argument(arguments, "max_area", None)),
-            ("frame", _argument(arguments, "min_frame", None), _argument(arguments, "max_frame", None)),
+            (
+                "area",
+                getattr(arguments, "min_area", None),
+                getattr(arguments, "max_area", None),
+            ),
+            (
+                "frame",
+                getattr(arguments, "min_frame", None),
+                getattr(arguments, "max_frame", None),
+            ),
             (
                 "intensity",
-                _argument(arguments, "min_intensity", None),
-                _argument(arguments, "max_intensity", None),
+                getattr(arguments, "min_intensity", None),
+                getattr(arguments, "max_intensity", None),
             ),
-            ("y", _argument(arguments, "min_y", None), _argument(arguments, "max_y", None)),
-            ("x", _argument(arguments, "min_x", None), _argument(arguments, "max_x", None)),
+            ("y", getattr(arguments, "min_y", None), getattr(arguments, "max_y", None)),
+            ("x", getattr(arguments, "min_x", None), getattr(arguments, "max_x", None)),
         ]
-        for column, minimum, maximum in checks:
-            if minimum is None and maximum is None:
-                continue
-            if column not in df.columns:
-                if column == "intensity":
-                    continue
-                raise ValueError(f"FilterObjects input table is missing required column {column!r}.")
-            series = df[column].astype(float)
-            column_mask = series.notna()
-            if minimum is not None:
-                column_mask &= series >= float(minimum)
-            if maximum is not None:
-                column_mask &= series <= float(maximum)
-            mask = column_mask if mask is None else mask & column_mask
+        active = [
+            (column, minimum, maximum)
+            for column, minimum, maximum in checks
+            if minimum is not None or maximum is not None
+        ]
+        require_columns(df, {column for column, _, _ in active}, "FilterObjects")
 
-        result = df.copy() if mask is None else df.loc[mask].copy()
+        mask = pd.Series(True, index=df.index, dtype=bool)
+        for column, minimum, maximum in active:
+            lower = (
+                finite_float(minimum, f"min_{column}") if minimum is not None else None
+            )
+            upper = (
+                finite_float(maximum, f"max_{column}") if maximum is not None else None
+            )
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError(f"min_{column} must be <= max_{column}.")
+            try:
+                values = np.asarray(
+                    pd.to_numeric(df[column], errors="raise"), dtype=np.float64
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"FilterObjects column {column!r} must be numeric."
+                ) from exc
+            column_mask = np.isfinite(values)
+            if lower is not None:
+                column_mask &= values >= lower
+            if upper is not None:
+                column_mask &= values <= upper
+            mask &= column_mask
+
+        result = df.loc[mask].copy()
         result["object_count"] = len(result)
         return result
 
 
-class TracksToLabels(ProcessingTool):
-    """Render track IDs into a label stack using source object labels."""
-
-    row_consumption = RowConsumption.COLLECTIVE
-    display_name = "Tracks To Labels"
-    documentation = "Render track IDs back into a label stack."
-    category = Category.TRACKING
-    tags = ["tracking", "labels", "render"]
-    environment = GENERAL_ENV
-    run_empty_batch = True
-    empty_batch_anchor_inputs = ("label_image",)
-
-    class Inputs(IOModel):
-        track_id: Annotated[int, GUIMeta("Track ID", connectable=Connectable.BY_DEFAULT)]
-        frame: Annotated[int, GUIMeta("Frame", connectable=Connectable.BY_DEFAULT)]
-        label: Annotated[int, GUIMeta("Label", connectable=Connectable.BY_DEFAULT)]
-        label_image: Annotated[
-            Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR, Layout.PLANAR_TIME}),
-            GUIMeta("Source labels", connectable=Connectable.BY_DEFAULT),
-        ]
-
-    class Outputs(IOModel):
-        output_label_image: Annotated[
-            Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR_TIME}, dtypes={"uint32"}),
-            GUIMeta("Track labels"),
-        ] = Template("{label_image.stem}_tracks.tif")
-        track_count: Annotated[int, GUIMeta("Track count")]
-
-    def process_batch(
-        self,
-        arguments_list: list[Arguments],
-        *,
-        context: Any = None,
-    ) -> Any:
-        import imageio.v3 as iio
-        import numpy as np
-
-        if not arguments_list:
-            return []
-        arguments = arguments_list[0]
-        tracks = [
-            {
-                "track_id": row_arguments.track_id,
-                "frame": row_arguments.frame,
-                "label": _argument(row_arguments, "label", None),
-            }
-            for row_arguments in arguments_list
-            if any(hasattr(row_arguments, field) for field in ("track_id", "frame", "label"))
-        ]
-        if not tracks:
-            outputs = []
-            for row_arguments in arguments_list:
-                source = iio.imread(row_arguments.label_image)
-                if source.ndim == 2:
-                    source = source[np.newaxis, ...]
-                output_image = np.zeros(source.shape, dtype=np.uint32)
-                output = Path(row_arguments.output_label_image)
-                output.parent.mkdir(parents=True, exist_ok=True)
-                iio.imwrite(output, output_image, photometric="minisblack")
-                outputs.append([
-                    self.Outputs(output_label_image=output, track_count=0)
-                ])
-            return outputs
-        source = iio.imread(arguments.label_image)
-        if source.ndim == 2:
-            source = source[np.newaxis, ...]
-        output_image = np.zeros(source.shape, dtype=np.uint32)
-        for row in tracks:
-            frame = _int(row, "frame")
-            label = _positive_uint32(row, "label")
-            track_id = _positive_uint32(row, "track_id")
-            if 0 <= frame < source.shape[0]:
-                output_image[frame][source[frame] == label] = track_id
-        output = Path(arguments.output_label_image)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        iio.imwrite(output, output_image, photometric="minisblack")
-        return [[
-            self.Outputs(
-                output_label_image=output,
-                track_count=len({_positive_uint32(row, "track_id") for row in tracks}),
-            )
-        ]]
-
-
 class TrackTableValidate(DataFrameTool):
-    """Validate required tracking columns and basic table consistency."""
+    """Report invalid values and inconsistent object assignments in a track table."""
 
     display_name = "Track Table Validate"
-    documentation = "Validate required columns, frame order, and track IDs."
+    documentation = (
+        "Validate required columns, values, ordering, and object assignments."
+    )
     category = Category.TRACKING
     tags = ["tracking", "validation", "tables"]
 
@@ -243,44 +114,57 @@ class TrackTableValidate(DataFrameTool):
         import pandas as pd
 
         required = {"track_id", "frame", "label", "y", "x"}
+        missing = sorted(required - set(df.columns))
         errors = [
             {"severity": "error", "message": f"missing required column: {column}"}
-            for column in sorted(required - set(df.columns))
+            for column in missing
         ]
-        seen_track_frames: set[tuple[int, int]] = set()
-        frames_by_track: dict[int, list[int]] = {}
-        if not errors:
-            rows = df[list(required)].to_dict("records")
-        else:
-            rows = []
-        for row in rows:
+        data = None
+        if not missing:
             try:
-                track_id = _int(row, "track_id")
-                frame = _int(row, "frame")
-                _int(row, "label")
-                _float(row, "y")
-                _float(row, "x")
+                data = validate_tracking_columns(
+                    df,
+                    tool_name="TrackTableValidate",
+                    require_label=True,
+                )
             except ValueError as exc:
                 errors.append({"severity": "error", "message": str(exc)})
-                continue
-            key = (track_id, frame)
-            if key in seen_track_frames:
+
+        if data is not None:
+            duplicate_track_frames = data.duplicated(["track_id", "frame"], keep=False)
+            for track_id, frame in (
+                data.loc[duplicate_track_frames, ["track_id", "frame"]]
+                .drop_duplicates()
+                .itertuples(index=False, name=None)
+            ):
                 errors.append(
                     {
                         "severity": "error",
                         "message": f"duplicate row for track_id {track_id} frame {frame}",
                     }
                 )
-            seen_track_frames.add(key)
-            frames_by_track.setdefault(track_id, []).append(frame)
-        for track_id, frames in frames_by_track.items():
-            if frames != sorted(frames):
+            duplicate_objects = data.duplicated(["frame", "label"], keep=False)
+            for frame, label in (
+                data.loc[duplicate_objects, ["frame", "label"]]
+                .drop_duplicates()
+                .itertuples(index=False, name=None)
+            ):
                 errors.append(
                     {
                         "severity": "error",
-                        "message": f"frames are not sorted for track_id {track_id}",
+                        "message": f"object label {label} in frame {frame} has multiple assignments",
                     }
                 )
+            for track_id, group in data.groupby("track_id", sort=True):
+                frames = group["frame"].tolist()
+                if frames != sorted(frames):
+                    errors.append(
+                        {
+                            "severity": "error",
+                            "message": f"frames are not sorted for track_id {track_id}",
+                        }
+                    )
+
         if not errors:
             errors = [{"severity": "info", "message": "valid"}]
         valid = len(errors) == 1 and errors[0]["severity"] == "info"
@@ -298,84 +182,11 @@ class TrackTableValidate(DataFrameTool):
         )
 
 
-def _track_groups(rows: list[dict[str, str]]) -> dict[int, list[dict[str, str]]]:
-    groups: dict[int, list[dict[str, str]]] = {}
-    for row in rows:
-        groups.setdefault(_int(row, "track_id"), []).append(row)
-    return {
-        track_id: sorted(group, key=lambda row: _int(row, "frame"))
-        for track_id, group in groups.items()
-    }
-
-
-class TrackSummary(DataFrameTool):
-    """Compute per-track duration, displacement, and speed."""
-
-    display_name = "Track Summary"
-    documentation = "Summarize per-track duration, displacement, speed, and frame bounds."
-    category = Category.MEASUREMENT
-    tags = ["tracking", "summary", "metrics"]
-
-    class Inputs(IOModel):
-        pass
-
-    class Outputs(IOModel):
-        track_id: Annotated[int, GUIMeta("Track ID")]
-        track_length: Annotated[int, GUIMeta("Track length")]
-        duration: Annotated[int, GUIMeta("Duration")]
-        start_frame: Annotated[int, GUIMeta("Start frame")]
-        end_frame: Annotated[int, GUIMeta("End frame")]
-        displacement: Annotated[float, GUIMeta("Displacement")]
-        mean_speed: Annotated[float, GUIMeta("Mean speed")]
-        track_count: Annotated[int, GUIMeta("Track count")]
-
-    def transform(self, df: Any, arguments: Any) -> Any:
-        import numpy as np
-        import pandas as pd
-
-        _require_columns(df, {"track_id", "frame", "y", "x"}, "TrackSummary")
-        rows = df.to_dict("records")
-        summaries = []
-        for track_id, group in sorted(_track_groups(rows).items()):
-            first = group[0]
-            last = group[-1]
-            start = _int(first, "frame")
-            end = _int(last, "frame")
-            duration = end - start + 1
-            displacement = float(
-                np.hypot(_float(last, "y") - _float(first, "y"), _float(last, "x") - _float(first, "x"))
-            )
-            summaries.append(
-                {
-                    "track_id": track_id,
-                    "track_length": len(group),
-                    "duration": duration,
-                    "start_frame": start,
-                    "end_frame": end,
-                    "displacement": displacement,
-                    "mean_speed": displacement / max(1, duration - 1),
-                }
-            )
-        for row in summaries:
-            row["track_count"] = len(summaries)
-        columns = [
-            "track_id",
-            "track_length",
-            "duration",
-            "start_frame",
-            "end_frame",
-            "displacement",
-            "mean_speed",
-            "track_count",
-        ]
-        return pd.DataFrame(summaries, columns=pd.Index(columns))
-
-
 class TrackQualityMetrics(DataFrameTool):
-    """Compute simple quality metrics for linked track tables."""
+    """Summarize track continuity and duplicate assignment conflicts."""
 
     display_name = "Track Quality Metrics"
-    documentation = "Compute gap counts, split/merge flags, and short-track fraction."
+    documentation = "Compute gaps, duplicate assignments, and short-track fraction."
     category = Category.MEASUREMENT
     tags = ["tracking", "quality", "metrics"]
 
@@ -385,43 +196,59 @@ class TrackQualityMetrics(DataFrameTool):
     class Outputs(IOModel):
         track_count: Annotated[int, GUIMeta("Track count")]
         gap_count: Annotated[int, GUIMeta("Gap count")]
-        split_count: Annotated[int, GUIMeta("Split count")]
-        merge_count: Annotated[int, GUIMeta("Merge count")]
+        duplicate_track_frame_count: Annotated[
+            int, GUIMeta("Duplicate track-frame count")
+        ]
+        object_assignment_conflict_count: Annotated[
+            int, GUIMeta("Object assignment conflict count")
+        ]
         short_track_fraction: Annotated[float, GUIMeta("Short-track fraction")]
 
     def transform(self, df: Any, arguments: Any) -> Any:
         import pandas as pd
 
-        _require_columns(df, {"track_id", "frame", "label"}, "TrackQualityMetrics")
-        rows = df.to_dict("records")
-        groups = _track_groups(rows)
+        minimum = finite_float(
+            getattr(arguments, "min_track_length", 3),
+            "min_track_length",
+        )
+        if not minimum.is_integer() or minimum < 1:
+            raise ValueError("min_track_length must be a positive integer.")
+        min_track_length = int(minimum)
+        data = validate_tracking_columns(
+            df,
+            tool_name="TrackQualityMetrics",
+            require_coordinates=False,
+            require_label=True,
+        )
+
         gap_count = 0
         short_count = 0
-        min_track_length = int(_argument(arguments, "min_track_length", 3))
-        for group in groups.values():
-            frames = [_int(row, "frame") for row in group]
+        for _, group in data.groupby("track_id", sort=True):
+            frames = sorted(set(int(frame) for frame in group["frame"]))
             gap_count += sum(
-                max(0, frames[index + 1] - frames[index] - 1)
-                for index in range(len(frames) - 1)
+                max(0, following - current - 1)
+                for current, following in zip(frames, frames[1:])
             )
-            if len(group) < min_track_length:
+            if len(frames) < min_track_length:
                 short_count += 1
-        track_frame_counts: dict[tuple[int, int], int] = {}
-        object_frame_counts: dict[tuple[int, int], int] = {}
-        for row in rows:
-            track_key = (_int(row, "track_id"), _int(row, "frame"))
-            object_key = (_int(row, "label"), _int(row, "frame"))
-            track_frame_counts[track_key] = track_frame_counts.get(track_key, 0) + 1
-            object_frame_counts[object_key] = object_frame_counts.get(object_key, 0) + 1
-        split_count = sum(1 for count in track_frame_counts.values() if count > 1)
-        merge_count = sum(1 for count in object_frame_counts.values() if count > 1)
-        track_count = len(groups)
-        short_fraction = short_count / track_count if track_count else 0.0
-        row = {
-            "track_count": track_count,
-            "gap_count": gap_count,
-            "split_count": split_count,
-            "merge_count": merge_count,
-            "short_track_fraction": short_fraction,
-        }
-        return pd.DataFrame([row])
+
+        duplicate_track_frame_count = int(
+            data.duplicated(["track_id", "frame"], keep="first").sum()
+        )
+        object_assignment_conflict_count = int(
+            data.duplicated(["frame", "label"], keep="first").sum()
+        )
+        track_count = int(data["track_id"].nunique())
+        return pd.DataFrame(
+            [
+                {
+                    "track_count": track_count,
+                    "gap_count": gap_count,
+                    "duplicate_track_frame_count": duplicate_track_frame_count,
+                    "object_assignment_conflict_count": object_assignment_conflict_count,
+                    "short_track_fraction": short_count / track_count
+                    if track_count
+                    else 0.0,
+                }
+            ]
+        )

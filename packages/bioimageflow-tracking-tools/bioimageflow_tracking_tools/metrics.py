@@ -1,29 +1,20 @@
-"""Track-level metrics."""
+"""Track-level motion metrics."""
 
 from typing import Annotated, Any
 
 from bioimageflow import DataFrameTool
-from bioimageflow_core import (
-    Category,
-    GUIMeta,
-    IOModel,
-)
+from bioimageflow_core import Category, GUIMeta, IOModel
 
-
-def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
-    missing = sorted(columns - set(df.columns))
-    if missing:
-        raise ValueError(
-            f"{tool_name} input table is missing required column(s): "
-            f"{', '.join(repr(column) for column in missing)}."
-        )
+from ._validation import validate_tracking_columns
 
 
 class TrackMetrics(DataFrameTool):
-    """Compute track length, displacement, and mean speed summaries."""
+    """Compute unambiguous per-track motion and area metrics."""
 
     display_name = "Track Metrics"
-    documentation = "Compute basic per-track metrics from linked object tables."
+    documentation = (
+        "Compute per-track duration, path, displacement, speed, and mean area."
+    )
     category = Category.MEASUREMENT
     tags = ["tracking", "metrics"]
 
@@ -33,10 +24,13 @@ class TrackMetrics(DataFrameTool):
     class Outputs(IOModel):
         track_id: Annotated[int, GUIMeta(display_name="Track ID")]
         track_length: Annotated[int, GUIMeta(display_name="Track length")]
+        duration: Annotated[int, GUIMeta(display_name="Duration")]
         start_frame: Annotated[int, GUIMeta(display_name="Start frame")]
         end_frame: Annotated[int, GUIMeta(display_name="End frame")]
-        displacement: Annotated[float, GUIMeta(display_name="Displacement")]
-        mean_speed: Annotated[float, GUIMeta(display_name="Mean speed")]
+        path_length: Annotated[float, GUIMeta(display_name="Path length")]
+        net_displacement: Annotated[float, GUIMeta(display_name="Net displacement")]
+        net_speed: Annotated[float, GUIMeta(display_name="Net speed")]
+        mean_step_speed: Annotated[float, GUIMeta(display_name="Mean step speed")]
         mean_area: Annotated[float, GUIMeta(display_name="Mean area")]
         track_count: Annotated[int, GUIMeta(display_name="Track count")]
         mean_track_length: Annotated[float, GUIMeta(display_name="Mean track length")]
@@ -45,46 +39,66 @@ class TrackMetrics(DataFrameTool):
         import numpy as np
         import pandas as pd
 
-        _require_columns(df, {"track_id", "frame", "y", "x", "area"}, "TrackMetrics")
-        rows = []
-        track_ids = sorted({int(float(track_id)) for track_id in df["track_id"]})
-        for track_id in track_ids:
-            group = df[df["track_id"].astype(float).astype(int) == track_id].copy()
-            group["_bif_frame_sort"] = group["frame"].astype(float).astype(int)
-            group = group.sort_values("_bif_frame_sort")
-            first = group.iloc[0]
-            last = group.iloc[-1]
-            displacement = float(
-                np.hypot(
-                    float(last["y"]) - float(first["y"]),
-                    float(last["x"]) - float(first["x"]),
-                )
+        data = validate_tracking_columns(
+            df,
+            tool_name="TrackMetrics",
+            require_area=True,
+        )
+        if data.duplicated(["track_id", "frame"]).any():
+            raise ValueError(
+                "TrackMetrics requires at most one observation per track and frame."
             )
-            duration = max(1, int(float(last["frame"])) - int(float(first["frame"])))
+
+        rows: list[dict[str, int | float]] = []
+        for track_id, group in data.groupby("track_id", sort=True):
+            group = group.sort_values("frame", kind="stable")
+            frames = group["frame"].to_numpy(dtype=np.int64)
+            points = group[["y", "x"]].to_numpy(dtype=float)
+            deltas = np.diff(points, axis=0)
+            step_distances = np.linalg.norm(deltas, axis=1)
+            frame_deltas = np.diff(frames)
+            start_frame = int(frames[0])
+            end_frame = int(frames[-1])
+            duration = end_frame - start_frame
+            path_length = float(step_distances.sum())
+            net_displacement = float(np.linalg.norm(points[-1] - points[0]))
+            mean_step_speed = (
+                float(np.mean(step_distances / frame_deltas))
+                if len(step_distances)
+                else 0.0
+            )
             rows.append(
                 {
-                    "track_id": track_id,
+                    "track_id": int(track_id),
                     "track_length": int(len(group)),
-                    "start_frame": int(float(first["frame"])),
-                    "end_frame": int(float(last["frame"])),
-                    "displacement": displacement,
-                    "mean_speed": displacement / duration,
-                    "mean_area": float(group["area"].astype(float).mean()),
+                    "duration": duration,
+                    "start_frame": start_frame,
+                    "end_frame": end_frame,
+                    "path_length": path_length,
+                    "net_displacement": net_displacement,
+                    "net_speed": net_displacement / duration if duration else 0.0,
+                    "mean_step_speed": mean_step_speed,
+                    "mean_area": float(group["area"].mean()),
                 }
             )
-        mean_length = (
-            sum(float(row["track_length"]) for row in rows) / len(rows) if rows else 0.0
+
+        track_count = len(rows)
+        mean_track_length = (
+            float(np.mean([row["track_length"] for row in rows])) if rows else 0.0
         )
         for row in rows:
-            row["track_count"] = len(rows)
-            row["mean_track_length"] = mean_length
+            row["track_count"] = track_count
+            row["mean_track_length"] = mean_track_length
         columns = [
             "track_id",
             "track_length",
+            "duration",
             "start_frame",
             "end_frame",
-            "displacement",
-            "mean_speed",
+            "path_length",
+            "net_displacement",
+            "net_speed",
+            "mean_step_speed",
             "mean_area",
             "track_count",
             "mean_track_length",

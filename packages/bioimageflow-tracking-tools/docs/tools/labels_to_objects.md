@@ -11,7 +11,7 @@ Label `0` is ignored.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, imageio, and NumPy.
+BioImageFlow core APIs, imageio, NumPy, and scikit-image region measurements.
 
 ## Minimal Example
 
@@ -29,4 +29,4 @@ All-background inputs produce an empty object table with the declared columns; n
 
 ## Failure Modes
 
-Non-2D/non-3D inputs raise `ValueError`; missing or unsupported image files fail through imageio.
+Non-2D/non-3D, non-integer, or negative label rasters raise `ValueError`; missing or unsupported image files fail through imageio.

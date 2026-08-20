@@ -17,6 +17,8 @@ from bioimageflow_core import (
     Semantic,
 )
 
+from ._validation import validate_label_image
+
 
 class LabelsToObjects(ProcessingTool):
     """Measure object centroids and areas from 2D or TYX label images."""
@@ -53,24 +55,33 @@ class LabelsToObjects(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
         import numpy as np
+        from skimage.measure import regionprops_table
 
         labels = iio.imread(arguments.label_image)
+        validate_label_image(labels, "LabelsToObjects")
         if labels.ndim == 2:
             labels = labels[np.newaxis, ...]
-        if labels.ndim != 3:
-            raise ValueError("LabelsToObjects expects a 2D label image or TYX stack.")
 
-        rows = []
+        rows: list[dict[str, int | float]] = []
         for frame, plane in enumerate(labels):
-            for label in sorted(int(v) for v in np.unique(plane) if v > 0):
-                yy, xx = np.nonzero(plane == label)
+            properties = regionprops_table(
+                plane,
+                properties=("label", "centroid", "area"),
+            )
+            for label, y, x, area in zip(
+                properties["label"],
+                properties["centroid-0"],
+                properties["centroid-1"],
+                properties["area"],
+                strict=True,
+            ):
                 rows.append(
                     {
                         "frame": frame,
-                        "label": label,
-                        "y": float(yy.mean()),
-                        "x": float(xx.mean()),
-                        "area": int(yy.size),
+                        "label": int(label),
+                        "y": float(y),
+                        "x": float(x),
+                        "area": int(area),
                     }
                 )
         return [

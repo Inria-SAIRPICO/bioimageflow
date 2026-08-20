@@ -28,5 +28,5 @@ When the upstream track table is empty but `label_image` is provided, `TracksToL
 
 ## Failure Modes
 
-Missing track fields, unreadable label images, or unwritable output paths raise errors.
+Missing track fields, invalid label rasters, out-of-bounds frames, absent source labels, duplicate object assignments, multiple objects for one track/frame, inconsistent paths, unreadable images, or unwritable output paths raise errors.
 `track_id` and source `label` values must be positive integers no larger than the `uint32` maximum.

@@ -28,7 +28,8 @@ report = TrackTableValidate().transform(tracks, Arguments())
 
 ## Expected Results
 
-Valid input returns an informational row; duplicate track/frame rows or blank required values are reported as error rows.
+Valid input returns an informational row.
+Missing, non-finite, fractional, or negative identifiers; non-finite coordinates; unsorted observations; duplicate track/frame rows; and multiply assigned source objects are reported as error rows.
 
 ## Failure Modes
 
