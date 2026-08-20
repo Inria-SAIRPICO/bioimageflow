@@ -1,5 +1,6 @@
 """Tracking table filtering, validation, and quality metrics."""
 
+from pathlib import Path
 from typing import Annotated, Any
 
 from bioimageflow import DataFrameTool, Passthrough
@@ -105,6 +106,7 @@ class TrackTableValidate(DataFrameTool):
         pass
 
     class Outputs(IOModel):
+        source_label_image: Annotated[Path | None, GUIMeta("Source label image")] = None
         severity: Annotated[str, GUIMeta("Severity")]
         message: Annotated[str, GUIMeta("Message")]
         valid: Annotated[bool, GUIMeta("Valid")]
@@ -115,7 +117,7 @@ class TrackTableValidate(DataFrameTool):
 
         required = {"track_id", "frame", "label", "y", "x"}
         missing = sorted(required - set(df.columns))
-        errors = [
+        errors: list[dict[str, Any]] = [
             {"severity": "error", "message": f"missing required column: {column}"}
             for column in missing
         ]
@@ -131,47 +133,75 @@ class TrackTableValidate(DataFrameTool):
                 errors.append({"severity": "error", "message": str(exc)})
 
         if data is not None:
-            duplicate_track_frames = data.duplicated(["track_id", "frame"], keep=False)
-            for track_id, frame in (
-                data.loc[duplicate_track_frames, ["track_id", "frame"]]
+            source_column = (
+                ["source_label_image"] if "source_label_image" in data.columns else []
+            )
+            track_frame_columns = [*source_column, "track_id", "frame"]
+            duplicate_track_frames = data.duplicated(track_frame_columns, keep=False)
+            for values in (
+                data.loc[duplicate_track_frames, track_frame_columns]
                 .drop_duplicates()
                 .itertuples(index=False, name=None)
             ):
+                source = values[0] if source_column else None
+                track_id, frame = values[-2:]
                 errors.append(
                     {
+                        "source_label_image": source,
                         "severity": "error",
                         "message": f"duplicate row for track_id {track_id} frame {frame}",
                     }
                 )
-            duplicate_objects = data.duplicated(["frame", "label"], keep=False)
-            for frame, label in (
-                data.loc[duplicate_objects, ["frame", "label"]]
+            object_columns = [*source_column, "frame", "label"]
+            duplicate_objects = data.duplicated(object_columns, keep=False)
+            for values in (
+                data.loc[duplicate_objects, object_columns]
                 .drop_duplicates()
                 .itertuples(index=False, name=None)
             ):
+                source = values[0] if source_column else None
+                frame, label = values[-2:]
                 errors.append(
                     {
+                        "source_label_image": source,
                         "severity": "error",
                         "message": f"object label {label} in frame {frame} has multiple assignments",
                     }
                 )
-            for track_id, group in data.groupby("track_id", sort=True):
+            track_columns = [*source_column, "track_id"]
+            grouper: str | list[str] = (
+                track_columns[0] if len(track_columns) == 1 else track_columns
+            )
+            for group_key, group in data.groupby(grouper, sort=True):
+                if source_column:
+                    source, track_id = group_key
+                else:
+                    source = None
+                    track_id = group_key
                 frames = group["frame"].tolist()
                 if frames != sorted(frames):
                     errors.append(
                         {
+                            "source_label_image": source,
                             "severity": "error",
                             "message": f"frames are not sorted for track_id {track_id}",
                         }
                     )
 
         if not errors:
-            errors = [{"severity": "info", "message": "valid"}]
+            errors = [
+                {
+                    "source_label_image": None,
+                    "severity": "info",
+                    "message": "valid",
+                }
+            ]
         valid = len(errors) == 1 and errors[0]["severity"] == "info"
         error_count = 0 if valid else len(errors)
         return pd.DataFrame(
             [
                 {
+                    "source_label_image": error.get("source_label_image"),
                     "severity": error["severity"],
                     "message": error["message"],
                     "valid": valid,
@@ -194,6 +224,7 @@ class TrackQualityMetrics(DataFrameTool):
         min_track_length: int = 3
 
     class Outputs(IOModel):
+        source_label_image: Annotated[Path | None, GUIMeta("Source label image")] = None
         track_count: Annotated[int, GUIMeta("Track count")]
         gap_count: Annotated[int, GUIMeta("Gap count")]
         duplicate_track_frame_count: Annotated[
@@ -221,27 +252,34 @@ class TrackQualityMetrics(DataFrameTool):
             require_label=True,
         )
 
-        gap_count = 0
-        short_count = 0
-        for _, group in data.groupby("track_id", sort=True):
-            frames = sorted(set(int(frame) for frame in group["frame"]))
-            gap_count += sum(
-                max(0, following - current - 1)
-                for current, following in zip(frames, frames[1:])
-            )
-            if len(frames) < min_track_length:
-                short_count += 1
+        if "source_label_image" in data.columns:
+            source_groups = data.groupby("source_label_image", sort=True)
+        else:
+            source_groups = [(None, data)]
 
-        duplicate_track_frame_count = int(
-            data.duplicated(["track_id", "frame"], keep="first").sum()
-        )
-        object_assignment_conflict_count = int(
-            data.duplicated(["frame", "label"], keep="first").sum()
-        )
-        track_count = int(data["track_id"].nunique())
-        return pd.DataFrame(
-            [
+        rows = []
+        for source_label_image, source_data in source_groups:
+            gap_count = 0
+            short_count = 0
+            for _, group in source_data.groupby("track_id", sort=True):
+                frames = sorted(set(int(frame) for frame in group["frame"]))
+                gap_count += sum(
+                    max(0, following - current - 1)
+                    for current, following in zip(frames, frames[1:])
+                )
+                if len(frames) < min_track_length:
+                    short_count += 1
+
+            duplicate_track_frame_count = int(
+                source_data.duplicated(["track_id", "frame"], keep="first").sum()
+            )
+            object_assignment_conflict_count = int(
+                source_data.duplicated(["frame", "label"], keep="first").sum()
+            )
+            track_count = int(source_data["track_id"].nunique())
+            rows.append(
                 {
+                    "source_label_image": source_label_image,
                     "track_count": track_count,
                     "gap_count": gap_count,
                     "duplicate_track_frame_count": duplicate_track_frame_count,
@@ -250,5 +288,5 @@ class TrackQualityMetrics(DataFrameTool):
                     if track_count
                     else 0.0,
                 }
-            ]
-        )
+            )
+        return pd.DataFrame(rows)

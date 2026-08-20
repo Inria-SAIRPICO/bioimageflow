@@ -218,6 +218,7 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
     assert {"track_id", "track_count"} <= set(tracks.columns)
     assert summary.empty
     assert list(summary.columns) == [
+        "source_label_image",
         "track_id",
         "track_length",
         "duration",
@@ -233,6 +234,7 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
     ]
     assert quality.to_dict("records") == [
         {
+            "source_label_image": None,
             "track_count": 0,
             "gap_count": 0,
             "duplicate_track_frame_count": 0,
@@ -242,6 +244,7 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
     ]
     assert validation.to_dict("records") == [
         {
+            "source_label_image": None,
             "severity": "info",
             "message": "valid",
             "valid": True,
@@ -664,3 +667,49 @@ def test_track_quality_names_duplicate_assignment_conflicts_truthfully() -> None
 
     assert result.iloc[0]["duplicate_track_frame_count"] == 1
     assert result.iloc[0]["object_assignment_conflict_count"] == 1
+
+
+def test_metrics_quality_and_validation_keep_source_stacks_independent() -> None:
+    tracks = pd.DataFrame(
+        [
+            {
+                "source_label_image": "first.tif",
+                "track_id": 1,
+                "frame": 0,
+                "label": 1,
+                "y": 0.0,
+                "x": 0.0,
+                "area": 4,
+            },
+            {
+                "source_label_image": "second.tif",
+                "track_id": 1,
+                "frame": 0,
+                "label": 1,
+                "y": 10.0,
+                "x": 10.0,
+                "area": 9,
+            },
+        ]
+    )
+
+    metrics = TrackMetrics().transform(tracks, Arguments())
+    quality = TrackQualityMetrics().transform(tracks, Arguments(min_track_length=1))
+    validation = TrackTableValidate().transform(tracks, Arguments())
+
+    assert metrics["source_label_image"].tolist() == ["first.tif", "second.tif"]
+    assert metrics["track_count"].tolist() == [1, 1]
+    assert metrics["mean_area"].tolist() == [4.0, 9.0]
+    assert quality["source_label_image"].tolist() == ["first.tif", "second.tif"]
+    assert quality["track_count"].tolist() == [1, 1]
+    assert quality["duplicate_track_frame_count"].tolist() == [0, 0]
+    assert quality["object_assignment_conflict_count"].tolist() == [0, 0]
+    assert validation.to_dict("records") == [
+        {
+            "source_label_image": None,
+            "severity": "info",
+            "message": "valid",
+            "valid": True,
+            "error_count": 0,
+        }
+    ]

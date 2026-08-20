@@ -68,6 +68,13 @@ def validate_tracking_columns(
     require_columns(df, required, tool_name)
 
     result = df.copy()
+    if (
+        "source_label_image" in result.columns
+        and result["source_label_image"].isna().any()
+    ):
+        raise ValueError(
+            f"{tool_name} column 'source_label_image' must not contain missing values."
+        )
     for column in required:
         try:
             values = np.asarray(

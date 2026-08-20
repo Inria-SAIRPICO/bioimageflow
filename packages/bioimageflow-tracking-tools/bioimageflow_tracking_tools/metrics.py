@@ -1,5 +1,6 @@
 """Track-level motion metrics."""
 
+from pathlib import Path
 from typing import Annotated, Any
 
 from bioimageflow import DataFrameTool
@@ -22,6 +23,10 @@ class TrackMetrics(DataFrameTool):
         pass
 
     class Outputs(IOModel):
+        source_label_image: Annotated[
+            Path | None,
+            GUIMeta(display_name="Source label image"),
+        ] = None
         track_id: Annotated[int, GUIMeta(display_name="Track ID")]
         track_length: Annotated[int, GUIMeta(display_name="Track length")]
         duration: Annotated[int, GUIMeta(display_name="Duration")]
@@ -44,13 +49,26 @@ class TrackMetrics(DataFrameTool):
             tool_name="TrackMetrics",
             require_area=True,
         )
-        if data.duplicated(["track_id", "frame"]).any():
+        identity_columns = ["track_id", "frame"]
+        group_columns = ["track_id"]
+        if "source_label_image" in data.columns:
+            identity_columns.insert(0, "source_label_image")
+            group_columns.insert(0, "source_label_image")
+        if data.duplicated(identity_columns).any():
             raise ValueError(
                 "TrackMetrics requires at most one observation per track and frame."
             )
 
-        rows: list[dict[str, int | float]] = []
-        for track_id, group in data.groupby("track_id", sort=True):
+        rows: list[dict[str, int | float | Any]] = []
+        grouper: str | list[str] = (
+            group_columns[0] if len(group_columns) == 1 else group_columns
+        )
+        for group_key, group in data.groupby(grouper, sort=True):
+            if len(group_columns) == 1:
+                source_label_image = None
+                track_id = group_key
+            else:
+                source_label_image, track_id = group_key
             group = group.sort_values("frame", kind="stable")
             frames = group["frame"].to_numpy(dtype=np.int64)
             points = group[["y", "x"]].to_numpy(dtype=float)
@@ -69,6 +87,7 @@ class TrackMetrics(DataFrameTool):
             )
             rows.append(
                 {
+                    "source_label_image": source_label_image,
                     "track_id": int(track_id),
                     "track_length": int(len(group)),
                     "duration": duration,
@@ -82,14 +101,24 @@ class TrackMetrics(DataFrameTool):
                 }
             )
 
-        track_count = len(rows)
-        mean_track_length = (
-            float(np.mean([row["track_length"] for row in rows])) if rows else 0.0
-        )
-        for row in rows:
-            row["track_count"] = track_count
-            row["mean_track_length"] = mean_track_length
+        if "source_label_image" in data.columns:
+            rows_by_source: dict[Any, list[dict[str, int | float | Any]]] = {}
+            for row in rows:
+                rows_by_source.setdefault(row["source_label_image"], []).append(row)
+        else:
+            rows_by_source = {None: rows}
+        for source_rows in rows_by_source.values():
+            if not source_rows:
+                continue
+            track_count = len(source_rows)
+            mean_track_length = float(
+                np.mean([row["track_length"] for row in source_rows])
+            )
+            for row in source_rows:
+                row["track_count"] = track_count
+                row["mean_track_length"] = mean_track_length
         columns = [
+            "source_label_image",
             "track_id",
             "track_length",
             "duration",

@@ -4,7 +4,7 @@
 
 The tool is a `DataFrameTool`: pass an upstream track dataframe positionally.
 The input dataframe must contain `track_id`, `frame`, `y`, `x`, and `area`.
-Outputs are one row per track with `track_length`, `duration`, `start_frame`, `end_frame`, `path_length`, `net_displacement`, `net_speed`, `mean_step_speed`, `mean_area`, `track_count`, and `mean_track_length`.
+Outputs are one row per source stack and track with `source_label_image`, `track_length`, `duration`, `start_frame`, `end_frame`, `path_length`, `net_displacement`, `net_speed`, `mean_step_speed`, `mean_area`, `track_count`, and `mean_track_length`.
 No metrics CSV artifact is written.
 
 ## Dependencies and Core Libraries
@@ -33,6 +33,7 @@ metrics = TrackMetrics().transform(tracks, Arguments())
 `net_speed` is net displacement divided by duration, and `mean_step_speed` is the arithmetic mean of each step distance divided by its frame interval.
 Both speeds are zero for a single-observation track.
 `mean_area` is the arithmetic mean of all observed areas.
+When the input contains `source_label_image`, local track IDs from independent stacks are measured separately and `track_count` and `mean_track_length` are computed per source.
 
 ## Failure Modes
 
