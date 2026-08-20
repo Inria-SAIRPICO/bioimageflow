@@ -41,8 +41,38 @@ def _parse_rename_mapping(value: str | None) -> dict[str, str]:
         old, new = (part.strip() for part in item.split(":", 1))
         if not old or not new:
             raise ValueError("Rename mapping entries must include old and new names.")
+        if old in mapping:
+            raise ValueError(f"Rename mapping contains duplicate source column '{old}'.")
         mapping[old] = new
     return mapping
+
+
+def _validate_column_selection(
+    columns: list[str],
+    rename_mapping: dict[str, str],
+) -> list[str]:
+    duplicates = list(dict.fromkeys(
+        column for index, column in enumerate(columns) if column in columns[:index]
+    ))
+    if duplicates:
+        raise ValueError(
+            f"Columns contains duplicate selection(s): {', '.join(duplicates)}."
+        )
+    unused = sorted(set(rename_mapping) - set(columns))
+    if unused:
+        raise KeyError(
+            f"Rename mapping references unselected column(s): {', '.join(unused)}"
+        )
+    final_names = [rename_mapping.get(column, column) for column in columns]
+    collisions = list(dict.fromkeys(
+        name for index, name in enumerate(final_names) if name in final_names[:index]
+    ))
+    if collisions:
+        raise ValueError(
+            "Selected and renamed columns must have unique output names; "
+            f"collision(s): {', '.join(collisions)}."
+        )
+    return final_names
 
 
 def _coerce_value_for_series(series: pd.Series, value: str) -> Any:
@@ -241,9 +271,7 @@ class SelectColumns(DataFrameTool):
             raise KeyError(f"Missing column(s): {', '.join(missing)}")
 
         rename_mapping = _parse_rename_mapping(arguments.rename_mapping)
-        unused = sorted(set(rename_mapping) - set(columns))
-        if unused:
-            raise KeyError(f"Rename mapping references unselected column(s): {', '.join(unused)}")
+        _validate_column_selection(columns, rename_mapping)
         return df.loc[:, columns].rename(columns=rename_mapping).copy()
 
     @classmethod
@@ -256,4 +284,8 @@ class SelectColumns(DataFrameTool):
         if missing:
             return None
         rename_mapping = _parse_rename_mapping((inputs or {}).get("rename_mapping", ""))
-        return {rename_mapping.get(column, column): upstream[column] for column in columns}
+        final_names = _validate_column_selection(columns, rename_mapping)
+        return {
+            final_name: upstream[column]
+            for column, final_name in zip(columns, final_names)
+        }

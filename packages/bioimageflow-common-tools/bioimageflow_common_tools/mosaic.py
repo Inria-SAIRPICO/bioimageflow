@@ -68,7 +68,7 @@ class Mosaic(ProcessingTool):
             Path,
             ImageSpec(
                 semantics={Semantic.INTENSITY},
-                layouts={Layout.PLANAR_CHANNEL},
+                layouts={Layout.PLANAR, Layout.PLANAR_CHANNEL},
             ),
             GUIMeta(
             display_name="Mosaic image",
@@ -88,36 +88,85 @@ class Mosaic(ProcessingTool):
     ) -> Any:
         from PIL import Image
 
+        if not arguments_list:
+            return []
+
+        first = arguments_list[0]
+        columns = int(first.columns)
+        tile_width = first.tile_width
+        tile_height = first.tile_height
+        if columns < 1:
+            raise ValueError("Columns must be at least 1.")
+        if tile_width is not None and tile_width < 1:
+            raise ValueError("Tile width must be at least 1 when provided.")
+        if tile_height is not None and tile_height < 1:
+            raise ValueError("Tile height must be at least 1 when provided.")
+        for args in arguments_list[1:]:
+            settings = (int(args.columns), args.tile_width, args.tile_height)
+            if settings != (columns, tile_width, tile_height):
+                raise ValueError("Mosaic layout settings must be identical for every row.")
+
         images = []
-        for args in arguments_list:
-            img = Image.open(str(args.input_image))
-            if args.tile_width is not None or args.tile_height is not None:
-                width = args.tile_width if args.tile_width is not None else img.size[0]
-                height = args.tile_height if args.tile_height is not None else img.size[1]
-                img = img.resize((width, height))
-            images.append(img)
+        try:
+            for args in arguments_list:
+                with Image.open(str(args.input_image)) as source:
+                    source.load()
+                    image = source.copy()
+                if tile_width is not None or tile_height is not None:
+                    width = tile_width if tile_width is not None else image.size[0]
+                    height = tile_height if tile_height is not None else image.size[1]
+                    resized = image.resize((width, height))
+                    image.close()
+                    image = resized
+                images.append(image)
 
-        # Use the output path from the first row (all rows share the same
-        # template since it only uses {node_name}).
-        output_path = Path(arguments_list[0].mosaic_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        cols = arguments_list[0].columns
-        if not images:
-            canvas = Image.new("RGB", (1, 1))
-        else:
+            cols = min(columns, len(images))
             rows = (len(images) + cols - 1) // cols
-            tile_w, tile_h = images[0].size
-            canvas = Image.new("RGB", (cols * tile_w, rows * tile_h))
+            cell_width = max(image.width for image in images)
+            cell_height = max(image.height for image in images)
+            mode = _mosaic_mode(images)
+            background: int | tuple[int, ...]
+            background = (0, 0, 0, 0) if mode == "RGBA" else 0
+            canvas = Image.new(
+                mode,
+                (cols * cell_width, rows * cell_height),
+                color=background,
+            )
             for idx, img in enumerate(images):
-                x = (idx % cols) * tile_w
-                y = (idx // cols) * tile_h
-                canvas.paste(img, (x, y))
+                x = (idx % cols) * cell_width
+                y = (idx // cols) * cell_height
+                tile = img if img.mode == mode else img.convert(mode)
+                try:
+                    if mode == "RGBA":
+                        canvas.alpha_composite(tile, (x, y))
+                    else:
+                        canvas.paste(tile, (x, y))
+                finally:
+                    if tile is not img:
+                        tile.close()
 
-        canvas.save(str(output_path))
+            output_path = Path(first.mosaic_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                canvas.save(str(output_path))
+            finally:
+                canvas.close()
+        finally:
+            for image in images:
+                image.close()
 
         # Every input row maps to the same mosaic output (1-to-1).
         return [
             self.Outputs(mosaic_path=output_path, image_count=len(images))
             for _ in arguments_list
         ]
+
+
+def _mosaic_mode(images: list[Any]) -> str:
+    """Choose a PNG-compatible mode without discarding color or transparency."""
+    modes = {image.mode for image in images}
+    if modes & {"LA", "PA", "RGBA"}:
+        return "RGBA"
+    if not modes <= {"1", "L"}:
+        return "RGB"
+    return "L"

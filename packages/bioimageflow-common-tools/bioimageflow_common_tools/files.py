@@ -76,14 +76,14 @@ class Files(DataFrameTool):
             raise ValueError("Set a Directory or at least one file.")
 
         if has_explicit_files:
-            files = [Path(value) for value in explicit_files]
+            files = [Path(value).resolve() for value in explicit_files]
             invalid = [path for path in files if not path.is_file()]
             if invalid:
                 paths = ", ".join(str(path) for path in invalid)
                 raise ValueError(f"Files contains missing or non-file paths: {paths}")
         else:
             assert directory_value is not None
-            directory = Path(directory_value)
+            directory = Path(directory_value).resolve()
             if not directory.is_dir():
                 raise ValueError(f"Directory is missing or not a directory: {directory}")
             pattern = getattr(arguments, "pattern", "*")
@@ -91,5 +91,5 @@ class Files(DataFrameTool):
             candidates = directory.rglob(pattern) if recursive else directory.glob(pattern)
             files = sorted(path for path in candidates if path.is_file())
 
-        rows = [{"path": str(path)} for path in files]
+        rows = [{"path": str(path.resolve())} for path in files]
         return pd.DataFrame(rows)

@@ -38,7 +38,7 @@ def test_common_exports_exclude_moved_heavy_tools() -> None:
     assert hasattr(common, "WriteTable")
     assert hasattr(common, "FilterTableRows")
     assert hasattr(common, "SelectColumns")
-    assert hasattr(common, "ExtractChannel")
+    assert not hasattr(common, "ExtractChannel")
     assert hasattr(common, "LabelOverlaps")
     assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_v3") is None
     assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_sam") is None
@@ -57,7 +57,6 @@ def test_common_package_all_exports_only_public_tools() -> None:
         "Concat",
         "ConnectedComponents",
         "CrossJoin",
-        "ExtractChannel",
         "Files",
         "FilterTableRows",
         "Generate",
@@ -163,14 +162,15 @@ def test_connected_components_schema_declares_uint32_labels() -> None:
     assert schema["output_image"]["image_spec"]["dtypes"] == ["uint32"]
 
 
-def test_connected_components_environment_declares_uint32_tiff_writer() -> None:
-    from bioimageflow_common_tools.connected_components import simpleitk_env
+def test_connected_components_uses_general_image_environment() -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+    from bioimageflow_core import GENERAL_ENV
 
-    assert "tifffile==2026.6.1" in simpleitk_env.dependencies["pip"]
+    assert ConnectedComponents.environment is GENERAL_ENV
+    assert "scikit-image==0.26.0" in GENERAL_ENV.dependencies["pip"]
 
 
 def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:
-    pytest.importorskip("SimpleITK")
     from bioimageflow_common_tools import ConnectedComponents
 
     mask = np.zeros((16, 16), dtype=np.uint8)
@@ -190,3 +190,19 @@ def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:
     assert labels.dtype == np.uint32
     assert result.num_labels == 2
     assert int(labels.max()) == 2
+
+
+def test_connected_components_uses_face_connectivity(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    mask = np.eye(3, dtype=np.uint8)
+    input_image = tmp_path / "diagonal.tif"
+    iio.imwrite(input_image, mask)
+
+    result = ConnectedComponents().process_row(
+        Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+    )
+
+    labels = iio.imread(result.output_image)
+    assert result.num_labels == 3
+    assert set(np.unique(labels)) == {0, 1, 2, 3}

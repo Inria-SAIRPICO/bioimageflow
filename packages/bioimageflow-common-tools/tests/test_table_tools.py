@@ -153,3 +153,37 @@ def test_select_columns_rejects_missing_column():
 
     with pytest.raises(KeyError, match="score"):
         SelectColumns().transform(df, Arguments(columns="sample,score", rename_mapping=""))
+
+
+def test_select_columns_rejects_duplicate_selections():
+    df = pd.DataFrame({"sample": ["A"]})
+
+    with pytest.raises(ValueError, match="duplicate selection"):
+        SelectColumns().transform(
+            df,
+            Arguments(columns="sample,sample", rename_mapping=""),
+        )
+
+
+@pytest.mark.parametrize(
+    "rename_mapping",
+    ["sample:value,score:value", "sample:score"],
+)
+def test_select_columns_rejects_final_name_collisions(rename_mapping):
+    df = pd.DataFrame({"sample": ["A"], "score": [1]})
+
+    with pytest.raises(ValueError, match="unique output names"):
+        SelectColumns().transform(
+            df,
+            Arguments(columns="sample,score", rename_mapping=rename_mapping),
+        )
+
+
+def test_select_columns_rejects_duplicate_rename_sources():
+    df = pd.DataFrame({"sample": ["A"]})
+
+    with pytest.raises(ValueError, match="duplicate source"):
+        SelectColumns().transform(
+            df,
+            Arguments(columns="sample", rename_mapping="sample:first,sample:second"),
+        )

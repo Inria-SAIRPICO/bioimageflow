@@ -87,6 +87,13 @@ class LabelOverlaps(ProcessingTool):
         print("Computing label overlaps...")
         labels = iio.imread(str(arguments.label_image))
         reference = iio.imread(str(arguments.reference_image))
+        labels = _validated_label_image(labels, "Label image", np)
+        reference = _validated_label_image(reference, "Reference label image", np)
+        if labels.shape != reference.shape:
+            raise ValueError(
+                "Label image and reference label image must have the same shape; "
+                f"got {labels.shape} and {reference.shape}."
+            )
 
         # Build overlap table: for each pixel, record (reference_label, spot_label)
         mask = (labels > 0) | (reference > 0)
@@ -111,3 +118,20 @@ class LabelOverlaps(ProcessingTool):
             )
             for (ref_lbl, spot_lbl), count in zip(pairs, counts)
         ]
+
+
+def _validated_label_image(image: Any, name: str, np: Any) -> Any:
+    if image.ndim != 2:
+        raise ValueError(f"{name} must be a 2D label image; got shape {image.shape}.")
+    if image.dtype.kind not in "biuf":
+        raise ValueError(f"{name} must contain numeric labels.")
+    if not np.isfinite(image).all():
+        raise ValueError(f"{name} must contain only finite labels.")
+    if (image < 0).any():
+        raise ValueError(f"{name} must contain only non-negative labels.")
+    if image.dtype.kind == "f" and not np.equal(image, np.floor(image)).all():
+        raise ValueError(f"{name} must contain only integer-valued labels.")
+    max_label = image.max(initial=0)
+    if max_label > np.iinfo(np.uint64).max:
+        raise ValueError(f"{name} contains labels larger than uint64 supports.")
+    return image.astype(np.uint64, copy=False)
