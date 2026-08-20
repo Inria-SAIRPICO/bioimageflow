@@ -864,8 +864,9 @@ Apply this cardinality rule and the same canonical output shape to direct and We
 Implement the complete normative empty-input contract:
 
 - skip an empty aligned batch by default,
-- run an empty batch only for a real `process_batch()` override with `run_empty_batch=True` on a column-bound node,
+- run synthetic rows only for a real `process_batch()` override with `run_empty_batch=True` on a column-bound node,
 - inspect `empty_batch_anchor_inputs` in declaration order,
+- use non-anchor inputs for normal alignment and synthesize only anchor indexes with no normal row or descendant,
 - use the first usable non-empty anchor indexes sorted by `str(index)`,
 - resolve other anchors by exact or parent-lineage match,
 - fall back to the single synthetic index `"0"`,

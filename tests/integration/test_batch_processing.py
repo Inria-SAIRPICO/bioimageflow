@@ -46,6 +46,36 @@ class EmptyChild(DataFrameTool):
         return pd.DataFrame(columns=pd.Index(["value"]))
 
 
+class PartiallyEmptyChild(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
+    environment = StubBatchProcessor.environment
+
+    class Inputs(IOModel):
+        path: Path
+
+    class Outputs(IOModel):
+        value: int
+
+    def process_row(
+        self, arguments: Arguments, *, context: object | None = None
+    ) -> Any:
+        if Path(arguments.path).stem == "empty":
+            return []
+        return self.Outputs(value=1)
+
+
+class TwoPathSource(DataFrameTool):
+    class Inputs(IOModel):
+        first: Path
+        second: Path
+
+    class Outputs(IOModel):
+        path: Path
+
+    def transform(self, df: Any, arguments: Arguments) -> pd.DataFrame:
+        return pd.DataFrame([{"path": arguments.first}, {"path": arguments.second}])
+
+
 class SinglePathSource(DataFrameTool):
     class Inputs(IOModel):
         path: Path
@@ -214,3 +244,29 @@ class TestEmptyBatchExecution:
         assert len(df) == 1
         assert df.iloc[0]["source_name"] == "source.tif"
         assert Path(df.iloc[0]["output"]).read_text() == "source.tif"
+
+    def test_empty_batch_anchor_fills_partially_empty_parent_groups(
+        self, tmp_workspace
+    ):
+        populated_path = tmp_workspace / "populated.tif"
+        empty_path = tmp_workspace / "empty.tif"
+        populated_path.write_text("populated")
+        empty_path.write_text("empty")
+
+        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
+            sources = TwoPathSource()(
+                first=populated_path,
+                second=empty_path,
+                name="sources",
+            )
+            children = PartiallyEmptyChild()(path=sources["path"], name="children")
+            reduced = AnchoredEmptyBatchReducer()(
+                value=children["value"],
+                path=sources["path"],
+                name="anchored",
+            )
+            df = wf.compute(reduced)
+
+        assert len(df) == 2
+        assert df["source_name"].tolist() == ["populated.tif", "empty.tif"]
+        assert all(Path(path).exists() for path in df["output"])

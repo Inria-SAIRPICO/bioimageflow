@@ -141,6 +141,7 @@ class _ArgumentsMixin:
         templates: dict[str, str],
         path_input_fields: list[str],
         assets_dir: Path,
+        represented_indices: list[Any] | None = None,
     ) -> tuple[list[Any], list[dict[str, Any]]]:
         """Resolve constants/defaults and output templates for an empty batch."""
         anchor_inputs = tuple(getattr(node.tool, "empty_batch_anchor_inputs", ()))
@@ -154,6 +155,18 @@ class _ArgumentsMixin:
         if anchor_bindings:
             anchor_df = results[anchor_bindings[0][1].node]
             execution_index = sorted(anchor_df.index, key=str)
+            if represented_indices:
+                represented = tuple(str(index) for index in represented_indices)
+                execution_index = [
+                    index
+                    for index in execution_index
+                    if not any(
+                        normal == str(index) or normal.startswith(f"{index}::")
+                        for normal in represented
+                    )
+                ]
+        elif represented_indices:
+            execution_index = []
         else:
             execution_index = ["0"]
 

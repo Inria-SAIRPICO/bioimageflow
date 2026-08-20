@@ -476,6 +476,25 @@ class _NodeExecutionMixin:
             cr.node.name: cr.node for cr in node._column_bindings.values()
         }
         aligned_index, _ = self._align_indices(node, upstream_nodes, results)
+        has_batch = type(node.tool).process_batch is not ProcessingTool.process_batch
+        run_empty_batch = has_batch and getattr(node.tool, "run_empty_batch", False)
+        anchor_inputs = (
+            set(getattr(node.tool, "empty_batch_anchor_inputs", ()))
+            if run_empty_batch
+            else set()
+        )
+        if anchor_inputs:
+            driving_upstream_nodes = {
+                column_ref.node.name: column_ref.node
+                for field, column_ref in node._column_bindings.items()
+                if field not in anchor_inputs
+            }
+            if driving_upstream_nodes:
+                aligned_index, _ = self._align_indices(
+                    node,
+                    driving_upstream_nodes,
+                    results,
+                )
         self._validate_column_bindings(node, results)
 
         # --- Signature hash ---
@@ -556,35 +575,28 @@ class _NodeExecutionMixin:
                 n for n, a in input_annotations.items() if is_path_type(a)
             ]
             execution_index = aligned_index
-            has_batch = (
-                type(node.tool).process_batch is not ProcessingTool.process_batch
+            arguments_dicts = self._resolve_all_row_arguments(
+                node,
+                aligned_index,
+                results,
+                upstream_nodes,
+                input_annotations,
+                templates,
+                path_input_fields,
+                real_assets_dir,
             )
-            if (
-                not aligned_index
-                and has_batch
-                and getattr(node.tool, "run_empty_batch", False)
-            ):
-                execution_index, arguments_dicts = (
-                    self._resolve_empty_batch_arguments(
-                        node,
-                        results,
-                        input_annotations,
-                        templates,
-                        path_input_fields,
-                        real_assets_dir,
-                    )
-                )
-            else:
-                arguments_dicts = self._resolve_all_row_arguments(
+            if run_empty_batch:
+                anchor_index, anchor_arguments = self._resolve_empty_batch_arguments(
                     node,
-                    aligned_index,
                     results,
-                    upstream_nodes,
                     input_annotations,
                     templates,
                     path_input_fields,
                     real_assets_dir,
+                    represented_indices=aligned_index,
                 )
+                execution_index = [*aligned_index, *anchor_index]
+                arguments_dicts.extend(anchor_arguments)
 
             # --- Dispatch & build output ---
             row_contexts, batch_context = self._build_execution_contexts(

@@ -746,8 +746,9 @@ One shared validator enforces this rule for direct, Wetlands, and Parsl.
 The Parsl engine implements the complete empty-input contract:
 
 - An empty aligned batch does not call `process_batch` by default.
-- `run_empty_batch=True` applies only to a tool class that overrides `process_batch` and a column-bound node whose aligned index is empty.
+- `run_empty_batch=True` applies only to a tool class that overrides `process_batch`; without anchors it runs when the column-bound node's aligned index is empty, while anchored tools also run synthetic rows for partially empty parent groups.
 - `empty_batch_anchor_inputs` is inspected in declared order; the first bound anchor with a usable non-empty DataFrame chooses synthetic indexes sorted by `str(index)`.
+- Non-anchor inputs drive normal row alignment, and anchor indexes already represented by a normal row or descendant are not synthesized again.
 - Other anchor bindings resolve by exact or parent-lineage matching against those chosen indexes.
 - Without a usable anchor, the engine supplies the canonical single synthetic index `"0"`.
 - Synthetic argument and template resolution happens in the orchestrator before dispatch.

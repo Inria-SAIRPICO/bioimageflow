@@ -492,6 +492,51 @@ def test_tracking_workflow_keeps_nonempty_sources_independent(tmp_path: Path) ->
         assert set(np.unique(labels)) == {0, 1}
 
 
+def test_tracking_workflow_writes_artifacts_for_mixed_empty_sources(
+    tmp_path: Path,
+) -> None:
+    image_dir = tmp_path / "labels"
+    image_dir.mkdir()
+    populated = np.zeros((2, 16, 16), dtype=np.uint32)
+    populated[0, 2:5, 2:5] = 7
+    populated[1, 3:6, 2:5] = 9
+    iio.imwrite(image_dir / "populated.tif", populated, photometric="minisblack")
+    iio.imwrite(
+        image_dir / "empty.tif",
+        np.zeros_like(populated),
+        photometric="minisblack",
+    )
+
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
+        files = Files()(path=image_dir, pattern="*.tif", name="files")
+        objects = LabelsToObjects()(label_image=files["path"], name="objects")
+        tracks = NearestNeighborLink()(objects, name="links")
+        rendered = TracksToLabels()(
+            track_id=tracks["track_id"],
+            frame=tracks["frame"],
+            label=tracks["label"],
+            label_image=files["path"],
+            name="render_tracks",
+        )
+        result = wf.compute(rendered)
+
+    assert len(result) == 2
+    by_name = {
+        Path(path).name: (int(count), iio.imread(path))
+        for path, count in zip(
+            result["output_label_image"],
+            result["track_count"],
+            strict=True,
+        )
+    }
+    empty_name = next(name for name in by_name if "empty" in name)
+    populated_name = next(name for name in by_name if "populated" in name)
+    assert by_name[empty_name][0] == 0
+    assert int(by_name[empty_name][1].max()) == 0
+    assert by_name[populated_name][0] == 1
+    assert set(np.unique(by_name[populated_name][1])) == {0, 1}
+
+
 def test_tracks_to_labels_output_schema_declares_uint32_labels() -> None:
     schema = serialize_output_schema(TracksToLabels)
 
