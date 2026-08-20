@@ -206,10 +206,16 @@ def test_sairpico_binary_environments_are_pinned_to_python39() -> None:
         assert tool_cls.environment.dependencies["python"] == "3.9"
 
 
-def test_hotspot_worker_environment_pins_scipy() -> None:
+def test_hotspot_worker_environment_pins_all_runtime_dependencies() -> None:
     dependencies = HotspotToSpots.environment.dependencies
 
-    assert "scipy==1.13.1" in dependencies["conda"]
+    assert set(dependencies["conda"]) >= {
+        "bioimageit::hotspot==1.0.0",
+        "imageio==2.37.0",
+        "numpy==1.26.4",
+        "scipy==1.13.1",
+        "tifffile==2024.2.12",
+    }
 
 
 def test_sairpico_image_outputs_have_fixed_tiff_templates() -> None:

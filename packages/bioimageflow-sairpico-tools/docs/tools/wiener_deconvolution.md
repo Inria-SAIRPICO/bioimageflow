@@ -23,7 +23,7 @@ sigma-based 2D approximation or a measured/synthetic 3D PSF is available.
 
 ## Assumptions
 
-- The chosen mode matches the input image dimensionality.
+- Select the mode that matches the input image dimensionality; the external binary validates the image layout.
 - `3D` mode uses `psf_image`; non-3D modes use `sigma`.
 - The regularization scale is appropriate for the image intensity range.
 

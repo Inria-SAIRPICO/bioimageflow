@@ -28,7 +28,7 @@ available.
 
 - Non-3D modes use the scalar `sigma` parameter rather than an explicit PSF.
 - `3D` mode requires `psf_image` to exist before the subprocess is started.
-- The input image layout matches the selected SAIRPICO mode.
+- Select the SAIRPICO mode that matches the input image layout; the external binary validates the image dimensionality.
 
 ## Dependencies and Core Libraries
 

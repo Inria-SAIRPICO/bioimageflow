@@ -33,7 +33,7 @@ The package declares three `EnvironmentSpec` instances:
   median denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0`, used by
   `CImgDenoising`.
-- `hotspot`: `bioimageit::hotspot==1.0.0` and `scipy==1.13.1`, used by `HotspotDetection` and `HotspotToSpots`.
+- `hotspot`: `bioimageit::hotspot==1.0.0` plus pinned NumPy, SciPy, imageio, and tifffile dependencies, used by `HotspotDetection` and `HotspotToSpots`.
 
 The original SAIRPICO inventory listed platform selectors for these packages:
 
