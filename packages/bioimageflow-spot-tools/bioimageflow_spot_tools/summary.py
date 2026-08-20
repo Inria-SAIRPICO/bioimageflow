@@ -3,12 +3,7 @@
 from typing import Annotated, Any
 
 from bioimageflow import DataFrameTool
-from bioimageflow_core import (
-    Arguments,
-    Category,
-    GUIMeta,
-    IOModel,
-)
+from bioimageflow_core import Arguments, Category, Connectable, GUIMeta, IOModel
 
 from .validation import finite_float, integral_value
 
@@ -22,6 +17,17 @@ class SpotSummary(DataFrameTool):
     tags = ["spots", "summary", "puncta"]
 
     class Inputs(IOModel):
+        group_by: Annotated[
+            str | None,
+            GUIMeta(
+                display_name="Group by",
+                description=(
+                    "Optional source column used to summarize labels independently. "
+                    "When omitted, BioImageFlow index lineage is used when available."
+                ),
+                connectable=Connectable.NEVER,
+            ),
+        ] = None
         label_column: Annotated[
             str,
             GUIMeta(
@@ -38,6 +44,7 @@ class SpotSummary(DataFrameTool):
         ] = "intensity"
 
     class Outputs(IOModel):
+        group: Annotated[str | None, GUIMeta(display_name="Group")] = None
         label: Annotated[int, GUIMeta(display_name="Label")]
         spot_count: Annotated[int, GUIMeta(display_name="Spot count")]
         mean_intensity: Annotated[float, GUIMeta(display_name="Mean intensity")]
@@ -55,9 +62,14 @@ class SpotSummary(DataFrameTool):
 
         label_column = getattr(arguments, "label_column", "label")
         intensity_column = getattr(arguments, "intensity_column", "intensity")
+        group_by = getattr(arguments, "group_by", None)
+        if group_by is not None:
+            if not isinstance(group_by, str) or not (group_by := group_by.strip()):
+                raise ValueError("group_by must be a non-empty column name when provided.")
         missing = [
             column
-            for column in (label_column, intensity_column)
+            for column in (label_column, intensity_column, group_by)
+            if column is not None
             if column not in df.columns
         ]
         if missing:
@@ -68,6 +80,18 @@ class SpotSummary(DataFrameTool):
             )
 
         table = df[[label_column, intensity_column]].copy()
+        if group_by is not None:
+            if df[group_by].isna().any():
+                raise ValueError(
+                    f"SpotSummary group column {group_by!r} must not contain missing values."
+                )
+            table["__bif_group"] = df[group_by].map(str)
+        elif len(df) and all("::" in str(index) for index in df.index):
+            table["__bif_group"] = [
+                str(index).split("::", 1)[0] for index in df.index
+            ]
+        else:
+            table["__bif_group"] = None
         try:
             table[label_column] = pd.to_numeric(table[label_column], errors="raise")
             table[intensity_column] = pd.to_numeric(
@@ -88,17 +112,36 @@ class SpotSummary(DataFrameTool):
         if not np.all(np.isfinite(table[intensity_column].to_numpy(dtype=float))):
             raise ValueError(f"SpotSummary column {intensity_column!r} must be finite.")
         table = table[table[label_column] > 0]
-        grouped = table.groupby(label_column, sort=True)[intensity_column]
+        grouped = table.groupby(
+            ["__bif_group", label_column],
+            sort=True,
+            dropna=False,
+        )[intensity_column]
         result = grouped.agg(
             spot_count="count",
             mean_intensity="mean",
             total_intensity="sum",
         ).reset_index()
-        result = result.rename(columns={label_column: "label"})
+        result = result.rename(
+            columns={"__bif_group": "group", label_column: "label"}
+        )
+        result["group"] = result["group"].where(result["group"].notna(), None)
         result["label"] = result["label"].astype(int)
         result["spot_count"] = result["spot_count"].astype(int)
-        result["label_count"] = len(result)
-        result.index = [str(label) for label in result["label"]]
+        result["label_count"] = result.groupby("group", dropna=False)[
+            "label"
+        ].transform("size")
+        result.index = [
+            str(label) if group is None else f"{group}::{label}"
+            for group, label in zip(result["group"], result["label"], strict=True)
+        ]
         return result[
-            ["label", "spot_count", "mean_intensity", "total_intensity", "label_count"]
+            [
+                "group",
+                "label",
+                "spot_count",
+                "mean_intensity",
+                "total_intensity",
+                "label_count",
+            ]
         ]

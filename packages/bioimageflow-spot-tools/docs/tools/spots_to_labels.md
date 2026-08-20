@@ -23,6 +23,7 @@ SpotsToLabels().process_batch([
 ## Expected Results
 
 Every input row receives the same aggregate label-image path and count so the collective tool preserves BioImageFlow batch cardinality.
+All rows in one collective batch must use the same `image_shape`, `radius`, and `label_image`; conflicting settings are rejected instead of being silently ignored.
 Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows deterministically overwrite earlier rows where disks overlap.
 The label image is written as `uint32`; background is `0`, and non-zero spot IDs are preserved exactly.
 `label_count` is the number of distinct positive IDs still visible in the final image, which can be smaller than the number of input rows after complete overlap or duplicate IDs.
@@ -30,5 +31,5 @@ When the upstream spot table is empty, coordinate mode still writes a blank `uin
 
 ## Failure Modes
 
-Missing coordinates, malformed shapes, or unwritable output paths raise errors.
+Missing coordinates, malformed shapes, conflicting collective settings, or unwritable output paths raise errors.
 Spot-row `spot_id` values must be positive integers no larger than the `uint32` maximum.

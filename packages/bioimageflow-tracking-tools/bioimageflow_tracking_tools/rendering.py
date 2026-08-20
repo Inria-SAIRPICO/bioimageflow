@@ -95,9 +95,6 @@ class TracksToLabels(ProcessingTool):
                 anchor_arguments.append(row)
                 anchor_positions.append(position)
 
-        if not track_arguments:
-            return [self._render_empty(row, iio=iio, np=np) for row in anchor_arguments]
-
         rows_by_source: dict[Path, list[tuple[int, Arguments]]] = {}
         output_by_source: dict[Path, Path] = {}
         source_by_output: dict[Path, Path] = {}
@@ -139,6 +136,7 @@ class TracksToLabels(ProcessingTool):
             rendered[position] = self._render_empty(row, iio=iio, np=np)
             rendered_sources.add(source_path)
             rendered_outputs.add(output_path)
+            output_by_source[source_path] = output_path
         return rendered
 
     def _render_tracks(

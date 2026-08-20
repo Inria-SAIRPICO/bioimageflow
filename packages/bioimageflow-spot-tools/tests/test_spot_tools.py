@@ -202,6 +202,24 @@ def test_assign_spots_to_labels_and_summarize(tmp_path: Path) -> None:
     assert list(summary["total_intensity"]) == [22.0, 8.0]
 
 
+def test_spot_summary_keeps_index_lineage_groups_independent() -> None:
+    assigned = pd.DataFrame(
+        {
+            "label": [1, 1, 1],
+            "intensity": [10.0, 12.0, 30.0],
+        },
+        index=_index(["first::0", "first::1", "second::0"]),
+    )
+
+    summary = SpotSummary().transform(assigned, Arguments())
+
+    assert summary.index.tolist() == ["first::1", "second::1"]
+    assert summary["group"].tolist() == ["first", "second"]
+    assert summary["spot_count"].tolist() == [2, 1]
+    assert summary["total_intensity"].tolist() == [22.0, 30.0]
+    assert summary["label_count"].tolist() == [1, 1]
+
+
 def test_spot_tools_build_workflow_graph(tmp_path: Path) -> None:
     image = _spot_image(tmp_path / "puncta.tif")
     labels = np.ones((48, 48), dtype=np.uint16)
@@ -486,6 +504,54 @@ def test_render_spots_rejects_output_collision_between_reference_images(
                 for index, reference in enumerate((first, second), start=1)
             ]
         )
+
+
+@pytest.mark.parametrize(
+    "changed_field, changed_value",
+    [
+        pytest.param("image_shape", "24,16", id="shape"),
+        pytest.param("radius", 2, id="radius"),
+        pytest.param("label_image", "other.tif", id="output"),
+    ],
+)
+def test_spots_to_labels_rejects_conflicting_collective_configuration(
+    tmp_path: Path,
+    changed_field: str,
+    changed_value: object,
+) -> None:
+    common = {
+        "image_shape": "16,16",
+        "radius": 1,
+        "label_image": tmp_path / "labels.tif",
+    }
+    changed = {**common, changed_field: changed_value}
+
+    with pytest.raises(ValueError, match="same image_shape, radius, and label_image"):
+        SpotsToLabels().process_batch(
+            [
+                Arguments(spot_id=1, y=4, x=5, **common),
+                Arguments(spot_id=2, y=8, x=9, **changed),
+            ]
+        )
+
+
+def test_spots_to_labels_all_empty_rows_share_one_collective_output(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "labels.tif"
+
+    results = SpotsToLabels().process_batch(
+        [
+            Arguments(image_shape="16,16", radius=1, label_image=output),
+            Arguments(image_shape="16,16", radius=1, label_image=output),
+        ]
+    )
+
+    assert len(results) == 2
+    assert all(len(row) == 1 for row in results)
+    assert {Path(row[0].label_image) for row in results} == {output}
+    assert {row[0].label_count for row in results} == {0}
+    assert int(iio.imread(output).max()) == 0
 
 
 def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) -> None:

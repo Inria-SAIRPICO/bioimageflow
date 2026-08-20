@@ -398,6 +398,24 @@ def test_tracks_to_labels_zero_tracks_preserves_artifact_and_count(
     assert result.track_count == 0
 
 
+def test_tracks_to_labels_coalesces_repeated_empty_anchors(tmp_path: Path) -> None:
+    label_path = _moving_labels(tmp_path / "labels.tif")
+    output = tmp_path / "track_labels.tif"
+
+    results = TracksToLabels().process_batch(
+        [
+            Arguments(label_image=label_path, output_label_image=output),
+            Arguments(label_image=label_path, output_label_image=output),
+        ]
+    )
+
+    assert len(results) == 2
+    assert len(results[0]) == 1
+    assert results[1] == []
+    assert Path(results[0][0].output_label_image) == output
+    assert results[0][0].track_count == 0
+
+
 def test_tracking_workflow_all_background_writes_zero_track_artifact(
     tmp_path: Path,
 ) -> None:

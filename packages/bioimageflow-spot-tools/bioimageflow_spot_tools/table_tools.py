@@ -452,21 +452,16 @@ class SpotsToLabels(ProcessingTool):
         ] = Template("spots_labels.tif")
         label_count: Annotated[int, GUIMeta("Label count")]
 
-    def _blank_coordinate_outputs(
-        self, arguments_list: list[Arguments]
-    ) -> list[list[Any]]:
+    def _blank_coordinate_output(self, arguments: Arguments) -> list[Any]:
         import imageio.v3 as iio
         import numpy as np
 
-        outputs = []
-        for arguments in arguments_list:
-            shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
-            labels = np.zeros(shape, dtype=np.uint32)
-            output = Path(arguments.label_image)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            iio.imwrite(output, labels)
-            outputs.append([self.Outputs(label_image=output, label_count=0)])
-        return outputs
+        shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
+        labels = np.zeros(shape, dtype=np.uint32)
+        output = Path(arguments.label_image)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        iio.imwrite(output, labels)
+        return [self.Outputs(label_image=output, label_count=0)]
 
     def process_batch(
         self,
@@ -480,15 +475,30 @@ class SpotsToLabels(ProcessingTool):
         if not arguments_list:
             return []
         arguments = arguments_list[0]
+        shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
+        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
+        output = Path(arguments.label_image)
+        for row_arguments in arguments_list[1:]:
+            row_shape = _parse_shape(
+                getattr(row_arguments, "image_shape", "256,256")
+            )
+            row_radius = integral_value(
+                getattr(row_arguments, "radius", 0), "radius", minimum=0
+            )
+            row_output = Path(row_arguments.label_image)
+            if (row_shape, row_radius, row_output) != (shape, radius, output):
+                raise ValueError(
+                    "SpotsToLabels rows in one collective batch must use the same "
+                    "image_shape, radius, and label_image."
+                )
         rows = [
             row_arguments
-            for index, row_arguments in enumerate(arguments_list, start=1)
+            for row_arguments in arguments_list
             if _has_spot_coordinate(row_arguments)
         ]
         if not rows:
-            return self._blank_coordinate_outputs(arguments_list)
-        shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
-        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
+            blank_output = self._blank_coordinate_output(arguments)
+            return [blank_output for _ in arguments_list]
         labels = np.zeros(shape, dtype=np.uint32)
         for index, row_arguments in enumerate(rows, start=1):
             spot_id = getattr(row_arguments, "spot_id", None)
@@ -503,7 +513,6 @@ class SpotsToLabels(ProcessingTool):
             _draw_disk(labels, y, x, radius, value)
         label_count = _rendered_label_count(labels)
 
-        output = Path(arguments.label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
         return [
