@@ -315,7 +315,10 @@ class RenderSpots(ProcessingTool):
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, image)
         spot_count = _rendered_label_count(image) if label_mode else len(rows)
-        return [[self.Outputs(output_image=output, spot_count=spot_count)]]
+        return [
+            [self.Outputs(output_image=output, spot_count=spot_count)]
+            for _ in arguments_list
+        ]
 
 
 class MaskToLabels(ProcessingTool):
@@ -460,7 +463,10 @@ class SpotsToLabels(ProcessingTool):
         output = Path(arguments.label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
-        return [[self.Outputs(label_image=output, label_count=label_count)]]
+        return [
+            [self.Outputs(label_image=output, label_count=label_count)]
+            for _ in arguments_list
+        ]
 
 
 class SpotColocalization(DataFrameTool):

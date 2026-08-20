@@ -22,6 +22,7 @@ SpotsToLabels().process_batch([
 
 ## Expected Results
 
+Every input row receives the same aggregate label-image path and count so the collective tool preserves BioImageFlow batch cardinality.
 Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows deterministically overwrite earlier rows where disks overlap.
 The label image is written as `uint32`; background is `0`, and non-zero spot IDs are preserved exactly.
 `label_count` is the number of distinct positive IDs still visible in the final image, which can be smaller than the number of input rows after complete overlap or duplicate IDs.

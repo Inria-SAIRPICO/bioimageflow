@@ -386,6 +386,39 @@ def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) ->
     assert labels.label_count == 2
 
 
+def test_collective_spot_renderers_preserve_workflow_batch_cardinality(
+    tmp_path: Path,
+) -> None:
+    image = _spot_image(tmp_path / "puncta.tif")
+
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
+        detected = DetectSpots()(input_image=image, threshold=0.3, name="detect")
+        rendered = RenderSpots()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            image_shape="48,48",
+            name="render",
+        )
+        labels = SpotsToLabels()(
+            spot_id=detected["spot_id"],
+            y=detected["y"],
+            x=detected["x"],
+            image_shape="48,48",
+            name="labels",
+        )
+        rendered_result = wf.compute(rendered)
+        labels_result = wf.compute(labels)
+
+    assert len(rendered_result) == len(labels_result) == 3
+    assert rendered_result["output_image"].nunique() == 1
+    assert labels_result["label_image"].nunique() == 1
+    assert rendered_result["spot_count"].tolist() == [3, 3, 3]
+    assert labels_result["label_count"].tolist() == [3, 3, 3]
+    assert int(iio.imread(rendered_result.iloc[0]["output_image"]).max()) == 3
+    assert int(iio.imread(labels_result.iloc[0]["label_image"]).max()) == 3
+
+
 def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) -> None:
     result = RenderSpots().process_batch(
         [
