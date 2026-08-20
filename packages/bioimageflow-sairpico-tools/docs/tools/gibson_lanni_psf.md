@@ -30,6 +30,7 @@ and working distance.
 - Input optical parameters are already in the units expected by SAIRPICO.
 - The output is intended for 3D deconvolution tools that accept volumetric PSFs.
 - The wrapper does not estimate parameters from acquisition metadata.
+- Dimensions must be positive integers, and optical parameters must be finite and greater than zero.
 
 ## Dependencies and Core Libraries
 
@@ -69,6 +70,6 @@ Wiener, or SPITFIR(e) deconvolution.
 ## Failure Modes
 
 - `simggibsonlannipsf` is unavailable in the active environment.
-- Invalid physical parameters cause the external binary to fail.
+- Invalid dimensions or physical parameters fail validation before the external binary starts.
 - Output path creation or writing fails.
 - Requested image size is too large for available resources.

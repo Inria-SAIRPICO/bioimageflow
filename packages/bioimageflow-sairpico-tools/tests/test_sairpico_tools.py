@@ -57,7 +57,9 @@ pytestmark = pytest.mark.package_tools
 
 
 @pytest.mark.parametrize("tool_cls", ALL_TOOLS)
-def test_sairpico_tools_have_serializable_schemas(tool_cls: type[ProcessingTool]) -> None:
+def test_sairpico_tools_have_serializable_schemas(
+    tool_cls: type[ProcessingTool],
+) -> None:
     assert issubclass(tool_cls, ProcessingTool)
     assert tool_cls.display_name
     assert tool_cls.documentation
@@ -133,7 +135,8 @@ def test_output_image_override_uses_output_template_not_input_binding(
 
 def test_importing_package_does_not_import_subprocess() -> None:
     modules_to_clear = [
-        name for name in sys.modules
+        name
+        for name in sys.modules
         if name == "bioimageflow_sairpico_tools"
         or name.startswith("bioimageflow_sairpico_tools.")
     ]
@@ -203,6 +206,21 @@ def test_sairpico_binary_environments_are_pinned_to_python39() -> None:
         assert tool_cls.environment.dependencies["python"] == "3.9"
 
 
+def test_hotspot_worker_environment_pins_scipy() -> None:
+    dependencies = HotspotToSpots.environment.dependencies
+
+    assert "scipy==1.13.1" in dependencies["conda"]
+
+
+def test_sairpico_image_outputs_have_fixed_tiff_templates() -> None:
+    for tool_cls in ALL_TOOLS:
+        if "output_image" not in tool_cls.Outputs._get_all_annotations():
+            continue
+        template = str(tool_cls.Outputs.output_image)
+        assert template.endswith(".tif")
+        assert "{ext}" not in template
+
+
 def _annotation_nodes(tree: ast.AST) -> list[ast.expr]:
     annotations: list[ast.expr] = []
     for node in ast.walk(tree):
@@ -210,7 +228,10 @@ def _annotation_nodes(tree: ast.AST) -> list[ast.expr]:
             annotations.append(node.annotation)
         elif isinstance(node, ast.arg) and node.annotation is not None:
             annotations.append(node.annotation)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+        elif (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.returns is not None
+        ):
             annotations.append(node.returns)
     return annotations
 
@@ -227,8 +248,13 @@ def test_python39_worker_modules_do_not_use_pep604_annotations() -> None:
         source = source_path.read_text()
         tree = ast.parse(source, filename=str(source_path), feature_version=(3, 9))
         for annotation in _annotation_nodes(tree):
-            if any(isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) for node in ast.walk(annotation)):
-                offenders.append(f"{source_path.relative_to(SAIRPICO_PACKAGE)}:{annotation.lineno}")
+            if any(
+                isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
+                for node in ast.walk(annotation)
+            ):
+                offenders.append(
+                    f"{source_path.relative_to(SAIRPICO_PACKAGE)}:{annotation.lineno}"
+                )
 
     assert offenders == []
 
@@ -295,12 +321,18 @@ def _resolve_sairpico_command_template(
             },
             [
                 "simggaussian3dpsf",
-                "-o", "{output}",
-                "-sigmaxy", "1.2",
-                "-sigmaz", "2.3",
-                "-depth", "8",
-                "-height", "24",
-                "-width", "32",
+                "-o",
+                "{output}",
+                "-sigmaxy",
+                "1.2",
+                "-sigmaz",
+                "2.3",
+                "-depth",
+                "8",
+                "-height",
+                "24",
+                "-width",
+                "32",
             ],
             "psf",
             id="gaussian-psf",
@@ -318,12 +350,18 @@ def _resolve_sairpico_command_template(
             },
             [
                 "simgrichardsonlucy2d",
-                "-i", "{tmp}/input.tif",
-                "-o", "{output}",
-                "-niter", "7",
-                "-padding", "true",
-                "-sigma", "1.5",
-                "-lambda", "0.25",
+                "-i",
+                "{tmp}/input.tif",
+                "-o",
+                "{output}",
+                "-niter",
+                "7",
+                "-padding",
+                "true",
+                "-sigma",
+                "1.5",
+                "-lambda",
+                "0.25",
             ],
             "deconvolved",
             id="richardson-lucy-2d",
@@ -343,14 +381,22 @@ def _resolve_sairpico_command_template(
             },
             [
                 "simgspitfiredeconv3d",
-                "-i", "{tmp}/input.tif",
-                "-o", "{output}",
-                "-regularization", "12.0",
-                "-weighting", "0.6",
-                "-method", "HV",
-                "-padding", "false",
-                "-niter", "150",
-                "-psf", "{tmp}/psf.tif",
+                "-i",
+                "{tmp}/input.tif",
+                "-o",
+                "{output}",
+                "-regularization",
+                "12.0",
+                "-weighting",
+                "0.6",
+                "-method",
+                "HV",
+                "-padding",
+                "false",
+                "-niter",
+                "150",
+                "-psf",
+                "{tmp}/psf.tif",
             ],
             "spitfire",
             id="spitfire-3d",
@@ -368,13 +414,20 @@ def _resolve_sairpico_command_template(
             },
             [
                 "simgmedian4d",
-                "-i", "{tmp}/input.tif",
-                "-o", "{output}",
-                "-rx", "2",
-                "-ry", "3",
-                "-padding", "true",
-                "-rz", "4",
-                "-rt", "5",
+                "-i",
+                "{tmp}/input.tif",
+                "-o",
+                "{output}",
+                "-rx",
+                "2",
+                "-ry",
+                "3",
+                "-padding",
+                "true",
+                "-rz",
+                "4",
+                "-rt",
+                "5",
             ],
             "median",
             id="median-4d",
@@ -389,11 +442,16 @@ def _resolve_sairpico_command_template(
             },
             [
                 "hotSpotDetection",
-                "-i", "{tmp}/input.tif",
-                "-o", "{output}",
-                "-m", "3",
-                "-n", "5",
-                "-pv", "0.2",
+                "-i",
+                "{tmp}/input.tif",
+                "-o",
+                "{output}",
+                "-m",
+                "3",
+                "-n",
+                "5",
+                "-pv",
+                "0.2",
             ],
             "hotspot",
             id="hotspot-detection",
@@ -446,15 +504,97 @@ def test_wiener_3d_requires_existing_psf_before_subprocess(
     )
 
     with pytest.raises(FileNotFoundError, match="psf_image"):
-        WienerDeconvolution().process_row(Arguments(
-            input_image=tmp_path / "input.tif",
-            deconvolution_type="3D",
-            sigma=1.5,
-            psf_image=tmp_path / "missing_psf.tif",
-            regularization_lambda=0.01,
-            padding=False,
-            output_image=tmp_path / "output.tif",
-        ))
+        WienerDeconvolution().process_row(
+            Arguments(
+                input_image=tmp_path / "input.tif",
+                deconvolution_type="3D",
+                sigma=1.5,
+                psf_image=tmp_path / "missing_psf.tif",
+                regularization_lambda=0.01,
+                padding=False,
+                output_image=tmp_path / "output.tif",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "message"),
+    [
+        pytest.param(
+            RichardsonLucyDeconvolution(),
+            Arguments(
+                input_image="input.tif",
+                deconvolution_type="../../malicious",
+                sigma=1.5,
+                psf_image=None,
+                niter=15,
+                regularization_lambda=0.0,
+                padding=False,
+                output_image="nested/output.tif",
+            ),
+            "deconvolution_type",
+            id="deconvolution-mode",
+        ),
+        pytest.param(
+            MedianDenoising(),
+            Arguments(
+                input_image="input.tif",
+                denoising_type="5D",
+                radius_x=2,
+                radius_y=2,
+                radius_z=1,
+                radius_t=1,
+                padding=False,
+                output_image="nested/output.tif",
+            ),
+            "denoising_type",
+            id="median-mode",
+        ),
+        pytest.param(
+            GaussianPSF(),
+            Arguments(
+                width=32,
+                height=32,
+                depth=8,
+                sigmaxy=float("nan"),
+                sigmaz=1.0,
+                output_image="nested/output.tif",
+            ),
+            "sigmaxy",
+            id="non-finite-psf-sigma",
+        ),
+        pytest.param(
+            HotspotDetection(),
+            Arguments(
+                input_image="input.tif",
+                patch_size=0,
+                neighborhood_size=5,
+                p_value=0.2,
+                output_image="nested/output.tif",
+            ),
+            "patch_size",
+            id="hotspot-patch-size",
+        ),
+    ],
+)
+def test_command_tools_validate_before_creating_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tool: ProcessingTool,
+    arguments: Arguments,
+    message: str,
+) -> None:
+    output_path = tmp_path / Path(arguments.output_image)
+    arguments.output_image = output_path
+    monkeypatch.setattr(
+        "bioimageflow_core.external._run_subprocess",
+        lambda *args, **kwargs: pytest.fail("external command should not run"),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        tool.process_row(arguments)
+
+    assert not output_path.parent.exists()
 
 
 @pytest.mark.parametrize(
@@ -478,25 +618,27 @@ def test_cimg_denoising_command_builds_optional_flags(
 
     monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
-    CImgDenoising().process_row(Arguments(
-        input_image=tmp_path / "input.tif",
-        first=0,
-        last=-1,
-        alpha=0.0,
-        scale=1.0,
-        intensity_range=1.0,
-        algorithm=algorithm,
-        gaussian_noise=0.0,
-        poisson_noise=False,
-        manual_sigma=0.0,
-        stabilize_poisson=False,
-        patch=3,
-        neighborhood=7,
-        denoising_parameter=-1.0,
-        sparsity_parameter=0.6,
-        iterations=4,
-        output_image=tmp_path / "output.tif",
-    ))
+    CImgDenoising().process_row(
+        Arguments(
+            input_image=tmp_path / "input.tif",
+            first=0,
+            last=-1,
+            alpha=0.0,
+            scale=1.0,
+            intensity_range=1.0,
+            algorithm=algorithm,
+            gaussian_noise=0.0,
+            poisson_noise=False,
+            manual_sigma=0.0,
+            stabilize_poisson=False,
+            patch=3,
+            neighborhood=7,
+            denoising_parameter=-1.0,
+            sparsity_parameter=0.6,
+            iterations=4,
+            output_image=tmp_path / "output.tif",
+        )
+    )
 
     command = calls[0]
     assert command[:2] == ["denoise", "-i"]
@@ -598,17 +740,21 @@ def test_sairpico_version_report_treats_nonzero_returncode_as_failed(
     assert result["failed_count"] == 1
 
 
-def test_hotspot_to_spots_converts_components_to_coordinate_table(tmp_path: Path) -> None:
+def test_hotspot_to_spots_converts_components_to_coordinate_table(
+    tmp_path: Path,
+) -> None:
     hotspot = np.zeros((12, 12), dtype=np.float32)
     hotspot[2:4, 2:4] = 5.0
     hotspot[8, 9] = 9.0
     hotspot_path = tmp_path / "hotspot.tif"
     iio.imwrite(hotspot_path, hotspot)
 
-    result = HotspotToSpots().process_row(Arguments(
-        hotspot_image=hotspot_path,
-        threshold=1.0,
-    ))
+    result = HotspotToSpots().process_row(
+        Arguments(
+            hotspot_image=hotspot_path,
+            threshold=1.0,
+        )
+    )
 
     assert result[0].spot_count == 2
     assert [row.intensity for row in result] == [5.0, 9.0]
@@ -619,14 +765,57 @@ def test_hotspot_to_spots_converts_components_to_coordinate_table(tmp_path: Path
     ]
 
 
+def test_hotspot_to_spots_uses_eight_connectivity(tmp_path: Path) -> None:
+    hotspot = np.zeros((5, 5), dtype=np.float32)
+    hotspot[1, 1] = 3.0
+    hotspot[2, 2] = 5.0
+    hotspot_path = tmp_path / "diagonal_hotspot.tif"
+    iio.imwrite(hotspot_path, hotspot)
+
+    result = HotspotToSpots().process_row(
+        Arguments(
+            hotspot_image=hotspot_path,
+            threshold=1.0,
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0].area == 2
+    assert result[0].y == pytest.approx(1.5)
+    assert result[0].x == pytest.approx(1.5)
+    assert result[0].intensity == pytest.approx(5.0)
+    assert result[0].score == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize("invalid_value", [np.nan, np.inf, -np.inf])
+def test_hotspot_to_spots_rejects_non_finite_values(
+    tmp_path: Path,
+    invalid_value: float,
+) -> None:
+    hotspot = np.zeros((5, 5), dtype=np.float32)
+    hotspot[2, 2] = invalid_value
+    hotspot_path = tmp_path / "invalid_hotspot.tif"
+    iio.imwrite(hotspot_path, hotspot)
+
+    with pytest.raises(ValueError, match="finite image values"):
+        HotspotToSpots().process_row(
+            Arguments(
+                hotspot_image=hotspot_path,
+                threshold=1.0,
+            )
+        )
+
+
 def test_hotspot_to_spots_returns_no_rows_for_blank_image(tmp_path: Path) -> None:
     hotspot_path = tmp_path / "blank_hotspot.tif"
     iio.imwrite(hotspot_path, np.zeros((8, 8), dtype=np.float32))
 
-    result = HotspotToSpots().process_row(Arguments(
-        hotspot_image=hotspot_path,
-        threshold=1.0,
-    ))
+    result = HotspotToSpots().process_row(
+        Arguments(
+            hotspot_image=hotspot_path,
+            threshold=1.0,
+        )
+    )
 
     assert result == []
     assert HotspotToSpots.zero_row_scalar_outputs == {"spot_count": 0}
@@ -653,7 +842,9 @@ def test_hotspot_to_spots_publishes_zero_spot_count_metadata(tmp_path: Path) -> 
         "label",
         "spot_count",
     ]
-    [run_dir] = [path for path in (storage_path / "views" / "runs").iterdir() if path.is_dir()]
+    [run_dir] = [
+        path for path in (storage_path / "views" / "runs").iterdir() if path.is_dir()
+    ]
     run_result = json.loads((run_dir / "nodes" / node_name / "result.json").read_text())
     result_key = run_result["result_key"]
     storage = Storage(storage_path)

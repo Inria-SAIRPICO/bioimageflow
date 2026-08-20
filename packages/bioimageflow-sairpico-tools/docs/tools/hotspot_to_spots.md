@@ -1,7 +1,7 @@
 # HotspotToSpots
 
 `HotspotToSpots` converts a 2D hotspot image into spot dataframe rows.
-Connected nonzero regions above `threshold` become one spot each.
+Eight-connected regions strictly above `threshold` become one spot each, so pixels touching diagonally belong to the same spot.
 
 Keep this tool public because `HotspotDetection` produces an image-like hotspot output, while downstream analyst workflows usually need tabular spot centroids for per-cell counting, intensity summaries, QC plots, or export through explicit table writer tools.
 
@@ -20,7 +20,7 @@ If no connected components pass the threshold, direct `process_row()` returns an
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and package-local connected-component traversal.
+imageio, NumPy, and the pinned SciPy `ndimage` labeling and region-measurement functions from the `hotspot` environment.
 
 ## Minimal Example
 
@@ -40,4 +40,4 @@ Blank hotspot masks produce no dataframe rows; the selected v1 record manifest a
 
 ## Failure Modes
 
-Unreadable images, unsupported dimensions, and invalid thresholds raise errors.
+Unreadable images, non-2D or non-numeric data, non-finite image values, and non-finite thresholds raise errors.

@@ -23,7 +23,7 @@ commands.
 ## Outputs
 
 - `output_image`: deconvolved image. The default template is
-  `{input_image.stem}_deconvolved{ext}`.
+  `{input_image.stem}_deconvolved.tif`.
 
 ## Assumptions
 
@@ -68,6 +68,7 @@ the supplied PSF path; in non-3D modes it includes `-sigma` instead.
 ## Failure Modes
 
 - Missing `simgspitfiredeconv*` binary.
+- The mode, method, weighting, iteration count, or another numeric parameter fails validation.
 - `3D` mode is requested with a missing PSF file.
 - Invalid method, regularization, or image layout causes subprocess failure.
 - Output cannot be written.

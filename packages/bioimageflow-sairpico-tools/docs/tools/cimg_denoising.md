@@ -37,13 +37,14 @@ workflow code.
 ## Outputs
 
 - `output_image`: denoised intensity image. The default template is
-  `{input_image.stem}_denoised{ext}`.
+  `{input_image.stem}_denoised.tif`.
 
 ## Assumptions
 
-- The selected algorithm name is supported by the installed `denoise` command.
+- The selected algorithm is one of the values declared by the tool schema.
 - Boolean options are omitted unless enabled.
-- Parameter meaning is delegated to the CImg backend.
+- Frame bounds, finite numeric ranges, and integral size parameters are validated before the command starts.
+- Algorithm-specific parameter meaning remains delegated to the CImg backend.
 
 ## Dependencies and Core Libraries
 
@@ -90,6 +91,6 @@ The tool writes `denoised.tif`. When `algorithm` is set, the command ends with
 ## Failure Modes
 
 - The `denoise` executable or its runtime libraries are missing.
-- The selected algorithm is unsupported by the installed binary.
+- The selected algorithm or a parameter value fails wrapper validation.
 - Parameter combinations are invalid for the input image.
 - The subprocess exits non-zero or cannot write the output.

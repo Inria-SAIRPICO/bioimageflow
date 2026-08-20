@@ -30,14 +30,11 @@ The package declares three environments:
   `bioimageit`; used by PSF, deconvolution, and median-denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0` from `conda-forge` and
   `bioimageit`; used by `CImgDenoising`.
-- `hotspot`: `bioimageit::hotspot==1.0.0` from `conda-forge` and `bioimageit`;
-  used by `HotspotDetection`.
+- `hotspot`: `bioimageit::hotspot==1.0.0` plus `scipy==1.13.1` from `conda-forge` and `bioimageit`; used by `HotspotDetection` and `HotspotToSpots`.
 
-Inputs are image files, with public image wrappers declaring `png`, `tif`, and
-`tiff` formats. The underlying SAIRPICO binaries are external
-processes, so failures are usually surfaced as missing binaries, missing PSF
-files for 3D deconvolution, unsupported file layouts, or non-zero subprocess
-exit codes.
+Inputs are image files, with public image wrappers declaring `png`, `tif`, and `tiff` formats.
+Image outputs default to fixed `.tif` paths, and mode values map to an explicit executable allowlist.
+The wrappers validate direct-call parameters before starting external processes, so failures are surfaced as clear validation errors, missing binaries, missing PSF files for 3D deconvolution, unsupported file layouts, or non-zero subprocess exit codes.
 
 Environment availability and version reporting are covered by package
 diagnostics and tests instead of being exposed as public workflow tools. They do

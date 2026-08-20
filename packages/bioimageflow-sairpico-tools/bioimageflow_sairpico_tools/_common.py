@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import math
+from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Optional
 
@@ -16,7 +18,6 @@ from bioimageflow_core import (
     ImageSpec,
     Layout,
     Semantic,
-    run_external_command,
     run_external_command_with_staged_output,
 )
 
@@ -45,7 +46,7 @@ hotspot_env = EnvironmentSpec(
     name="hotspot",
     dependencies={
         "python": "3.9",
-        "conda": ["bioimageit::hotspot==1.0.0"],
+        "conda": ["bioimageit::hotspot==1.0.0", "scipy==1.13.1"],
         "channels": ["conda-forge", "bioimageit"],
     },
 )
@@ -69,6 +70,30 @@ SAIRPICO_BINARIES = (
     "hotSpotDetection",
 )
 
+RICHARDSON_LUCY_BINARIES = {
+    "2D": "simgrichardsonlucy2d",
+    "2D Slice": "simgrichardsonlucy2dslice",
+    "3D": "simgrichardsonlucy3d",
+}
+
+WIENER_BINARIES = {
+    "2D": "simgwiener2d",
+    "2D Slice": "simgwiener2dslice",
+    "3D": "simgwiener3d",
+}
+
+SPITFIRE_BINARIES = {
+    "2D": "simgspitfiredeconv2d",
+    "2D Slice": "simgspitfiredeconv2dslice",
+    "3D": "simgspitfiredeconv3d",
+}
+
+MEDIAN_BINARIES = {
+    "2D": "simgmedian2d",
+    "3D": "simgmedian3d",
+    "4D": "simgmedian4d",
+}
+
 
 IntensityImage: TypeAlias = Annotated[
     Path,
@@ -87,7 +112,7 @@ IntensityImage: TypeAlias = Annotated[
         description="Intensity TIFF image to process.",
         connectable=Connectable.BY_DEFAULT,
     ),
-] 
+]
 
 OptionalPsfImage: TypeAlias = Annotated[
     Optional[Path],
@@ -102,12 +127,7 @@ OptionalPsfImage: TypeAlias = Annotated[
         connectable=Connectable.NOT_BY_DEFAULT,
         group="psf",
     ),
-] 
-
-
-def _run(command: list[Any]) -> None:
-    context = str(command[0]) if command else "SAIRPICO command"
-    run_external_command(command, context=context)
+]
 
 
 def _run_with_staged_output(command: list[Any], output_path: Path) -> None:
@@ -120,6 +140,8 @@ def _run_with_staged_output(command: list[Any], output_path: Path) -> None:
 
 
 def _bool(value: bool) -> str:
+    if not isinstance(value, bool):
+        raise ValueError("Boolean command parameters must be true or false.")
     return "true" if value else "false"
 
 
@@ -137,13 +159,48 @@ def _parse_csv_list(value: Any) -> list[str]:
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def _deconvolution_suffix(deconvolution_type: str) -> str:
-    return deconvolution_type.replace(" ", "").lower()
+def _require_choice(value: Any, name: str, choices: tuple[str, ...]) -> str:
+    if not isinstance(value, str) or value not in choices:
+        expected = ", ".join(repr(choice) for choice in choices)
+        raise ValueError(f"{name} must be one of: {expected}.")
+    return value
+
+
+def _require_finite(
+    value: Any,
+    name: str,
+    *,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+    strictly_positive: bool = False,
+) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite number.") from error
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be a finite number.")
+    if strictly_positive and number <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+    if minimum is not None and number < minimum:
+        raise ValueError(f"{name} must be greater than or equal to {minimum}.")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{name} must be less than or equal to {maximum}.")
+    return number
+
+
+def _require_integer(value: Any, name: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be an integer.")
+    number = int(value)
+    if number < minimum:
+        raise ValueError(f"{name} must be greater than or equal to {minimum}.")
+    return number
 
 
 def _require_psf(psf_image: Optional[Path]) -> Path:
     psf_path = Path(psf_image) if psf_image is not None else None
-    if psf_path is None or not psf_path.exists():
+    if psf_path is None or not psf_path.is_file():
         raise FileNotFoundError(
             f"psf_image must point to an existing PSF image for 3D deconvolution: "
             f"{psf_image}"
@@ -233,37 +290,9 @@ def _write_sairpico_version_report(
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-    reported_count = sum(
-        1 for row in rows
-        if row["returncode"] == 0 and row["version"]
-    )
+    reported_count = sum(1 for row in rows if row["returncode"] == 0 and row["version"])
     return {
         "report_csv": output,
         "reported_count": reported_count,
         "failed_count": len(rows) - reported_count,
     }
-
-
-def _hotspot_components(mask: Any) -> list[list[tuple[int, int]]]:
-    import numpy as np
-
-    seen = np.zeros(mask.shape, dtype=bool)
-    components: list[list[tuple[int, int]]] = []
-    for y, x in np.argwhere(mask):
-        y = int(y)
-        x = int(x)
-        if seen[y, x]:
-            continue
-        stack = [(y, x)]
-        seen[y, x] = True
-        component = []
-        while stack:
-            cy, cx = stack.pop()
-            component.append((cy, cx))
-            for ny in range(max(0, cy - 1), min(mask.shape[0], cy + 2)):
-                for nx in range(max(0, cx - 1), min(mask.shape[1], cx + 2)):
-                    if mask[ny, nx] and not seen[ny, nx]:
-                        seen[ny, nx] = True
-                        stack.append((ny, nx))
-        components.append(component)
-    return components

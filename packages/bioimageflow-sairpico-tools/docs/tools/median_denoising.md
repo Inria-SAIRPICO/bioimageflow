@@ -20,7 +20,7 @@ detection, or deconvolution.
 ## Outputs
 
 - `output_image`: median-filtered intensity image. The default template is
-  `{input_image.stem}_filtered{ext}`.
+  `{input_image.stem}_filtered.tif`.
 
 ## Assumptions
 
@@ -62,6 +62,7 @@ The wrapper writes `median.tif` and returns that path. The example invokes
 ## Failure Modes
 
 - The selected `simgmedian*` command is missing.
+- The mode is unsupported or a radius is not a non-negative integer.
 - Image dimensionality does not match the selected mode.
 - Radius values remove desired structures or create excessive smoothing.
 - The subprocess exits non-zero or cannot write the output.

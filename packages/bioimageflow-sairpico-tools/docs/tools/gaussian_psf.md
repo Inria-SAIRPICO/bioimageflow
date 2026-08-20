@@ -12,8 +12,8 @@ input without microscope-specific PSF measurement.
 - `width`: output image width in pixels. Default `256`; minimum `1`.
 - `height`: output image height in pixels. Default `256`; minimum `1`.
 - `depth`: number of Z planes. Default `20`; minimum `1`.
-- `sigmaxy`: Gaussian sigma in XY pixels. Default `1.0`; non-negative.
-- `sigmaz`: Gaussian sigma in Z planes. Default `1.0`; non-negative.
+- `sigmaxy`: Gaussian sigma in XY pixels. Default `1.0`; must be finite and greater than zero.
+- `sigmaz`: Gaussian sigma in Z planes. Default `1.0`; must be finite and greater than zero.
 
 ## Outputs
 
@@ -62,6 +62,7 @@ dimensions.
 ## Failure Modes
 
 - `simggaussian3dpsf` is not installed or not on `PATH`.
+- Dimensions are not positive integers or sigma values are not finite and positive.
 - The command exits with a non-zero status.
 - The output directory cannot be created or written.
 - Very large dimensions exhaust memory or disk space in the external process.
