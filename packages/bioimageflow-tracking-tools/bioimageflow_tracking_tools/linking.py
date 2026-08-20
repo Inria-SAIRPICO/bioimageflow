@@ -1,41 +1,27 @@
-"""Object table linking and tracking-library adapters."""
+"""Deterministic object-table linking."""
 
 from typing import Annotated, Any
 
 from bioimageflow import DataFrameTool, Passthrough
-from bioimageflow_core import (
-    Category,
-    EnvironmentSpec,
-    GUIMeta,
-    IOModel,
-)
+from bioimageflow_core import Category, GUIMeta, IOModel
+
+from ._validation import finite_float, require_columns, validated_numeric_column
 
 
-def _require_columns(df: Any, columns: set[str], tool_name: str) -> None:
-    missing = sorted(columns - set(df.columns))
-    if missing:
-        raise ValueError(
-            f"{tool_name} input table is missing required column(s): "
-            f"{', '.join(repr(column) for column in missing)}."
-        )
+class NearestNeighborLink(DataFrameTool):
+    """Link objects in adjacent frames by global minimum-distance assignment."""
 
-
-class _NearestNeighborLinkObjects(DataFrameTool):
-    """Internal nearest-neighbor linker used by deterministic tests."""
-
-    display_name = "Nearest Neighbor Link Objects"
-    documentation = (
-        "Internal greedy nearest-neighbor frame linking for small object tables."
-    )
+    display_name = "Nearest Neighbor Link"
+    documentation = "Link objects between adjacent frames with a global one-to-one distance assignment."
     category = Category.TRACKING
-    tags = ["tracking", "linking"]
+    tags = ["tracking", "linking", "nearest-neighbor"]
 
     class Inputs(IOModel):
         max_distance: Annotated[
             float,
             GUIMeta(
                 display_name="Max distance",
-                description="Maximum centroid distance for linking objects between adjacent frames.",
+                description="Maximum centroid distance allowed between adjacent frames.",
             ),
         ] = 10.0
 
@@ -45,94 +31,121 @@ class _NearestNeighborLinkObjects(DataFrameTool):
 
     def transform(self, df: Any, arguments: Any) -> Any:
         import numpy as np
+        import pandas as pd
+        from scipy.optimize import linear_sum_assignment
+        from scipy.spatial.distance import cdist
 
-        _require_columns(df, {"frame", "label", "y", "x", "area"}, "_NearestNeighborLinkObjects")
-        if df.empty:
-            result = df.copy()
-            result["track_id"] = []
-            result["track_count"] = []
-            return result
+        tool_name = "NearestNeighborLink"
+        required = {"frame", "label", "y", "x"}
+        require_columns(df, required, tool_name)
+        max_distance = finite_float(
+            getattr(arguments, "max_distance", 10.0), "max_distance"
+        )
+        if max_distance < 0:
+            raise ValueError("max_distance must be non-negative.")
 
         result = df.copy()
-        result["_bif_frame_sort"] = result["frame"].astype(float).astype(int)
-        result["_bif_label_sort"] = result["label"].astype(float).astype(int)
-        result = result.sort_values(["_bif_frame_sort", "_bif_label_sort"])
+        for column in required:
+            if column in {"frame", "label"}:
+                minimum = 0 if column == "frame" else 1
+                result[column] = validated_numeric_column(
+                    result,
+                    column,
+                    tool_name,
+                    integer_minimum=minimum,
+                )
+            else:
+                result[column] = validated_numeric_column(result, column, tool_name)
 
-        active: dict[int, tuple[int, float, float]] = {}
-        next_track_id = 1
-        assignments: dict[Any, int] = {}
-        max_distance = float(getattr(arguments, "max_distance", 10.0))
+        grouping_column = (
+            "source_label_image" if "source_label_image" in result.columns else None
+        )
+        identity_columns = ["frame", "label"]
+        if grouping_column is not None:
+            if result[grouping_column].isna().any():
+                raise ValueError(
+                    "NearestNeighborLink column 'source_label_image' must not contain missing values."
+                )
+            identity_columns.insert(0, grouping_column)
+        if result.duplicated(identity_columns).any():
+            raise ValueError(
+                "NearestNeighborLink requires each source (frame, label) object to occur exactly once."
+            )
+        if result.empty:
+            result["track_id"] = pd.Series(dtype=np.int64)
+            result["track_count"] = pd.Series(dtype=np.int64)
+            return result
 
-        frames = sorted(result["_bif_frame_sort"].unique())
-        for frame in frames:
-            frame_objects = result[result["_bif_frame_sort"] == frame]
-            used_tracks: set[int] = set()
-            for index, obj in frame_objects.iterrows():
-                obj_y = float(obj["y"])
-                obj_x = float(obj["x"])
-                best_track = None
-                best_distance = float("inf")
-                for track_id, (last_frame, y, x) in active.items():
-                    if track_id in used_tracks or int(frame) != last_frame + 1:
-                        continue
-                    distance = float(np.hypot(obj_y - y, obj_x - x))
-                    if distance <= max_distance and distance < best_distance:
-                        best_track = track_id
-                        best_distance = distance
-                if best_track is None:
-                    best_track = next_track_id
-                    next_track_id += 1
-                used_tracks.add(best_track)
-                active[best_track] = (int(frame), obj_y, obj_x)
-                assignments[index] = best_track
+        frames = result["frame"].to_numpy(dtype=np.int64)
+        labels = result["label"].to_numpy(dtype=np.int64)
+        assignments = np.empty(len(result), dtype=np.int64)
+        track_counts = np.empty(len(result), dtype=np.int64)
+        if grouping_column is None:
+            groups = [np.arange(len(result), dtype=np.int64)]
+        else:
+            group_codes, unique_groups = pd.factorize(
+                result[grouping_column], sort=False
+            )
+            groups = [
+                np.flatnonzero(group_codes == code)
+                for code in range(len(unique_groups))
+            ]
 
-        result["track_id"] = [assignments[index] for index in result.index]
-        result["track_count"] = len(set(assignments.values()))
-        return result.drop(columns=["_bif_frame_sort", "_bif_label_sort"])
+        for group_positions in groups:
+            sorted_positions = group_positions[
+                np.lexsort(
+                    (
+                        group_positions,
+                        labels[group_positions],
+                        frames[group_positions],
+                    )
+                )
+            ]
+            next_track_id = 1
+            previous_frame: int | None = None
+            previous_positions = np.empty(0, dtype=np.int64)
 
+            for frame_value in np.unique(frames[sorted_positions]):
+                frame = int(frame_value)
+                current_positions = sorted_positions[
+                    frames[sorted_positions] == frame
+                ]
+                current_tracks: dict[int, int] = {}
+                if previous_frame is not None and frame == previous_frame + 1:
+                    previous_points = result.iloc[previous_positions][
+                        ["y", "x"]
+                    ].to_numpy(float)
+                    current_points = result.iloc[current_positions][["y", "x"]].to_numpy(
+                        float
+                    )
+                    distances = cdist(previous_points, current_points)
+                    # Invalid edges cost more than all valid edges combined, so assignment
+                    # maximizes the valid link count before minimizing total distance.
+                    valid_cost = distances / (max_distance + 1.0)
+                    invalid_cost = float(min(distances.shape) + 1)
+                    cost = np.where(
+                        distances <= max_distance, valid_cost, invalid_cost
+                    )
+                    previous_rows, current_columns = linear_sum_assignment(cost)
+                    for previous_row, current_column in zip(
+                        previous_rows.tolist(), current_columns.tolist(), strict=True
+                    ):
+                        if distances[previous_row, current_column] <= max_distance:
+                            current_position = int(current_positions[current_column])
+                            current_tracks[current_position] = int(
+                                assignments[previous_positions[previous_row]]
+                            )
 
-ultrack_env = EnvironmentSpec(
-    name="tracking-ultrack",
-    dependencies={
-        "python": "3.12",
-        "pip": ["ultrack==0.7.2", "numpy==2.4.6", "pandas==3.0.3"],
-    }
-)
+                for position_value in current_positions:
+                    position = int(position_value)
+                    if position not in current_tracks:
+                        current_tracks[position] = next_track_id
+                        next_track_id += 1
+                    assignments[position] = current_tracks[position]
+                previous_frame = frame
+                previous_positions = current_positions
+            track_counts[group_positions] = next_track_id - 1
 
-btrack_env = EnvironmentSpec(
-    name="tracking-btrack",
-    dependencies={
-        "python": "3.12",
-        "pip": ["btrack==0.7.0", "numpy==2.4.2", "pandas==3.0.1"],
-    }
-)
-
-
-class UltrackLink(_NearestNeighborLinkObjects):
-    """Link objects with an Ultrack-compatible adapter."""
-
-    display_name = "Ultrack Link"
-    documentation = "Link object tables with Ultrack."
-    tags = ["tracking", "ultrack", "linking"]
-    environment = ultrack_env
-
-    def transform(self, df: Any, arguments: Any) -> Any:
-        ultrack = __import__("ultrack")
-        if hasattr(ultrack, "link_objects"):
-            return ultrack.link_objects(df, max_distance=arguments.max_distance)
-        return ultrack.Linker(max_distance=arguments.max_distance).link(df)
-
-
-class BTrackLink(_NearestNeighborLinkObjects):
-    """Link objects with a btrack-compatible adapter."""
-
-    display_name = "btrack Link"
-    documentation = "Link object tables with btrack."
-    tags = ["tracking", "btrack", "linking"]
-    environment = btrack_env
-
-    def transform(self, df: Any, arguments: Any) -> Any:
-        btrack = __import__("btrack")
-        if hasattr(btrack, "link_objects"):
-            return btrack.link_objects(df, max_distance=arguments.max_distance)
-        return btrack.Linker(max_distance=arguments.max_distance).link(df)
+        result["track_id"] = assignments
+        result["track_count"] = track_counts
+        return result

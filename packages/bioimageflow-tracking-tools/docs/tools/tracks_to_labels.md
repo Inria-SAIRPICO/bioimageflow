@@ -23,10 +23,11 @@ TracksToLabels().process_batch([
 ## Expected Results
 
 The output label stack contains track IDs at the pixels occupied by the source labels.
+Collective batches containing several source stacks produce one output artifact per source without mixing mappings.
 The output is written as `uint32`; background is `0`, and positive track IDs are preserved exactly.
 When the upstream track table is empty but `label_image` is provided, `TracksToLabels` still writes an all-background `uint32` label stack matching the source shape and reports `track_count=0`.
 
 ## Failure Modes
 
-Missing track fields, unreadable label images, or unwritable output paths raise errors.
+Missing track fields, invalid label rasters, out-of-bounds frames, absent source labels, duplicate object assignments, multiple objects for one track/frame, inconsistent paths, unreadable images, or unwritable output paths raise errors.
 `track_id` and source `label` values must be positive integers no larger than the `uint32` maximum.

@@ -4,39 +4,33 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .linking import BTrackLink as BTrackLink
     from .labels import LabelsToObjects as LabelsToObjects
-    from .linking import UltrackLink as UltrackLink
+    from .linking import NearestNeighborLink as NearestNeighborLink
     from .metrics import TrackMetrics as TrackMetrics
+    from .rendering import TracksToLabels as TracksToLabels
     from .table_tools import FilterObjects as FilterObjects
     from .table_tools import TrackQualityMetrics as TrackQualityMetrics
-    from .table_tools import TrackSummary as TrackSummary
     from .table_tools import TrackTableValidate as TrackTableValidate
-    from .table_tools import TracksToLabels as TracksToLabels
 
 
 _EXPORTS = {
-    "BTrackLink": ("linking", "BTrackLink"),
     "FilterObjects": ("table_tools", "FilterObjects"),
     "LabelsToObjects": ("labels", "LabelsToObjects"),
+    "NearestNeighborLink": ("linking", "NearestNeighborLink"),
     "TrackMetrics": ("metrics", "TrackMetrics"),
     "TrackQualityMetrics": ("table_tools", "TrackQualityMetrics"),
-    "TrackSummary": ("table_tools", "TrackSummary"),
     "TrackTableValidate": ("table_tools", "TrackTableValidate"),
-    "TracksToLabels": ("table_tools", "TracksToLabels"),
-    "UltrackLink": ("linking", "UltrackLink"),
+    "TracksToLabels": ("rendering", "TracksToLabels"),
 }
 
 __all__ = [
-    "BTrackLink",
     "FilterObjects",
     "LabelsToObjects",
+    "NearestNeighborLink",
     "TrackMetrics",
     "TrackQualityMetrics",
-    "TrackSummary",
     "TrackTableValidate",
     "TracksToLabels",
-    "UltrackLink",
 ]
 
 

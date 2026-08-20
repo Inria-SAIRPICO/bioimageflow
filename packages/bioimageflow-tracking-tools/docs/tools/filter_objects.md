@@ -3,7 +3,7 @@
 `FilterObjects` filters object dataframe rows by area, frame, intensity, and position.
 
 The tool is a `DataFrameTool`: pass an upstream object dataframe positionally, then configure threshold fields.
-The input dataframe must contain `frame`, `label`, `y`, `x`, and `area`; optional `intensity` is used only when intensity thresholds are requested.
+Each requested threshold requires its matching dataframe column; without thresholds, any dataframe can pass through.
 The output preserves input columns for kept rows and adds `object_count`.
 No filtered objects CSV artifact is written.
 
@@ -32,4 +32,4 @@ Rows inside all requested thresholds pass through as dataframe rows.
 
 ## Failure Modes
 
-Missing required numeric fields or invalid numeric filter values raise errors.
+Missing columns for requested filters, non-numeric data, non-finite bounds, and minimum bounds greater than maximum bounds raise errors.

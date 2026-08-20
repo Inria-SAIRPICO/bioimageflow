@@ -4,7 +4,7 @@
 
 The tool is a `DataFrameTool`: pass an upstream track dataframe positionally.
 The input dataframe must contain `track_id`, `frame`, `label`, `y`, and `x`.
-Outputs are validation rows with `severity`, `message`, `valid`, and `error_count`.
+Outputs are validation rows with `source_label_image`, `severity`, `message`, `valid`, and `error_count`.
 No validation CSV artifact is written.
 
 ## Dependencies and Core Libraries
@@ -28,7 +28,9 @@ report = TrackTableValidate().transform(tracks, Arguments())
 
 ## Expected Results
 
-Valid input returns an informational row; duplicate track/frame rows or blank required values are reported as error rows.
+Valid input returns an informational row.
+Missing, non-finite, fractional, or negative identifiers; non-finite coordinates; unsorted observations; duplicate track/frame rows; and multiply assigned source objects are reported as error rows.
+When the input contains `source_label_image`, track and object identities are validated within each independent source stack.
 
 ## Failure Modes
 
