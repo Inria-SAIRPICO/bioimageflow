@@ -1,35 +1,17 @@
-"""Live-cell migration tracking workflow with Ultrack and btrack adapters."""
+"""Live-cell migration tracking with deterministic nearest-neighbor linking."""
 
 import argparse
 from pathlib import Path
-from typing import Annotated, Any
-
-import pandas as pd
-
-from bioimageflow import DataFrameTool, Workflow
-from bioimageflow_core import Category, GUIMeta, IOModel
-from bioimageflow_common_tools import Concat
-from bioimageflow_tracking_tools import BTrackLink, LabelsToObjects, TrackMetrics, UltrackLink
+from bioimageflow import Workflow
+from bioimageflow_common_tools import CrossJoin, SelectColumns
+from bioimageflow_tracking_tools import (
+    LabelsToObjects,
+    NearestNeighborLink,
+    TrackMetrics,
+    TrackQualityMetrics,
+)
 
 DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
-
-
-class AddTrackerName(DataFrameTool):
-    """Attach the tracker name to a metrics table."""
-
-    display_name = "Add Tracker Name"
-    category = Category.UTILITIES
-
-    class Inputs(IOModel):
-        tracker: Annotated[str, GUIMeta(display_name="Tracker")]
-
-    class Outputs(IOModel):
-        tracker: str
-
-    def transform(self, df: Any, arguments: Any) -> pd.DataFrame:
-        table = pd.DataFrame(df).copy()
-        table.insert(0, "tracker", str(arguments.tracker))
-        return table
 
 
 def build_workflow(
@@ -38,7 +20,7 @@ def build_workflow(
     engine: str = "wetlands",
     wetlands_config: dict | None = None,
 ) -> Workflow:
-    """Build an Ultrack/btrack migration metrics workflow without lineage outputs."""
+    """Build a deterministic migration and track-quality workflow."""
     storage = Path(storage_path)
     wf = Workflow(
         name="live_cell_tracking",
@@ -50,22 +32,43 @@ def build_workflow(
     with wf:
         label_image = wf.input("label_image", Path, id="input-label-image")
         objects = LabelsToObjects()(label_image=label_image, name="objects")
-        ultrack_tracks = UltrackLink()(objects, name="ultrack_tracks")
-        btrack_tracks = BTrackLink()(objects, name="btrack_tracks")
-        ultrack_metrics = TrackMetrics()(ultrack_tracks, name="ultrack_migration_metrics")
-        btrack_metrics = TrackMetrics()(btrack_tracks, name="btrack_migration_metrics")
-        tagged_ultrack = AddTrackerName()(
-            ultrack_metrics,
-            tracker="ultrack",
-            name="tag_ultrack_metrics",
+        tracks = NearestNeighborLink()(
+            objects,
+            max_distance=10.0,
+            name="nearest_neighbor_tracks",
         )
-        tagged_btrack = AddTrackerName()(
-            btrack_metrics,
-            tracker="btrack",
-            name="tag_btrack_metrics",
+        metrics = TrackMetrics()(tracks, name="migration_metrics_by_track")
+        quality = TrackQualityMetrics()(
+            tracks,
+            min_track_length=3,
+            name="tracking_quality",
         )
-        summary = Concat()(tagged_ultrack, tagged_btrack, name="migration_metrics")
-        wf.output("tracker", summary["tracker"], id="output-tracker")
+        quality_fields = SelectColumns()(
+            quality,
+            columns=(
+                "gap_count,duplicate_track_frame_count,"
+                "object_assignment_conflict_count,short_track_fraction"
+            ),
+            name="quality_fields",
+        )
+        summary = CrossJoin()(metrics, quality_fields, name="migration_metrics")
+        for output_name in (
+            "track_id",
+            "track_length",
+            "duration",
+            "path_length",
+            "net_displacement",
+            "net_speed",
+            "mean_step_speed",
+            "mean_area",
+            "track_count",
+            "mean_track_length",
+            "gap_count",
+            "duplicate_track_frame_count",
+            "object_assignment_conflict_count",
+            "short_track_fraction",
+        ):
+            wf.output(output_name, summary[output_name], id=f"output-{output_name.replace('_', '-')}")
     return wf
 
 

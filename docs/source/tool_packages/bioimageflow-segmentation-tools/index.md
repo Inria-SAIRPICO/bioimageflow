@@ -15,7 +15,6 @@ tools/cellpose_sam
 tools/distance_watershed_segment
 tools/filter_labels
 tools/local_threshold_segment
-tools/nninteractive
 tools/otsu_threshold_segment
 tools/postprocess_labels
 tools/split_touching_objects

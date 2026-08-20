@@ -297,7 +297,7 @@ def build_workflow(
         )
         cellpose_sam = CellposeSAM()(
             input_image=segmentation_input["segmentation_image"],
-            model_type="cpsam",
+            pretrained_model="cpsam_v2",
             diameter=0.0,
             name="cellpose_sam_segmentation",
         )

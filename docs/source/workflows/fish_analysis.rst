@@ -48,7 +48,7 @@ Two parallel marker branches reuse the same marker-analysis ``Workflow`` with di
    </pre>
 
 1. **Data ingestion and preprocessing:** ``DownloadImages`` creates a table of CIL image paths.
-   ``ExtractChannel`` isolates channel 2, producing the nuclear image used by Cellpose3.
+   ``SelectChannel`` isolates channel 2 from the declared ``CYX`` layout, producing the nuclear image used by Cellpose3.
 2. **Nuclei segmentation:** ``Cellpose3`` segments the nuclear channel and produces a label image in which each nucleus receives a distinct integer identifier.
 3. **Spot detection for channels 0 and 1:** The FOLS2 and CSF1R channels are processed independently by two invocations of the reusable marker-analysis ``Workflow``.
    Each instance extracts one marker channel, runs ``AtlasSpotDetection``, converts the detection mask into connected-component spot labels, and measures spot-to-nucleus overlaps.

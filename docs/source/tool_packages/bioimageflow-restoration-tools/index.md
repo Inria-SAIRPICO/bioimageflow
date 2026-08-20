@@ -11,11 +11,12 @@
 :maxdepth: 1
 
 tools/background_subtract
+tools/bilateral_denoise
 tools/careamics_predict
 tools/gaussian_denoise
 tools/median_denoise
 tools/restoration_metrics
-tools/restore_image
 tools/richardson_lucy_restoration
+tools/total_variation_denoise
 tools/unsharp_mask
 ```

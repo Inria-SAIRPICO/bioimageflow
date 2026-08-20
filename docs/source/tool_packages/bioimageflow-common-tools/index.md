@@ -14,7 +14,6 @@ tools/collect
 tools/concat
 tools/connected_components
 tools/cross_join
-tools/extract_channel
 tools/files
 tools/filter_table_rows
 tools/generate

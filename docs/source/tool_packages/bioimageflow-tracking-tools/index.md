@@ -10,13 +10,11 @@
 ```{toctree}
 :maxdepth: 1
 
-tools/btrack_link
 tools/filter_objects
 tools/labels_to_objects
+tools/nearest_neighbor_link
 tools/track_metrics
 tools/track_quality_metrics
-tools/track_summary
 tools/track_table_validate
 tools/tracks_to_labels
-tools/ultrack_link
 ```

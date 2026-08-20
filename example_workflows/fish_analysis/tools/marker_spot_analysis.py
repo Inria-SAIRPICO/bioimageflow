@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Annotated
 
 from bioimageflow import Workflow
-from bioimageflow_common_tools import ConnectedComponents, ExtractChannel, LabelOverlaps
+from bioimageflow_common_tools import ConnectedComponents, LabelOverlaps
 from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic
+from bioimageflow_io_tools import SelectChannel
 from bioimageflow_spot_tools import AtlasSpotDetection
 
 
@@ -46,8 +47,9 @@ def build_workflow(
         gaussian_std = workflow.input("gaussian_std", int, default=60, id="input-gaussian-std")
         p_value = workflow.input("p_value", float, default=0.001, id="input-p-value")
 
-        marker_channel = ExtractChannel()(
+        marker_channel = SelectChannel()(
             input_image=input_image,
+            layout="CYX",
             channel=channel,
             name="extract_marker_channel",
         )

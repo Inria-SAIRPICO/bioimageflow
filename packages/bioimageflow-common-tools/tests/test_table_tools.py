@@ -25,6 +25,16 @@ def test_table_tools_have_serializable_schemas():
     assert serialize_output_schema(SelectColumns) == {}
 
 
+def test_select_columns_validates_when_bound_in_workflow(tmp_path):
+    from bioimageflow import Workflow
+
+    workflow = Workflow(engine="direct", storage_path=tmp_path)
+    with workflow:
+        SelectColumns()(columns="sample,score", name="select_columns")
+
+    assert workflow.validate() == []
+
+
 def test_select_columns_resolves_schema_from_upstream_columns():
     upstream = {
         "sample": {"type": "str", "default": None, "image_spec": None},

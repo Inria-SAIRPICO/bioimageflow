@@ -683,11 +683,11 @@ def tracking_assets() -> None:
     metrics = artifacts.dataframe("migration_metrics")
     if metrics.empty:
         raise WorkflowArtifactError("live_cell_tracking/migration_metrics is empty.")
-    tracks_df = artifacts.dataframe("ultrack_tracks")
+    tracks_df = artifacts.dataframe("nearest_neighbor_tracks")
     required_track_columns = {"track_id", "frame", "y", "x"}
     if not required_track_columns.issubset(tracks_df.columns):
         raise WorkflowArtifactError(
-            "live_cell_tracking/ultrack_tracks is missing real track centroid columns: "
+            "live_cell_tracking/nearest_neighbor_tracks is missing real track centroid columns: "
             + ", ".join(sorted(required_track_columns - set(tracks_df.columns)))
         )
     y0, x0 = _crop_offsets(labels.shape[-2:], 420)
@@ -712,8 +712,10 @@ def tracking_assets() -> None:
         [
             ("track_count", _format_number(row["track_count"], 0)),
             ("mean_track_length", _format_number(row["mean_track_length"])),
-            ("displacement", _format_number(row["displacement"])),
-            ("mean_speed", _format_number(row["mean_speed"])),
+            ("net_displacement", _format_number(row["net_displacement"])),
+            ("net_speed", _format_number(row["net_speed"])),
+            ("gap_count", _format_number(row["gap_count"], 0)),
+            ("short_track_fraction", _format_number(row["short_track_fraction"])),
         ]
     )
     _save_grid(

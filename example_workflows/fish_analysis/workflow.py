@@ -21,9 +21,9 @@ Output: average number of FOLS2 and CSF1R spots per nucleus per image.
 
 Pipeline topology:
 
-  DownloadImages ─┬─ ExtractChannel(ch0) → AtlasSpotDetection → ConnectedComponents ─┐
-                  ├─ ExtractChannel(ch1) → AtlasSpotDetection → ConnectedComponents ─┤
-                  └─ ExtractChannel(ch2) → Cellpose3 ────────────────────────────────┤
+  DownloadImages ─┬─ SelectChannel(ch0) → AtlasSpotDetection → ConnectedComponents ─┐
+                  ├─ SelectChannel(ch1) → AtlasSpotDetection → ConnectedComponents ─┤
+                  └─ SelectChannel(ch2) → Cellpose3 ────────────────────────────────┤
                                                                                      │
                   LabelOverlaps(FOLS2 spots vs nuclei) ◄─────────────────────────────┤
                   LabelOverlaps(CSF1R spots vs nuclei) ◄─────────────────────────────┘
@@ -37,7 +37,7 @@ from pathlib import Path
 from bioimageflow import Workflow, configure_wetlands
 from bioimageflow.engine import SequentialEngine
 
-from bioimageflow_common_tools import ExtractChannel
+from bioimageflow_io_tools import SelectChannel
 from bioimageflow_segmentation_tools import Cellpose3
 from tools.average_spots_per_nucleus import AverageSpotsPerNucleus
 from tools.download_images import DownloadImages
@@ -82,8 +82,9 @@ def build_workflow(
         )
 
         # -- 2. Nuclei channel extraction before Cellpose v3 --
-        ch_nuclei = ExtractChannel()(
+        ch_nuclei = SelectChannel()(
             input_image=download["path"],
+            layout="CYX",
             channel=2,
             name="extract_ch2_nuclei",
         )

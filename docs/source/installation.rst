@@ -57,7 +57,7 @@ Companion tool packages
 -----------------------
 
 The documentation imports source and processing tools (``Files``, ``Generate``,
-``ExtractChannel``, ``Mosaic``, the merge tools, ...) from a layered
+``Mosaic``, ``LabelOverlaps``, the merge tools, ...) from a layered
 companion package, ``bioimageflow-common-tools``. Installing it alongside the
 core library lets every example in the docs run without copy-pasting helper
 classes:
@@ -88,7 +88,8 @@ needed by the workflows you run:
 
 The how-to guides that import ``bioimageflow_io_tools`` or
 ``bioimageflow_segmentation_tools`` require those corresponding packages in
-addition to ``bioimageflow-common-tools``.
+addition to ``bioimageflow-common-tools``. Axis-aware channel selection is provided by
+``bioimageflow_io_tools.SelectChannel`` and requires an explicit layout such as ``CYX``.
 
 Install for development
 -----------------------

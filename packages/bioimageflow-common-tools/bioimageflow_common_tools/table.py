@@ -1,7 +1,5 @@
 """Lightweight table source, filtering, selection, and persistence tools."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Annotated, Any, cast
 

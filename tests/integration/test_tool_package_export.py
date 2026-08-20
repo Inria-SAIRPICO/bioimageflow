@@ -23,8 +23,8 @@ def test_io_and_measurement_packages_are_not_exported_as_custom_sources(
     data = json.loads((tmp_path / "workflow.json").read_text())
     assert "custom_sources" not in data
     assert {node["tool_module"] for node in data["nodes"]} == {
-        "bioimageflow_io_tools.image_io",
-        "bioimageflow_measurement_tools.measurements",
+        "bioimageflow_io_tools.writers",
+        "bioimageflow_measurement_tools.processing_tools",
     }
 
 
@@ -32,19 +32,19 @@ def test_all_tool_packages_are_not_workflow_custom_classes() -> None:
     from bioimageflow.workflow import _is_workflow_custom_class
     from bioimageflow_io_tools import ConvertImageFormat
     from bioimageflow_measurement_tools import CountLabels
-    from bioimageflow_restoration_tools import RestoreImage
+    from bioimageflow_restoration_tools import TotalVariationDenoise
     from bioimageflow_sairpico_tools import MedianDenoising
     from bioimageflow_segmentation_tools import ThresholdSegment
     from bioimageflow_spot_tools import DetectSpots
-    from bioimageflow_tracking_tools import UltrackLink
+    from bioimageflow_tracking_tools import NearestNeighborLink
 
     for tool_cls in [
         ConvertImageFormat,
         CountLabels,
-        RestoreImage,
+        TotalVariationDenoise,
         MedianDenoising,
         ThresholdSegment,
         DetectSpots,
-        UltrackLink,
+        NearestNeighborLink,
     ]:
         assert _is_workflow_custom_class(tool_cls) is False

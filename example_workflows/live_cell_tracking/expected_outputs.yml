@@ -2,30 +2,32 @@ workflow: live_cell_tracking
 outputs:
   terminal_node: migration_metrics
   required_columns:
-    - tracker
     - track_id
     - track_length
+    - duration
     - start_frame
     - end_frame
-    - displacement
-    - mean_speed
+    - path_length
+    - net_displacement
+    - net_speed
+    - mean_step_speed
     - mean_area
     - track_count
     - mean_track_length
+    - gap_count
+    - duplicate_track_frame_count
+    - object_assignment_conflict_count
+    - short_track_fraction
   required_nodes:
     - objects
-    - ultrack_tracks
-    - btrack_tracks
-    - ultrack_migration_metrics
-    - btrack_migration_metrics
-    - tag_ultrack_metrics
-    - tag_btrack_metrics
+    - nearest_neighbor_tracks
+    - migration_metrics_by_track
+    - tracking_quality
+    - quality_fields
     - migration_metrics
   forbidden_columns:
     - parent_track_id
     - division_time
   deterministic_acceptance:
-    trackers:
-      - ultrack
-      - btrack
-    min_rows: 2
+    linker: nearest_neighbor
+    min_rows: 1

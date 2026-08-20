@@ -56,38 +56,31 @@ This means entries such as "scikit-image" should not become one generic
 Purpose: small, stable graph and image-analysis primitives that are broadly
 useful and cheap to maintain.
 
-Core libraries:
+Install-time libraries:
 
 - `bioimageflow`
 - `bioimageflow-core`
-- `numpy`
-- `scipy`
-- `scikit-image`
-- `imageio`
-- `tifffile`
-- `Pillow`
+- `pandas`
+
+Worker-side image operations use the shared `GENERAL_ENV` scientific stack.
 
 Keep here:
 
-- `Files`
+- `Files`, `TableFromCsv`, `WriteTable`
 - `Generate`
 - `CrossJoin`, `JoinOnColumn`, `InnerJoin`, `Concat`, `Collect`
-- `ConvertImage` for simple local conversions
-- `ExtractChannel`
+- `SelectColumns`, `FilterTableRows`
 - `ConnectedComponents`
 - `LabelOverlaps`
 - `Mosaic`
-- Simple `GENERAL_ENV` image operations when they are dependency-light:
-  `GaussianSmooth`, `MedianFilter`, `OtsuThreshold`, `BinaryMorphology`,
-  `DistanceTransform`, `Watershed`
 
 Move or re-home later:
 
 - `CellposeSAM` and `Cellpose3` should belong to
   `bioimageflow-segmentation-tools`.
 - `StarDistSegmenter` should belong to `bioimageflow-segmentation-tools`.
-- `Atlas` should eventually belong to `bioimageflow-spot-tools`, but can stay
-  temporarily in common to keep the current FISH example working.
+- Axis-aware selection and image conversion belong to `bioimageflow-io-tools`.
+- Detection algorithms such as Atlas belong to `bioimageflow-spot-tools`.
 
 Backward compatibility is not a constraint for the example workflows in this
 strategy. They should be updated to import tools from the canonical
@@ -109,7 +102,7 @@ Core libraries and binaries:
 Source inventory:
 `/Users/amasson/Travail/bioimageit/PyFlow/Tools/Sairpico`
 
-Candidate tools:
+Implemented tools:
 
 | Tool | Process | Runtime dependency | Validation idea |
 |------|---------|--------------------|-----------------|
@@ -154,14 +147,15 @@ Core libraries and binaries:
 Candidate tools:
 
 - `BioIOConvertImage`: convert microscopy formats with `bioio` plus selected plugins and explicit scene/channel/Z/T selection.
-- `ConvertImageFormat`: convert common image files, OME-TIFF, and lightweight
-  OME-Zarr, with optional scene/channel/Z/T selection.
+- `ConvertImageFormat`: convert ordinary image formats without claiming OME metadata preservation.
 - `ConvertToOmeTiff`: convert an image file to OME-TIFF with explicit
   dimension order and metadata.
 - `ConvertToOmeZarr`: convert an image file to chunked OME-Zarr.
 - `SelectScene`: extract one scene from multi-scene files.
 - `SelectTimepoint`, `SelectZRange`, `SelectChannel`: explicit dimension
   subsetting tools.
+- `SelectDimensions` and `ValidateImageLayout`: validate explicit axis strings and selections.
+- `ReadImageMetadata`: inspect reader metadata without requiring full-array loading where supported.
 - `ConvertWithBioformats`: optional Java/Bio-Formats based converter for
   formats not covered by pure Python readers.
 - `ReadMedicalImage`: SimpleITK-based NIfTI, NRRD, MHA, or DICOM-adjacent
@@ -193,7 +187,7 @@ Core libraries:
 - `scipy`
 - `numpy`
 
-Candidate tools:
+Implemented tools:
 
 - `CellposeSegment`: Cellpose / Cellpose-SAM inference for nuclei, cells, and
   cyto models.
@@ -203,6 +197,8 @@ Candidate tools:
 - `WatershedSegment`: distance-transform and marker-based watershed.
 - `PostprocessLabels`: remove small objects, fill holes, clear border,
   relabel sequentially.
+
+`nnInteractive` is intentionally not exposed: its upstream interface is a stateful volumetric session, which cannot be represented truthfully by the former point-list-to-planar-mask wrapper.
 
 Public validation data:
 
@@ -231,7 +227,7 @@ Core libraries:
 - `scipy`
 - `tifffile` or `imageio`
 
-Candidate tools:
+Implemented tools:
 
 - `RegionProperties`: area, centroid, bounding box, eccentricity, perimeter,
   solidity, axis lengths.
@@ -242,6 +238,8 @@ Candidate tools:
 - `ColocalizationMetrics`: Pearson, Manders, overlap coefficient for channels
   or masked regions.
 - `SummarizeTable`: group-by aggregation for workflow-level summaries.
+- `DiceIoU`, `LabelBenchmark`, and `ObjectMatchingMetrics`: validated label comparison and matching metrics.
+- `AggregatePerImage` and `NormalizeFeatures`: explicit table transformations with dynamically resolved output schemas.
 
 Public validation data:
 
@@ -335,22 +333,21 @@ Purpose: link per-frame detections into trajectories and lineage tables.
 
 Core libraries:
 
-- `btrack`
-- `laptrack`
-- `trackpy`
 - `numpy`
 - `pandas`
 - `scikit-image`
-- possibly `ultrack` later, after a smaller tracker is integrated
+- `scipy`
 
-Candidate tools:
+Implemented tools:
 
 - `LabelsToObjects`: convert time-indexed label images into object tables.
-- `BTrackLink`: Bayesian tracking with optional lineage reconstruction.
-- `LapTrackLink`: linear assignment based tracking.
-- `TrackpyParticles`: particle tracking for small subcellular objects.
-- `TrackMetrics`: displacement, speed, track duration, division count.
+- `NearestNeighborLink`: global one-to-one distance assignment between adjacent frames.
+- `TrackMetrics`: path length, net displacement, net speed, mean step speed, duration, and area summaries.
+- `TrackQualityMetrics`: gaps, duplicate track-frame rows, object-assignment conflicts, and short-track fraction.
+- `TrackTableValidate` and `FilterObjects`: strict table validation and filtering.
 - `TracksToLabels`: render tracks or track IDs back into images.
+
+The package does not expose `UltrackLink` or `BTrackLink`: their former dataframe adapters did not represent the upstream libraries' configured session and object-tracker APIs.
 
 Public validation data:
 
@@ -359,8 +356,7 @@ Public validation data:
 
 Expected results:
 
-- Track table with `track_id`, `t`, `y`, `x`, optional `z`, parent track ID,
-  and object label.
+- Track table with `track_id`, `frame`, `y`, `x`, object label, and an optional source-label-image key.
 - Validation against provided annotations for a small training subset.
 - Metrics: number of tracks, average duration, linking precision/recall where
   ground truth is available.
@@ -379,14 +375,14 @@ Core libraries:
 - `n2v` or the current Noise2Void successor used by the community
 - `csbdeep` only if legacy CARE models need it
 
-Candidate tools:
+Implemented tools:
 
-- `SkimageRichardsonLucy`: CPU Richardson-Lucy baseline.
-- `N2VDenoise` and possibly `N2VTrain`: Noise2Void inference and training.
-- `CAREamicsPredict` and possibly `CAREamicsTrain`: CARE / Noise2Void style
-  restoration using CAREamics.
-- `EstimateNoise`: estimate image noise level for reporting and parameter
-  selection.
+- `GaussianDenoise`, `MedianDenoise`, `BilateralDenoise`, `TotalVariationDenoise`, `BackgroundSubtract`, and `UnsharpMask`: focused public-library restoration operations.
+- `RichardsonLucyRestoration`: validated CPU Richardson-Lucy restoration.
+- `CAREamicsPredict`: inference from an explicit CAREamics checkpoint.
+- `RestorationMetrics`: PSNR and SSIM with an explicit or validated data range.
+
+The overloaded `RestoreImage` entry point was removed; workflows select the dedicated algorithm tool and its algorithm-specific parameters.
 
 Public validation data:
 
@@ -420,10 +416,7 @@ grow from proven workflow needs, not from library cataloguing:
   `careamics`, `n2v`, `csbdeep`. Current baselines are public-library tools;
   learned restoration should wait for public-data benchmarks and model
   lifecycle rules.
-- `bioimageflow-tracking-tools`: `btrack`, `laptrack`, `trackpy`, possibly
-  `ultrack`. Current baselines cover table validation, rendering, summaries,
-  and QC. Algorithmic linking should grow only when time-lapse public ground
-  truth and metrics are clear.
+- `bioimageflow-tracking-tools`: `numpy`, `pandas`, `scipy`, and `scikit-image`. Current tools cover deterministic global nearest-neighbor linking, table validation, rendering, summaries, and QC. A heavier upstream tracker should be added only with an adapter that matches its real lifecycle and public-data validation.
 - `bioimageflow-registration-tools`: `pystackreg`, SimpleITK, ITKElastix,
   ANTsPy. Important for time-lapse, multimodal, and atlas workflows.
 - `bioimageflow-stitching-tools`: ASHLAR, BigStitcher / ImageJ integration,
@@ -432,8 +425,7 @@ grow from proven workflow needs, not from library cataloguing:
   scikit-learn, networkx.
 - `bioimageflow-gpu-tools`: pyclesperanto, cuCIM, APOC. GPU/OpenCL/CUDA
   availability makes CI and user support more expensive.
-- `bioimageflow-deep-segmentation-tools`: nnU-Net, Micro-SAM, nnInteractive,
-  PlantSeg, Biom3d. These are powerful but model/data/GPU heavy and should be
+- `bioimageflow-deep-segmentation-tools`: nnU-Net, Micro-SAM, PlantSeg, and Biom3d. These are powerful but model/data/GPU heavy and should be
   integrated only after the smaller segmentation package is stable.
 - `bioimageflow-imagej-tools`: PyImageJ wrappers for Fiji plugins. Useful, but
   Java/ImageJ lifecycle management should be isolated from the main package set.
@@ -472,9 +464,9 @@ Candidate graph:
 ```text
 Download or Files
   -> direct image path or BioIOConvertImage when conversion is needed
-  -> ExtractChannel(FOLS2) -> SpotDetection -> ConnectedComponents
-  -> ExtractChannel(CSF1R) -> SpotDetection -> ConnectedComponents
-  -> ExtractChannel(DAPI)  -> CellposeSegment or ThresholdSegment
+  -> SelectChannel(layout=CYX, FOLS2) -> SpotDetection -> ConnectedComponents
+  -> SelectChannel(layout=CYX, CSF1R) -> SpotDetection -> ConnectedComponents
+  -> SelectChannel(layout=CYX, DAPI)  -> CellposeSegment or ThresholdSegment
   -> LabelOverlaps(FOLS2 labels, nuclei labels)
   -> LabelOverlaps(CSF1R labels, nuclei labels)
   -> RegionProperties / CountLabels / SummarizeTable
@@ -675,11 +667,8 @@ Examples:
 
 ### Stabilized Package Boundary
 
-1. `bioimageflow-common-tools` is focused on glue tools, table operations,
-   simple channel extraction, connected components, label overlaps, mosaics,
-   and legacy module-level wrappers that existing workflows still import.
-2. `bioimageflow-io-tools` owns the lightweight reader, dimension-selection,
-   OME-TIFF converter, and OME-Zarr converter.
+1. `bioimageflow-common-tools` is focused on source/glue tools, table operations, connected components, label overlaps, and mosaics.
+2. `bioimageflow-io-tools` owns metadata reading, explicit axis-layout validation and selection, ordinary image conversion, OME-TIFF conversion, and OME-Zarr conversion.
 3. `bioimageflow-sairpico-tools` owns wrappers for the SAIRPICO legacy command
    line tools.
 4. `bioimageflow-segmentation-tools` owns Cellpose, StarDist, threshold,
@@ -689,9 +678,7 @@ Examples:
 6. `bioimageflow-spot-tools`, `bioimageflow-restoration-tools`, and
    `bioimageflow-tracking-tools` exist as specialized packages with synthetic
    demo workflows and package-local tests.
-7. `Atlas` remains a legacy module-level common-tools wrapper for existing FISH
-   examples; the growth target is to migrate or wrap that behavior under
-   `bioimageflow-spot-tools`.
+7. Atlas detection is owned by `bioimageflow-spot-tools`; the FISH examples import every domain tool from its canonical package.
 
 ### Demonstrable Workflows
 

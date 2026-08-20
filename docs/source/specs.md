@@ -420,16 +420,16 @@ from typing import Annotated
 
 from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImageSpec, Semantic, Template
 
-class ExtractChannel(ProcessingTool):
-    display_name = "Extract Channel"
+class ThresholdImage(ProcessingTool):
+    display_name = "Threshold Image"
     environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
-        channel: int = 0
+        threshold: float = 0.0
 
     class Outputs(IOModel):
-        output_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = Template("{input_image.stem}_ch{channel}{ext}")
+        output_image: Annotated[Path, ImageSpec(semantics={Semantic.BINARY})] = Template("{input_image.stem}_binary{ext}")
 
     def process_row(self, arguments: Arguments) -> "Outputs":
         import imageio.v3 as iio

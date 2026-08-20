@@ -147,22 +147,15 @@ source = { editable = "packages/bioimageflow-common-tools" }
 dependencies = [
     { name = "bioimageflow" },
     { name = "bioimageflow-core" },
-    { name = "imageio" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pillow" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "bioimageflow", editable = "packages/bioimageflow" },
     { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
-    { name = "imageio", specifier = ">=2.31.0" },
-    { name = "numpy", specifier = ">=1.23.5" },
     { name = "pandas", specifier = ">=2.0.0" },
-    { name = "pillow", specifier = ">=9.5.0" },
 ]
 
 [[package]]
@@ -268,6 +261,8 @@ dependencies = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-image", version = "0.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
@@ -276,6 +271,7 @@ requires-dist = [
     { name = "imageio", specifier = ">=2.31.0" },
     { name = "numpy", specifier = ">=1.23.5" },
     { name = "scikit-image", specifier = ">=0.21.0" },
+    { name = "scipy", specifier = ">=1.10.0" },
 ]
 
 [[package]]
@@ -290,6 +286,10 @@ dependencies = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-image", version = "0.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
@@ -299,6 +299,8 @@ requires-dist = [
     { name = "imageio", specifier = ">=2.31.0" },
     { name = "numpy", specifier = ">=1.23.5" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "scikit-image", specifier = ">=0.21.0" },
+    { name = "scipy", specifier = ">=1.10.0" },
 ]
 
 [[package]]
@@ -313,6 +315,10 @@ dependencies = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-image", version = "0.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
@@ -322,6 +328,8 @@ requires-dist = [
     { name = "imageio", specifier = ">=2.31.0" },
     { name = "numpy", specifier = ">=1.23.5" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "scikit-image", specifier = ">=0.21.0" },
+    { name = "scipy", specifier = ">=1.10.0" },
 ]
 
 [[package]]

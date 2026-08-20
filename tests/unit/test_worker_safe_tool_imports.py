@@ -29,8 +29,13 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             "bioimageflow_common_tools",
             "bioimageflow_io_tools",
             "bioimageflow_io_tools.bioio_convert",
-            "bioimageflow_io_tools.image_io",
+            "bioimageflow_io_tools.metadata",
+            "bioimageflow_io_tools.selection",
+            "bioimageflow_io_tools.writers",
+            "bioimageflow_measurement_tools",
+            "bioimageflow_measurement_tools.processing_tools",
             "bioimageflow_restoration_tools",
+            "bioimageflow_restoration_tools.baselines",
             "bioimageflow_restoration_tools.restore",
             "bioimageflow_sairpico_tools",
             "bioimageflow_sairpico_tools.cimgdenoising",
@@ -44,6 +49,7 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             "bioimageflow_spot_tools.detection",
             "bioimageflow_tracking_tools",
             "bioimageflow_tracking_tools.labels",
+            "bioimageflow_tracking_tools.rendering",
         ]
 
         for module_name in modules:
@@ -52,7 +58,6 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
         root_processing_exports = {
             "bioimageflow_common_tools": [
                 "ConnectedComponents",
-                "ExtractChannel",
                 "LabelOverlaps",
                 "Mosaic",
             ],
@@ -80,10 +85,11 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
             ],
             "bioimageflow_restoration_tools": [
                 "BackgroundSubtract",
+                "BilateralDenoise",
                 "GaussianDenoise",
                 "MedianDenoise",
-                "RestoreImage",
                 "RichardsonLucyRestoration",
+                "TotalVariationDenoise",
                 "UnsharpMask",
             ],
             "bioimageflow_sairpico_tools": [
@@ -113,6 +119,7 @@ def test_worker_safe_tool_modules_do_not_import_orchestrator_package() -> None:
                 "AssignSpotsToLabels",
                 "AtlasSpotDetection",
                 "DetectSpots",
+                "MaskToLabels",
                 "RenderSpots",
                 "SpotsToLabels",
             ],

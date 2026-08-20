@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from bioimageflow import Workflow, configure_wetlands
-from bioimageflow_common_tools import CrossJoin, ExtractChannel, Generate, Mosaic
+from bioimageflow_common_tools import CrossJoin, Generate, Mosaic
+from bioimageflow_io_tools import SelectChannel
 from bioimageflow_spot_tools import AtlasSpotDetection
 from parameter_tools.download_images import DownloadImages
 from parameter_tools.metrics import ParameterSweepResults, SpotMaskMetrics
@@ -75,8 +76,9 @@ def build_workflow(
         # output includes the source path before sensitivity and size.
 
         # Step 4: Extract the marker channel for each concrete parameter row.
-        marker_images = ExtractChannel()(
+        marker_images = SelectChannel()(
             input_image=param_grid["path"],
+            layout="CYX",
             channel=marker_channel,
             name="extract_marker_channel",
         )

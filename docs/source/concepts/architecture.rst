@@ -86,10 +86,10 @@ bioimageflow-common-tools
 
 A third, **layered** package — ``bioimageflow_common_tools`` — ships the
 canonical source tools (``Files``, ``Generate``) and the basic processing
-tools used throughout the documentation (``ExtractChannel``, ``Mosaic``,
-``LabelOverlaps``, the merge tools, ...). Dedicated companion packages such as
-``bioimageflow_io_tools`` and ``bioimageflow_segmentation_tools`` own image IO
-and segmentation tools. These packages depend on ``bioimageflow`` and
+tools used throughout the documentation (``Mosaic``, ``LabelOverlaps``, the
+merge tools, ...). Dedicated companion packages such as
+``bioimageflow_io_tools`` and ``bioimageflow_segmentation_tools`` own image IO,
+axis-aware selection, and segmentation tools. These packages depend on ``bioimageflow`` and
 ``bioimageflow-core``; they are not imported by either of them.
 
 The docs use it freely so examples are short and runnable. Workflow authors
