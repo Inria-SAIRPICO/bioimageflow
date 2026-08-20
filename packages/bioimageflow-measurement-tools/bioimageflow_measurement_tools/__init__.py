@@ -4,29 +4,29 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .measurements import AggregatePerImage as AggregatePerImage
-    from .measurements import CountLabels as CountLabels
-    from .measurements import DiceIoU as DiceIoU
-    from .measurements import IntensityProperties as IntensityProperties
-    from .measurements import LabelBenchmark as LabelBenchmark
-    from .measurements import NormalizeFeatures as NormalizeFeatures
-    from .measurements import ObjectMatchingMetrics as ObjectMatchingMetrics
-    from .measurements import RegionProperties as RegionProperties
-    from .measurements import ShapeProperties as ShapeProperties
-    from .measurements import SummarizeTable as SummarizeTable
+    from .processing_tools import CountLabels as CountLabels
+    from .processing_tools import DiceIoU as DiceIoU
+    from .processing_tools import IntensityProperties as IntensityProperties
+    from .processing_tools import LabelBenchmark as LabelBenchmark
+    from .processing_tools import ObjectMatchingMetrics as ObjectMatchingMetrics
+    from .processing_tools import RegionProperties as RegionProperties
+    from .processing_tools import ShapeProperties as ShapeProperties
+    from .table_tools import AggregatePerImage as AggregatePerImage
+    from .table_tools import NormalizeFeatures as NormalizeFeatures
+    from .table_tools import SummarizeTable as SummarizeTable
 
 
 _EXPORTS = {
-    "AggregatePerImage": ("measurements", "AggregatePerImage"),
-    "CountLabels": ("measurements", "CountLabels"),
-    "DiceIoU": ("measurements", "DiceIoU"),
-    "IntensityProperties": ("measurements", "IntensityProperties"),
-    "LabelBenchmark": ("measurements", "LabelBenchmark"),
-    "NormalizeFeatures": ("measurements", "NormalizeFeatures"),
-    "ObjectMatchingMetrics": ("measurements", "ObjectMatchingMetrics"),
-    "RegionProperties": ("measurements", "RegionProperties"),
-    "ShapeProperties": ("measurements", "ShapeProperties"),
-    "SummarizeTable": ("measurements", "SummarizeTable"),
+    "AggregatePerImage": ("table_tools", "AggregatePerImage"),
+    "CountLabels": ("processing_tools", "CountLabels"),
+    "DiceIoU": ("processing_tools", "DiceIoU"),
+    "IntensityProperties": ("processing_tools", "IntensityProperties"),
+    "LabelBenchmark": ("processing_tools", "LabelBenchmark"),
+    "NormalizeFeatures": ("table_tools", "NormalizeFeatures"),
+    "ObjectMatchingMetrics": ("processing_tools", "ObjectMatchingMetrics"),
+    "RegionProperties": ("processing_tools", "RegionProperties"),
+    "ShapeProperties": ("processing_tools", "ShapeProperties"),
+    "SummarizeTable": ("table_tools", "SummarizeTable"),
 }
 
 __all__ = [

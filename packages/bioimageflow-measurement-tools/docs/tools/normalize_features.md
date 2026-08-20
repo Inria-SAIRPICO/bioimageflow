@@ -2,9 +2,9 @@
 
 `NormalizeFeatures` appends scaled versions of numeric feature columns.
 
-Inputs are `columns`, `method`, and `suffix`. Supported methods are `zscore`,
-`robust`, and `minmax`. Constant columns are normalized to `0.0` to keep output
-deterministic.
+Inputs are `columns`, `method`, and `suffix`.
+Supported methods are `zscore`, `robust`, and `minmax`.
+Constant columns are normalized to `0.0`, while missing values remain missing.
 
 ## Minimal Example
 
@@ -21,7 +21,7 @@ normalized = NormalizeFeatures().transform(
 ## Inputs
 
 - upstream table: feature DataFrame.
-- `columns`: comma-separated numeric columns to normalize.
+- `columns`: comma-separated numeric columns to normalize; omission selects all numeric columns.
 - `method`: `zscore`, `robust`, or `minmax`.
 - `suffix`: suffix for appended normalized columns.
 
@@ -45,5 +45,4 @@ order.
 
 ## Failure Modes
 
-Missing columns, unsupported methods, unreadable inputs, and invalid numeric
-values raise errors.
+Missing, empty, duplicate, or nonnumeric selections, unsupported methods, infinite values, empty suffixes, and output-name collisions raise `ValueError`.

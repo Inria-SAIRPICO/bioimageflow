@@ -1,8 +1,6 @@
 # ObjectMatchingMetrics
 
-`ObjectMatchingMetrics` compares predicted and reference label images by
-building pairwise object IoUs and greedily taking the best non-overlapping
-matches above `iou_threshold`.
+`ObjectMatchingMetrics` builds one predicted/reference overlap contingency and greedily takes the best non-overlapping object pairs above `iou_threshold`.
 
 Inputs are `predicted_label_image`, `reference_label_image`, and
 `iou_threshold`. Outputs report predicted/reference counts, matched and
@@ -30,7 +28,7 @@ metrics = ObjectMatchingMetrics().process_row(
 
 - `predicted_label_image`: predicted label image.
 - `reference_label_image`: reference label image with the same shape.
-- `iou_threshold`: minimum object IoU for a match.
+- `iou_threshold`: finite minimum object IoU for a match, between `0` and `1` inclusive.
 
 ## Outputs
 
@@ -39,7 +37,7 @@ metrics = ObjectMatchingMetrics().process_row(
 
 ## Dependencies and Core Libraries
 
-imageio and NumPy for label masks and pairwise overlap calculations.
+imageio and NumPy for validated labels and vectorized overlap contingency calculations.
 
 ## Assumptions
 

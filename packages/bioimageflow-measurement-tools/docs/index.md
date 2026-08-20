@@ -1,14 +1,10 @@
 # bioimageflow-measurement-tools
 
-`bioimageflow-measurement-tools` provides lightweight feature extraction,
-object counting, table summarization, and label benchmark metrics. It should
-grow toward a CellProfiler-like measurement layer: shape, intensity, object QC,
-and benchmark features that are useful across segmentation, spot, and tracking
-workflows.
+`bioimageflow-measurement-tools` provides lightweight feature extraction, object counting, table summarization, and label benchmark metrics.
 
-Core libraries are imageio, NumPy, pandas, and BioImageFlow's DataFrameTool and
-ProcessingTool APIs. The current tools are intentionally deterministic and
-small enough to test with generated arrays.
+Image tools are worker-safe and use imageio, NumPy, and scikit-image from the general execution environment.
+Table tools run in the orchestrator process with pandas and expose dynamically resolved output columns when the upstream schema and configuration are known.
+Every label raster must be 2D, finite, non-negative, and integer-valued, with `0` reserved for background.
 
 ## Tools
 
@@ -43,7 +39,5 @@ Run package tests with:
 uv run pytest packages/bioimageflow-measurement-tools/tests
 ```
 
-The current tests generate two labeled objects, an intensity image, and small
-tables with exact expected values. Future public-data tests should be marked
-`public_data` and should assert broad metric ranges rather than storing large
-datasets.
+The current tests generate labeled objects, invalid label fixtures, intensity images, and small tables with exact expected values.
+Future public-data tests should be marked `public_data` and should assert broad metric ranges rather than storing large datasets.

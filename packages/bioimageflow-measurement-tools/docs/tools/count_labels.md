@@ -1,13 +1,11 @@
 # CountLabels
 
-`CountLabels` reports the number of non-zero labels and the number of
-foreground pixels in a 2D label image.
+`CountLabels` reports the number of distinct positive labels and the number of foreground pixels in a 2D label image.
 
 Input is `label_image`. Outputs are `label_count` and `object_pixel_count`.
 This is a compact QC tool for segmentation smoke tests and workflow branching.
 
-The tool treats all positive/non-zero pixels as object pixels. Non-2D label
-images raise a `ValueError`.
+The tool treats all positive pixels as object pixels.
 
 ## Dependencies and Core Libraries
 
@@ -15,7 +13,7 @@ BioImageFlow core APIs, imageio, and NumPy.
 
 ## Assumptions
 
-Labels are integer-like 2D arrays and all non-zero pixels are foreground.
+Labels are finite, non-negative, integer-valued 2D arrays and `0` is background.
 
 ## Minimal Example
 
@@ -28,10 +26,8 @@ CountLabels().process_row(Arguments(label_image="labels.tif"))
 
 ## Expected Results
 
-`label_count` equals the number of distinct non-zero labels, and
-`object_pixel_count` equals the number of non-zero pixels.
+`label_count` equals the number of distinct positive IDs, and `object_pixel_count` equals the number of positive pixels.
 
 ## Failure Modes
 
-Non-2D labels raise `ValueError`; missing or unsupported files fail through
-imageio.
+Non-2D, non-finite, fractional, or negative labels raise `ValueError`; missing or unsupported files fail through imageio.
