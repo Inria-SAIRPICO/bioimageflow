@@ -581,6 +581,18 @@ def test_wiener_3d_requires_existing_psf_before_subprocess(
             "patch_size",
             id="hotspot-patch-size",
         ),
+        pytest.param(
+            HotspotDetection(),
+            Arguments(
+                input_image="input.tif",
+                patch_size=3,
+                neighborhood_size=5,
+                p_value=True,
+                output_image="nested/output.tif",
+            ),
+            "p_value",
+            id="boolean-is-not-a-numeric-p-value",
+        ),
     ],
 )
 def test_command_tools_validate_before_creating_outputs(

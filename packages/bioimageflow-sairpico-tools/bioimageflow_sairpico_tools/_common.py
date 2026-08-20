@@ -180,6 +180,8 @@ def _require_finite(
     maximum: Optional[float] = None,
     strictly_positive: bool = False,
 ) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number.")
     try:
         number = float(value)
     except (TypeError, ValueError) as error:
