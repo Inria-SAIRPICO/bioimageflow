@@ -17,8 +17,8 @@ Domain-heavy segmentation, restoration, tracking, spot detection, and large-form
 
 ## Dependencies
 
-Install-time libraries are BioImageFlow, pandas, imageio, NumPy, and Pillow.
-Image-processing tools use the shared `GENERAL_ENV`, which pins imageio, scikit-image, NumPy, and Pillow for worker execution.
+Install-time libraries are BioImageFlow and pandas.
+Image-processing tools import imageio, scikit-image, NumPy, and Pillow only inside worker methods and obtain them from the shared `GENERAL_ENV`.
 New domain-specific tools should live in their own packages instead of expanding this package's scope.
 
 ## Migration

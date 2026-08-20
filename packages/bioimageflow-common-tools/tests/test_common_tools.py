@@ -114,14 +114,15 @@ def test_common_docs_list_only_public_tools() -> None:
     assert "ConvertImage" not in public_tools
 
 
-def test_common_pyproject_declares_public_tool_runtime_dependencies() -> None:
+def test_common_pyproject_keeps_worker_dependencies_out_of_main_environment() -> None:
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     dependencies = {
         dependency.split(">=", maxsplit=1)[0].split("==", maxsplit=1)[0].lower()
         for dependency in pyproject["project"]["dependencies"]
     }
 
-    assert {"pandas", "imageio", "numpy", "pillow"} <= dependencies
+    assert "pandas" in dependencies
+    assert {"imageio", "numpy", "pillow"}.isdisjoint(dependencies)
 
 
 def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:

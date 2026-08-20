@@ -3,8 +3,8 @@
 `bioimageflow-common-tools` is the small glue package for workflows that need sources, table loading, table joins, filtering, column selection, table export, label overlap checks, connected component labeling, or visual mosaics.
 It should stay lightweight and process orchestration-oriented; domain-heavy segmentation, restoration, spot, tracking, and large-format IO tools belong in their specialized packages.
 
-Install-time libraries for the public tools are BioImageFlow, pandas, imageio, NumPy, and Pillow.
-Image-processing tools use the shared `GENERAL_ENV`, which pins imageio, scikit-image, NumPy, and Pillow for worker execution.
+Install-time libraries for the public tools are BioImageFlow and pandas.
+Image-processing tools import imageio, scikit-image, NumPy, and Pillow only inside worker methods and obtain them from the shared `GENERAL_ENV`.
 The package is intended for users who need to assemble or inspect workflows without installing deep-learning dependencies.
 
 `ExtractChannel` is no longer exported by this package.
