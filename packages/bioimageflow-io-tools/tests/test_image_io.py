@@ -158,6 +158,20 @@ def test_read_image_metadata_uses_headers_and_reports_rgb_samples(
     assert metadata.channel_names == ["red", "green", "blue"]
 
 
+def test_read_image_metadata_reports_animated_rgb_samples(tmp_path: Path) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "animated.gif"
+    iio.imwrite(source, np.zeros((2, 4, 5, 3), dtype=np.uint8))
+
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+
+    assert metadata.axes == "?YXS"
+    assert metadata.channel_names == ["red", "green", "blue"]
+
+
 def test_read_image_metadata_does_not_treat_narrow_stack_as_rgb(tmp_path: Path) -> None:
     import bioimageflow_io_tools
 
@@ -538,6 +552,33 @@ def test_convert_to_ome_tiff_preserves_narrow_zyx_volume(tmp_path: Path) -> None
     with tifffile.TiffFile(output) as tif:
         assert tif.series[0].axes == "ZYX"
         np.testing.assert_array_equal(tif.series[0].asarray(), data)
+
+
+def test_bioio_plain_tiff_writer_honors_sample_axis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools.bioio_convert import _write_bioio_output
+
+    ome_tiff_writers = types.ModuleType("bioio_ome_tiff.writers")
+    ome_tiff_writers.OmeTiffWriter = object
+    imageio_writers = types.ModuleType("bioio_imageio.writers")
+    imageio_writers.TwoDWriter = object
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff", types.ModuleType("bioio_ome_tiff"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff.writers", ome_tiff_writers)
+    monkeypatch.setitem(sys.modules, "bioio_imageio", types.ModuleType("bioio_imageio"))
+    monkeypatch.setitem(sys.modules, "bioio_imageio.writers", imageio_writers)
+
+    output = tmp_path / "animated_rgb.tif"
+    data = np.zeros((2, 4, 5, 3), dtype=np.uint8)
+
+    _write_bioio_output(data, output, "TYXS")
+
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].shape == data.shape
+        assert all(page.photometric.name == "RGB" for page in tif.pages)
 
 
 def test_z_range_rejects_non_integer_direct_call_bounds(tmp_path: Path) -> None:

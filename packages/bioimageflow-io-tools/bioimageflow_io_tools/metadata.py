@@ -148,8 +148,8 @@ def _reported_axes(reader_axes: str, shape: tuple[int, ...]) -> str:
 def _conservative_axes(shape: tuple[int, ...]) -> str:
     if len(shape) == 2:
         return "YX"
-    if len(shape) == 3 and shape[-1] in {3, 4}:
-        return "YXS"
+    if len(shape) >= 3 and shape[-1] in {3, 4}:
+        return f"{'?' * (len(shape) - 3)}YXS"
     if len(shape) >= 2:
         return f"{'?' * (len(shape) - 2)}YX"
     return "?" * len(shape)

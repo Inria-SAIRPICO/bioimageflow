@@ -21,7 +21,7 @@ from ._axes import (
     validate_nonnegative_index,
     validate_unbound_axis_order,
 )
-from ._raster import is_grayscale_stack, is_ome_tiff_path, is_ome_zarr_path, is_tiff_path
+from ._raster import is_ome_tiff_path, is_ome_zarr_path, is_tiff_path
 from .environments import bioio_env
 from .writers import write_ome_zarr
 
@@ -121,11 +121,13 @@ def _write_bioio_output(data: Any, output_path: Path, axes: str) -> None:
     elif is_ome_zarr_path(output_path):
         write_ome_zarr(array, output_path, axes, verify=True)
     elif is_tiff_path(output_path):
-        kwargs: dict[str, Any] = (
-            {"photometric": "minisblack"} if is_grayscale_stack(array) else {}
-        )
+        kwargs: dict[str, Any] = {}
+        if axes.endswith("S"):
+            kwargs["photometric"] = "rgb"
+        elif array.ndim >= 3:
+            kwargs["photometric"] = "minisblack"
         tifffile.imwrite(output_path, array, **kwargs)
-    elif axes in {"YX", "YXS", "SYX"}:
+    elif axes in {"YX", "YXS"}:
         TwoDWriter.save(array, str(output_path), dim_order=axes)
     else:
         raise ValueError(
