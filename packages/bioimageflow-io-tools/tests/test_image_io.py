@@ -558,6 +558,37 @@ def test_z_range_rejects_non_integer_direct_call_bounds(tmp_path: Path) -> None:
         )
 
 
+def test_scene_and_bioio_indices_reject_non_integer_direct_calls(tmp_path: Path) -> None:
+    from bioimageflow_io_tools import SelectScene
+    from bioimageflow_io_tools.bioio_convert import (
+        _validate_bioio_index,
+        _validate_scene,
+    )
+
+    source = tmp_path / "image.tif"
+    iio.imwrite(source, np.zeros((4, 5), dtype=np.uint8))
+
+    with pytest.raises(TypeError, match="Scene index must be an integer"):
+        SelectScene().process_row(
+            Arguments(
+                input_image=source,
+                scene=True,
+                output_image=tmp_path / "bad.tif",
+            )
+        )
+
+    class FakeImage:
+        scenes = ("0", "1")
+
+        class dims:
+            C = 2
+
+    with pytest.raises(TypeError, match="Scene index must be an integer"):
+        _validate_scene(FakeImage(), 1.5)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="C index must be an integer"):
+        _validate_bioio_index(FakeImage(), "C", False)
+
+
 def test_write_named_ome_tools_are_not_public_workflow_tools() -> None:
     import bioimageflow_io_tools
 

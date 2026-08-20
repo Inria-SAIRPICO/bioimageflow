@@ -134,10 +134,18 @@ def remaining_axis_order(axis_order: str, selected_axes: Iterable[str]) -> str:
     return remaining
 
 
-def _validate_index(axis: str, index: int, size: int) -> None:
+def validate_nonnegative_index(name: str, index: int) -> int:
+    """Validate a zero-based integer index used by a direct tool call."""
     if isinstance(index, bool) or not isinstance(index, int):
-        raise TypeError(f"{axis} index must be an integer, got {index!r}.")
-    if index < 0 or index >= size:
+        raise TypeError(f"{name} index must be an integer, got {index!r}.")
+    if index < 0:
+        raise IndexError(f"{name} index {index} is invalid; indexes are zero-based.")
+    return index
+
+
+def _validate_index(axis: str, index: int, size: int) -> None:
+    validate_nonnegative_index(axis, index)
+    if index >= size:
         raise IndexError(f"{axis} index {index} is out of range for axis size {size}.")
 
 

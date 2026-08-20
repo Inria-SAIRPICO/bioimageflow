@@ -18,6 +18,7 @@ from bioimageflow_core import (
 from ._axes import (
     normalize_axis_order,
     remaining_axis_order,
+    validate_nonnegative_index,
     validate_unbound_axis_order,
 )
 from ._raster import is_grayscale_stack, is_ome_tiff_path, is_ome_zarr_path, is_tiff_path
@@ -93,16 +94,14 @@ class BioIOConvertImage(ProcessingTool):
 
 
 def _validate_scene(image: Any, scene: int) -> None:
-    if scene < 0:
-        raise IndexError(f"Scene index {scene} is invalid; indexes are zero-based.")
+    validate_nonnegative_index("Scene", scene)
     scenes = getattr(image, "scenes", None)
     if scenes is not None and scene >= len(scenes):
         raise IndexError(f"Scene index {scene} is out of range for {len(scenes)} scenes.")
 
 
 def _validate_bioio_index(image: Any, axis: str, index: int) -> int:
-    if index < 0:
-        raise IndexError(f"{axis} index {index} is invalid; indexes are zero-based.")
+    validate_nonnegative_index(axis, index)
     size = getattr(getattr(image, "dims", None), axis, None)
     if isinstance(size, int) and index >= size:
         raise IndexError(f"{axis} index {index} is out of range for axis size {size}.")

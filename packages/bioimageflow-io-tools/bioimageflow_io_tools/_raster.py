@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any
 
+from ._axes import validate_nonnegative_index
+
 
 def read_raster(input_image: Path | str) -> Any:
     import imageio.v3 as iio
@@ -14,8 +16,7 @@ def read_scene(input_image: Path | str, scene: int) -> Any:
     import imageio.v3 as iio
 
     path = Path(input_image)
-    if scene < 0:
-        raise IndexError(f"Scene index {scene} is invalid; indexes are zero-based.")
+    validate_nonnegative_index("Scene", scene)
     if is_tiff_path(path):
         import tifffile
 
