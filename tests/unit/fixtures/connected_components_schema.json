@@ -37,7 +37,7 @@
     },
     "output_image": {
       "connectable": "not_by_default",
-      "default": "{input_image.stem}_labels{ext}",
+      "default": "{input_image.stem}_labels.tif",
       "description": "Label image where each connected component has a unique integer ID.",
       "display_name": "Label image",
       "group": null,
@@ -50,7 +50,7 @@
       "max": null,
       "min": null,
       "step": null,
-      "template": "{input_image.stem}_labels{ext}",
+      "template": "{input_image.stem}_labels.tif",
       "type": "ImageFile"
     }
   }

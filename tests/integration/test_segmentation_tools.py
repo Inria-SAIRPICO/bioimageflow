@@ -94,6 +94,7 @@ class TestCellpose3:
                 model_type="nuclei",
                 channel=0,
                 nuclear_channel=0,
+                channel_axis="last",
                 flow_threshold=0.4,
                 cellprob_threshold=0.0,
             )
@@ -103,6 +104,7 @@ class TestCellpose3:
         assert calls["model_type"] == "nuclei"
         assert calls["diameter"] == 12.0
         assert calls["channels"] == [0, 0]
+        assert calls["channel_axis"] is None
         assert iio.imread(mask_path).max() == 2
 
 
@@ -156,6 +158,7 @@ class TestStarDistSegmenter:
                 mask=mask_path,
                 model_name="2D_versatile_fluo",
                 channel=1,
+                channel_axis="first",
                 prob_thresh=0.5,
                 nms_thresh=0.3,
                 normalize_low=1.0,
@@ -174,12 +177,17 @@ class TestStarDistSegmenter:
         tool_cls = StarDistSegmenter
         assert tool_cls is not None
         image = np.zeros((3, 8, 9), dtype=np.uint8)
-        prepared = tool_cls._prepare_image(image, "2D_versatile_he", 0)
+        prepared = tool_cls._prepare_image(image, "2D_versatile_he", 0, "first")
         assert prepared.shape == (8, 9, 3)
 
     def test_prepare_image_handles_channel_last_fluorescence(self) -> None:
         tool_cls = StarDistSegmenter
         assert tool_cls is not None
         image = np.zeros((8, 9, 3), dtype=np.uint8)
-        prepared = tool_cls._prepare_image(image, "2D_versatile_fluo", 2)
+        prepared = tool_cls._prepare_image(
+            image,
+            "2D_versatile_fluo",
+            2,
+            "last",
+        )
         assert prepared.shape == (8, 9)
