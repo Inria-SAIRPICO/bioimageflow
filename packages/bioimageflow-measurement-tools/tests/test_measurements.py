@@ -335,6 +335,7 @@ def test_table_schema_resolution_matches_runtime_validation() -> None:
 
     upstream = {
         "sample": {"type": "str", "default": None, "image_spec": None},
+        "condition": {"type": "str", "default": None, "image_spec": None},
         "area": {"type": "float", "default": None, "image_spec": None},
         "area_count": {"type": "float", "default": None, "image_spec": None},
     }
@@ -355,3 +356,42 @@ def test_table_schema_resolution_matches_runtime_validation() -> None:
     assert NormalizeFeatures.resolve_merge_schema(
         [upstream], {"columns": "area", "method": "unknown"}
     ) is None
+    assert SummarizeTable.resolve_merge_schema(
+        [upstream], {"columns": "sample"}
+    ) is None
+    assert AggregatePerImage.resolve_merge_schema(
+        [upstream], {"group_by": "sample", "columns": "condition"}
+    ) is None
+    assert NormalizeFeatures.resolve_merge_schema(
+        [upstream], {"columns": "sample"}
+    ) is None
+
+
+def test_grouped_table_tools_do_not_duplicate_non_unique_index_rows() -> None:
+    from bioimageflow_measurement_tools import AggregatePerImage, SummarizeTable
+
+    table = pd.DataFrame(
+        {"sample": ["a", "a", "b"], "area": [1.0, 3.0, 5.0]},
+        index=[0, 0, 0],
+    )
+    summary = SummarizeTable().transform(
+        table, Arguments(group_by="sample", columns="area")
+    )
+    assert summary.set_index("sample")["area_count"].to_dict() == {"a": 2, "b": 1}
+    assert summary.set_index("sample")["area_sum"].to_dict() == {
+        "a": 4.0,
+        "b": 5.0,
+    }
+
+    aggregate = AggregatePerImage().transform(
+        table,
+        Arguments(group_by="sample", columns="area", stats="count,sum"),
+    )
+    assert aggregate.set_index("sample")["object_count"].to_dict() == {
+        "a": 2,
+        "b": 1,
+    }
+    assert aggregate.set_index("sample")["area_sum"].to_dict() == {
+        "a": 4.0,
+        "b": 5.0,
+    }

@@ -94,7 +94,8 @@ class SummarizeTable(DataFrameTool):
         )
         numeric = _numeric_table(table, columns)
         if grouped_by:
-            source = table[[grouped_by]].join(numeric)
+            source = numeric.copy()
+            source.insert(0, grouped_by, table[grouped_by].array)
             result = source.groupby(grouped_by, dropna=False)[columns].agg(
                 list(_DEFAULT_STATS)
             )
@@ -190,7 +191,8 @@ class AggregatePerImage(DataFrameTool):
         ]
         _reject_output_collisions(output_names)
         numeric = _numeric_table(table, columns)
-        source = table[[group_by]].join(numeric)
+        source = numeric.copy()
+        source.insert(0, group_by, table[group_by].array)
         grouped = source.groupby(group_by, dropna=False)
         result = grouped[columns].agg(stats)
         result.columns = [f"{column}_{stat}" for column, stat in result.columns]
@@ -317,7 +319,12 @@ def _schema_columns(
         selected = [part.strip() for part in columns.split(",") if part.strip()]
         if len(selected) != len(set(selected)):
             return None
-        if any(name not in schema or name in excluded for name in selected):
+        if any(
+            name not in schema
+            or name in excluded
+            or schema[name].get("type") not in _NUMERIC_SCHEMA_TYPES
+            for name in selected
+        ):
             return None
     return selected or None
 
