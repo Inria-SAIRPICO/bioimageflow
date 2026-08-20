@@ -365,7 +365,7 @@ class WatershedSegment(ProcessingTool):
             float,
             GUIMeta(
                 display_name="Foreground threshold",
-                description="Pixels greater than or equal to this value are segmented.",
+                description="Pixels strictly greater than this value are segmented.",
                 group="general",
             ),
         ] = 0.5
@@ -453,7 +453,7 @@ class DistanceWatershedSegment(ProcessingTool):
             float,
             GUIMeta(
                 display_name="Foreground threshold",
-                description="Pixels greater than or equal to this value are segmented.",
+                description="Pixels strictly greater than this value are segmented.",
                 group="general",
             ),
         ] = 0.5

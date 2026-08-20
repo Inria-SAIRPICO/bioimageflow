@@ -165,6 +165,28 @@ def test_cellpose3_model_cache_is_keyed_and_clearable(
     assert created_models == ["cyto3", "nuclei", "nuclei"]
 
 
+def test_cellpose3_rejects_channel_selector_outside_declared_axis(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "two_channels.tif"
+    iio.imwrite(image_path, np.zeros((8, 9, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match=r"channel=3 is out of range for 2 channels"):
+        Cellpose3().process_row(
+            Arguments(
+                input_image=image_path,
+                diameter=10.0,
+                model_type="cyto3",
+                channel=3,
+                nuclear_channel=0,
+                channel_axis="last",
+                flow_threshold=0.4,
+                cellprob_threshold=0.0,
+                mask=tmp_path / "mask.tif",
+            )
+        )
+
+
 def test_cellpose_sam_model_cache_is_keyed_and_clearable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

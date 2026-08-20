@@ -232,6 +232,15 @@ class Cellpose3(ProcessingTool):
                     "Three-dimensional Cellpose input must have one to four channels "
                     f"on the declared channel axis; got shape {image.shape}."
                 )
+            for selector_name, selector in (
+                ("channel", channel),
+                ("nuclear_channel", nuclear_channel),
+            ):
+                if selector > channel_count:
+                    raise ValueError(
+                        f"{selector_name}={selector} is out of range for "
+                        f"{channel_count} channels."
+                    )
             expected_shape = tuple(
                 size for axis, size in enumerate(image.shape) if axis != channel_axis
             )
