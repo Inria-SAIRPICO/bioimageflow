@@ -87,6 +87,9 @@ def select_axis_range(
         )
     axis_index = normalized.index(axis)
     axis_size = int(data.shape[axis_index])
+    _validate_bound(axis, "range start", start)
+    if stop is not None:
+        _validate_bound(axis, "range stop", stop)
     normalized_stop = axis_size if stop is None else stop
     if start < 0:
         raise IndexError(f"{axis} range start {start} must be non-negative.")
@@ -136,3 +139,8 @@ def _validate_index(axis: str, index: int, size: int) -> None:
         raise TypeError(f"{axis} index must be an integer, got {index!r}.")
     if index < 0 or index >= size:
         raise IndexError(f"{axis} index {index} is out of range for axis size {size}.")
+
+
+def _validate_bound(axis: str, name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{axis} {name} must be an integer, got {value!r}.")

@@ -140,8 +140,8 @@ def _reported_axes(reader_axes: str, shape: tuple[int, ...]) -> str:
         return _conservative_axes(shape)
     known = {"T", "C", "Z", "Y", "X", "S"}
     normalized = "".join(axis if axis in known else "?" for axis in reader_axes.upper())
-    if normalized.endswith("?YX") and shape[-1] in {3, 4}:
-        normalized = f"{normalized[:-3]}YXS"
+    if normalized.endswith("YX?") and shape[-1] in {3, 4}:
+        normalized = f"{normalized[:-1]}S"
     return normalized
 
 

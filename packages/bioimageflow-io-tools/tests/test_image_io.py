@@ -158,6 +158,20 @@ def test_read_image_metadata_uses_headers_and_reports_rgb_samples(
     assert metadata.channel_names == ["red", "green", "blue"]
 
 
+def test_read_image_metadata_does_not_treat_narrow_stack_as_rgb(tmp_path: Path) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "narrow_stack.tif"
+    iio.imwrite(source, np.zeros((7, 5, 4), dtype=np.uint8), photometric="minisblack")
+
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+
+    assert metadata.axes == "?YX"
+    assert metadata.channel_names == []
+
+
 def test_validate_image_layout_checks_length_required_axes_and_sizes(tmp_path: Path) -> None:
     from bioimageflow_io_tools import ValidateImageLayout
 
@@ -505,6 +519,43 @@ def test_convert_to_ome_tiff_records_axes_metadata(tmp_path: Path) -> None:
     with tifffile.TiffFile(output) as tif:
         assert tif.series[0].axes == "CZYX"
         assert tif.series[0].shape == data.shape
+
+
+def test_convert_to_ome_tiff_preserves_narrow_zyx_volume(tmp_path: Path) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools import ConvertToOmeTiff
+
+    source = tmp_path / "narrow_volume.tif"
+    output = tmp_path / "narrow_volume.ome.tiff"
+    data = np.arange(2 * 5 * 4, dtype=np.uint16).reshape(2, 5, 4)
+    iio.imwrite(source, data, photometric="minisblack")
+
+    ConvertToOmeTiff().process_row(
+        Arguments(input_image=source, output_image=output, dimension_order="ZYX")
+    )
+
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].axes == "ZYX"
+        np.testing.assert_array_equal(tif.series[0].asarray(), data)
+
+
+def test_z_range_rejects_non_integer_direct_call_bounds(tmp_path: Path) -> None:
+    from bioimageflow_io_tools import SelectZRange
+
+    source = tmp_path / "volume.tif"
+    iio.imwrite(source, np.zeros((3, 4, 5), dtype=np.uint8), photometric="minisblack")
+
+    with pytest.raises(TypeError, match="Z range start must be an integer"):
+        SelectZRange().process_row(
+            Arguments(
+                input_image=source,
+                layout="ZYX",
+                start_z=True,
+                stop_z=2,
+                output_image=tmp_path / "bad.tif",
+            )
+        )
 
 
 def test_write_named_ome_tools_are_not_public_workflow_tools() -> None:

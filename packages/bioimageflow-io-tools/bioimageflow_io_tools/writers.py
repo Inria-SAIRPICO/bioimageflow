@@ -187,6 +187,9 @@ def write_ome_tiff(data: Any, output_path: Path | str, axes: str) -> Path:
     kwargs: dict[str, Any] = {}
     if normalized_axes.endswith("S"):
         kwargs["photometric"] = "rgb"
+    elif array.ndim >= 3:
+        # Avoid tifffile interpreting a ZYX volume whose X size is 3 or 4 as RGB(A).
+        kwargs["photometric"] = "minisblack"
     tifffile.imwrite(
         path,
         array,
