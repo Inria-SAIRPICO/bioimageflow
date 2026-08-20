@@ -126,7 +126,7 @@ class ThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_threshold_labels{ext}")
+        ] = Template("{input_image.stem}_threshold_labels.tif")
         object_count: Annotated[
             int,
             GUIMeta(
@@ -198,7 +198,7 @@ class OtsuThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_otsu_labels{ext}")
+        ] = Template("{input_image.stem}_otsu_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
         threshold: Annotated[float, GUIMeta(display_name="Otsu threshold")]
 
@@ -292,7 +292,7 @@ class LocalThresholdSegment(ProcessingTool):
                 display_name="Label image",
                 description="Connected foreground components as integer labels.",
             ),
-        ] = Template("{input_image.stem}_local_threshold_labels{ext}")
+        ] = Template("{input_image.stem}_local_threshold_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -381,7 +381,7 @@ class WatershedSegment(ProcessingTool):
                 display_name="Label image",
                 description="Watershed segmentation label image.",
             ),
-        ] = Template("{input_image.stem}_watershed_labels{ext}")
+        ] = Template("{input_image.stem}_watershed_labels.tif")
         object_count: Annotated[
             int,
             GUIMeta(
@@ -479,7 +479,7 @@ class DistanceWatershedSegment(ProcessingTool):
                 display_name="Label image",
                 description="Distance watershed label image.",
             ),
-        ] = Template("{input_image.stem}_distance_watershed_labels{ext}")
+        ] = Template("{input_image.stem}_distance_watershed_labels.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -545,7 +545,7 @@ class SplitTouchingObjects(ProcessingTool):
                 display_name="Output labels",
                 description="Split label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_split{ext}")
+        ] = Template("{labels.stem}_split.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -641,7 +641,7 @@ class FilterLabels(ProcessingTool):
                 display_name="Output labels",
                 description="Filtered label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_filtered{ext}")
+        ] = Template("{labels.stem}_filtered.tif")
         object_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
@@ -762,7 +762,7 @@ class PostprocessLabels(ProcessingTool):
                 display_name="Output labels",
                 description="Filtered label image with sequential label IDs.",
             ),
-        ] = Template("{labels.stem}_postprocessed{ext}")
+        ] = Template("{labels.stem}_postprocessed.tif")
         object_count: Annotated[
             int,
             GUIMeta(

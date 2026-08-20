@@ -34,6 +34,7 @@ cellpose_v3_env = EnvironmentSpec(
         "pip": [
             "cellpose==3.1.1.1",
             "imageio==2.37.3",
+            "numpy==2.0.2",
             "packaging==26.2",
             "tifffile==2026.3.3",
         ],
@@ -186,7 +187,7 @@ class Cellpose3(ProcessingTool):
                 display_name="Segmentation mask",
                 description="Label image where each detected object has a unique integer ID.",
             ),
-        ] = Template("{input_image.stem}_cellpose3_mask{ext}")
+        ] = Template("{input_image.stem}_cellpose3_mask.tif")
         cell_count: Annotated[
             int,
             GUIMeta(

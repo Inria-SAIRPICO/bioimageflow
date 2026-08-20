@@ -58,6 +58,25 @@ def test_segmentation_package_all_exports_only_public_tools() -> None:
     assert all(issubclass(getattr(segmentation, name), BaseTool) for name in segmentation.__all__)
 
 
+def test_label_output_templates_use_tiff() -> None:
+    output_fields = [
+        (Cellpose3, "mask"),
+        (CellposeSAM, "mask"),
+        (StarDistSegmenter, "mask"),
+        (ThresholdSegment, "labels"),
+        (OtsuThresholdSegment, "labels"),
+        (LocalThresholdSegment, "labels"),
+        (WatershedSegment, "labels"),
+        (DistanceWatershedSegment, "labels"),
+        (SplitTouchingObjects, "output_labels"),
+        (FilterLabels, "output_labels"),
+        (PostprocessLabels, "output_labels"),
+    ]
+
+    for tool, field_name in output_fields:
+        assert str(getattr(tool.Outputs, field_name)).endswith(".tif")
+
+
 @pytest.mark.parametrize("tool_cls", SEGMENTATION_TOOLS, ids=lambda c: c.__name__)
 def test_segmentation_tool_schemas_are_json_serializable(tool_cls: type) -> None:
     inputs = serialize_input_schema(tool_cls)

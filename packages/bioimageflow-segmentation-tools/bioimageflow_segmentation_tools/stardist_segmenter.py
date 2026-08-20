@@ -32,6 +32,7 @@ stardist_env = EnvironmentSpec(
     dependencies={
         "python": "3.12",
         "pip": [
+            "csbdeep==0.8.2",
             "tensorflow==2.21.0",
             "stardist==0.9.2",
             "imageio==2.37.3",
@@ -178,7 +179,7 @@ class StarDistSegmenter(ProcessingTool):
                 display_name="Segmentation mask",
                 description="Label image where each detected object has a unique integer ID.",
             ),
-        ] = Template("{input_image.stem}_stardist_mask{ext}")
+        ] = Template("{input_image.stem}_stardist_mask.tif")
         object_count: Annotated[
             int,
             GUIMeta(

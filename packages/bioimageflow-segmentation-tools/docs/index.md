@@ -8,6 +8,7 @@ probability, or binary inputs.
 Install-time libraries are imageio, NumPy, and scikit-image.
 Classical tool runtime environments include tifffile where file-format handling needs it.
 Cellpose, StarDist, TensorFlow, and other model-runtime dependencies live in isolated `EnvironmentSpec` environments and are imported inside `process_row`, so graph construction and schema tests remain lightweight.
+Default label-output paths use TIFF so label IDs are not written to an unsuitable lossy input format.
 
 ## Tools
 

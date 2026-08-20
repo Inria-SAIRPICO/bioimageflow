@@ -1,9 +1,8 @@
 # WatershedSegment
 
-`WatershedSegment` segments thresholded foreground using scikit-image watershed
-semantics. If marker labels are supplied, foreground pixels are assigned to the
-nearest marker. Without markers, connected foreground components are used as
-markers.
+`WatershedSegment` segments thresholded foreground using scikit-image watershed semantics.
+If marker labels are supplied, intensity topography guides the assignment of foreground pixels to markers.
+Without markers, connected foreground components are used as markers.
 
 Inputs are `input_image`, optional `markers_image`, and `threshold`. Outputs are
 `labels` and `object_count`. Marker and input shapes must match.

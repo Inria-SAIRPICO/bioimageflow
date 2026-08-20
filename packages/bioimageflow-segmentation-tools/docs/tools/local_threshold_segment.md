@@ -21,7 +21,7 @@ result = LocalThresholdSegment().process_row(
 
 ## Inputs
 
-- `input_image`: 2D intensity image.
+- `input_image`: 2D or 3D intensity image.
 - `block_size`, `k`, and `offset`: local threshold parameters.
 - `above`: when true, pixels above the local threshold are foreground.
 
@@ -36,7 +36,7 @@ imageio, NumPy, and scikit-image Sauvola thresholding/labeling functions.
 
 ## Assumptions
 
-The image is 2D and local contrast separates foreground from background.
+The image is 2D or 3D and local contrast separates foreground from background.
 
 ## Expected Results
 

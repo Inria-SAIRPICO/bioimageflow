@@ -102,7 +102,7 @@ class CellposeSAM(ProcessingTool):
             Path,
             ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
             GUIMeta(display_name="Segmentation mask"),
-        ] = Template("{input_image.stem}_cellpose_sam_mask{ext}")
+        ] = Template("{input_image.stem}_cellpose_sam_mask.tif")
         cell_count: Annotated[int, GUIMeta(display_name="Object count")]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
