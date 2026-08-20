@@ -23,6 +23,7 @@ TracksToLabels().process_batch([
 ## Expected Results
 
 The output label stack contains track IDs at the pixels occupied by the source labels.
+Collective batches containing several source stacks produce one output artifact per source without mixing mappings.
 The output is written as `uint32`; background is `0`, and positive track IDs are preserved exactly.
 When the upstream track table is empty but `label_image` is provided, `TracksToLabels` still writes an all-background `uint32` label stack matching the source shape and reports `track_count=0`.
 

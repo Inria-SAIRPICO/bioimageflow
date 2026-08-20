@@ -45,6 +45,13 @@ class LabelsToObjects(ProcessingTool):
         ]
 
     class Outputs(IOModel):
+        source_label_image: Annotated[
+            Path,
+            GUIMeta(
+                display_name="Source label image",
+                description="Source key used to keep independent image stacks separate.",
+            ),
+        ]
         frame: Annotated[int, GUIMeta(display_name="Frame")]
         label: Annotated[int, GUIMeta(display_name="Label")]
         y: Annotated[float, GUIMeta(display_name="Y")]
@@ -86,6 +93,7 @@ class LabelsToObjects(ProcessingTool):
                 )
         return [
             self.Outputs(
+                source_label_image=arguments.label_image,
                 frame=int(row["frame"]),
                 label=int(row["label"]),
                 y=float(row["y"]),

@@ -4,8 +4,8 @@ Tools for label-stack object extraction, deterministic centroid linking, track r
 
 ## Tools
 
-- `LabelsToObjects`: converts 2D or TYX label images into object centroid and area tables.
-- `NearestNeighborLink`: links adjacent-frame objects with global one-to-one distance assignment.
+- `LabelsToObjects`: converts 2D or TYX label images into source-keyed object centroid and area tables.
+- `NearestNeighborLink`: links adjacent-frame objects with global one-to-one distance assignment, independently per source label stack when the source key is present.
 - `TrackMetrics`: computes explicit duration, path length, net displacement, speed, and area summaries.
 - `FilterObjects`: filters object tables by area, frame, intensity, and position.
 - `TracksToLabels`: renders track IDs back into label stacks.

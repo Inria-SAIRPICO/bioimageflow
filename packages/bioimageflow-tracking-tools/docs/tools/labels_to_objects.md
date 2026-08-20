@@ -3,7 +3,7 @@
 `LabelsToObjects` converts a 2D label image or a `TYX` label stack into object dataframe rows.
 
 Input is `label_image`.
-Outputs are `frame`, `label`, `y`, `x`, `area`, and `object_count`.
+Outputs are `source_label_image`, `frame`, `label`, `y`, `x`, `area`, and `object_count`.
 No objects CSV artifact is written.
 
 Use it as the bridge from segmentation to tracking.
@@ -25,6 +25,7 @@ LabelsToObjects().process_row(Arguments(label_image="labels_tyx.tif"))
 ## Expected Results
 
 The workflow dataframe contains one row per non-zero label per frame with centroid and area columns.
+`source_label_image` preserves the stack identity so downstream linking does not mix objects from independent input files.
 All-background inputs produce an empty object table with the declared columns; no sentinel object row is created.
 
 ## Failure Modes

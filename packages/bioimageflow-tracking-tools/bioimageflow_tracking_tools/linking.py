@@ -73,9 +73,19 @@ class NearestNeighborLink(DataFrameTool):
             else:
                 result[column] = values
 
-        if result.duplicated(["frame", "label"]).any():
+        grouping_column = (
+            "source_label_image" if "source_label_image" in result.columns else None
+        )
+        identity_columns = ["frame", "label"]
+        if grouping_column is not None:
+            if result[grouping_column].isna().any():
+                raise ValueError(
+                    "NearestNeighborLink column 'source_label_image' must not contain missing values."
+                )
+            identity_columns.insert(0, grouping_column)
+        if result.duplicated(identity_columns).any():
             raise ValueError(
-                "NearestNeighborLink requires each (frame, label) object to occur exactly once."
+                "NearestNeighborLink requires each source (frame, label) object to occur exactly once."
             )
         if result.empty:
             result["track_id"] = pd.Series(dtype=np.int64)
@@ -84,45 +94,74 @@ class NearestNeighborLink(DataFrameTool):
 
         frames = result["frame"].to_numpy(dtype=np.int64)
         labels = result["label"].to_numpy(dtype=np.int64)
-        input_positions = np.arange(len(result), dtype=np.int64)
-        sorted_positions = np.lexsort((input_positions, labels, frames))
         assignments = np.empty(len(result), dtype=np.int64)
-        next_track_id = 1
-        previous_frame: int | None = None
-        previous_positions = np.empty(0, dtype=np.int64)
+        track_counts = np.empty(len(result), dtype=np.int64)
+        if grouping_column is None:
+            groups = [np.arange(len(result), dtype=np.int64)]
+        else:
+            group_codes, unique_groups = pd.factorize(
+                result[grouping_column], sort=False
+            )
+            groups = [
+                np.flatnonzero(group_codes == code)
+                for code in range(len(unique_groups))
+            ]
 
-        for frame_value in np.unique(frames[sorted_positions]):
-            frame = int(frame_value)
-            current_positions = sorted_positions[frames[sorted_positions] == frame]
-            current_tracks: dict[int, int] = {}
-            if previous_frame is not None and frame == previous_frame + 1:
-                previous_points = result.iloc[previous_positions][["y", "x"]].to_numpy(float)
-                current_points = result.iloc[current_positions][["y", "x"]].to_numpy(float)
-                distances = cdist(previous_points, current_points)
-                # Invalid edges cost more than all valid edges combined, so assignment
-                # maximizes the valid link count before minimizing total distance.
-                valid_cost = distances / (max_distance + 1.0)
-                invalid_cost = float(min(distances.shape) + 1)
-                cost = np.where(distances <= max_distance, valid_cost, invalid_cost)
-                previous_rows, current_columns = linear_sum_assignment(cost)
-                for previous_row, current_column in zip(
-                    previous_rows.tolist(), current_columns.tolist(), strict=True
-                ):
-                    if distances[previous_row, current_column] <= max_distance:
-                        current_position = int(current_positions[current_column])
-                        current_tracks[current_position] = int(
-                            assignments[previous_positions[previous_row]]
-                        )
+        for group_positions in groups:
+            sorted_positions = group_positions[
+                np.lexsort(
+                    (
+                        group_positions,
+                        labels[group_positions],
+                        frames[group_positions],
+                    )
+                )
+            ]
+            next_track_id = 1
+            previous_frame: int | None = None
+            previous_positions = np.empty(0, dtype=np.int64)
 
-            for position_value in current_positions:
-                position = int(position_value)
-                if position not in current_tracks:
-                    current_tracks[position] = next_track_id
-                    next_track_id += 1
-                assignments[position] = current_tracks[position]
-            previous_frame = frame
-            previous_positions = current_positions
+            for frame_value in np.unique(frames[sorted_positions]):
+                frame = int(frame_value)
+                current_positions = sorted_positions[
+                    frames[sorted_positions] == frame
+                ]
+                current_tracks: dict[int, int] = {}
+                if previous_frame is not None and frame == previous_frame + 1:
+                    previous_points = result.iloc[previous_positions][
+                        ["y", "x"]
+                    ].to_numpy(float)
+                    current_points = result.iloc[current_positions][["y", "x"]].to_numpy(
+                        float
+                    )
+                    distances = cdist(previous_points, current_points)
+                    # Invalid edges cost more than all valid edges combined, so assignment
+                    # maximizes the valid link count before minimizing total distance.
+                    valid_cost = distances / (max_distance + 1.0)
+                    invalid_cost = float(min(distances.shape) + 1)
+                    cost = np.where(
+                        distances <= max_distance, valid_cost, invalid_cost
+                    )
+                    previous_rows, current_columns = linear_sum_assignment(cost)
+                    for previous_row, current_column in zip(
+                        previous_rows.tolist(), current_columns.tolist(), strict=True
+                    ):
+                        if distances[previous_row, current_column] <= max_distance:
+                            current_position = int(current_positions[current_column])
+                            current_tracks[current_position] = int(
+                                assignments[previous_positions[previous_row]]
+                            )
+
+                for position_value in current_positions:
+                    position = int(position_value)
+                    if position not in current_tracks:
+                        current_tracks[position] = next_track_id
+                        next_track_id += 1
+                    assignments[position] = current_tracks[position]
+                previous_frame = frame
+                previous_positions = current_positions
+            track_counts[group_positions] = next_track_id - 1
 
         result["track_id"] = assignments
-        result["track_count"] = int(result["track_id"].nunique())
+        result["track_count"] = track_counts
         return result

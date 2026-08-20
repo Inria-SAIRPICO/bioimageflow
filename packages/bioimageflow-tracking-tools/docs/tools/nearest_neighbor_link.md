@@ -28,6 +28,7 @@ For every pair of adjacent frame numbers, the tool first maximizes the number of
 Each object and track participates in at most one link per frame.
 Objects without a valid assignment start new positive sequential track IDs.
 A missing frame breaks continuity and starts new tracks.
+When the input contains the `source_label_image` column emitted by `LabelsToObjects`, assignment and track numbering are performed independently for each source stack.
 
 ## Failure Modes
 

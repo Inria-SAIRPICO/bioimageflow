@@ -41,6 +41,7 @@ def test_labels_to_objects_extracts_centroids(tmp_path: Path) -> None:
 
     assert len(result) == 6
     assert result[0].object_count == 6
+    assert {Path(row.source_label_image) for row in result} == {label_path}
     assert {row.label for row in result} == {1, 2}
     assert {row.frame for row in result} == {0, 1, 2}
 
@@ -141,6 +142,46 @@ def test_nearest_neighbor_link_is_independent_of_index_and_preserves_columns() -
     assert result["_bif_input_order"].tolist() == ["a", "b", "c"]
     assert result["track_id"].tolist() == [1, 1, 2]
     assert result["track_count"].tolist() == [2, 2, 2]
+
+
+def test_nearest_neighbor_link_keeps_source_label_stacks_independent() -> None:
+    objects = pd.DataFrame(
+        [
+            {
+                "source_label_image": "first.tif",
+                "frame": 0,
+                "label": 1,
+                "y": 0.0,
+                "x": 0.0,
+            },
+            {
+                "source_label_image": "first.tif",
+                "frame": 1,
+                "label": 1,
+                "y": 1.0,
+                "x": 0.0,
+            },
+            {
+                "source_label_image": "second.tif",
+                "frame": 0,
+                "label": 1,
+                "y": 10.0,
+                "x": 0.0,
+            },
+            {
+                "source_label_image": "second.tif",
+                "frame": 1,
+                "label": 1,
+                "y": 11.0,
+                "x": 0.0,
+            },
+        ]
+    )
+
+    result = NearestNeighborLink().transform(objects, Arguments(max_distance=2.0))
+
+    assert result["track_id"].tolist() == [1, 1, 1, 1]
+    assert result["track_count"].tolist() == [1, 1, 1, 1]
 
 
 @pytest.mark.parametrize("column,value", [("frame", 0.5), ("label", 0), ("x", np.inf)])
@@ -369,6 +410,39 @@ def test_tracking_workflow_all_background_writes_one_artifact_per_source(
         assert labels.dtype == np.uint32
         assert labels.shape == (3, 16, 16)
         assert int(labels.max()) == 0
+
+
+def test_tracking_workflow_keeps_nonempty_sources_independent(tmp_path: Path) -> None:
+    image_dir = tmp_path / "labels"
+    image_dir.mkdir()
+    for index, offset in enumerate((0, 10)):
+        labels = np.zeros((2, 24, 24), dtype=np.uint16)
+        labels[0, 2 + offset : 5 + offset, 2:5] = 1
+        labels[1, 3 + offset : 6 + offset, 2:5] = 1
+        iio.imwrite(
+            image_dir / f"labels_{index}.tif",
+            labels,
+            photometric="minisblack",
+        )
+
+    with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
+        files = Files()(path=image_dir, pattern="*.tif", name="files")
+        objects = LabelsToObjects()(label_image=files["path"], name="objects")
+        tracks = NearestNeighborLink()(objects, name="links")
+        rendered = TracksToLabels()(
+            track_id=tracks["track_id"],
+            frame=tracks["frame"],
+            label=tracks["label"],
+            label_image=files["path"],
+            name="render_tracks",
+        )
+        result = wf.compute(rendered)
+
+    assert len(result) == 2
+    assert result["track_count"].tolist() == [1, 1]
+    for path in result["output_label_image"]:
+        labels = iio.imread(path)
+        assert set(np.unique(labels)) == {0, 1}
 
 
 def test_tracks_to_labels_output_schema_declares_uint32_labels() -> None:
