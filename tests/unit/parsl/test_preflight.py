@@ -177,9 +177,10 @@ def test_worker_probe_payload_round_trips_through_result_validation(
     source = tmp_path / "probe_tool.py"
     source.write_text(
         """
-from bioimageflow_core import Arguments, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 
 class ProbeTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     class Inputs(IOModel):
         value: str
     class Outputs(IOModel):

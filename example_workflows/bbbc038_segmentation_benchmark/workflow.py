@@ -22,6 +22,7 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 from bioimageflow_common_tools import Concat
 from bioimageflow_segmentation_tools import (
@@ -89,6 +90,7 @@ class BBBC038Samples(DataFrameTool):
 class BuildBBBC038ReferenceLabels(ProcessingTool):
     """Combine BBBC038 per-object mask files into one instance label image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Build BBBC038 Reference Labels"
     category = Category.CONVERSION
     environment = GENERAL_ENV
@@ -129,6 +131,7 @@ class BuildBBBC038ReferenceLabels(ProcessingTool):
 class PrepareBBBC038SegmentationImage(ProcessingTool):
     """Convert BBBC038 image files to a 2D intensity image for segmentation."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Prepare BBBC038 Segmentation Image"
     category = Category.CONVERSION
     environment = GENERAL_ENV
@@ -153,6 +156,7 @@ class PrepareBBBC038SegmentationImage(ProcessingTool):
 class BenchmarkSegmentationMethod(ProcessingTool):
     """Benchmark one predicted label image against one reference label image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Benchmark Segmentation Method"
     category = Category.MEASUREMENT
     environment = GENERAL_ENV

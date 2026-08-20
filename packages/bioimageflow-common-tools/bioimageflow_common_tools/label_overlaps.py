@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
 )
 
@@ -24,6 +25,7 @@ class LabelOverlaps(ProcessingTool):
     label from image 2. Outputs a DataFrame with columns:
     reference_label, spot_label, overlap_count.
     """
+    row_consumption = RowConsumption.MAPPED
     display_name = "Label Overlaps"
     documentation = (
         "Compute the spatial overlap between two labeled images. "

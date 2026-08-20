@@ -16,6 +16,7 @@ from bioimageflow_spot_tools import (
     AtlasSpotDetection,
     DetectSpots,
     FilterSpots,
+    MaskToLabels,
     RenderSpots,
     SpotColocalization,
     SpotQualityMetrics,
@@ -434,7 +435,7 @@ def test_render_spots_zero_rows_writes_one_artifact_per_anchor(tmp_path: Path) -
         assert result.spot_count == 0
 
 
-def test_spots_to_labels_mask_mode_writes_one_artifact_per_mask(tmp_path: Path) -> None:
+def test_mask_to_labels_writes_one_artifact_per_mask(tmp_path: Path) -> None:
     mask_paths = []
     for index in range(2):
         mask = np.zeros((16, 16), dtype=np.uint8)
@@ -444,20 +445,20 @@ def test_spots_to_labels_mask_mode_writes_one_artifact_per_mask(tmp_path: Path) 
         iio.imwrite(mask_path, mask)
         mask_paths.append(mask_path)
 
-    results = SpotsToLabels().process_batch(
-        [
+    results = [
+        MaskToLabels().process_row(
             Arguments(
                 mask_image=mask_path,
                 label_image=tmp_path / f"labels_{index}.tif",
             )
-            for index, mask_path in enumerate(mask_paths)
-        ]
-    )
+        )
+        for index, mask_path in enumerate(mask_paths)
+    ]
 
     assert len(results) == 2
-    assert [row[0].label_count for row in results] == [0, 1]
-    assert int(iio.imread(results[0][0].label_image).max()) == 0
-    assert int(iio.imread(results[1][0].label_image).max()) == 1
+    assert [result.label_count for result in results] == [0, 1]
+    assert int(iio.imread(results[0].label_image).max()) == 0
+    assert int(iio.imread(results[1].label_image).max()) == 1
 
 
 def test_spots_to_labels_zero_spot_workflow_writes_blank_artifact(
@@ -493,7 +494,7 @@ def test_spots_to_labels_zero_spot_workflow_writes_blank_artifact(
     assert Path(second.iloc[0]["label_image"]).exists()
 
 
-def test_spots_to_labels_empty_coordinates_do_not_treat_masks_as_fake_rows(
+def test_mask_to_labels_workflow_maps_over_mask_rows(
     tmp_path: Path,
 ) -> None:
     mask_dir = tmp_path / "masks"
@@ -505,27 +506,12 @@ def test_spots_to_labels_empty_coordinates_do_not_treat_masks_as_fake_rows(
 
     with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
         masks = Files()(path=mask_dir, pattern="*.tif", name="masks")
-        detected = DetectSpots()(
-            input_image=masks["path"],
-            method="local_maxima",
-            threshold=2.0,
-            name="detect",
-        )
-        labels_node = SpotsToLabels()(
-            spot_id=detected["spot_id"],
-            y=detected["y"],
-            x=detected["x"],
-            mask_image=masks["path"],
-            image_shape="16,16",
-            name="labels",
-        )
+        labels_node = MaskToLabels()(mask_image=masks["path"], name="labels")
         result = wf.compute(labels_node)
 
-    assert len(result) == 1
-    assert int(result.iloc[0]["label_count"]) == 0
-    labels = iio.imread(result.iloc[0]["label_image"])
-    assert labels.shape == (16, 16)
-    assert int(labels.max()) == 0
+    assert len(result) == 2
+    assert result["label_count"].tolist() == [1, 1]
+    assert all(int(iio.imread(path).max()) == 1 for path in result["label_image"])
 
 
 def test_spot_label_renderers_preserve_ids_above_uint16(tmp_path: Path) -> None:

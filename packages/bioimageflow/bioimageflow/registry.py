@@ -39,6 +39,7 @@ from bioimageflow.tool_loader import (
 from bioimageflow.validation import (
     serialize_input_schema,
     serialize_output_schema,
+    serialize_tool_metadata,
 )
 
 logger = logging.getLogger("bioimageflow")
@@ -78,6 +79,7 @@ class ToolMetadata:
     inputs_schema: dict[str, Any]
     outputs_schema: dict[str, Any]
     display_name: str
+    row_consumption: str | None
     tags: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -280,6 +282,7 @@ class ToolRegistry:
             getattr(cls, "display_name", None) or cls.__name__
         )
         tags = tuple(getattr(cls, "tags", ()) or ())
+        row_consumption = serialize_tool_metadata(cls)["row_consumption"]
         return ToolMetadata(
             package=package,
             version=version,
@@ -288,6 +291,7 @@ class ToolRegistry:
             inputs_schema=inputs_schema,
             outputs_schema=outputs_schema,
             display_name=display_name,
+            row_consumption=row_consumption,
             tags=tags,
         )
 

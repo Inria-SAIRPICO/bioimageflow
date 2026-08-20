@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -110,6 +111,7 @@ def _local_maxima(score: "Any", threshold: float, min_distance: int) -> list[tup
 class DetectSpots(ProcessingTool):
     """Detect puncta as local maxima in LoG/DoG filtered images."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Detect Spots"
     documentation = (
         "Detect puncta with Difference-of-Gaussians, Laplacian-of-Gaussian, "

@@ -22,12 +22,13 @@ from bioimageflow import (
     Workflow,
     submit_workflow,
 )
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, RowConsumption
 
 pytestmark = [pytest.mark.parsl, pytest.mark.slow, pytest.mark.cluster_smoke]
 
 
 class _ReadUploadedFile(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(
         name="cluster-smoke",
         dependencies={

@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -24,6 +25,7 @@ class ExtractChannel(ProcessingTool):
     Reads an image and writes the selected channel as a 2D image.
     Expects the first axis to be the channel axis (CYX or CZYX layout).
     """
+    row_consumption = RowConsumption.MAPPED
     display_name = "Extract Channel"
     documentation = "Extract a single channel (by index) from a multi-channel image."
     category = Category.IMAGE_PROCESSING

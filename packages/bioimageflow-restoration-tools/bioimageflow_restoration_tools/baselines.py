@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -110,6 +111,7 @@ def _richardson_lucy(image: Any, psf: Any, iterations: int, clip: bool) -> Any:
 class GaussianDenoise(ProcessingTool):
     """Apply Gaussian smoothing to a scalar image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Gaussian Denoise"
     documentation = "Simple Gaussian denoising baseline."
     category = Category.RESTORATION
@@ -134,6 +136,7 @@ class GaussianDenoise(ProcessingTool):
 class MedianDenoise(ProcessingTool):
     """Apply median denoising to a scalar image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Median Denoise"
     documentation = "Dependency-light median denoising baseline."
     category = Category.RESTORATION
@@ -158,6 +161,7 @@ class MedianDenoise(ProcessingTool):
 class BackgroundSubtract(ProcessingTool):
     """Subtract a smoothed background estimate from an image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Background Subtract"
     documentation = "Subtract a Gaussian-smoothed background estimate."
     category = Category.RESTORATION
@@ -188,6 +192,7 @@ class BackgroundSubtract(ProcessingTool):
 class UnsharpMask(ProcessingTool):
     """Sharpen an image by adding high-frequency residuals."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Unsharp Mask"
     documentation = "Sharpening baseline with clear radius and amount parameters."
     category = Category.RESTORATION
@@ -215,6 +220,7 @@ class UnsharpMask(ProcessingTool):
 class RichardsonLucyRestoration(ProcessingTool):
     """Apply Richardson-Lucy deconvolution with a provided or default PSF."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Richardson-Lucy Restoration"
     documentation = "scikit-image-style Richardson-Lucy deconvolution baseline."
     category = Category.DECONVOLUTION

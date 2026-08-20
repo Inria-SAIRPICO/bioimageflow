@@ -22,6 +22,7 @@ from bioimageflow_core import (
     ExecutionContext,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Template,
 )
 
@@ -55,6 +56,7 @@ class FirstColumnValue(DataFrameTool):
 
 
 class ValueAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="recursive_value_writer", dependencies={})
 
     class Inputs(IOModel):
@@ -77,6 +79,8 @@ class ValueAssetWriter(ProcessingTool):
 
 
 class FailingValueAssetWriter(ValueAssetWriter):
+    row_consumption = RowConsumption.MAPPED
+
     def process_row(
         self,
         arguments: Arguments,

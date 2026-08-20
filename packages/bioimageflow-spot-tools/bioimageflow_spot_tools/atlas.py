@@ -16,6 +16,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
     run_external_command,
@@ -74,6 +75,7 @@ class AtlasSpotDetection(ProcessingTool):
     The spot size is automatically selected and the detection threshold
     adapts to the local image dynamics. Wraps the ``atlas`` CLI tool.
     """
+    row_consumption = RowConsumption.MAPPED
     display_name = "Atlas Spot Detection"
     documentation = (
         "ATLAS is a spot detection method. The spots size is "

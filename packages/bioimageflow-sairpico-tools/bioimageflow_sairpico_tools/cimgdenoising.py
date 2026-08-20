@@ -10,6 +10,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -25,6 +26,7 @@ from ._common import (
 class CImgDenoising(ProcessingTool):
     """Run CImg denoising algorithms."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "CImg Denoising"
     documentation = "Denoise 2D+T images using CImg patch, basic, and variational methods."
     category = Category.RESTORATION

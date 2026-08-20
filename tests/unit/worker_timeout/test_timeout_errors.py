@@ -25,7 +25,13 @@ from bioimageflow.engine import (
 
 from bioimageflow.workflow import Workflow, WorkflowEnvironment
 
-from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool
+from bioimageflow_core import (
+    EnvironmentSpec,
+    ExecutionContext,
+    IOModel,
+    ProcessingTool,
+    RowConsumption,
+)
 
 
 from tests.testkit.worker_timeout import (
@@ -74,6 +80,8 @@ class TestWorkerTimeoutErrorRaised:
         engine, stub = self._make_engine_with_stub()
 
         class _BatchTool(_StubTool):
+            row_consumption = RowConsumption.MAPPED
+
             def process_batch(self, arguments_list, *, context: object | None = None):
                 return []
 

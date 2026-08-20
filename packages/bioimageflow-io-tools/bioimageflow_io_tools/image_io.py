@@ -15,6 +15,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -22,6 +23,7 @@ from bioimageflow_core import (
 class ReadImageMetadata(ProcessingTool):
     """Read lightweight image metadata without materializing workflow outputs."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Read Image Metadata"
     documentation = "Report image shape, dtype, dimensionality, and a pragmatic axes guess."
     category = Category.CONVERSION
@@ -63,6 +65,7 @@ class ReadImageMetadata(ProcessingTool):
 class ValidateImageLayout(ProcessingTool):
     """Validate that a declared axis layout matches an image array."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Validate Image Layout"
     documentation = "Validate layout length, required axes, and optional minimum axis sizes."
     category = Category.UTILITIES
@@ -122,6 +125,7 @@ class ValidateImageLayout(ProcessingTool):
 class ConvertImageFormat(ProcessingTool):
     """Convert an image to a path-selected output format, with optional slicing."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Convert Image Format"
     documentation = (
         "Convert an image through imageio, OME-TIFF, or minimal OME-Zarr output. "
@@ -200,6 +204,7 @@ class ConvertImageFormat(ProcessingTool):
 class SelectScene(ProcessingTool):
     """Extract one image scene from an ordinary or TIFF-series image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Select Scene"
     documentation = "Extract scene 0 from ordinary images or a tifffile series by index."
     category = Category.IMAGE_PROCESSING
@@ -240,6 +245,7 @@ class SelectScene(ProcessingTool):
 class SelectDimensions(ProcessingTool):
     """Select channel, z, and/or time indices from a raster image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Select Dimensions"
     documentation = "Select channel, z, and time indices from CZYX, TCYX, or TZYX images."
     category = Category.IMAGE_PROCESSING
@@ -313,6 +319,7 @@ class SelectDimensions(ProcessingTool):
 class SelectTimepoint(ProcessingTool):
     """Select one timepoint from an image using a declared layout."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Select Timepoint"
     documentation = "Select one zero-based T index from a declared image layout."
     category = Category.IMAGE_PROCESSING
@@ -361,6 +368,7 @@ class SelectTimepoint(ProcessingTool):
 class SelectChannel(ProcessingTool):
     """Select one channel from an image using a declared layout."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Select Channel"
     documentation = "Select one zero-based C index from a declared image layout."
     category = Category.IMAGE_PROCESSING
@@ -409,6 +417,7 @@ class SelectChannel(ProcessingTool):
 class SelectZRange(ProcessingTool):
     """Select a Z slab from an image using Python-style slice bounds."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Select Z Range"
     documentation = "Select a start-inclusive, stop-exclusive Z range from a declared layout."
     category = Category.IMAGE_PROCESSING
@@ -462,6 +471,7 @@ class SelectZRange(ProcessingTool):
 class ConvertToOmeTiff(ProcessingTool):
     """Convert an image file to OME-TIFF using tifffile."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Convert to OME-TIFF"
     documentation = (
         "Read an image file and convert it to OME-TIFF with explicit OME axis metadata."
@@ -511,6 +521,7 @@ class ConvertToOmeTiff(ProcessingTool):
 class ConvertToOmeZarr(ProcessingTool):
     """Convert an image file to a minimal OME-NGFF/Zarr v2 directory."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Convert to OME-Zarr"
     documentation = (
         "Read an image file and convert it to a single-scale uncompressed OME-Zarr v2 directory."

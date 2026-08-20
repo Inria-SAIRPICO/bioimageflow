@@ -25,7 +25,7 @@ from bioimageflow.launcher.errors import WorkflowRunFailedError
 from bioimageflow.launcher.inputs import load_invocation
 from bioimageflow.launcher.repository import LauncherRepository
 from bioimageflow.parsl.startup import CORE_REQUIREMENT
-from bioimageflow_core import Arguments, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 from tests.testkit.parsl_tools import PARSL_TEST_ENV, ParslFail
 from tests.testkit.remote_cluster import FakeCluster
 
@@ -59,6 +59,7 @@ class _RootBarrier(DataFrameTool):
 
 
 class _ArchiveIncrement(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):

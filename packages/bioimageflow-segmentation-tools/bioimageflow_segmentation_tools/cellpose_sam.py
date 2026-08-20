@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -35,6 +36,7 @@ cellpose_sam_env = EnvironmentSpec(
 class CellposeSAM(ProcessingTool):
     """Segment cells or nuclei with Cellpose-SAM models."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose-SAM"
     documentation = "Segment cells or nuclei using Cellpose-SAM and write a label mask."
     category = Category.SEGMENTATION

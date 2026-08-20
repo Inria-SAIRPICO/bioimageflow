@@ -22,6 +22,7 @@ from bioimageflow_core.tool import (
     Category as Category,
     IOModel as IOModel,
     ProcessingTool as ProcessingTool,
+    RowConsumption as RowConsumption,
     Template as Template,
 )
 from bioimageflow_core.arguments import (
@@ -78,6 +79,7 @@ __all__ = [
     "ProcessingTaskV1",
     "ProcessingTool",
     "ResourceSpec",
+    "RowConsumption",
     "RowInvocationV1",
     "RowResultV1",
     "SCALAR_IMAGE_SEMANTICS",

@@ -18,6 +18,7 @@ from bioimageflow_core import (
     IOModel,
     ImageSpec,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Layout,
     Template,
@@ -81,6 +82,7 @@ def _tool_node(
 class _BadConstraintTool(ProcessingTool):
     """Inputs has a gt=0 constraint that can surface as parameter_invalid."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "BadConstraint"
     environment = EnvironmentSpec(
         name="_validateenv",

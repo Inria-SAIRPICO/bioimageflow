@@ -7,10 +7,11 @@ import time
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, RowConsumption
 
 
 class _DelayedFailure(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="delayed_failure", dependencies={})
 
     class Inputs(IOModel):

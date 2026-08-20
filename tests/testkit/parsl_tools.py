@@ -11,6 +11,7 @@ from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     SharedArray,
     Template,
 )
@@ -29,6 +30,8 @@ PARSL_TEST_ENV = EnvironmentSpec(
 class ParslIncrement(ProcessingTool):
     """Return one incremented scalar from a source processing invocation."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -43,6 +46,8 @@ class ParslIncrement(ProcessingTool):
 
 class ParslExplode(ProcessingTool):
     """Return a deterministic ordered one-to-many result."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = PARSL_TEST_ENV
 
@@ -65,6 +70,8 @@ class ParslExplode(ProcessingTool):
 class ParslDelayed(ProcessingTool):
     """Delay smaller input values less so task completion is out of order."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -80,6 +87,8 @@ class ParslDelayed(ProcessingTool):
 
 class ParslBatch(ProcessingTool):
     """Exercise one whole-node batch with nested output groups."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = PARSL_TEST_ENV
 
@@ -105,6 +114,8 @@ class ParslBatch(ProcessingTool):
 class ParslFail(ProcessingTool):
     """Raise a deterministic worker error for correlation tests."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -119,6 +130,8 @@ class ParslFail(ProcessingTool):
 
 class ParslProcessIdentity(ProcessingTool):
     """Expose process and persistent worker-instance identity."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = PARSL_TEST_ENV
 
@@ -144,6 +157,8 @@ class ParslProcessIdentity(ProcessingTool):
 class ParslEmptyBatch(ProcessingTool):
     """Run once for an empty aligned input using the synthetic anchor."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
     run_empty_batch = True
 
@@ -165,6 +180,8 @@ class ParslEmptyBatch(ProcessingTool):
 class ParslDrop(ProcessingTool):
     """Return no output row."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -180,6 +197,8 @@ class ParslDrop(ProcessingTool):
 
 class ParslFlatBatch(ProcessingTool):
     """Return the one-to-one flat batch shorthand."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = PARSL_TEST_ENV
 
@@ -202,6 +221,8 @@ class ParslFlatBatch(ProcessingTool):
 class ParslDirectoryWriter(ProcessingTool):
     """Write one declared directory asset."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -223,6 +244,8 @@ class ParslDirectoryWriter(ProcessingTool):
 class ParslRuntimeSharedArray(ProcessingTool):
     """Return a runtime SharedArray through a statically plain field."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):
@@ -243,6 +266,8 @@ class ParslRuntimeSharedArray(ProcessingTool):
 
 class ParslConcurrencyProbe(ProcessingTool):
     """Measure worker-thread overlap without exposing scheduler metadata."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = PARSL_TEST_ENV
     class Inputs(IOModel):

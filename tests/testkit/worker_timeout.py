@@ -25,7 +25,7 @@ from bioimageflow.engine import (
 
 from bioimageflow.workflow import Workflow, WorkflowEnvironment
 
-from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool
+from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool, RowConsumption
 
 
 def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionContext]:
@@ -60,6 +60,7 @@ def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionCo
 
 
 class _StubTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub"
     environment = EnvironmentSpec(name="stub_wt_env", dependencies={})
 

@@ -10,7 +10,8 @@ Tools for puncta and spot quantification.
 - `SpotSummary`: aggregates spot counts and intensities per label.
 - `FilterSpots`: filters spot dataframe rows by intensity, score, radius, and mask.
 - `RenderSpots`: renders coordinate rows to binary mask or label images.
-- `SpotsToLabels`: converts spot coordinates or masks into label images.
+- `SpotsToLabels`: combines spot-coordinate rows into one label image.
+- `MaskToLabels`: converts each mask row into a connected-component label image.
 - `SpotColocalization`: matches two upstream spot dataframes between channels by distance.
 - `SpotQualityMetrics`: computes SNR, local background, and nearest-neighbor distances.
 

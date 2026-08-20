@@ -40,7 +40,7 @@ from bioimageflow.engine import DefaultEngine
 from bioimageflow.parsl.startup import CORE_REQUIREMENT
 from bioimageflow.parsl.startup import prepare_parsl_execution
 from bioimageflow.launcher.profile_validation import validate_profile_on_cluster
-from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, ResourceSpec
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, RowConsumption, ResourceSpec
 
 
 TEST_ENV = EnvironmentSpec(
@@ -50,6 +50,7 @@ TEST_ENV = EnvironmentSpec(
 
 
 class ContractTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = TEST_ENV
     resources = ResourceSpec(cpu=2, gpu=0, memory="2GB", max_concurrent=8)
 
@@ -64,6 +65,8 @@ class ContractTool(ProcessingTool):
 
 
 class FailingContractTool(ContractTool):
+    row_consumption = RowConsumption.MAPPED
+
     def process_row(self, arguments: Arguments):
         del arguments
         raise RuntimeError("independent failure")

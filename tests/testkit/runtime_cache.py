@@ -42,6 +42,7 @@ from bioimageflow_core import (
     ExecutionContext,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Template,
 )
 
@@ -112,6 +113,7 @@ class PathTable(DataFrameTool):
 
 
 class SourceAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Source Asset Writer"
     environment = EnvironmentSpec(name="source_asset_writer", dependencies={})
     executions = 0
@@ -139,6 +141,7 @@ class SourceAssetWriter(ProcessingTool):
 
 
 class ZeroRowAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Zero Row Asset Writer"
     environment = EnvironmentSpec(name="zero_row_asset_writer", dependencies={})
     executions = 0
@@ -164,6 +167,7 @@ class ZeroRowAssetWriter(ProcessingTool):
 
 
 class DefaultTemplateZeroRowWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Default Template Zero Row Writer"
     environment = EnvironmentSpec(
         name="default_template_zero_row_writer", dependencies={}
@@ -189,6 +193,7 @@ class DefaultTemplateZeroRowWriter(ProcessingTool):
 
 
 class SourceExternalPaths(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Source External Paths"
     environment = EnvironmentSpec(name="source_external_paths", dependencies={})
     executions = 0
@@ -209,6 +214,7 @@ class SourceExternalPaths(ProcessingTool):
 
 
 class FailingSourceAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Failing Source Asset Writer"
     environment = EnvironmentSpec(name="failing_source_asset_writer", dependencies={})
 
@@ -227,6 +233,7 @@ class FailingSourceAssetWriter(ProcessingTool):
 
 
 class SlowSourceAssetWriter(SourceAssetWriter):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Slow Source Asset Writer"
     environment = EnvironmentSpec(name="slow_source_asset_writer", dependencies={})
 
@@ -238,6 +245,7 @@ class SlowSourceAssetWriter(SourceAssetWriter):
 
 
 class EscapingSourceAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Escaping Source Asset Writer"
     environment = EnvironmentSpec(name="escaping_source_asset_writer", dependencies={})
 
@@ -256,6 +264,7 @@ class EscapingSourceAssetWriter(ProcessingTool):
 
 
 class UnsafeTemplateSource(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Unsafe Template Source"
     environment = EnvironmentSpec(name="unsafe_template_source", dependencies={})
     executions = 0
@@ -275,6 +284,7 @@ class UnsafeTemplateSource(ProcessingTool):
 
 
 class ColumnBoundAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Column Bound Asset Writer"
     environment = EnvironmentSpec(name="column_bound_asset_writer", dependencies={})
     executions = 0
@@ -300,6 +310,7 @@ class ColumnBoundAssetWriter(ProcessingTool):
 
 
 class ColumnBoundZeroRowWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Column Bound Zero Row Writer"
     environment = EnvironmentSpec(name="column_bound_zero_row_writer", dependencies={})
     executions = 0
@@ -323,6 +334,7 @@ class ColumnBoundZeroRowWriter(ProcessingTool):
 
 
 class ColumnBoundZeroRowScalarWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Column Bound Zero Row Scalar Writer"
     environment = EnvironmentSpec(
         name="column_bound_zero_row_scalar_writer", dependencies={}
@@ -343,6 +355,7 @@ class ColumnBoundZeroRowScalarWriter(ProcessingTool):
 
 
 class EscapingColumnBoundWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Escaping Column Bound Writer"
     environment = EnvironmentSpec(name="escaping_column_bound_writer", dependencies={})
 
@@ -362,6 +375,7 @@ class EscapingColumnBoundWriter(ProcessingTool):
 
 
 class SourceSharedMemoryWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Source Shared Memory Writer"
     environment = EnvironmentSpec(name="source_shared_memory_writer", dependencies={})
     executions = 0
@@ -384,6 +398,7 @@ class SourceSharedMemoryWriter(ProcessingTool):
 
 
 class SourceFlexibleImageWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Source Flexible Image Writer"
     environment = EnvironmentSpec(name="source_flexible_image_writer", dependencies={})
     executions = 0
@@ -411,6 +426,7 @@ class SourceFlexibleImageWriter(ProcessingTool):
 
 
 class SourceSharedMemoryConsumer(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Source Shared Memory Consumer"
     environment = EnvironmentSpec(name="source_shared_memory_consumer", dependencies={})
 
@@ -431,6 +447,7 @@ class SourceSharedMemoryConsumer(ProcessingTool):
 
 
 class ColumnBoundSharedMemoryWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Column Bound Shared Memory Writer"
     environment = EnvironmentSpec(
         name="column_bound_shared_memory_writer", dependencies={}

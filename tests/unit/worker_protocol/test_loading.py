@@ -21,9 +21,10 @@ from bioimageflow_core.worker_origins import (
 
 
 TOOL_SOURCE = """
-from bioimageflow_core import Arguments, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 
 class SameNameTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     class Inputs(IOModel):
         value: str
     class Outputs(IOModel):

@@ -23,6 +23,7 @@ from bioimageflow_core import (
     Layout,
     PathPicker,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -57,6 +58,7 @@ _ENV = EnvironmentSpec(name="test-schema", dependencies={})
 
 
 class _SchemaTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Schema Test Tool"
     category = Category.UTILITIES
     environment = _ENV
@@ -96,6 +98,7 @@ class _SchemaTool(ProcessingTool):
 
 
 class _ImageFieldGuiTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Image Field GUI Test Tool"
     category = Category.UTILITIES
     environment = _ENV

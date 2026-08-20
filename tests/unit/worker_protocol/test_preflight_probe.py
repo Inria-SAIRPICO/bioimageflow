@@ -32,9 +32,10 @@ def _write_tool(source: Path, marker: Path) -> SourceFileOriginV1:
     source.write_text(
         f"""
 from pathlib import Path
-from bioimageflow_core import Arguments, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 
 class ProbeTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     class Inputs(IOModel):
         value: str
     class Outputs(IOModel):

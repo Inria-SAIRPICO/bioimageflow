@@ -55,8 +55,9 @@ def tool_store(tmp_path):
 
         (pkg_dir / "alpha.py").write_text(
             "from .base import DummyBase\n"
-            "from bioimageflow_core import IOModel, Arguments\n\n"
+            "from bioimageflow_core import IOModel, Arguments, RowConsumption\n\n"
             "class AlphaTool(DummyBase):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
             f"    display_name = 'Alpha'\n"
             "    class Inputs(IOModel):\n"
             f"        value: int = 0{extra_field}\n"

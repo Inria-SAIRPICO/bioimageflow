@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
 )
 
@@ -20,6 +21,7 @@ from bioimageflow_core import (
 class LabelsToObjects(ProcessingTool):
     """Measure object centroids and areas from 2D or TYX label images."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Labels to Objects"
     documentation = "Convert label images into per-frame object centroid tables."
     category = Category.TRACKING

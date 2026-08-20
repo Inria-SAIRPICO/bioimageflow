@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -229,6 +230,7 @@ class FilterSpots(DataFrameTool):
 class RenderSpots(ProcessingTool):
     """Render spot coordinates into a 2D mask or label image."""
 
+    row_consumption = RowConsumption.COLLECTIVE
     display_name = "Render Spots"
     documentation = "Render coordinate tables to label or binary mask images."
     category = Category.SPOT_DETECTION
@@ -333,11 +335,59 @@ def _components(mask: Any) -> list[list[tuple[int, int]]]:
     return components
 
 
-class SpotsToLabels(ProcessingTool):
-    """Create connected spot labels from coordinate tables or binary masks."""
+class MaskToLabels(ProcessingTool):
+    """Create connected-component labels from one binary mask row."""
 
+    row_consumption = RowConsumption.MAPPED
+    display_name = "Mask To Labels"
+    documentation = "Convert each binary mask into a connected label image."
+    category = Category.SPOT_DETECTION
+    tags = ["mask", "labels", "components"]
+    environment = GENERAL_ENV
+
+    class Inputs(IOModel):
+        mask_image: Annotated[
+            Path,
+            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
+            GUIMeta("Spot mask"),
+        ]
+
+    class Outputs(IOModel):
+        label_image: Annotated[
+            Path,
+            ImageSpec(
+                semantics={Semantic.LABEL},
+                layouts={Layout.PLANAR},
+                dtypes={"uint32"},
+            ),
+            GUIMeta("Spot labels"),
+        ] = Template("{mask_image.stem}_labels.tif")
+        label_count: Annotated[int, GUIMeta("Label count")]
+
+    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import imageio.v3 as iio
+        import numpy as np
+
+        mask = iio.imread(arguments.mask_image) > 0
+        labels = np.zeros(mask.shape, dtype=np.uint32)
+        components = _components(mask)
+        if len(components) > np.iinfo(np.uint32).max:
+            raise ValueError("MaskToLabels produced more labels than uint32 can store.")
+        for label, component in enumerate(components, start=1):
+            for y, x in component:
+                labels[y, x] = label
+        output = Path(arguments.label_image)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        iio.imwrite(output, labels)
+        return self.Outputs(label_image=output, label_count=len(components))
+
+
+class SpotsToLabels(ProcessingTool):
+    """Create one label image from a table of spot coordinates."""
+
+    row_consumption = RowConsumption.COLLECTIVE
     display_name = "Spots To Labels"
-    documentation = "Convert spot coordinates or masks to connected label images."
+    documentation = "Convert a spot coordinate table into one label image."
     category = Category.SPOT_DETECTION
     tags = ["spots", "labels", "coordinates"]
     environment = GENERAL_ENV
@@ -347,11 +397,6 @@ class SpotsToLabels(ProcessingTool):
         spot_id: Annotated[int | None, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)] = None
         y: Annotated[float | None, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)] = None
         x: Annotated[float | None, GUIMeta("X", connectable=Connectable.BY_DEFAULT)] = None
-        mask_image: Annotated[
-            Path | None,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
-            GUIMeta("Spot mask"),
-        ] = None
         image_shape: str = "256,256"
         radius: int = 0
 
@@ -389,55 +434,35 @@ class SpotsToLabels(ProcessingTool):
         if not arguments_list:
             return []
         arguments = arguments_list[0]
-        mask_image = _argument(arguments, "mask_image", None)
-        if mask_image is not None:
-            outputs = []
-            for row_arguments in arguments_list:
-                mask = iio.imread(_argument(row_arguments, "mask_image", None)) > 0
-                labels = np.zeros(mask.shape, dtype=np.uint32)
-                components = _components(mask)
-                if len(components) > np.iinfo(np.uint32).max:
-                    raise ValueError("SpotsToLabels produced more labels than uint32 can store.")
-                for label, component in enumerate(components, start=1):
-                    for y, x in component:
-                        labels[y, x] = label
-                output = Path(row_arguments.label_image)
-                output.parent.mkdir(parents=True, exist_ok=True)
-                iio.imwrite(output, labels)
-                outputs.append([
-                    self.Outputs(label_image=output, label_count=len(components))
-                ])
-            return outputs
-        else:
-            rows = [
-                {
-                    "spot_id": _argument(row_arguments, "spot_id", index),
-                    "y": _argument(row_arguments, "y", None),
-                    "x": _argument(row_arguments, "x", None),
-                }
-                for index, row_arguments in enumerate(arguments_list, start=1)
-                if _has_spot_coordinate(row_arguments)
-            ]
-            if not rows:
-                return self._blank_coordinate_outputs(arguments_list)
-            shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
-            labels = np.zeros(shape, dtype=np.uint32)
-            for index, row in enumerate(rows, start=1):
-                value = _positive_uint32_id(row, "spot_id", index)
-                y, x = _spot_coordinate(row, shape=shape)
-                _draw_disk(
-                    labels,
-                    y,
-                    x,
-                    _argument(arguments, "radius", 0),
-                    value,
-                )
-            label_count = len(rows)
+        rows = [
+            {
+                "spot_id": _argument(row_arguments, "spot_id", index),
+                "y": _argument(row_arguments, "y", None),
+                "x": _argument(row_arguments, "x", None),
+            }
+            for index, row_arguments in enumerate(arguments_list, start=1)
+            if _has_spot_coordinate(row_arguments)
+        ]
+        if not rows:
+            return self._blank_coordinate_outputs(arguments_list)
+        shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
+        labels = np.zeros(shape, dtype=np.uint32)
+        for index, row in enumerate(rows, start=1):
+            value = _positive_uint32_id(row, "spot_id", index)
+            y, x = _spot_coordinate(row, shape=shape)
+            _draw_disk(
+                labels,
+                y,
+                x,
+                _argument(arguments, "radius", 0),
+                value,
+            )
+        label_count = len(rows)
 
-            output = Path(arguments.label_image)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            iio.imwrite(output, labels)
-            return [[self.Outputs(label_image=output, label_count=label_count)]]
+        output = Path(arguments.label_image)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        iio.imwrite(output, labels)
+        return [[self.Outputs(label_image=output, label_count=label_count)]]
 
 
 class SpotColocalization(DataFrameTool):

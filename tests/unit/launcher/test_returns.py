@@ -32,6 +32,7 @@ from bioimageflow_core import (
     ExecutionContext,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 from bioimageflow_core.types import SharedArray
 from tests.testkit.runtime_cache import SourceAssetWriter
@@ -68,6 +69,7 @@ class _SuffixMerge(DataFrameTool):
 
 
 class _SharedArrayWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="return_shared_array_writer", dependencies={})
     created_names: list[str] = []
 

@@ -11,6 +11,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -30,6 +31,7 @@ from ._common import (
 class GaussianPSF(ProcessingTool):
     """Generate a 3D Gaussian point-spread function with simglib."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Gaussian PSF"
     documentation = "Generate a 3D Gaussian point-spread function using simglib."
     category = Category.RESTORATION
@@ -67,6 +69,7 @@ class GaussianPSF(ProcessingTool):
 class GibsonLanniPSF(ProcessingTool):
     """Generate a 3D Gibson-Lanni point-spread function with simglib."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Gibson-Lanni PSF"
     documentation = "Generate a 3D Gibson-Lanni point-spread function using simglib."
     category = Category.RESTORATION
@@ -114,6 +117,7 @@ class GibsonLanniPSF(ProcessingTool):
 class RichardsonLucyDeconvolution(ProcessingTool):
     """Run Richardson-Lucy deconvolution with simglib."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Richardson-Lucy Deconvolution"
     documentation = "Run 2D, 2D-slice, or 3D Richardson-Lucy deconvolution using simglib."
     category = Category.DECONVOLUTION
@@ -162,6 +166,7 @@ class RichardsonLucyDeconvolution(ProcessingTool):
 class WienerDeconvolution(ProcessingTool):
     """Run Wiener deconvolution with simglib."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Wiener Deconvolution"
     documentation = "Run 2D, 2D-slice, or 3D Wiener deconvolution using simglib."
     category = Category.DECONVOLUTION
@@ -209,6 +214,7 @@ class WienerDeconvolution(ProcessingTool):
 class SpitfireDeconvolution(ProcessingTool):
     """Run SPITFIR(e) deconvolution with simglib."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "SPITFIR(e) Deconvolution"
     documentation = "Run 2D, 2D-slice, or 3D SPITFIR(e) deconvolution using simglib."
     category = Category.DECONVOLUTION
@@ -259,6 +265,7 @@ class SpitfireDeconvolution(ProcessingTool):
 class MedianDenoising(ProcessingTool):
     """Run simglib median denoising."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Median Denoising"
     documentation = "Run 2D, 3D, or 4D median filtering using simglib."
     category = Category.RESTORATION

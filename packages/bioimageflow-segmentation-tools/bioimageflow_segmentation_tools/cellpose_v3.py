@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -34,6 +35,7 @@ cellpose_v3_env = EnvironmentSpec(
 class Cellpose3(ProcessingTool):
     """Segment cells or nuclei using the faster pre-SAM Cellpose v3 models."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose 3"
     documentation = (
         "Segment cells or nuclei using Cellpose v3 pretrained models such as "

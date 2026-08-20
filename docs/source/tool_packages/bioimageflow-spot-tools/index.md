@@ -14,6 +14,7 @@ tools/assign_spots_to_labels
 tools/atlas_spot_detection
 tools/detect_spots
 tools/filter_spots
+tools/mask_to_labels
 tools/render_spots
 tools/spot_colocalization
 tools/spot_quality_metrics

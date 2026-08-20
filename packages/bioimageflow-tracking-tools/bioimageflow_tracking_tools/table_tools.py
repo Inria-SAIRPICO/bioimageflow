@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -138,6 +139,7 @@ class FilterObjects(DataFrameTool):
 class TracksToLabels(ProcessingTool):
     """Render track IDs into a label stack using source object labels."""
 
+    row_consumption = RowConsumption.COLLECTIVE
     display_name = "Tracks To Labels"
     documentation = "Render track IDs back into a label stack."
     category = Category.TRACKING

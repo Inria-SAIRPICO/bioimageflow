@@ -24,6 +24,13 @@ class Category(str, Enum):
     UTILITIES = "utilities"
 
 
+class RowConsumption(str, Enum):
+    """How a processing tool consumes rows connected to one of its inputs."""
+
+    MAPPED = "mapped"
+    COLLECTIVE = "collective"
+
+
 if TYPE_CHECKING:
 
     class Template(Path):
@@ -104,12 +111,12 @@ class ProcessingTool(BaseTool):
     run_empty_batch: ClassVar[bool] = False
     empty_batch_anchor_inputs: ClassVar[tuple[str, ...]] = ()
     zero_row_scalar_outputs: ClassVar[dict[str, Any]] = {}
+    row_consumption: ClassVar[RowConsumption]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # Only validate leaf concrete classes that define Outputs on themselves
-        has_own_outputs = 'Outputs' in cls.__dict__
-        if not has_own_outputs:
+        # Validate every concrete class, including subclasses that inherit Outputs.
+        if getattr(cls, "Outputs", None) is None:
             return
         # Check that at least one of process_row or process_batch is overridden
         has_process_row = cls.process_row is not ProcessingTool.process_row
@@ -117,6 +124,21 @@ class ProcessingTool(BaseTool):
         if not has_process_row and not has_process_batch:
             raise TypeError(
                 f"{cls.__name__} must implement process_row or process_batch"
+            )
+        if "row_consumption" not in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} must explicitly declare row_consumption"
+            )
+        row_consumption = cls.__dict__["row_consumption"]
+        if not isinstance(row_consumption, RowConsumption):
+            raise TypeError(
+                f"{cls.__name__}.row_consumption must be a RowConsumption value, "
+                f"not {row_consumption!r}"
+            )
+        if row_consumption is RowConsumption.COLLECTIVE and not has_process_batch:
+            raise TypeError(
+                f"{cls.__name__} declares collective row consumption and must "
+                "implement process_batch"
             )
 
     def __call__(

@@ -2,7 +2,7 @@
 
 import pytest
 
-from bioimageflow_core.tool import IOModel, ProcessingTool
+from bioimageflow_core.tool import IOModel, ProcessingTool, RowConsumption
 from bioimageflow_core.environment import EnvironmentSpec
 
 
@@ -72,6 +72,7 @@ class TestProcessingToolValidation:
     def test_missing_process_methods_raises(self):
         with pytest.raises(TypeError, match="must implement process_row or process_batch"):
             class Bad(ProcessingTool):
+                row_consumption = RowConsumption.MAPPED
                 display_name = "Bad"
                 environment = EnvironmentSpec(name="test", dependencies={})
 
@@ -80,6 +81,7 @@ class TestProcessingToolValidation:
 
     def test_process_row_only_is_valid(self):
         class Good(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Good Row"
             environment = EnvironmentSpec(name="test", dependencies={})
 
@@ -93,6 +95,7 @@ class TestProcessingToolValidation:
 
     def test_process_batch_only_is_valid(self):
         class Good(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Good Batch"
             environment = EnvironmentSpec(name="test", dependencies={})
 
@@ -104,15 +107,55 @@ class TestProcessingToolValidation:
 
         assert Good.display_name == "Good Batch"
 
+    def test_missing_row_consumption_raises(self):
+        with pytest.raises(TypeError, match="must explicitly declare"):
+            class MissingConsumption(ProcessingTool):
+                display_name = "Missing consumption"
+                environment = EnvironmentSpec(name="test", dependencies={})
+
+                class Outputs(IOModel):
+                    result: str
+
+                def process_row(self, arguments, *, context: object | None = None):
+                    return self.Outputs(result="ok")
+
+    def test_raw_string_row_consumption_raises(self):
+        with pytest.raises(TypeError, match="must be a RowConsumption value"):
+            class InvalidConsumption(ProcessingTool):
+                row_consumption = "mapped"
+                display_name = "Invalid consumption"
+                environment = EnvironmentSpec(name="test", dependencies={})
+
+                class Outputs(IOModel):
+                    result: str
+
+                def process_row(self, arguments, *, context: object | None = None):
+                    return self.Outputs(result="ok")
+
+    def test_collective_requires_process_batch(self):
+        with pytest.raises(TypeError, match="must implement process_batch"):
+            class InvalidCollective(ProcessingTool):
+                row_consumption = RowConsumption.COLLECTIVE
+                display_name = "Invalid collective"
+                environment = EnvironmentSpec(name="test", dependencies={})
+
+                class Outputs(IOModel):
+                    result: str
+
+                def process_row(self, arguments, *, context: object | None = None):
+                    return self.Outputs(result="ok")
+
     def test_abstract_intermediate_not_validated(self):
         """A class without name or Outputs should not trigger validation."""
         class Intermediate(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             pass
 
         # Should not raise — no name and no Outputs
 
     def test_intermediate_with_name_only_not_validated(self):
         class Intermediate(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Intermediate"
 
         # Has name but no Outputs — no validation

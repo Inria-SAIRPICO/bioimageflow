@@ -21,12 +21,14 @@ from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     ResourceSpec,
 )
 from bioimageflow_core.worker_origins import InstalledModuleOriginV1
 
 
 class RequirementTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(
         name="analysis",
         dependencies={

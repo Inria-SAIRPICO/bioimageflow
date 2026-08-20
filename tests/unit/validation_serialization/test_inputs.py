@@ -23,6 +23,7 @@ from bioimageflow_core import (
     Layout,
     PathPicker,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -88,6 +89,7 @@ class TestSerializeInputSchema:
 
     def test_path_picker_modes(self) -> None:
         class PickerTool(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):
@@ -185,6 +187,7 @@ class TestSerializeInputSchema:
         """Optional[X] without a default is still required."""
 
         class OptTool(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):

@@ -23,9 +23,10 @@ from bioimageflow_core.worker_origins import (
 
 
 TOOL_SOURCE = """\
-from bioimageflow_core import IOModel, ProcessingTool
+from bioimageflow_core import IOModel, ProcessingTool, RowConsumption
 
 class ArchivedTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = None
     class Outputs(IOModel):
         value: int
@@ -70,9 +71,10 @@ def _bundle_record() -> dict[str, object]:
         _file_record("tools/helper.py", b"VALUE = 7\n"),
         _file_record(
             "tools/worker.py",
-            b"from bioimageflow_core import IOModel, ProcessingTool\n"
+            b"from bioimageflow_core import IOModel, ProcessingTool, RowConsumption\n"
             b"from .helper import VALUE\n"
             b"class ArchivedTool(ProcessingTool):\n"
+            b"    row_consumption = RowConsumption.MAPPED\n"
             b"    environment = None\n"
             b"    class Outputs(IOModel):\n"
             b"        value: int\n"

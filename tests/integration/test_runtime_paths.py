@@ -8,7 +8,7 @@ from typing import Annotated, Any
 import pandas as pd
 
 from bioimageflow import DataFrameTool, Workflow
-from bioimageflow_core import Arguments, IOModel, ProcessingTool, Template
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption, Template
 from bioimageflow_core.environment import EnvironmentSpec
 from bioimageflow_core.types import ImageSpec, Semantic
 
@@ -29,6 +29,8 @@ class RelativePathSource(DataFrameTool):
 
 class CwdSensitiveWrapper(ProcessingTool):
     """Wrapper that passes framework paths to a subprocess with cwd=row_dir."""
+
+    row_consumption = RowConsumption.MAPPED
 
     environment = EnvironmentSpec(name="runtime-paths", dependencies={})
 

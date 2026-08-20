@@ -43,7 +43,7 @@ class TestEnvironmentMismatch:
         from bioimageflow import Workflow
         from typing import Annotated
         from pathlib import Path
-        from bioimageflow_core import IOModel, ImageSpec, ProcessingTool, Semantic
+        from bioimageflow_core import IOModel, ImageSpec, ProcessingTool, RowConsumption, Semantic
 
         env_v1 = EnvironmentSpec(
             name="conflict_env",
@@ -55,6 +55,7 @@ class TestEnvironmentMismatch:
         )
 
         class ToolV1(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Tool V1"
             environment = env_v1
 
@@ -68,6 +69,7 @@ class TestEnvironmentMismatch:
                 return self.Outputs(result=1.0)
 
         class ToolV2(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Tool V2"
             environment = env_v2
 

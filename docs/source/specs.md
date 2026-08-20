@@ -276,7 +276,7 @@ unless the consumer explicitly declares a set containing `BINARY`.
 
 **Tool-level wire-shape serialization:** For a full per-field wire-format schema, callers should use `bioimageflow.validation.serialize_input_schema(tool_class) -> dict[str, dict]` and `serialize_output_schema(tool_class) -> dict[str, dict]`. Both accept the tool *class* (no instantiation is required) and return a fully JSON-serializable dict; both return `{}` when the tool has no `Inputs` / `Outputs` class attribute.
 
-For per-tool (not per-field) facts, callers use `bioimageflow.validation.serialize_tool_metadata(tool_class) -> dict[str, Any]`. Returned keys: `tool_type` (`"ProcessingTool"` | `"DataFrameTool"`), `accepts_upstream` (bool — `True` for `ProcessingTool`; for `DataFrameTool` reflects the class attribute), `dynamic_outputs` (bool — `True` when the tool overrides `DataFrameTool.resolve_outputs` or `resolve_merge_schema`), and `dataframe_output` (bool — `True` when the node exposes its full result DataFrame as a graph-level output). GUIs use this to suppress the upstream pin on source DataFrameTools, render full-DataFrame output pins, and know whether to call `serialize_resolved_outputs(node)` for per-column output pins.
+For per-tool (not per-field) facts, callers use `bioimageflow.validation.serialize_tool_metadata(tool_class) -> dict[str, Any]`. Returned keys: `tool_type` (`"ProcessingTool"` | `"DataFrameTool"`), `accepts_upstream` (bool — `True` for `ProcessingTool`; for `DataFrameTool` reflects the class attribute), `dynamic_outputs` (bool — `True` when the tool overrides `DataFrameTool.resolve_outputs` or `resolve_merge_schema`), `dataframe_output` (bool — `True` when the node exposes its full result DataFrame as a graph-level output), and `row_consumption` (`"mapped"` or `"collective"` for a `ProcessingTool`, `None` for a `DataFrameTool`). GUIs use this to suppress the upstream pin on source DataFrameTools, render full-DataFrame output pins, communicate row semantics, and know whether to call `serialize_resolved_outputs(node)` for per-column output pins.
 
 For *configured-node* output resolution, callers use `bioimageflow.validation.serialize_resolved_outputs(node) -> dict[str, Any]`. Returns `{"resolved": True, "columns": <schema>}` when the node's `get_output_schema()` resolves; otherwise `{"resolved": False, "columns": {}}`. The `columns` payload has the same shape as `serialize_output_schema` — either per-field entries or the `{"_passthrough": True, ...}` marker. GUIs use this to render per-column output pins on configured nodes (e.g. `Generate(column_name="x")` or fully-configured merge tools) and to know when to fall back to a placeholder pin.
 
@@ -518,6 +518,7 @@ class ProcessingTool(BaseTool):
     All custom methods (process_row, process_batch) run in the worker.
     """
     environment: EnvironmentSpec    # Required — defines the Wetlands environment
+    row_consumption: RowConsumption # Required — mapped or collective row semantics
     run_empty_batch: bool = False   # Opt-in reducer/artifact behavior for zero rows
     empty_batch_anchor_inputs: tuple[str, ...] = ()
 
@@ -580,7 +581,7 @@ class ProcessingTool(BaseTool):
         raise NotImplementedError  # Never called — engine checks override first
 ```
 
-Concrete `ProcessingTool` subclasses must override at least one of `process_row` or `process_batch`. The framework validates this via `__init_subclass__` and raises `TypeError` at class definition time if neither is overridden.
+Concrete `ProcessingTool` subclasses must override at least one of `process_row` or `process_batch` and must explicitly declare `row_consumption` with a `RowConsumption` enum value. The framework validates these requirements via `__init_subclass__` and raises `TypeError` at class definition time for missing or invalid declarations. `RowConsumption.MAPPED` means aligned input rows are logically independent; it is valid with `process_row` or with a vectorized `process_batch`. `RowConsumption.COLLECTIVE` means one batch operation may combine aligned rows into a collective result and therefore requires a `process_batch` override. This metadata describes input-row meaning, not concurrency or output cardinality.
 
 Batch tools are not called when their row-aligned upstream inputs are empty by default; the engine publishes an empty output dataframe with the declared output columns. Reducer or artifact-rendering batch tools that can produce a meaningful aggregate output for zero rows may set `run_empty_batch = True`. In that case the engine calls `process_batch` with synthetic argument rows built from constants, defaults, output templates, and any `empty_batch_anchor_inputs` bound to non-empty upstream columns. Without anchors, the engine supplies one synthetic argument row. With anchors, it supplies one synthetic argument row per anchor row. Anchor inputs are for non-row context such as a source label image used to render an all-background output; they must not be used to create fake object or spot rows.
 

@@ -29,8 +29,9 @@ def tool_store(tmp_path):
         "    return Workflow(name='packaged_definition', storage_path=storage_path)\n"
     )
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Alpha'\n"
         "    tags = ['demo']\n"
         "    class Inputs(IOModel):\n"
@@ -46,8 +47,9 @@ def tool_store(tmp_path):
         "from .alpha import AlphaTool\n"
     )
     (pkg_dir_v2 / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Alpha v2'\n"
         "    tags = ['demo', 'v2']\n"
         "    class Inputs(IOModel):\n"
@@ -82,8 +84,9 @@ def tool_store_lazy_exports(tmp_path):
         "    return value\n"
     )
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
         "class LazyAlpha(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Lazy Alpha'\n"
         "    tags = ['lazy']\n"
         "    class Inputs(IOModel):\n"
@@ -239,8 +242,9 @@ def tool_store_absolute_imports(tmp_path):
         "from abs_tools.alpha import AlphaTool\n"
     )
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
         "    class Inputs(IOModel):\n"
         "        value: int = 0\n"
         "    class Outputs(IOModel):\n"

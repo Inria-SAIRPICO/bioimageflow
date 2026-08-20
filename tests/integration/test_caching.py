@@ -23,6 +23,7 @@ from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -179,6 +180,7 @@ class TestDevMode:
         from bioimageflow_core import Arguments
 
         class ModifiedSegmenter(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Stub Segmenter"
             environment = segment.environment
 
@@ -227,6 +229,7 @@ class TestEnvironmentDependencyChange:
         )
 
         class ToolV1(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Versioned Tool"
             environment = env_v1
 
@@ -254,6 +257,7 @@ class TestEnvironmentDependencyChange:
         )
 
         class ToolV2(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Versioned Tool"
             environment = env_v2
 

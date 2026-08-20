@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec
+from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, EnvironmentSpec
 
 from bioimageflow.dataframe_tool import DataFrameTool
 
@@ -111,6 +111,7 @@ class TestGetToolVersion:
         from bioimageflow.validation import get_tool_version
 
         class Stub(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Stub Ver Test"
             environment = EnvironmentSpec(name="x", dependencies={})
 

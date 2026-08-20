@@ -21,6 +21,7 @@ from bioimageflow_core import (
     ImageSpec,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -276,6 +277,7 @@ class TestMosaic:
 
     def test_accepts_binary_images_for_visualization(self, tmp_path: Path) -> None:
         class BinaryProducer(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Binary Producer"
             environment = EnvironmentSpec(name="stub", dependencies={})
 
@@ -340,6 +342,7 @@ class TestMiniPipeline:
 
         class StubLabeler(ProcessingTool):
             """Passthrough that re-tags an image as LABEL semantic."""
+            row_consumption = RowConsumption.MAPPED
             display_name = "Stub Labeler"
             environment = stub_env
 

@@ -12,6 +12,7 @@ from bioimageflow_core import (
     ExecutionContext,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Template,
 )
 from bioimageflow_core.types import SharedArray
@@ -19,6 +20,7 @@ from tests.testkit.runtime_cache import CountingTable, SourceAssetWriter
 
 
 class _TransientAssetWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="transient_outcome_writer", dependencies={})
 
     class Inputs(IOModel):
@@ -40,6 +42,7 @@ class _TransientAssetWriter(ProcessingTool):
 
 
 class _SharedArrayWriter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="outcome_shared_array_writer", dependencies={})
     created_names: list[str] = []
 

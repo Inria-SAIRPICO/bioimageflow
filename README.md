@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Annotated
 
 from bioimageflow_core import (
-    ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template,
+    ProcessingTool, RowConsumption, GENERAL_ENV, ImageSpec, Arguments, Template,
 )
 from bioimageflow import Workflow, DataFrameTool
 
@@ -75,6 +75,7 @@ class FileLoader(DataFrameTool):
 
 # 2. Define a processing tool (runs in an isolated environment)
 class Threshold(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Threshold"
     environment = GENERAL_ENV
 
@@ -175,7 +176,7 @@ bioimageflow-core          bioimageflow
 
 ### ProcessingTool
 
-Runs in isolated environments. Implements `process_row()` (one row at a time) or `process_batch()` (all rows at once). Inputs and outputs are declared as `IOModel` inner classes.
+Runs in isolated environments. Implements `process_row()` (one row at a time) or `process_batch()` (all rows at once), and explicitly declares whether rows are mapped independently or consumed collectively. Inputs and outputs are declared as `IOModel` inner classes.
 
 ### DataFrameTool
 

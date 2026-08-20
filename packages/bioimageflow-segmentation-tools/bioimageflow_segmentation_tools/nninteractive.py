@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -35,6 +36,7 @@ nninteractive_env = EnvironmentSpec(
 class nnInteractive(ProcessingTool):
     """Run an nnInteractive segmentation model from point prompts."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "nnInteractive"
     documentation = "Run nnInteractive inference from prompt coordinates and write a label mask."
     category = Category.SEGMENTATION

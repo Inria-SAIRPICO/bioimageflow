@@ -9,6 +9,7 @@ from bioimageflow_core import (
     ExecutionContext,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Template,
 )
 
@@ -16,6 +17,7 @@ from tests.testkit.integration_tools import FileLoader, imageio_env
 
 
 class RowContextTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Row Context Tool"
     environment = imageio_env
 
@@ -61,6 +63,7 @@ class RowContextTool(ProcessingTool):
 
 
 class BatchContextTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Batch Context Tool"
     environment = imageio_env
 

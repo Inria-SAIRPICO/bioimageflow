@@ -14,6 +14,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -138,6 +139,7 @@ def _distance_watershed(mask: Any, min_distance: int) -> tuple[Any, int]:
 class ThresholdSegment(ProcessingTool):
     """Threshold an image and label connected foreground components."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Threshold Segment"
     documentation = (
         "Create a binary foreground mask from an intensity threshold and label "
@@ -216,6 +218,7 @@ class ThresholdSegment(ProcessingTool):
 class OtsuThresholdSegment(ProcessingTool):
     """Threshold an image with scikit-image's global Otsu threshold."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Otsu Threshold Segment"
     documentation = "Compute a global Otsu threshold and label foreground components."
     category = Category.SEGMENTATION
@@ -279,6 +282,7 @@ class OtsuThresholdSegment(ProcessingTool):
 class LocalThresholdSegment(ProcessingTool):
     """Threshold an image with scikit-image's Sauvola local threshold."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Local Threshold Segment"
     documentation = "Compute a Sauvola adaptive threshold and label foreground."
     category = Category.SEGMENTATION
@@ -371,6 +375,7 @@ class LocalThresholdSegment(ProcessingTool):
 class WatershedSegment(ProcessingTool):
     """Split foreground regions using marker-controlled watershed semantics."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Watershed Segment"
     documentation = (
         "Segment thresholded foreground regions. When marker labels are supplied, "
@@ -470,6 +475,7 @@ class WatershedSegment(ProcessingTool):
 class DistanceWatershedSegment(ProcessingTool):
     """Split foreground using marker-free distance-transform watershed."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Distance Watershed Segment"
     documentation = "Use distance-transform peaks as watershed markers for foreground."
     category = Category.SEGMENTATION
@@ -538,6 +544,7 @@ class DistanceWatershedSegment(ProcessingTool):
 class SplitTouchingObjects(ProcessingTool):
     """Split clumped labels with distance-transform watershed semantics."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Split Touching Objects"
     documentation = "Split touching foreground inside each label image mask."
     category = Category.SEGMENTATION
@@ -611,6 +618,7 @@ class SplitTouchingObjects(ProcessingTool):
 class FilterLabels(ProcessingTool):
     """Filter labels by area, border contact, intensity, and shape constraints."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Filter Labels"
     documentation = "Remove labels by area, border contact, intensity, or shape."
     category = Category.SEGMENTATION
@@ -723,6 +731,7 @@ class FilterLabels(ProcessingTool):
 class PostprocessLabels(ProcessingTool):
     """Filter and relabel a label image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Postprocess Labels"
     documentation = (
         "Remove labels below a minimum size and relabel remaining labels sequentially."

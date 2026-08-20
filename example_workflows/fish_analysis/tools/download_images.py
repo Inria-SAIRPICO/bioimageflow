@@ -12,6 +12,7 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 
 
@@ -21,6 +22,8 @@ class DownloadImages(ProcessingTool):
     Takes a list of URLs as a newline-separated string and downloads
     each one to a local directory. Returns one row per downloaded file.
     """
+
+    row_consumption = RowConsumption.MAPPED
 
     name = "download_images"
     documentation = (

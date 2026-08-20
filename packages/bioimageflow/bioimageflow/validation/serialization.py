@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow_core import ProcessingTool
+
 from .common import (
     Annotated,
     Any,
@@ -312,6 +314,8 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
       full result DataFrame as a graph-level output. All current tool kinds
       produce a DataFrame at runtime; per-field output schemas still describe
       the DataFrame columns.
+    - ``row_consumption`` — ``"mapped"`` or ``"collective"`` for a
+      ``ProcessingTool`` and ``None`` for a ``DataFrameTool``.
 
     Companion to :func:`serialize_input_schema` / :func:`serialize_output_schema`,
     which describe per-field schemas. This helper exists so platform code does
@@ -331,6 +335,7 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
     ):
         tool_type = "DataFrameTool"
         accepts_upstream = bool(getattr(tool_class, "accepts_upstream", True))
+        row_consumption = None
         # ``dynamic_outputs`` is True when the tool's resolved schema can
         # differ from a static ``serialize_output_schema(cls)`` — i.e. it
         # overrides either ``resolve_outputs`` (input-driven schema like
@@ -340,15 +345,19 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
             tool_class, DataFrameTool, "resolve_outputs"
         ) or _overrides_classmethod(tool_class, DataFrameTool, "resolve_merge_schema")
     else:
+        if not issubclass(tool_class, ProcessingTool):
+            raise TypeError(f"Unsupported tool class: {tool_class!r}")
         tool_type = "ProcessingTool"
         accepts_upstream = True
         dynamic_outputs = False
+        row_consumption = tool_class.row_consumption.value
 
     return {
         "tool_type": tool_type,
         "accepts_upstream": accepts_upstream,
         "dynamic_outputs": dynamic_outputs,
         "dataframe_output": True,
+        "row_consumption": row_consumption,
     }
 
 

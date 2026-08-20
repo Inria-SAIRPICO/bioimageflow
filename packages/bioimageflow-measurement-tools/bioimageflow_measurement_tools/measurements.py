@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
 )
 
@@ -34,6 +35,7 @@ else:
 class RegionProperties(ProcessingTool):
     """Compute geometric properties for each non-zero label."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Region Properties"
     documentation = "Compute area, centroid, and bounding box for each label."
     category = Category.MEASUREMENT
@@ -81,6 +83,7 @@ class RegionProperties(ProcessingTool):
 class ShapeProperties(ProcessingTool):
     """Compute extended deterministic shape features for each non-zero label."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Shape Properties"
     documentation = (
         "Compute area, perimeter, bounding-box area, extent, aspect ratio, and "
@@ -143,6 +146,7 @@ class ShapeProperties(ProcessingTool):
 class IntensityProperties(ProcessingTool):
     """Compute intensity statistics for each non-zero label."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Intensity Properties"
     documentation = "Compute mean, min, max, and sum intensity for each label."
     category = Category.MEASUREMENT
@@ -202,6 +206,7 @@ class IntensityProperties(ProcessingTool):
 class CountLabels(ProcessingTool):
     """Count non-zero labels and labeled pixels."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Count Labels"
     documentation = "Count non-zero labels and object pixels in a label image."
     category = Category.MEASUREMENT
@@ -280,6 +285,7 @@ class SummarizeTable(DataFrameTool):
 class LabelBenchmark(ProcessingTool):
     """Compute simple pixel-level agreement between predicted and reference labels."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Label Benchmark"
     documentation = "Compute simple foreground pixel agreement for two label images."
     category = Category.MEASUREMENT
@@ -339,6 +345,7 @@ class LabelBenchmark(ProcessingTool):
 class DiceIoU(ProcessingTool):
     """Compute foreground Dice and IoU between predicted and reference labels."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Dice IoU"
     documentation = "Compute binary foreground Dice and IoU metrics for two masks."
     category = Category.MEASUREMENT
@@ -384,6 +391,7 @@ class DiceIoU(ProcessingTool):
 class ObjectMatchingMetrics(ProcessingTool):
     """Greedily match predicted and reference objects by pairwise IoU."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Object Matching Metrics"
     documentation = "Match predicted labels to reference labels and summarize IoU/Dice."
     category = Category.MEASUREMENT

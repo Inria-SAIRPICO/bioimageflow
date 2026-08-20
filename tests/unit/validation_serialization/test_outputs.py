@@ -23,6 +23,7 @@ from bioimageflow_core import (
     Layout,
     PathPicker,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -92,6 +93,7 @@ class TestSerializeOutputSchema:
 
     def test_template_default_on_non_path_output_raises(self) -> None:
         class BadTemplateOutput(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):
@@ -108,6 +110,7 @@ class TestSerializeOutputSchema:
 
     def test_string_output_default_raises(self) -> None:
         class BadStringTemplateOutput(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):
@@ -124,6 +127,7 @@ class TestSerializeOutputSchema:
 
     def test_path_output_default_raises(self) -> None:
         class BadPathTemplateOutput(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):
@@ -140,6 +144,7 @@ class TestSerializeOutputSchema:
 
     def test_static_template_output_default_is_valid(self) -> None:
         class StaticTemplateOutput(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             environment = _ENV
 
             class Inputs(IOModel):

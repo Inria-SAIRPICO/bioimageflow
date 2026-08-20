@@ -16,6 +16,7 @@ from bioimageflow_core import (
     IOModel,
     ImageSpec,
     ProcessingTool,
+    RowConsumption,
     ResourceSpec,
     Semantic,
     Template,
@@ -42,6 +43,7 @@ gpu_env = EnvironmentSpec(
 
 class SimpleRowTool(ProcessingTool):
     """Minimal row tool — writes a file per row."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Simple Row Tool"
     environment = stub_env
 
@@ -61,6 +63,7 @@ class SimpleRowTool(ProcessingTool):
 
 class SlowRowTool(ProcessingTool):
     """Row tool with a small delay — for testing parallelism timing."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Slow Row Tool"
     environment = stub_env
 
@@ -82,6 +85,7 @@ class SlowRowTool(ProcessingTool):
 
 class ErrorRowTool(ProcessingTool):
     """Always raises — for testing error propagation."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Error Row Tool"
     environment = stub_env
 
@@ -97,6 +101,7 @@ class ErrorRowTool(ProcessingTool):
 
 class WorkerStreamTool(ProcessingTool):
     """Writes to worker stdout and stderr for console routing tests."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Worker Stream Tool"
     environment = stub_env
 
@@ -119,6 +124,7 @@ class WorkerStreamTool(ProcessingTool):
 
 class GpuTool(ProcessingTool):
     """Declares a portable GPU worker requirement."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "GPU Tool"
     environment = gpu_env
     resources = ResourceSpec(gpu=1)
@@ -141,6 +147,7 @@ class GpuTool(ProcessingTool):
 
 class ProgressReportingTool(ProcessingTool):
     """Reports sub-row progress via task.update()."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Progress Tool"
     environment = stub_env
 
@@ -166,6 +173,7 @@ class ProgressReportingTool(ProcessingTool):
 
 class BatchTool(ProcessingTool):
     """Batch processor — tests submit() path."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Batch Tool"
     environment = stub_env
 
@@ -196,6 +204,7 @@ class BatchTool(ProcessingTool):
 
 class CancellableRowTool(ProcessingTool):
     """Slow tool for testing cancellation — sleeps long enough to be cancelled."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cancellable Tool"
     environment = stub_env
 

@@ -21,6 +21,7 @@ from bioimageflow_core import (
     ImageShared,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 from tests.testkit.parsl_tools import PARSL_TEST_ENV, ParslIncrement
 
@@ -93,6 +94,7 @@ def test_ambiguous_compatible_routes_fail_before_dfk_acquisition(
 
 
 class _SharedOutput(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = PARSL_TEST_ENV
 
     class Inputs(IOModel):

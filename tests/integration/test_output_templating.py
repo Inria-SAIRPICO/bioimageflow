@@ -17,7 +17,7 @@ from typing import Annotated
 import pytest
 
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, IOModel, ProcessingTool, Semantic, Template
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption, Semantic, Template
 from bioimageflow_core.types import ImageSpec
 
 from tests.testkit.integration_tools import FileLoader, StubTiler, imageio_env
@@ -25,6 +25,7 @@ from tests.testkit.integration_tools import FileLoader, StubTiler, imageio_env
 
 class StubDefaultTemplate(ProcessingTool):
     """Tool using the default output template."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Default Template"
     environment = imageio_env
 
@@ -43,6 +44,7 @@ class StubDefaultTemplate(ProcessingTool):
 
 class StubCustomTemplate(ProcessingTool):
     """Tool with a custom output template."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Custom Template"
     environment = imageio_env
 
@@ -62,6 +64,7 @@ class StubCustomTemplate(ProcessingTool):
 
 class StubMultiInput(ProcessingTool):
     """Tool with multiple input paths — {ext} resolves to empty."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Multi Input"
     environment = imageio_env
 
@@ -82,6 +85,7 @@ class StubMultiInput(ProcessingTool):
 
 class StubOptionalPathTemplate(ProcessingTool):
     """Tool with one required path and one optional path."""
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Optional Path Template"
     environment = imageio_env
 
@@ -197,6 +201,7 @@ class TestColumnTemplate:
         ws = tmp_workspace_with_metadata
 
         class StubColumnTemplate(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Stub Column Template"
             environment = imageio_env
 
@@ -241,6 +246,7 @@ class TestTimestampTemplate:
         """Test {timestamp} resolves to the execution timestamp."""
 
         class StubTimestampTemplate(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Stub Timestamp Template"
             environment = imageio_env
 
@@ -280,6 +286,7 @@ class TestTemplateErrors:
         """Template referencing a non-existent input field raises at construction."""
 
         class BadTemplate(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Bad Template"
             environment = imageio_env
 

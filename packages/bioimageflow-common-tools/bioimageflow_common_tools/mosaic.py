@@ -12,6 +12,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     SCALAR_IMAGE_SEMANTICS,
     Template,
 )
@@ -25,6 +26,7 @@ class Mosaic(ProcessingTool):
     into a single composite grid.  Each input row receives the same output
     (the mosaic path and total image count).
     """
+    row_consumption = RowConsumption.COLLECTIVE
     display_name = "Mosaic"
     documentation = (
         "Aggregates images into a single mosaic image arranged in a grid. "

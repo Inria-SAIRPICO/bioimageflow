@@ -53,9 +53,10 @@ def test_row_chunk_forwards_context_and_returns_plain_outputs(tmp_path) -> None:
     source = tmp_path / "context_tool.py"
     source.write_text(
         """
-from bioimageflow_core import Arguments, ExecutionContext, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, ExecutionContext, IOModel, ProcessingTool, RowConsumption
 
 class ContextTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     class Inputs(IOModel):
         value: str
     class Outputs(IOModel):
@@ -97,9 +98,10 @@ def test_batch_one_to_one_shorthand_is_normalized(tmp_path) -> None:
     source = tmp_path / "context_tool.py"
     source.write_text(
         """
-from bioimageflow_core import Arguments, ExecutionContext, IOModel, ProcessingTool
+from bioimageflow_core import Arguments, ExecutionContext, IOModel, ProcessingTool, RowConsumption
 
 class ContextTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     class Inputs(IOModel):
         value: str
     class Outputs(IOModel):

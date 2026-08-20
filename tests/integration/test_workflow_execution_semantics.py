@@ -9,7 +9,7 @@ import pytest
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
-from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, Semantic
+from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, RowConsumption, Semantic
 
 from tests.testkit.integration_tools import (
     AddColumn,
@@ -143,6 +143,7 @@ class TestFailureAndCancellation:
         self, tmp_workspace: Path,
     ) -> None:
         class FailingConsumer(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Failing Consumer"
             environment = imageio_env
 
@@ -204,6 +205,7 @@ class TestFailureAndCancellation:
         self, tmp_workspace: Path,
     ) -> None:
         class CancellingSegmenter(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Cancelling Segmenter"
             environment = imageio_env
 

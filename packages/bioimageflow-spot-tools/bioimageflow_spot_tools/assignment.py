@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
 )
 
@@ -20,6 +21,7 @@ from bioimageflow_core import (
 class AssignSpotsToLabels(ProcessingTool):
     """Assign each spot coordinate to the label value at the same pixel."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Assign Spots to Labels"
     documentation = "Assign detected spot coordinates to nuclei or cell label images."
     category = Category.MEASUREMENT

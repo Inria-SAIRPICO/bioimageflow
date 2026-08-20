@@ -25,6 +25,7 @@ from bioimageflow_core import (
     IOModel,
     ImageSpec,
     ProcessingTool,
+    RowConsumption,
     Semantic,
 )
 
@@ -171,6 +172,7 @@ class TestTypeIncompatibility:
         """Feeding LABEL output to a tool expecting DISPLACEMENT raises."""
 
         class DisplacementConsumer(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Disp Consumer"
             environment = imageio_env
 
@@ -201,6 +203,7 @@ class TestWorkerExceptions:
         """Exceptions in process_row are re-raised in the main process."""
 
         class FailingTool(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
             display_name = "Failing Tool"
             environment = imageio_env
 
@@ -289,6 +292,7 @@ class TestProcessingToolValidation:
         with pytest.raises(TypeError, match="process_row|process_batch"):
 
             class EmptyTool(ProcessingTool):
+                row_consumption = RowConsumption.MAPPED
                 display_name = "Empty"
                 environment = imageio_env
 

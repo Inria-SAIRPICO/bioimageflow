@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -35,6 +36,7 @@ stardist_env = EnvironmentSpec(
 class StarDistSegmenter(ProcessingTool):
     """Segment nuclei/objects in 2D images using pretrained StarDist models."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "StarDist 2D"
     documentation = (
         "Segment star-convex nuclei or cells in 2D images using StarDist "

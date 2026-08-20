@@ -16,6 +16,7 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 from bioimageflow_restoration_tools import CAREamicsPredict, RestorationMetrics
 
@@ -25,6 +26,7 @@ DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent / "results"
 class RestorationPreview(ProcessingTool):
     """Create a side-by-side preview of clean, degraded, and restored images."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Restoration Preview"
     category = Category.UTILITIES
     environment = GENERAL_ENV

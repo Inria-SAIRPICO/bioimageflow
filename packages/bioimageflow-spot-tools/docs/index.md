@@ -21,7 +21,8 @@ Big-FISH remains a future optional evaluation backend, not a current default dep
   intensities per label.
 - [FilterSpots](tools/filter_spots.md): filter spot dataframe rows by numeric thresholds and masks.
 - [RenderSpots](tools/render_spots.md): render coordinates to label or mask images.
-- [SpotsToLabels](tools/spots_to_labels.md): create spot label images from dataframe rows or masks.
+- [SpotsToLabels](tools/spots_to_labels.md): combine spot-coordinate rows into one label image.
+- [MaskToLabels](tools/mask_to_labels.md): convert each mask row into a connected-component label image.
 - [SpotColocalization](tools/spot_colocalization.md): match two upstream spot dataframes by distance.
 - [SpotQualityMetrics](tools/spot_quality_metrics.md): compute SNR, local background,
   and nearest-neighbor distances.

@@ -77,8 +77,9 @@ def tool_store(tmp_path):
             "import dep_pkg\n"
             "from .base import DummyBase\n"
             "from .utils.helpers import helper_func\n"
-            "from bioimageflow_core import IOModel, Arguments\n\n"
+            "from bioimageflow_core import IOModel, Arguments, RowConsumption\n\n"
             "class AlphaTool(DummyBase):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
             f"    display_name = 'Alpha'\n"
             "    class Inputs(IOModel):\n"
             f"        value: int = 0{extra_field}\n"
@@ -146,8 +147,9 @@ def lazy_tool_store(tmp_path):
             "    return value\n"
         )
         (pkg_dir / "alpha.py").write_text(
-            "from bioimageflow_core import ProcessingTool, IOModel, Arguments\n\n"
+            "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n\n"
             "class LazyAlpha(ProcessingTool):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
             "    display_name = 'Lazy Alpha'\n"
             "    class Inputs(IOModel):\n"
             "        value: int = 0\n"

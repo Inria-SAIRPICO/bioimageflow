@@ -12,11 +12,14 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ProcessingTool,
+    RowConsumption,
 )
 
 
 class DownloadImages(ProcessingTool):
     """Download a newline-separated list of URLs into the run assets directory."""
+
+    row_consumption = RowConsumption.MAPPED
 
     name = "download_images"
     documentation = (

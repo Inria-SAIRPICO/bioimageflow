@@ -12,6 +12,7 @@ from bioimageflow_core import (
     ImageSpec,
     IOModel,
     ProcessingTool,
+    RowConsumption,
     Template,
 )
 
@@ -39,6 +40,7 @@ class BioIOConvertImage(ProcessingTool):
     SLDY, TIFF, and Bio-Formats files. The extension of the output file
     specifies the target format.
     """
+    row_consumption = RowConsumption.MAPPED
     display_name = "BioIO Convert Image"
     documentation = (
         "Convert broad microscopy image file formats using bioio. The output format is "

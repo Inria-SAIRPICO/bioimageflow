@@ -11,6 +11,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -27,6 +28,7 @@ from ._common import (
 class HotspotDetection(ProcessingTool):
     """Run hotspot detection."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Hotspot Detection"
     documentation = "Detect hotspots in microscopy images using the hotspot command-line tool."
     category = Category.SPOT_DETECTION
@@ -62,6 +64,7 @@ class HotspotDetection(ProcessingTool):
 class HotspotToSpots(ProcessingTool):
     """Convert thresholded hotspot images into spot coordinate tables."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Hotspot To Spots"
     documentation = "Convert SAIRPICO hotspot image outputs to spot coordinate tables."
     category = Category.SPOT_DETECTION

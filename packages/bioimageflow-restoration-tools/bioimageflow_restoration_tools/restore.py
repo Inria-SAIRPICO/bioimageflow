@@ -14,6 +14,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -76,6 +77,7 @@ def restore_array(image: "Any", method: str = "tv_chambolle", weight: float = 0.
 class RestoreImage(ProcessingTool):
     """Apply a simple image-processing restoration baseline to a scalar image."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Restore Image"
     documentation = (
         "Restore a noisy or blurred image with a simple image-processing baseline."
@@ -133,6 +135,7 @@ careamics_env = EnvironmentSpec(
 class CAREamicsPredict(ProcessingTool):
     """Run CAREamics prediction from a restoration checkpoint."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "CAREamics Predict"
     documentation = (
         "Run CAREamics restoration inference from a checkpoint."
@@ -183,6 +186,7 @@ class CAREamicsPredict(ProcessingTool):
 class RestorationMetrics(ProcessingTool):
     """Compare degraded and restored images against a clean reference."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Restoration Metrics"
     documentation = "Compute MSE, PSNR, and residual noise estimates for restoration evaluation."
     category = Category.MEASUREMENT

@@ -15,7 +15,7 @@ import pandas as pd
 
 from bioimageflow import DataFrameTool
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, IOModel, ProcessingTool, Template
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption, Template
 
 from tests.testkit.integration_tools import (
     FileLoader,
@@ -58,6 +58,7 @@ class SinglePathSource(DataFrameTool):
 
 
 class EmptyBatchProbe(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = StubBatchProcessor.environment
     called = False
 
@@ -73,6 +74,7 @@ class EmptyBatchProbe(ProcessingTool):
 
 
 class EmptyBatchReducer(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = StubBatchProcessor.environment
     run_empty_batch = True
 
@@ -92,6 +94,7 @@ class EmptyBatchReducer(ProcessingTool):
 
 
 class AnchoredEmptyBatchReducer(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     environment = StubBatchProcessor.environment
     run_empty_batch = True
     empty_batch_anchor_inputs = ("path",)

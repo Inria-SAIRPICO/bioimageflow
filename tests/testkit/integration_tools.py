@@ -17,6 +17,7 @@ from bioimageflow_core import (
     IOModel,
     ImageSpec,
     ProcessingTool,
+    RowConsumption,
     ResourceSpec,
     Semantic,
     SharedArray,
@@ -103,6 +104,7 @@ class CsvLoader(DataFrameTool):
 class StubSegmenter(ProcessingTool):
     """Simulates cell segmentation. Writes a small file as output."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Segmenter"
     tags = ["segmentation"]
     environment = cellpose_env
@@ -135,6 +137,7 @@ class StubSegmenter(ProcessingTool):
 class StubStats(ProcessingTool):
     """Simulates intensity measurement on image + mask."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Stats"
     tags = ["measurement"]
     environment = imageio_env
@@ -164,6 +167,7 @@ class StubStats(ProcessingTool):
 class StubTiler(ProcessingTool):
     """Simulates tiling: 1-to-N output (splits one image into tiles)."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Tiler"
     tags = ["tiling"]
     environment = imageio_env
@@ -199,6 +203,7 @@ class StubTiler(ProcessingTool):
 class StubBatchProcessor(ProcessingTool):
     """Uses process_batch instead of process_row for GPU-style batching."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Batch Processor"
     tags = ["batch", "gpu"]
     environment = numpy_env
@@ -229,6 +234,7 @@ class StubBatchProcessor(ProcessingTool):
 class StubBatchExploder(ProcessingTool):
     """Uses process_batch with 1-to-N outputs."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Batch Exploder"
     tags = ["batch"]
     environment = numpy_env
@@ -262,6 +268,7 @@ class StubBatchExploder(ProcessingTool):
 class StubSourceProcessingTool(ProcessingTool):
     """A ProcessingTool used as a source node (no upstream, only constants)."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Source Processor"
     tags = ["source"]
     environment = imageio_env
@@ -287,6 +294,7 @@ class StubSourceProcessingTool(ProcessingTool):
 class StubRegistration(ProcessingTool):
     """Simulates image registration from two inputs."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub Registration"
     tags = ["registration"]
     environment = imageio_env
@@ -325,6 +333,7 @@ class StubRegistration(ProcessingTool):
 class StubSharedMemoryTool(ProcessingTool):
     """Produces shared memory output instead of files."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub SHM Tool"
     tags = ["shared_memory"]
     environment = numpy_env
@@ -353,6 +362,7 @@ class StubSharedMemoryTool(ProcessingTool):
 class StubSharedMemoryConsumer(ProcessingTool):
     """Consumes shared memory input."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stub SHM Consumer"
     tags = ["shared_memory"]
     environment = numpy_env
@@ -388,11 +398,14 @@ class StubSharedMemoryConsumer(ProcessingTool):
 class CellposeBase(ProcessingTool):
     """Base class for the Cellpose tool family. Shares environment."""
 
+    row_consumption = RowConsumption.MAPPED
+
     environment = cellpose_env
     tags = ["cellpose"]
 
 
 class CellposeSegmenter(CellposeBase):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose Segmenter"
     documentation = "Segments cells using the Cellpose algorithm."
 
@@ -422,6 +435,7 @@ class CellposeSegmenter(CellposeBase):
 
 
 class CellposeTrain(CellposeBase):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose Train"
     documentation = "Trains a custom Cellpose model."
     tags = ["cellpose", "training"]
@@ -459,6 +473,7 @@ class CellposeTrain(CellposeBase):
 class StardistSegmenter(ProcessingTool):
     """Segmenter using a different environment (stardist)."""
 
+    row_consumption = RowConsumption.MAPPED
     display_name = "Stardist Segmenter"
     environment = stardist_env
 

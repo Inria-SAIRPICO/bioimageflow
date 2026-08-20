@@ -13,6 +13,7 @@ from bioimageflow_core import (
     IOModel,
     Layout,
     ProcessingTool,
+    RowConsumption,
     Semantic,
     Template,
 )
@@ -34,6 +35,7 @@ class ConnectedComponents(ProcessingTool):
     Uses SimpleITK for input I/O and processing, and tifffile for UInt32 TIFF
     output because SimpleITK's TIFF writer does not support UInt32.
     """
+    row_consumption = RowConsumption.MAPPED
     display_name = "Connected Components"
     documentation = (
         "Convert a binary image into a labeled image by assigning "
