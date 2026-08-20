@@ -71,8 +71,16 @@ class LabelsToObjects(ProcessingTool):
 
         rows: list[dict[str, int | float]] = []
         for frame, plane in enumerate(labels):
+            original_labels = np.unique(plane)
+            original_labels = original_labels[original_labels > 0]
+            if not original_labels.size:
+                continue
+            dense_plane = np.searchsorted(original_labels, plane).astype(
+                np.int64, copy=False
+            ) + 1
+            dense_plane[plane == 0] = 0
             properties = regionprops_table(
-                plane,
+                dense_plane,
                 properties=("label", "centroid", "area"),
             )
             for label, y, x, area in zip(
@@ -85,7 +93,7 @@ class LabelsToObjects(ProcessingTool):
                 rows.append(
                     {
                         "frame": frame,
-                        "label": int(label),
+                        "label": int(original_labels[int(label) - 1]),
                         "y": float(y),
                         "x": float(x),
                         "area": int(area),

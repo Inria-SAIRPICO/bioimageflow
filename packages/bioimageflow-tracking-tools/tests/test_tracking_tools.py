@@ -59,6 +59,22 @@ def test_labels_to_objects_all_background_returns_empty_object_table(
     assert result == []
 
 
+def test_labels_to_objects_supports_sparse_uint32_ids(tmp_path: Path) -> None:
+    label_path = tmp_path / "sparse_labels.tif"
+    sparse_label = int(np.iinfo(np.uint32).max)
+    labels = np.zeros((2, 5, 5), dtype=np.uint32)
+    labels[0, 1:3, 1:3] = sparse_label
+    labels[1, 2:5, 3:5] = sparse_label
+    iio.imwrite(label_path, labels, photometric="minisblack")
+
+    result = LabelsToObjects().process_row(Arguments(label_image=label_path))
+
+    assert [row.label for row in result] == [sparse_label, sparse_label]
+    assert [row.frame for row in result] == [0, 1]
+    assert [row.area for row in result] == [4, 6]
+    assert all(row.object_count == 2 for row in result)
+
+
 @pytest.mark.parametrize(
     "labels, message",
     [
