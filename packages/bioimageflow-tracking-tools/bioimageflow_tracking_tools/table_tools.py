@@ -252,7 +252,9 @@ class TrackQualityMetrics(DataFrameTool):
             require_label=True,
         )
 
-        if "source_label_image" in data.columns:
+        if data.empty:
+            source_groups = [(None, data)]
+        elif "source_label_image" in data.columns:
             source_groups = data.groupby("source_label_image", sort=True)
         else:
             source_groups = [(None, data)]

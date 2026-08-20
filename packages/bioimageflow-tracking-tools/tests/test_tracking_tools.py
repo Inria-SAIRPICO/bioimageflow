@@ -253,6 +253,25 @@ def test_empty_tracking_tables_keep_declared_contracts() -> None:
     ]
 
 
+def test_empty_source_keyed_table_keeps_quality_summary_contract() -> None:
+    tracks = pd.DataFrame(
+        columns=pd.Index(["source_label_image", "track_id", "frame", "label"])
+    )
+
+    result = TrackQualityMetrics().transform(tracks, Arguments())
+
+    assert result.to_dict("records") == [
+        {
+            "source_label_image": None,
+            "track_count": 0,
+            "gap_count": 0,
+            "duplicate_track_frame_count": 0,
+            "object_assignment_conflict_count": 0,
+            "short_track_fraction": 0.0,
+        }
+    ]
+
+
 def test_tracking_workflow_graph_runs(tmp_path: Path) -> None:
     label_path = _moving_labels(tmp_path / "labels.tif")
 
