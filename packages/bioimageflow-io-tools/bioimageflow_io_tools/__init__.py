@@ -5,30 +5,30 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .bioio_convert import BioIOConvertImage as BioIOConvertImage
-    from .image_io import ConvertImageFormat as ConvertImageFormat
-    from .image_io import ConvertToOmeTiff as ConvertToOmeTiff
-    from .image_io import ConvertToOmeZarr as ConvertToOmeZarr
-    from .image_io import ReadImageMetadata as ReadImageMetadata
-    from .image_io import SelectChannel as SelectChannel
-    from .image_io import SelectDimensions as SelectDimensions
-    from .image_io import SelectScene as SelectScene
-    from .image_io import SelectTimepoint as SelectTimepoint
-    from .image_io import SelectZRange as SelectZRange
-    from .image_io import ValidateImageLayout as ValidateImageLayout
+    from .metadata import ReadImageMetadata as ReadImageMetadata
+    from .selection import SelectChannel as SelectChannel
+    from .selection import SelectDimensions as SelectDimensions
+    from .selection import SelectScene as SelectScene
+    from .selection import SelectTimepoint as SelectTimepoint
+    from .selection import SelectZRange as SelectZRange
+    from .selection import ValidateImageLayout as ValidateImageLayout
+    from .writers import ConvertImageFormat as ConvertImageFormat
+    from .writers import ConvertToOmeTiff as ConvertToOmeTiff
+    from .writers import ConvertToOmeZarr as ConvertToOmeZarr
 
 
 _EXPORTS = {
     "BioIOConvertImage": ("bioio_convert", "BioIOConvertImage"),
-    "ConvertImageFormat": ("image_io", "ConvertImageFormat"),
-    "ConvertToOmeTiff": ("image_io", "ConvertToOmeTiff"),
-    "ConvertToOmeZarr": ("image_io", "ConvertToOmeZarr"),
-    "ReadImageMetadata": ("image_io", "ReadImageMetadata"),
-    "SelectChannel": ("image_io", "SelectChannel"),
-    "SelectDimensions": ("image_io", "SelectDimensions"),
-    "SelectScene": ("image_io", "SelectScene"),
-    "SelectTimepoint": ("image_io", "SelectTimepoint"),
-    "SelectZRange": ("image_io", "SelectZRange"),
-    "ValidateImageLayout": ("image_io", "ValidateImageLayout"),
+    "ConvertImageFormat": ("writers", "ConvertImageFormat"),
+    "ConvertToOmeTiff": ("writers", "ConvertToOmeTiff"),
+    "ConvertToOmeZarr": ("writers", "ConvertToOmeZarr"),
+    "ReadImageMetadata": ("metadata", "ReadImageMetadata"),
+    "SelectChannel": ("selection", "SelectChannel"),
+    "SelectDimensions": ("selection", "SelectDimensions"),
+    "SelectScene": ("selection", "SelectScene"),
+    "SelectTimepoint": ("selection", "SelectTimepoint"),
+    "SelectZRange": ("selection", "SelectZRange"),
+    "ValidateImageLayout": ("selection", "ValidateImageLayout"),
 }
 
 __all__ = [

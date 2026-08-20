@@ -1,9 +1,7 @@
 # ConvertImageFormat
 
-`ConvertImageFormat` reads an image and writes it to a requested destination.
-The output suffix selects the writer: ordinary paths use imageio,
-`.ome.tif`/`.ome.tiff` use tifffile OME-TIFF, and `.ome.zarr` uses the package
-minimal OME-Zarr v2 writer.
+`ConvertImageFormat` reads an image and writes an ordinary raster format through imageio.
+OME-TIFF and OME-Zarr outputs are intentionally handled by their dedicated tools.
 
 This is the workflow-level converter for common normalization steps. It can
 select one TIFF scene and optionally export one channel, Z plane, or timepoint
@@ -19,16 +17,14 @@ Use `BioIOConvertImage` for broad bioio/plugin-backed formats such as CZI, OME-Z
   `z`, or `timepoint`.
 - `scene`: optional zero-based TIFF scene index.
 - `channel`, `z`, `timepoint`: optional zero-based dimension selections.
-- `dimension_order`: optional axis order for OME-TIFF metadata.
 
 ## Outputs
 
-- `output_image`: converted image path. The suffix selects the writer:
-  ordinary imageio output, OME-TIFF, or minimal OME-Zarr.
+- `output_image`: converted ordinary image path.
 
 ## Dependencies and Core Libraries
 
-imageio, tifffile, NumPy, and the package's minimal OME-Zarr writer.
+imageio, tifffile, and NumPy.
 
 ## Assumptions
 
@@ -48,26 +44,20 @@ from bioimageflow_io_tools import ConvertImageFormat
 ConvertImageFormat().process_row(
     Arguments(
         input_image="source.tif",
-        output_image="source.ome.tiff",
+        output_image="source_selected.tif",
         input_layout="CZYX",
         scene=None,
         channel=0,
         z=3,
         timepoint=None,
-        dimension_order="YX",
     )
 )
 ```
 
 ## Expected Results
 
-The output contains the selected pixel array from the input. OME-TIFF outputs
-include the requested dimension order, and OME-Zarr outputs contain minimal
-multiscales metadata plus a single array.
+The output contains the selected pixel array from the input.
 
 ## Failure Modes
 
-Unreadable inputs, unsupported imageio outputs, invalid OME axis order, invalid
-scene or dimension selections, missing `input_layout` for dimension selection,
-and filesystem write failures stop execution. The OME-Zarr writer is
-single-scale and uncompressed.
+Unreadable inputs, OME output suffixes, unsupported imageio outputs, invalid scene or dimension selections, missing `input_layout` for selection, and filesystem failures stop execution.

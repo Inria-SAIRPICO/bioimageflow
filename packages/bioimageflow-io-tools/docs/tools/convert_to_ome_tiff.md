@@ -8,8 +8,8 @@ downstream tools that expect OME metadata.
 ## Inputs
 
 - `input_image`: image file to convert.
-- `dimension_order`: optional OME axis order. When omitted, the tool infers
-  `YX`, `ZYX`, `CZYX`, or `TCZYX` from dimensionality.
+- `dimension_order`: optional OME axis order.
+  Reader-provided axes are used when unambiguous; otherwise this input is required.
 
 ## Outputs
 
@@ -50,5 +50,4 @@ requested series axes.
 
 ## Failure Modes
 
-Unreadable inputs, invalid axis metadata, unsupported dimensionality without an
-explicit `dimension_order`, and filesystem write failures stop execution.
+Unreadable inputs, ambiguous axes without an explicit `dimension_order`, invalid axis metadata, and filesystem write failures stop execution.

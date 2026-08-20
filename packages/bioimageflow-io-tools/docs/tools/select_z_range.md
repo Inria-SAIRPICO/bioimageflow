@@ -1,8 +1,9 @@
 # SelectZRange
 
 `SelectZRange` selects a Z slab from an image using Python-style slice bounds:
-`start_z` is included and `stop_z` is excluded. Leaving `stop_z` empty keeps
-planes through the end of the Z axis.
+`start_z` is included and `stop_z` is excluded.
+Leaving `stop_z` empty keeps planes through the end of the Z axis.
+Both bounds must be in range and the selected slab must be non-empty.
 
 ## Inputs
 
@@ -49,4 +50,4 @@ Missing Z axes or reversed ranges raise errors.
 ## Failure Modes
 
 Layout mismatches, missing `Z` axes, and `stop_z < start_z` raise `ValueError`.
-Out-of-range slice bounds follow normal NumPy slicing behavior.
+Negative, out-of-range, reversed, and empty ranges fail before slicing.

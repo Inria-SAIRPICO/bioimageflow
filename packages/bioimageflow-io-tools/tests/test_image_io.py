@@ -87,15 +87,7 @@ def test_io_tools_schema_and_synthetic_execution(tmp_path: Path) -> None:
     assert ome_tiff.output_image == ome_tiff_output
     assert tifffile_shape(ome_tiff_output) == (4, 5)
 
-    zarr_output = tmp_path / "selected.ome.zarr"
-    ome_zarr = ConvertToOmeZarr().process_row(
-        Arguments(input_image=selected_output, output_image=zarr_output)
-    )
-    assert ome_zarr.output_image == zarr_output
-    assert (zarr_output / ".zgroup").exists()
-    assert (zarr_output / ".zattrs").exists()
-    assert (zarr_output / "0" / ".zarray").exists()
-    assert (zarr_output / "0" / "0.0").exists()
+    assert ConvertToOmeZarr.environment.name == "bioio-all"
 
 
 def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> None:
@@ -112,8 +104,8 @@ def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> Non
     assert metadata.shape == [2, 3, 4, 5]
     assert metadata.dtype == "uint16"
     assert metadata.ndim == 4
-    assert metadata.axes == "CZYX"
-    assert metadata.channel_names == ["channel_0", "channel_1"]
+    assert metadata.axes == "??YX"
+    assert metadata.channel_names == []
     assert metadata.pixel_sizes == {"X": None, "Y": None, "Z": None}
 
 
@@ -143,6 +135,55 @@ def test_read_image_metadata_reports_ome_tiff_pixel_sizes(tmp_path: Path) -> Non
     assert metadata.shape == [4, 5]
     assert metadata.axes == "YX"
     assert metadata.pixel_sizes == {"X": 0.2, "Y": 0.3, "Z": 0.4}
+
+
+def test_read_image_metadata_uses_headers_and_reports_rgb_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "rgb.tif"
+    iio.imwrite(source, np.zeros((4, 5, 3), dtype=np.uint8))
+
+    def fail_imread(*args: object, **kwargs: object) -> None:
+        raise AssertionError("metadata inspection must not read the pixel array")
+
+    monkeypatch.setattr(iio, "imread", fail_imread)
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+    assert metadata.shape == [4, 5, 3]
+    assert metadata.axes == "YXS"
+    assert metadata.channel_names == ["red", "green", "blue"]
+
+
+def test_read_image_metadata_reports_animated_rgb_samples(tmp_path: Path) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "animated.gif"
+    iio.imwrite(source, np.zeros((2, 4, 5, 3), dtype=np.uint8))
+
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+
+    assert metadata.axes == "?YXS"
+    assert metadata.channel_names == ["red", "green", "blue"]
+
+
+def test_read_image_metadata_does_not_treat_narrow_stack_as_rgb(tmp_path: Path) -> None:
+    import bioimageflow_io_tools
+
+    source = tmp_path / "narrow_stack.tif"
+    iio.imwrite(source, np.zeros((7, 5, 4), dtype=np.uint8), photometric="minisblack")
+
+    metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
+        Arguments(input_image=source)
+    )
+
+    assert metadata.axes == "?YX"
+    assert metadata.channel_names == []
 
 
 def test_validate_image_layout_checks_length_required_axes_and_sizes(tmp_path: Path) -> None:
@@ -176,8 +217,6 @@ def test_validate_image_layout_checks_length_required_axes_and_sizes(tmp_path: P
 
 
 def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path) -> None:
-    import tifffile
-
     from bioimageflow_io_tools import ConvertImageFormat
 
     data = np.arange(2 * 3 * 4 * 5, dtype=np.uint16).reshape(2, 3, 4, 5)
@@ -200,39 +239,48 @@ def test_convert_image_format_converts_and_selects_before_export(tmp_path: Path)
     assert result.output_image == tiff_output
     np.testing.assert_array_equal(iio.imread(tiff_output), data[1, 2])
 
-    ome_tiff_output = tmp_path / "converted.ome.tiff"
+    with pytest.raises(ValueError, match="ordinary image formats"):
+        ConvertImageFormat().process_row(
+            Arguments(
+                input_image=source,
+                output_image=tmp_path / "converted.ome.tiff",
+                input_layout="CZYX",
+                scene=None,
+                channel=1,
+                z=2,
+                timepoint=None,
+            )
+        )
+
+
+def test_convert_image_format_preserves_declared_rgb_sample_axis(tmp_path: Path) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools import ConvertImageFormat
+
+    source = tmp_path / "animated.gif"
+    output = tmp_path / "animated.tif"
+    data = np.zeros((2, 4, 5, 3), dtype=np.uint8)
+    data[0, ..., 0] = 255
+    data[1, ..., 1] = 255
+    iio.imwrite(source, data)
+
     ConvertImageFormat().process_row(
         Arguments(
             input_image=source,
-            output_image=ome_tiff_output,
-            input_layout="CZYX",
+            output_image=output,
+            input_layout="TYXS",
             scene=None,
-            channel=1,
-            z=2,
+            channel=None,
+            z=None,
             timepoint=None,
-            dimension_order="YX",
         )
     )
-    with tifffile.TiffFile(ome_tiff_output) as tif:
-        assert tif.series[0].axes == "YX"
-        np.testing.assert_array_equal(tif.series[0].asarray(), data[1, 2])
 
-    ome_zarr_output = tmp_path / "converted.ome.zarr"
-    zarr_result = ConvertImageFormat().process_row(
-        Arguments(
-            input_image=source,
-            output_image=ome_zarr_output,
-            input_layout="CZYX",
-            scene=None,
-            channel=1,
-            z=2,
-            timepoint=None,
-            dimension_order=None,
-        )
-    )
-    assert zarr_result.output_image == ome_zarr_output
-    assert (ome_zarr_output / ".zattrs").exists()
-    assert (ome_zarr_output / "0" / ".zarray").exists()
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].shape == data.shape
+        assert len(tif.pages) == 2
+        assert all(page.photometric.name == "RGB" for page in tif.pages)
 
 
 def test_bioio_convert_image_uses_bioio_plugins_and_selection(
@@ -248,7 +296,12 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
     saves: list[tuple[np.ndarray, str, str]] = []
 
     class FakeBioImage:
-        dims = "TCZYX"
+        class dims:
+            T = 2
+            C = 3
+            Z = 4
+
+        scenes = ("0", "1", "2")
         shape = data.shape
         dtype = data.dtype
 
@@ -260,9 +313,9 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
             self.scene = scene
 
         def get_image_data(self, dim_order: str, **dim_kwargs: int) -> np.ndarray:
-            assert dim_order == "TCZYX"
+            assert dim_order == "YX"
             assert dim_kwargs == {"C": 1, "Z": 2, "T": 0}
-            return data[0:1, 1:2, 2:3]
+            return data[0, 1, 2]
 
     class FakeOmeTiffWriter:
         @staticmethod
@@ -318,6 +371,51 @@ def test_bioio_convert_image_uses_bioio_plugins_and_selection(
     assert saved_path == str(output)
     assert saved_dim_order == "YX"
     np.testing.assert_array_equal(saved_array, data[0, 1, 2])
+
+
+def test_convert_to_ome_zarr_uses_writer_and_reopens_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bioimageflow_io_tools import ConvertToOmeZarr
+
+    source = tmp_path / "source.tif"
+    output = tmp_path / "output.ome.zarr"
+    data = np.arange(20, dtype=np.uint16).reshape(4, 5)
+    iio.imwrite(source, data)
+    writer_arguments: dict[str, object] = {}
+
+    class FakeBioImage:
+        def __init__(self, path: Path) -> None:
+            assert path == output
+
+        def get_image_dask_data(self, dim_order: str) -> np.ndarray:
+            assert dim_order == "YX"
+            return data
+
+    class FakeOMEZarrWriter:
+        def __init__(self, **kwargs: object) -> None:
+            writer_arguments.update(kwargs)
+
+        def write_full_volume(self, array: np.ndarray) -> None:
+            np.testing.assert_array_equal(array, data)
+            output.mkdir()
+
+    bioio_module = types.ModuleType("bioio")
+    bioio_module.BioImage = FakeBioImage
+    ome_zarr_writers = types.ModuleType("bioio_ome_zarr.writers")
+    ome_zarr_writers.OMEZarrWriter = FakeOMEZarrWriter
+    monkeypatch.setitem(sys.modules, "bioio", bioio_module)
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr", types.ModuleType("bioio_ome_zarr"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_zarr.writers", ome_zarr_writers)
+
+    result = ConvertToOmeZarr().process_row(
+        Arguments(input_image=source, output_image=output)
+    )
+
+    assert result.output_image == output
+    assert writer_arguments["zarr_format"] == 2
+    assert writer_arguments["axes_names"] == ["y", "x"]
 
 
 def test_select_scene_supports_ordinary_images_and_tiff_series(tmp_path: Path) -> None:
@@ -399,6 +497,25 @@ def test_explicit_axis_selectors_slice_declared_layouts(tmp_path: Path) -> None:
             Arguments(input_image=zyx_source, layout="ZYX", timepoint=0, output_image=tmp_path / "bad.tif")
         )
 
+    with pytest.raises(IndexError, match="C index -1"):
+        SelectChannel().process_row(
+            Arguments(input_image=source, layout="TCYX", channel=-1, output_image=tmp_path / "negative.tif")
+        )
+    with pytest.raises(IndexError, match="C index 3"):
+        SelectChannel().process_row(
+            Arguments(input_image=source, layout="TCYX", channel=3, output_image=tmp_path / "too_large.tif")
+        )
+    with pytest.raises(ValueError, match="must be non-empty"):
+        SelectZRange().process_row(
+            Arguments(
+                input_image=zyx_source,
+                layout="ZYX",
+                start_z=2,
+                stop_z=2,
+                output_image=tmp_path / "empty.tif",
+            )
+        )
+
 
 def test_select_dimensions_uses_declared_axis_layout(tmp_path: Path) -> None:
     from bioimageflow_io_tools import SelectDimensions
@@ -446,6 +563,101 @@ def test_convert_to_ome_tiff_records_axes_metadata(tmp_path: Path) -> None:
     with tifffile.TiffFile(output) as tif:
         assert tif.series[0].axes == "CZYX"
         assert tif.series[0].shape == data.shape
+
+
+def test_convert_to_ome_tiff_preserves_narrow_zyx_volume(tmp_path: Path) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools import ConvertToOmeTiff
+
+    source = tmp_path / "narrow_volume.tif"
+    output = tmp_path / "narrow_volume.ome.tiff"
+    data = np.arange(2 * 5 * 4, dtype=np.uint16).reshape(2, 5, 4)
+    iio.imwrite(source, data, photometric="minisblack")
+
+    ConvertToOmeTiff().process_row(
+        Arguments(input_image=source, output_image=output, dimension_order="ZYX")
+    )
+
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].axes == "ZYX"
+        np.testing.assert_array_equal(tif.series[0].asarray(), data)
+
+
+def test_bioio_plain_tiff_writer_honors_sample_axis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tifffile
+
+    from bioimageflow_io_tools.bioio_convert import _write_bioio_output
+
+    ome_tiff_writers = types.ModuleType("bioio_ome_tiff.writers")
+    ome_tiff_writers.OmeTiffWriter = object
+    imageio_writers = types.ModuleType("bioio_imageio.writers")
+    imageio_writers.TwoDWriter = object
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff", types.ModuleType("bioio_ome_tiff"))
+    monkeypatch.setitem(sys.modules, "bioio_ome_tiff.writers", ome_tiff_writers)
+    monkeypatch.setitem(sys.modules, "bioio_imageio", types.ModuleType("bioio_imageio"))
+    monkeypatch.setitem(sys.modules, "bioio_imageio.writers", imageio_writers)
+
+    output = tmp_path / "animated_rgb.tif"
+    data = np.zeros((2, 4, 5, 3), dtype=np.uint8)
+
+    _write_bioio_output(data, output, "TYXS")
+
+    with tifffile.TiffFile(output) as tif:
+        assert tif.series[0].shape == data.shape
+        assert all(page.photometric.name == "RGB" for page in tif.pages)
+
+
+def test_z_range_rejects_non_integer_direct_call_bounds(tmp_path: Path) -> None:
+    from bioimageflow_io_tools import SelectZRange
+
+    source = tmp_path / "volume.tif"
+    iio.imwrite(source, np.zeros((3, 4, 5), dtype=np.uint8), photometric="minisblack")
+
+    with pytest.raises(TypeError, match="Z range start must be an integer"):
+        SelectZRange().process_row(
+            Arguments(
+                input_image=source,
+                layout="ZYX",
+                start_z=True,
+                stop_z=2,
+                output_image=tmp_path / "bad.tif",
+            )
+        )
+
+
+def test_scene_and_bioio_indices_reject_non_integer_direct_calls(tmp_path: Path) -> None:
+    from bioimageflow_io_tools import SelectScene
+    from bioimageflow_io_tools.bioio_convert import (
+        _validate_bioio_index,
+        _validate_scene,
+    )
+
+    source = tmp_path / "image.tif"
+    iio.imwrite(source, np.zeros((4, 5), dtype=np.uint8))
+
+    with pytest.raises(TypeError, match="Scene index must be an integer"):
+        SelectScene().process_row(
+            Arguments(
+                input_image=source,
+                scene=True,
+                output_image=tmp_path / "bad.tif",
+            )
+        )
+
+    class FakeImage:
+        scenes = ("0", "1")
+
+        class dims:
+            C = 2
+
+    with pytest.raises(TypeError, match="Scene index must be an integer"):
+        _validate_scene(FakeImage(), 1.5)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="C index must be an integer"):
+        _validate_bioio_index(FakeImage(), "C", False)
 
 
 def test_write_named_ome_tools_are_not_public_workflow_tools() -> None:

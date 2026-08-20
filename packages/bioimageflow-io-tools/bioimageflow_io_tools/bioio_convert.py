@@ -1,4 +1,4 @@
-"""BioIOConvertImage — convert image file formats using bioio."""
+"""Broad plugin-backed image conversion through BioIO."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -7,7 +7,6 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
-    EnvironmentSpec,
     GUIMeta,
     ImageSpec,
     IOModel,
@@ -16,35 +15,25 @@ from bioimageflow_core import (
     Template,
 )
 
-bioio_env = EnvironmentSpec(
-    name="bioio-all",
-    dependencies={
-        "python": "3.12",
-        "pip": [
-            "bioio==3.4.0",
-            "bioio-ome-zarr==3.5.1",
-            "bioio-ome-tiff==1.4.0",
-            "bioio-czi==2.8.0",
-            "bioio-imageio==1.3.0",
-            "bioio-tifffile==1.3.0",
-            "bioio-tiff-glob==1.2.0",
-        ]
-    }
+from ._axes import (
+    normalize_axis_order,
+    remaining_axis_order,
+    validate_nonnegative_index,
+    validate_unbound_axis_order,
 )
+from ._raster import is_ome_tiff_path, is_ome_zarr_path, is_tiff_path
+from .environments import bioio_env
+from .writers import write_ome_zarr
 
 
 class BioIOConvertImage(ProcessingTool):
-    """Convert image file formats using bioio.
+    """Convert broad microscopy formats through BioIO reader and writer plugins."""
 
-    Supports reading CZI, DV, PNG, GIF, LIF, ND2, OME-TIFF, OME-ZARR,
-    SLDY, TIFF, and Bio-Formats files. The extension of the output file
-    specifies the target format.
-    """
     row_consumption = RowConsumption.MAPPED
     display_name = "BioIO Convert Image"
     documentation = (
-        "Convert broad microscopy image file formats using bioio. The output format is "
-        "determined by the output file extension."
+        "Convert plugin-backed microscopy formats with explicit output axes and "
+        "axis-aware scene, channel, Z, and time selection."
     )
     category = Category.CONVERSION
     tags = ["format conversion", "bioio"]
@@ -54,125 +43,94 @@ class BioIOConvertImage(ProcessingTool):
         input_image: Annotated[
             Path,
             ImageSpec(),
-            GUIMeta(
-                display_name="Input image",
-                description="Source image file to convert.",
-                connectable=Connectable.BY_DEFAULT,
-            )
+            GUIMeta(display_name="Input image", connectable=Connectable.BY_DEFAULT),
         ]
-        dim_order: Annotated[str, GUIMeta(
-            display_name="Dimension order",
-            description="Target dimension order used when reading the image.",
-        )] = "TCZYX"
-        scene: Annotated[int | None, GUIMeta(
-            display_name="Scene",
-            description="Optional scene index for multi-scene files. Leave empty to keep the default scene.",
-            min=0, step=1,
-        )] = None
-        channel: Annotated[int | None, GUIMeta(
-            display_name="Channel",
-            description="Optional channel index to select (0-based). Leave empty to keep all channels.",
-            min=0, step=1,
-        )] = None
-        z: Annotated[int | None, GUIMeta(
-            display_name="Z slice",
-            description="Optional Z-slice index to select (0-based). Leave empty to keep all Z slices.",
-            min=0, step=1,
-        )] = None
-        timepoint: Annotated[int | None, GUIMeta(
-            display_name="Timepoint",
-            description="Optional timepoint index to select (0-based). Leave empty to keep all timepoints.",
-            min=0, step=1,
-        )] = None
+        dim_order: Annotated[
+            str,
+            GUIMeta(
+                display_name="Dimension order",
+                description="Requested output axes before explicitly selected dimensions are removed.",
+            ),
+        ] = "TCZYX"
+        scene: Annotated[int | None, GUIMeta(display_name="Scene", min=0, step=1)] = None
+        channel: Annotated[int | None, GUIMeta(display_name="Channel", min=0, step=1)] = None
+        z: Annotated[int | None, GUIMeta(display_name="Z slice", min=0, step=1)] = None
+        timepoint: Annotated[int | None, GUIMeta(display_name="Timepoint", min=0, step=1)] = None
 
     class Outputs(IOModel):
         output_image: Annotated[
             Path,
             ImageSpec(),
-            GUIMeta(
-                display_name="Output image",
-                description="Converted image. The file extension controls the output format (e.g. .ome.tiff, .ome.zarr, .tif, .png).",
-            )
+            GUIMeta(display_name="Output image"),
         ] = Template("{input_image.stem}.ome.tiff")
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        from bioio import BioImage                          #type: ignore
-        from bioio_ome_tiff.writers import OmeTiffWriter    #type: ignore
-        from bioio_ome_zarr.writers import OMEZarrWriter    #type: ignore
-        from bioio_imageio.writers import TwoDWriter        #type: ignore
-        import numpy as np
-        import tifffile
+        from bioio import BioImage  # type: ignore
 
         input_path = Path(arguments.input_image)
         output_path = Path(arguments.output_image)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        print(f"Converting {input_path.name}...")
+        requested_order = validate_unbound_axis_order(arguments.dim_order)
         image = BioImage(input_path)
-
         if arguments.scene is not None:
+            _validate_scene(image, arguments.scene)
             image.set_scene(arguments.scene)
 
-        # Show dimension sizes
-        print(f"Image: {input_path.name}")
-        print(f"  Dimensions: {image.dims}")
-        print(f"  Shape: {image.shape}")
-        print(f"  Dtype: {image.dtype}")
-
-        dim_kwargs: dict[str, int] = {}
-        if arguments.channel is not None:
-            dim_kwargs["C"] = arguments.channel
-        if arguments.z is not None:
-            dim_kwargs["Z"] = arguments.z
-        if arguments.timepoint is not None:
-            dim_kwargs["T"] = arguments.timepoint
-
-        # Use user-specified dim_order for reading
-        dim_order = arguments.dim_order
-        if dim_kwargs:
-            data = image.get_image_data(dim_order, **dim_kwargs)
-        else:
-            data = image.get_image_data(dim_order)
-
-        # Squeeze singleton leading dimensions (T, Z) so downstream tools
-        # see CYX / YX shapes rather than TCZYX with size-1 axes.
-        while data.ndim > 2 and data.shape[0] == 1:
-            data = data[0]
-            dim_order = dim_order[1:]
-
-        print(f"  Output shape ({dim_order}): {data.shape}")
-
-        suffixes = "".join(output_path.suffixes).lower()
-
-        if suffixes.endswith(".ome.tiff") or suffixes.endswith(".ome.tif"):
-            OmeTiffWriter.save(data, str(output_path), dim_order=dim_order)
-        elif suffixes.endswith(".ome.zarr"):
-            axes_map = {
-                "T": ("t", "time"), "C": ("c", "channel"), "Z": ("z", "space"),
-                "Y": ("y", "space"), "X": ("x", "space"), "S": ("s", "channel"),
-            }
-            axes_names = [axes_map[c][0] for c in dim_order]
-            axes_types = [axes_map[c][1] for c in dim_order]
-            writer = OMEZarrWriter(
-                store=str(output_path),
-                level_shapes=data.shape,
-                dtype=data.dtype,
-                axes_names=axes_names,
-                axes_types=axes_types,
-            )
-            writer.write_full_volume(data)
-        elif suffixes.endswith(".tiff") or suffixes.endswith(".tif"):
-            tifffile.imwrite(str(output_path), data)
-        else:
-            img_2d = np.squeeze(data)
-            if img_2d.ndim > 3:
-                raise ValueError(
-                    f"Cannot save {img_2d.ndim}D data to {output_path.suffix}. "
-                    f"Use dimension selection (channel, z, timepoint) to reduce."
-                )
-            if img_2d.ndim == 3 and img_2d.shape[0] in (1, 3, 4):
-                TwoDWriter.save(img_2d, str(output_path), "SYX")
-            else:
-                TwoDWriter.save(img_2d, str(output_path))
-
+        selections = {
+            "C": arguments.channel,
+            "Z": arguments.z,
+            "T": arguments.timepoint,
+        }
+        selected_axes = [axis for axis, index in selections.items() if index is not None]
+        output_order = remaining_axis_order(requested_order, selected_axes)
+        dim_kwargs = {
+            axis: _validate_bioio_index(image, axis, index)
+            for axis, index in selections.items()
+            if index is not None
+        }
+        data = image.get_image_data(output_order, **dim_kwargs)
+        output_order = normalize_axis_order(output_order, tuple(data.shape))
+        _write_bioio_output(data, output_path, output_order)
         return self.Outputs(output_image=output_path)
+
+
+def _validate_scene(image: Any, scene: int) -> None:
+    validate_nonnegative_index("Scene", scene)
+    scenes = getattr(image, "scenes", None)
+    if scenes is not None and scene >= len(scenes):
+        raise IndexError(f"Scene index {scene} is out of range for {len(scenes)} scenes.")
+
+
+def _validate_bioio_index(image: Any, axis: str, index: int) -> int:
+    validate_nonnegative_index(axis, index)
+    size = getattr(getattr(image, "dims", None), axis, None)
+    if isinstance(size, int) and index >= size:
+        raise IndexError(f"{axis} index {index} is out of range for axis size {size}.")
+    return index
+
+
+def _write_bioio_output(data: Any, output_path: Path, axes: str) -> None:
+    from bioio_imageio.writers import TwoDWriter  # type: ignore
+    from bioio_ome_tiff.writers import OmeTiffWriter  # type: ignore
+    import numpy as np
+    import tifffile
+
+    array = np.asarray(data)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if is_ome_tiff_path(output_path):
+        OmeTiffWriter.save(array, str(output_path), dim_order=axes)
+    elif is_ome_zarr_path(output_path):
+        write_ome_zarr(array, output_path, axes, verify=True)
+    elif is_tiff_path(output_path):
+        kwargs: dict[str, Any] = {}
+        if axes.endswith("S"):
+            kwargs["photometric"] = "rgb"
+        elif array.ndim >= 3:
+            kwargs["photometric"] = "minisblack"
+        tifffile.imwrite(output_path, array, **kwargs)
+    elif axes in {"YX", "YXS"}:
+        TwoDWriter.save(array, str(output_path), dim_order=axes)
+    else:
+        raise ValueError(
+            f"Cannot write axes {axes!r} to ordinary 2D format {output_path.suffix!r}; "
+            "select remaining T, C, and Z dimensions or choose an OME output."
+        )

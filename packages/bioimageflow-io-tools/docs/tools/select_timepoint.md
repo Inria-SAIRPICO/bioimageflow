@@ -45,5 +45,5 @@ axes, invalid layouts, or out-of-range indexes fail before producing output.
 
 ## Failure Modes
 
-Layout mismatches and missing `T` axes raise `ValueError`. Out-of-range indexes
-raise the underlying NumPy indexing error.
+Layout mismatches and missing `T` axes raise `ValueError`.
+Negative and out-of-range indexes raise an explicit `IndexError` before slicing.

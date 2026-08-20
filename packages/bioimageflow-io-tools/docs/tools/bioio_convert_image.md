@@ -4,11 +4,11 @@
 It can read broad plugin-backed formats such as CZI, OME-Zarr, OME-TIFF, TIFF, PNG, and similar sources, then write an output format selected by the output suffix.
 
 Use `BioIOConvertImage` when the input requires bioio reader plugins or broad microscopy format coverage.
-Use `ConvertImageFormat` for lightweight workflow-local conversion through imageio, tifffile OME-TIFF, or the package's minimal OME-Zarr writer.
+Use `ConvertImageFormat` for lightweight workflow-local conversion between ordinary image formats.
 
 Inputs are `input_image`, `dim_order`, optional `scene`, optional `channel`, optional `z`, and optional `timepoint`.
 Output is `output_image`, whose extension controls the writer.
-The tool prints source dimensions and squeezes singleton leading dimensions after optional selection.
+Selected axes are removed explicitly from the requested output order; singleton dimensions that were not selected are preserved.
 
 ```python
 from bioimageflow_io_tools import BioIOConvertImage
@@ -29,8 +29,8 @@ BioImageFlow core APIs, bioio, bioio OME-TIFF and OME-Zarr writers, bioio CZI/Im
 
 ## Assumptions
 
-The requested bioio reader and writer plugins are installed and the selected dimension order matches the source image.
+The requested BioIO reader and writer plugins are installed and the selected dimension order matches the desired output.
 
 ## Failure Modes
 
-Missing plugins, invalid scene/channel/Z/T indexes, unsupported extensions, or writer errors stop execution.
+Missing plugins, invalid scene/channel/Z/T indexes, incompatible output axes, unsupported extensions, or writer errors stop execution.

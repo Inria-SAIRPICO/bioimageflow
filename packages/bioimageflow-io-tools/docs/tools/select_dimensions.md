@@ -47,6 +47,6 @@ their original order.
 
 ## Failure Modes
 
-Layout length mismatches raise `ValueError`. Invalid indexes raise indexing
-errors. Incorrect but dimensionally valid layouts can silently select the wrong
-data.
+Unknown, duplicate, missing, or mismatched axes raise `ValueError`.
+Negative and out-of-range indexes raise an explicit `IndexError` before slicing.
+Incorrect but structurally valid layouts can still select the wrong biological data.
