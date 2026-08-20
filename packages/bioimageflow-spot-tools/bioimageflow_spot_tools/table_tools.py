@@ -18,6 +18,14 @@ from bioimageflow_core import (
     Template,
 )
 
+from .validation import (
+    finite_float,
+    integral_value,
+    pixel_coordinate,
+    planar_array,
+    positive_uint32_id,
+)
+
 if TYPE_CHECKING:
     from bioimageflow import DataFrameTool as DataFrameTool
     from bioimageflow import Passthrough as Passthrough
@@ -26,6 +34,7 @@ else:
         from bioimageflow import DataFrameTool as DataFrameTool
         from bioimageflow import Passthrough as Passthrough
     except ModuleNotFoundError:
+
         class DataFrameTool:  # type: ignore[no-redef]
             """Unavailable outside the orchestrator environment."""
 
@@ -38,101 +47,76 @@ else:
             """Fallback schema base for worker-only imports."""
 
 
-def _float(row: dict[str, Any], column: str, default: float | None = None) -> float:
+def _row_float(row: dict[str, Any], column: str, default: float | None = None) -> float:
     value = row.get(column, "")
     if value in {"", None}:
         if default is None:
             raise ValueError(f"Spot table row is missing required column {column!r}.")
         return default
-    return float(value)
-
-
-def _int_id(row: dict[str, Any], column: str, default: int | None = None) -> int:
-    value = row.get(column, "")
-    if value in {"", None}:
-        if default is None:
-            raise ValueError(f"Spot table row is missing required column {column!r}.")
-        return default
-    return int(float(value))
-
-
-def _positive_uint32_id(row: dict[str, Any], column: str, default: int | None = None) -> int:
-    import numpy as np
-
-    raw_value = row.get(column, "")
-    if raw_value in {"", None}:
-        if default is None:
-            raise ValueError(f"Spot table row is missing required column {column!r}.")
-        raw_value = default
-    numeric_value = float(raw_value)
-    if not np.isfinite(numeric_value) or not numeric_value.is_integer():
-        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
-    value = int(numeric_value)
-    if value <= 0:
-        raise ValueError(f"{column} must be a positive integer; 0 is reserved for background.")
-    if value > np.iinfo(np.uint32).max:
-        raise ValueError(f"{column} must be <= {np.iinfo(np.uint32).max}.")
-    return value
-
-
-def _argument(arguments: Arguments, name: str, default: Any) -> Any:
-    return getattr(arguments, name, default)
+    return finite_float(value, column)
 
 
 def _parse_shape(shape: str) -> tuple[int, int]:
-    parts = [int(part.strip()) for part in str(shape).replace("x", ",").split(",")]
-    if len(parts) != 2 or min(parts) <= 0:
-        raise ValueError("image_shape must be two positive integers, for example '128,128'.")
+    raw_parts = str(shape).replace("x", ",").split(",")
+    if len(raw_parts) != 2:
+        raise ValueError(
+            "image_shape must be two positive integers, for example '128,128'."
+        )
+    try:
+        parts = [
+            integral_value(part.strip(), "image_shape", minimum=1) for part in raw_parts
+        ]
+    except ValueError as error:
+        raise ValueError(
+            "image_shape must be two positive integers, for example '128,128'."
+        ) from error
     return parts[0], parts[1]
 
 
 def _shape_from_arguments(arguments: Arguments) -> tuple[int, int]:
     import imageio.v3 as iio
 
-    reference_image = _argument(arguments, "reference_image", None)
+    reference_image = getattr(arguments, "reference_image", None)
     if reference_image is not None:
-        image = iio.imread(reference_image)
-        return int(image.shape[-2]), int(image.shape[-1])
-    return _parse_shape(_argument(arguments, "image_shape", "256,256"))
-
-
-def _spot_coordinate(
-    row: dict[str, Any],
-    *,
-    shape: tuple[int, int] | None = None,
-) -> tuple[float, float]:
-    y = _float(row, "y")
-    x = _float(row, "x")
-    if shape is not None:
-        iy = int(round(y))
-        ix = int(round(x))
-        if iy < 0 or iy >= shape[0] or ix < 0 or ix >= shape[1]:
-            raise ValueError(
-                f"Spot coordinate ({y}, {x}) is outside image bounds {shape}."
-            )
-    return y, x
+        image = planar_array(iio.imread(reference_image), "reference_image")
+        return int(image.shape[0]), int(image.shape[1])
+    return _parse_shape(getattr(arguments, "image_shape", "256,256"))
 
 
 def _has_spot_coordinate(arguments: Arguments) -> bool:
-    return _argument(arguments, "y", None) is not None or _argument(arguments, "x", None) is not None
+    return (
+        getattr(arguments, "y", None) is not None
+        or getattr(arguments, "x", None) is not None
+    )
 
 
-def _draw_disk(image: Any, y: float, x: float, radius: int, value: int) -> None:
-    radius = max(0, int(radius))
-    cy = int(round(y))
-    cx = int(round(x))
-    for yy in range(max(0, cy - radius), min(image.shape[0], cy + radius + 1)):
-        for xx in range(max(0, cx - radius), min(image.shape[1], cx + radius + 1)):
-            if (yy - cy) ** 2 + (xx - cx) ** 2 <= radius**2:
-                image[yy, xx] = value
+def _draw_disk(image: Any, y: int, x: int, radius: int, value: int) -> None:
+    """Draw a clipped disk including pixels exactly on its radius."""
+    import numpy as np
+
+    y0 = max(0, y - radius)
+    y1 = min(image.shape[0], y + radius + 1)
+    x0 = max(0, x - radius)
+    x1 = min(image.shape[1], x + radius + 1)
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    region = image[y0:y1, x0:x1]
+    region[(yy - y) ** 2 + (xx - x) ** 2 <= radius**2] = value
 
 
-def _blank_rendered_spots_output(tool: "RenderSpots", arguments: Arguments) -> list[Any]:
+def _rendered_label_count(image: Any) -> int:
+    import numpy as np
+
+    return int(np.count_nonzero(np.unique(image)))
+
+
+def _blank_rendered_spots_output(
+    tool: "RenderSpots", arguments: Arguments
+) -> list[Any]:
     import imageio.v3 as iio
     import numpy as np
 
     shape = _shape_from_arguments(arguments)
-    label_mode = bool(_argument(arguments, "label_mode", True))
+    label_mode = bool(getattr(arguments, "label_mode", True))
     image = np.zeros(shape, dtype=np.uint32 if label_mode else np.uint8)
     output = Path(arguments.output_image)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +128,9 @@ class FilterSpots(DataFrameTool):
     """Filter spot tables by numeric columns and optional binary masks."""
 
     display_name = "Filter Spots"
-    documentation = "Filter spot coordinate tables by intensity, score, radius, and mask."
+    documentation = (
+        "Filter spot coordinate tables by intensity, score, radius, and mask."
+    )
     category = Category.SPOT_DETECTION
     tags = ["spots", "filter", "puncta"]
 
@@ -173,24 +159,30 @@ class FilterSpots(DataFrameTool):
         import imageio.v3 as iio
         import pandas as pd
 
-        mask_image = _argument(arguments, "mask_image", None)
-        mask = iio.imread(mask_image) if mask_image is not None else None
+        import numpy as np
+
+        mask_image = getattr(arguments, "mask_image", None)
+        mask = (
+            planar_array(iio.imread(mask_image), "mask_image")
+            if mask_image is not None
+            else None
+        )
         keep = pd.Series(True, index=df.index)
         checks = [
             (
                 "intensity",
-                _argument(arguments, "min_intensity", None),
-                _argument(arguments, "max_intensity", None),
+                getattr(arguments, "min_intensity", None),
+                getattr(arguments, "max_intensity", None),
             ),
             (
                 "score",
-                _argument(arguments, "min_score", None),
-                _argument(arguments, "max_score", None),
+                getattr(arguments, "min_score", None),
+                getattr(arguments, "max_score", None),
             ),
             (
                 "radius",
-                _argument(arguments, "min_radius", None),
-                _argument(arguments, "max_radius", None),
+                getattr(arguments, "min_radius", None),
+                getattr(arguments, "max_radius", None),
             ),
         ]
         for column, minimum, maximum in checks:
@@ -200,11 +192,28 @@ class FilterSpots(DataFrameTool):
                 raise ValueError(
                     f"FilterSpots input table is missing required column {column!r}."
                 )
-            values = cast(pd.Series, pd.to_numeric(df[column]))
+            try:
+                values = cast(pd.Series, pd.to_numeric(df[column], errors="raise"))
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"FilterSpots column {column!r} must be numeric."
+                ) from error
+            if not np.all(np.isfinite(values.to_numpy(dtype=float))):
+                raise ValueError(
+                    f"FilterSpots column {column!r} must contain finite values."
+                )
+            lower = (
+                finite_float(minimum, f"min_{column}") if minimum is not None else None
+            )
+            upper = (
+                finite_float(maximum, f"max_{column}") if maximum is not None else None
+            )
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError(f"min_{column} must be <= max_{column}.")
             if minimum is not None:
-                keep &= values >= float(minimum)
+                keep &= values >= lower
             if maximum is not None:
-                keep &= values <= float(maximum)
+                keep &= values <= upper
 
         if mask is not None:
             missing = {"y", "x"} - set(df.columns)
@@ -216,9 +225,10 @@ class FilterSpots(DataFrameTool):
                 )
             mask_keep = []
             for _, row in df.iterrows():
-                y_float, x_float = _spot_coordinate(row.to_dict(), shape=mask.shape[:2])
-                y = int(round(y_float))
-                x = int(round(x_float))
+                row_dict = row.to_dict()
+                _, _, y, x = pixel_coordinate(
+                    row_dict.get("y"), row_dict.get("x"), mask.shape
+                )
                 mask_keep.append(mask[y, x] != 0)
             keep &= pd.Series(mask_keep, index=df.index)
 
@@ -277,7 +287,8 @@ class RenderSpots(ProcessingTool):
             return []
         arguments = arguments_list[0]
         shape = _shape_from_arguments(arguments)
-        label_mode = bool(_argument(arguments, "label_mode", True))
+        label_mode = bool(getattr(arguments, "label_mode", True))
+        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
         image = np.zeros(shape, dtype=np.uint32 if label_mode else np.uint8)
         rows = [
             row_arguments
@@ -290,49 +301,24 @@ class RenderSpots(ProcessingTool):
                 for arguments in arguments_list
             ]
         for index, row_arguments in enumerate(rows, start=1):
-            row = {
-                "spot_id": _argument(row_arguments, "spot_id", index),
-                "y": _argument(row_arguments, "y", None),
-                "x": _argument(row_arguments, "x", None),
-            }
-            value = _positive_uint32_id(row, "spot_id", index) if label_mode else 1
-            y, x = _spot_coordinate(row, shape=shape)
-            _draw_disk(
-                image,
-                y,
-                x,
-                _argument(arguments, "radius", 0),
-                value,
+            spot_id = getattr(row_arguments, "spot_id", None)
+            if spot_id is None:
+                spot_id = index
+            value = positive_uint32_id(spot_id) if label_mode else 1
+            _, _, y, x = pixel_coordinate(
+                getattr(row_arguments, "y", None),
+                getattr(row_arguments, "x", None),
+                shape,
             )
+            _draw_disk(image, y, x, radius, value)
         output = Path(arguments.output_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, image)
-        return [[self.Outputs(output_image=output, spot_count=len(rows))]]
-
-
-def _components(mask: Any) -> list[list[tuple[int, int]]]:
-    import numpy as np
-
-    seen = np.zeros(mask.shape, dtype=bool)
-    components: list[list[tuple[int, int]]] = []
-    for y, x in np.argwhere(mask):
-        y = int(y)
-        x = int(x)
-        if seen[y, x]:
-            continue
-        stack = [(y, x)]
-        seen[y, x] = True
-        component = []
-        while stack:
-            cy, cx = stack.pop()
-            component.append((cy, cx))
-            for ny in range(max(0, cy - 1), min(mask.shape[0], cy + 2)):
-                for nx in range(max(0, cx - 1), min(mask.shape[1], cx + 2)):
-                    if mask[ny, nx] and not seen[ny, nx]:
-                        seen[ny, nx] = True
-                        stack.append((ny, nx))
-        components.append(component)
-    return components
+        spot_count = _rendered_label_count(image) if label_mode else len(rows)
+        return [
+            [self.Outputs(output_image=output, spot_count=spot_count)]
+            for _ in arguments_list
+        ]
 
 
 class MaskToLabels(ProcessingTool):
@@ -348,8 +334,8 @@ class MaskToLabels(ProcessingTool):
     class Inputs(IOModel):
         mask_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}),
-            GUIMeta("Spot mask"),
+            ImageSpec(semantics={Semantic.BINARY}, layouts={Layout.PLANAR}),
+            GUIMeta("Spot mask", "A 2D mask where every nonzero pixel is foreground."),
         ]
 
     class Outputs(IOModel):
@@ -366,20 +352,27 @@ class MaskToLabels(ProcessingTool):
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
+        from skimage.measure import label
+
+        mask = planar_array(iio.imread(arguments.mask_image), "mask_image") != 0
+        labels, label_count = cast(
+            tuple[Any, int],
+            label(
+                mask,
+                background=0,
+                connectivity=2,
+                return_num=True,
+            ),
+        )
         import numpy as np
 
-        mask = iio.imread(arguments.mask_image) > 0
-        labels = np.zeros(mask.shape, dtype=np.uint32)
-        components = _components(mask)
-        if len(components) > np.iinfo(np.uint32).max:
+        if label_count > np.iinfo(np.uint32).max:
             raise ValueError("MaskToLabels produced more labels than uint32 can store.")
-        for label, component in enumerate(components, start=1):
-            for y, x in component:
-                labels[y, x] = label
+        labels = labels.astype(np.uint32, copy=False)
         output = Path(arguments.label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
-        return self.Outputs(label_image=output, label_count=len(components))
+        return self.Outputs(label_image=output, label_count=int(label_count))
 
 
 class SpotsToLabels(ProcessingTool):
@@ -394,27 +387,37 @@ class SpotsToLabels(ProcessingTool):
     run_empty_batch = True
 
     class Inputs(IOModel):
-        spot_id: Annotated[int | None, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)] = None
-        y: Annotated[float | None, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)] = None
-        x: Annotated[float | None, GUIMeta("X", connectable=Connectable.BY_DEFAULT)] = None
+        spot_id: Annotated[
+            int | None, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)
+        ] = None
+        y: Annotated[float | None, GUIMeta("Y", connectable=Connectable.BY_DEFAULT)] = (
+            None
+        )
+        x: Annotated[float | None, GUIMeta("X", connectable=Connectable.BY_DEFAULT)] = (
+            None
+        )
         image_shape: str = "256,256"
         radius: int = 0
 
     class Outputs(IOModel):
         label_image: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}),
+            ImageSpec(
+                semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}
+            ),
             GUIMeta("Spot labels"),
         ] = Template("spots_labels.tif")
         label_count: Annotated[int, GUIMeta("Label count")]
 
-    def _blank_coordinate_outputs(self, arguments_list: list[Arguments]) -> list[list[Any]]:
+    def _blank_coordinate_outputs(
+        self, arguments_list: list[Arguments]
+    ) -> list[list[Any]]:
         import imageio.v3 as iio
         import numpy as np
 
         outputs = []
         for arguments in arguments_list:
-            shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
+            shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
             labels = np.zeros(shape, dtype=np.uint32)
             output = Path(arguments.label_image)
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -435,41 +438,45 @@ class SpotsToLabels(ProcessingTool):
             return []
         arguments = arguments_list[0]
         rows = [
-            {
-                "spot_id": _argument(row_arguments, "spot_id", index),
-                "y": _argument(row_arguments, "y", None),
-                "x": _argument(row_arguments, "x", None),
-            }
+            row_arguments
             for index, row_arguments in enumerate(arguments_list, start=1)
             if _has_spot_coordinate(row_arguments)
         ]
         if not rows:
             return self._blank_coordinate_outputs(arguments_list)
-        shape = _parse_shape(_argument(arguments, "image_shape", "256,256"))
+        shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
+        radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
         labels = np.zeros(shape, dtype=np.uint32)
-        for index, row in enumerate(rows, start=1):
-            value = _positive_uint32_id(row, "spot_id", index)
-            y, x = _spot_coordinate(row, shape=shape)
-            _draw_disk(
-                labels,
-                y,
-                x,
-                _argument(arguments, "radius", 0),
-                value,
+        for index, row_arguments in enumerate(rows, start=1):
+            spot_id = getattr(row_arguments, "spot_id", None)
+            if spot_id is None:
+                spot_id = index
+            value = positive_uint32_id(spot_id)
+            _, _, y, x = pixel_coordinate(
+                getattr(row_arguments, "y", None),
+                getattr(row_arguments, "x", None),
+                shape,
             )
-        label_count = len(rows)
+            _draw_disk(labels, y, x, radius, value)
+        label_count = _rendered_label_count(labels)
 
         output = Path(arguments.label_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
-        return [[self.Outputs(label_image=output, label_count=label_count)]]
+        return [
+            [self.Outputs(label_image=output, label_count=label_count)]
+            for _ in arguments_list
+        ]
 
 
 class SpotColocalization(DataFrameTool):
-    """Match two spot tables with a nearest-neighbor distance threshold."""
+    """Compute a global one-to-one matching between two spot tables."""
 
     display_name = "Spot Colocalization"
-    documentation = "Match spots between channels within a distance threshold."
+    documentation = (
+        "Globally match spots between channels, maximizing the number of pairs "
+        "within a distance threshold before minimizing their total distance."
+    )
     category = Category.COLOCALIZATION
     tags = ["spots", "colocalization", "matching"]
 
@@ -495,7 +502,6 @@ class SpotColocalization(DataFrameTool):
         dfs: list[Any],
         arguments: Arguments,
     ) -> Any:
-        import numpy as np
         import pandas as pd
 
         if len(dfs) != 2:
@@ -505,8 +511,12 @@ class SpotColocalization(DataFrameTool):
             )
 
         reference_df, query_df = (df.copy() for df in dfs)
-        group_by = _argument(arguments, "group_by", None)
-        max_distance = float(_argument(arguments, "max_distance", 2.0))
+        group_by = getattr(arguments, "group_by", None)
+        max_distance = finite_float(
+            getattr(arguments, "max_distance", 2.0), "max_distance"
+        )
+        if max_distance < 0:
+            raise ValueError("max_distance must be >= 0.")
 
         self._validate_spot_table(reference_df, "reference", group_by)
         self._validate_spot_table(query_df, "query", group_by)
@@ -514,7 +524,11 @@ class SpotColocalization(DataFrameTool):
         reference_groups = self._group_spots(reference_df, group_by)
         query_groups = self._group_spots(query_df, group_by)
         shared_groups = sorted(set(reference_groups) & set(query_groups))
-        if not shared_groups and (len(reference_df) > 0 or len(query_df) > 0):
+        if (
+            not shared_groups
+            and len(reference_df) > 0
+            and len(query_df) > 0
+        ):
             raise ValueError(
                 "SpotColocalization found no shared groups between reference and "
                 "query tables. Provide group_by when the tables do not share "
@@ -526,33 +540,20 @@ class SpotColocalization(DataFrameTool):
         for group in shared_groups:
             reference_rows = reference_groups[group]
             query_rows = query_groups[group]
-            used_query: set[int] = set()
             group_matches: list[dict[str, Any]] = []
-            for reference_index, ref in enumerate(reference_rows, start=1):
-                best_index = None
-                best_distance = float("inf")
-                for query_index, candidate in enumerate(query_rows, start=1):
-                    if query_index in used_query:
-                        continue
-                    distance = float(
-                        np.hypot(
-                            _float(ref, "y") - _float(candidate, "y"),
-                            _float(ref, "x") - _float(candidate, "x"),
-                        )
-                    )
-                    if distance <= max_distance and distance < best_distance:
-                        best_index = query_index
-                        best_distance = distance
-                if best_index is None:
-                    continue
-                used_query.add(best_index)
-                query_row = query_rows[best_index - 1]
+            for reference_index, query_index, distance in self._match_group(
+                reference_rows,
+                query_rows,
+                max_distance,
+            ):
+                ref = reference_rows[reference_index]
+                query_row = query_rows[query_index]
                 group_matches.append(
                     {
                         "group": group,
-                        "reference_spot_id": _int_id(ref, "spot_id", reference_index),
-                        "query_spot_id": _int_id(query_row, "spot_id", best_index),
-                        "distance": best_distance,
+                        "reference_spot_id": positive_uint32_id(ref["spot_id"]),
+                        "query_spot_id": positive_uint32_id(query_row["spot_id"]),
+                        "distance": distance,
                     }
                 )
 
@@ -577,6 +578,8 @@ class SpotColocalization(DataFrameTool):
 
     @staticmethod
     def _validate_spot_table(df: Any, role: str, group_by: str | None) -> None:
+        import pandas as pd
+
         required = {"spot_id", "y", "x"}
         if group_by is not None:
             required.add(group_by)
@@ -586,6 +589,15 @@ class SpotColocalization(DataFrameTool):
                 f"SpotColocalization {role} table is missing required "
                 f"column(s): {', '.join(repr(column) for column in missing)}."
             )
+        for row_number, (_, row) in enumerate(df.iterrows(), start=1):
+            positive_uint32_id(row["spot_id"], f"{role} spot_id at row {row_number}")
+            finite_float(row["y"], f"{role} y at row {row_number}")
+            finite_float(row["x"], f"{role} x at row {row_number}")
+            if group_by is not None and pd.isna(row[group_by]):
+                raise ValueError(
+                    f"SpotColocalization {role} table column {group_by!r} "
+                    "must not contain missing groups."
+                )
 
     @staticmethod
     def _group_spots(df: Any, group_by: str | None) -> dict[str, list[dict[str, Any]]]:
@@ -596,7 +608,76 @@ class SpotColocalization(DataFrameTool):
             else:
                 group = str(row[group_by])
             groups.setdefault(group, []).append(row.to_dict())
+        for group, rows in groups.items():
+            spot_ids = [positive_uint32_id(row["spot_id"]) for row in rows]
+            if len(spot_ids) != len(set(spot_ids)):
+                raise ValueError(
+                    "SpotColocalization spot_id values must be unique within "
+                    f"group {group!r}."
+                )
         return groups
+
+    @staticmethod
+    def _match_group(
+        reference_rows: list[dict[str, Any]],
+        query_rows: list[dict[str, Any]],
+        max_distance: float,
+    ) -> list[tuple[int, int, float]]:
+        """Maximize cardinality, then minimize total Euclidean distance."""
+        import numpy as np
+        from scipy.optimize import linear_sum_assignment
+        from scipy.spatial.distance import cdist
+
+        if not reference_rows or not query_rows:
+            return []
+
+        reference = np.asarray(
+            [
+                [finite_float(row["y"], "y"), finite_float(row["x"], "x")]
+                for row in reference_rows
+            ]
+        )
+        query = np.asarray(
+            [
+                [finite_float(row["y"], "y"), finite_float(row["x"], "x")]
+                for row in query_rows
+            ]
+        )
+        distances = cdist(reference, query, metric="euclidean")
+        n_reference, n_query = distances.shape
+        maximum_pairs = min(n_reference, n_query)
+        unmatched_cost = (maximum_pairs + 1) * (max_distance + 1.0)
+        forbidden_cost = unmatched_cost * (n_reference + n_query + 1) * 4.0
+
+        costs = np.full(
+            (n_reference + n_query, n_reference + n_query),
+            forbidden_cost,
+            dtype=float,
+        )
+        costs[:n_reference, :n_query] = np.where(
+            distances <= max_distance,
+            distances,
+            forbidden_cost,
+        )
+        costs[np.arange(n_reference), n_query + np.arange(n_reference)] = unmatched_cost
+        costs[n_reference + np.arange(n_query), np.arange(n_query)] = unmatched_cost
+        costs[n_reference:, n_query:] = 0.0
+
+        row_indices, column_indices = linear_sum_assignment(costs)
+        matches = [
+            (
+                int(reference_index),
+                int(query_index),
+                float(distances[reference_index, query_index]),
+            )
+            for reference_index, query_index in zip(
+                row_indices, column_indices, strict=True
+            )
+            if reference_index < n_reference
+            and query_index < n_query
+            and distances[reference_index, query_index] <= max_distance
+        ]
+        return sorted(matches)
 
 
 class SpotQualityMetrics(DataFrameTool):
@@ -618,7 +699,9 @@ class SpotQualityMetrics(DataFrameTool):
     class Outputs(Passthrough):
         local_background: Annotated[float, GUIMeta("Local background")]
         snr: Annotated[float, GUIMeta("SNR")]
-        nearest_neighbor_distance: Annotated[float, GUIMeta("Nearest neighbor distance")]
+        nearest_neighbor_distance: Annotated[
+            float, GUIMeta("Nearest neighbor distance")
+        ]
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
     def merge_dataframes(self, dfs: list[Any], arguments: Arguments) -> Any:
@@ -631,6 +714,7 @@ class SpotQualityMetrics(DataFrameTool):
     def transform(self, df: Any, arguments: Arguments) -> Any:
         import imageio.v3 as iio
         import numpy as np
+        from scipy.spatial import KDTree
 
         missing = {"y", "x"} - set(df.columns)
         if missing:
@@ -643,42 +727,76 @@ class SpotQualityMetrics(DataFrameTool):
         result = df.copy()
         if "spot_id" not in result.columns:
             result["spot_id"] = range(1, len(result) + 1)
-        image = iio.imread(arguments.image).astype(np.float32)
-        coordinates = [
-            _spot_coordinate(row.to_dict(), shape=image.shape[:2])
-            for _, row in result.iterrows()
-        ]
+        for row_number, value in enumerate(result["spot_id"], start=1):
+            positive_uint32_id(value, f"spot_id at row {row_number}")
+
+        image = planar_array(
+            iio.imread(arguments.image).astype(np.float32),
+            "image",
+        )
+        if not np.all(np.isfinite(image)):
+            raise ValueError("image must contain only finite intensities.")
+        coordinates = np.asarray(
+            [
+                pixel_coordinate(row["y"], row["x"], image.shape)
+                for _, row in result.iterrows()
+            ],
+            dtype=float,
+        )
+        continuous_coordinates = (
+            coordinates[:, :2] if len(coordinates) else np.empty((0, 2))
+        )
+        pixel_coordinates = (
+            coordinates[:, 2:].astype(int)
+            if len(coordinates)
+            else np.empty((0, 2), dtype=int)
+        )
+
+        nearest_distances = np.zeros(len(result), dtype=float)
+        if len(result) > 1:
+            nearest_distances = KDTree(continuous_coordinates).query(
+                continuous_coordinates,
+                k=2,
+            )[0][:, 1]
+
         metrics = []
-        radius = max(1, int(_argument(arguments, "radius", 2)))
+        radius = integral_value(getattr(arguments, "radius", 2), "radius", minimum=1)
+        outer_radius = radius * 2
+        spot_footprints = np.zeros(image.shape, dtype=bool)
+        for y, x in pixel_coordinates:
+            _draw_disk(spot_footprints, int(y), int(x), radius, True)
+
         for index, (_, row) in enumerate(result.iterrows(), start=1):
             row_dict = row.to_dict()
-            y_float, x_float = coordinates[index - 1]
-            y = int(round(y_float))
-            x = int(round(x_float))
-            y0 = max(0, y - radius)
-            y1 = min(image.shape[0], y + radius + 1)
-            x0 = max(0, x - radius)
-            x1 = min(image.shape[1], x + radius + 1)
-            window = image[y0:y1, x0:x1]
-            background = float(np.median(window)) if window.size else 0.0
-            noise = float(np.std(window)) if window.size else 0.0
-            intensity = _float(row_dict, "intensity", float(image[y, x]))
-            distances = [
-                float(np.hypot(y - other_y, x - other_x))
-                for other_y, other_x in coordinates
-                if (other_y, other_x) != coordinates[index - 1]
-            ]
-            nearest = min(distances) if distances else 0.0
+            y, x = (int(value) for value in pixel_coordinates[index - 1])
+            y0 = max(0, y - outer_radius)
+            y1 = min(image.shape[0], y + outer_radius + 1)
+            x0 = max(0, x - outer_radius)
+            x1 = min(image.shape[1], x + outer_radius + 1)
+            yy, xx = np.ogrid[y0:y1, x0:x1]
+            distance_squared = (yy - y) ** 2 + (xx - x) ** 2
+            annulus = (distance_squared > radius**2) & (
+                distance_squared <= outer_radius**2
+            )
+            annulus &= ~spot_footprints[y0:y1, x0:x1]
+            samples = image[y0:y1, x0:x1][annulus]
+            if not samples.size:
+                raise ValueError(
+                    f"Spot at ({y}, {x}) has no background pixels in its clipped "
+                    f"radius-{radius}-to-{outer_radius} annulus."
+                )
+            background = float(np.median(samples))
+            noise = float(np.std(samples))
+            intensity = _row_float(row_dict, "intensity", float(image[y, x]))
             metrics.append(
                 {
                     "local_background": background,
-                    "snr": (intensity - background) / (noise if noise > 0 else 1.0),
-                    "nearest_neighbor_distance": nearest,
+                    "snr": (intensity - background)
+                    / max(noise, float(np.finfo(np.float32).eps)),
+                    "nearest_neighbor_distance": nearest_distances[index - 1],
                 }
             )
-        result["local_background"] = [
-            metric["local_background"] for metric in metrics
-        ]
+        result["local_background"] = [metric["local_background"] for metric in metrics]
         result["snr"] = [metric["snr"] for metric in metrics]
         result["nearest_neighbor_distance"] = [
             metric["nearest_neighbor_distance"] for metric in metrics

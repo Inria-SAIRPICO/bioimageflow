@@ -7,7 +7,7 @@ Outputs are `label_image` and `label_count`.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, NumPy image allocation, imageio, and package-local connected-component helpers.
+BioImageFlow core APIs, NumPy image allocation, and imageio.
 
 ## Minimal Example
 
@@ -22,8 +22,10 @@ SpotsToLabels().process_batch([
 
 ## Expected Results
 
-The output label image contains one label per spot row.
+Every input row receives the same aggregate label-image path and count so the collective tool preserves BioImageFlow batch cardinality.
+Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows deterministically overwrite earlier rows where disks overlap.
 The label image is written as `uint32`; background is `0`, and non-zero spot IDs are preserved exactly.
+`label_count` is the number of distinct positive IDs still visible in the final image, which can be smaller than the number of input rows after complete overlap or duplicate IDs.
 When the upstream spot table is empty, coordinate mode still writes a blank `uint32` label image from `image_shape` and reports `label_count=0`.
 
 ## Failure Modes

@@ -23,7 +23,10 @@ RenderSpots().process_batch([
 ## Expected Results
 
 The output image marks each spot coordinate.
+Every input row receives the same aggregate image path and count so the collective tool preserves BioImageFlow batch cardinality.
+Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows overwrite earlier rows where disks overlap.
 With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
+In label mode, `spot_count` is the number of distinct positive labels visible in the final image.
 With `label_mode=False`, the output is a `uint8` binary mask with values `{0, 1}`.
 When the upstream spot table is empty, `RenderSpots` still writes a blank image from `image_shape` or `reference_image` and reports `spot_count=0`.
 

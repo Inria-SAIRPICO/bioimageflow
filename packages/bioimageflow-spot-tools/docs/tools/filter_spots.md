@@ -30,7 +30,8 @@ filtered = FilterSpots().transform(
 ## Expected Results
 
 Rows inside all requested thresholds pass through as dataframe rows.
+Mask sampling uses nearest-pixel rounding with exact half values rounded upward.
 
 ## Failure Modes
 
-Missing columns required by requested filters, malformed coordinates, out-of-bounds mask coordinates, unreadable masks, and invalid numeric thresholds raise errors.
+Missing columns required by requested filters, non-numeric or non-finite column values, inverted or non-finite thresholds, malformed coordinates, out-of-bounds mask coordinates, non-planar or unreadable masks raise errors.

@@ -10,6 +10,8 @@ from bioimageflow_core import (
     IOModel,
 )
 
+from .validation import finite_float, integral_value
+
 
 class SpotSummary(DataFrameTool):
     """Aggregate assigned puncta counts and intensities by label."""
@@ -48,6 +50,7 @@ class SpotSummary(DataFrameTool):
         return dfs[0].copy()
 
     def transform(self, df: Any, arguments: Arguments) -> Any:
+        import numpy as np
         import pandas as pd
 
         label_column = getattr(arguments, "label_column", "label")
@@ -65,8 +68,25 @@ class SpotSummary(DataFrameTool):
             )
 
         table = df[[label_column, intensity_column]].copy()
-        table[label_column] = pd.to_numeric(table[label_column])
-        table[intensity_column] = pd.to_numeric(table[intensity_column])
+        try:
+            table[label_column] = pd.to_numeric(table[label_column], errors="raise")
+            table[intensity_column] = pd.to_numeric(
+                table[intensity_column],
+                errors="raise",
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "SpotSummary label and intensity columns must be numeric."
+            ) from error
+        table[label_column] = [
+            integral_value(value, label_column, minimum=0)
+            for value in table[label_column]
+        ]
+        table[intensity_column] = [
+            finite_float(value, intensity_column) for value in table[intensity_column]
+        ]
+        if not np.all(np.isfinite(table[intensity_column].to_numpy(dtype=float))):
+            raise ValueError(f"SpotSummary column {intensity_column!r} must be finite.")
         table = table[table[label_column] > 0]
         grouped = table.groupby(label_column, sort=True)[intensity_column]
         result = grouped.agg(

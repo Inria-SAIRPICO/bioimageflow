@@ -23,6 +23,8 @@ from bioimageflow_core import (
     run_external_command_with_staged_output,
 )
 
+from .validation import finite_float, integral_value
+
 atlas_env = EnvironmentSpec(
     name="atlas",
     dependencies={
@@ -50,7 +52,9 @@ def _ensure_generated_blobs_file(work_dir: Path) -> Path:
             if not lock_dir.exists() and blobs_file.exists():
                 return blobs_file.resolve()
             if time.monotonic() > deadline:
-                raise TimeoutError(f"Timed out waiting for Atlas reference lock: {lock_dir}")
+                raise TimeoutError(
+                    f"Timed out waiting for Atlas reference lock: {lock_dir}"
+                )
             time.sleep(0.05)
 
     try:
@@ -75,6 +79,7 @@ class AtlasSpotDetection(ProcessingTool):
     The spot size is automatically selected and the detection threshold
     adapts to the local image dynamics. Wraps the ``atlas`` CLI tool.
     """
+
     row_consumption = RowConsumption.MAPPED
     display_name = "Atlas Spot Detection"
     documentation = (
@@ -100,26 +105,44 @@ class AtlasSpotDetection(ProcessingTool):
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
-        gaussian_std: Annotated[int | None, GUIMeta(
-            display_name="Gaussian std",
-            description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size. Leave unset to use Atlas's built-in default.",
-            min=0, max=200, step=1,
-        )] = None
-        p_value: Annotated[float | None, GUIMeta(
-            display_name="P-value",
-            description="Detection significance threshold. Lower values yield fewer, more confident detections. Leave unset to use Atlas's built-in default.",
-            min=0.0, max=1.0, step=0.000001,
-        )] = None
-        area_lim: Annotated[float | None, GUIMeta(
-            display_name="Area limit",
-            description="Remove detections smaller than this area (in pixels). Leave unset to use Atlas's built-in default.",
-            min=0.0, max=10000.0, step=0.01,
-        )] = None
-        verbose: Annotated[bool, GUIMeta(
-            display_name="Verbose",
-            description="Print detailed progress information from the Atlas CLI.",
-            connectable=Connectable.NEVER,
-        )] = False
+        gaussian_std: Annotated[
+            int | None,
+            GUIMeta(
+                display_name="Gaussian std",
+                description="Standard deviation (in pixels) of the Gaussian kernel used to approximate spot size. Leave unset to use Atlas's built-in default.",
+                min=0,
+                max=200,
+                step=1,
+            ),
+        ] = None
+        p_value: Annotated[
+            float | None,
+            GUIMeta(
+                display_name="P-value",
+                description="Detection significance threshold. Lower values yield fewer, more confident detections. Leave unset to use Atlas's built-in default.",
+                min=0.0,
+                max=1.0,
+                step=0.000001,
+            ),
+        ] = None
+        area_lim: Annotated[
+            float | None,
+            GUIMeta(
+                display_name="Area limit",
+                description="Remove detections smaller than this area (in pixels). Leave unset to use Atlas's built-in default.",
+                min=0.0,
+                max=10000.0,
+                step=0.01,
+            ),
+        ] = None
+        verbose: Annotated[
+            bool,
+            GUIMeta(
+                display_name="Verbose",
+                description="Print detailed progress information from the Atlas CLI.",
+                connectable=Connectable.NEVER,
+            ),
+        ] = False
 
     class Outputs(IOModel):
         output_image: Annotated[
@@ -141,6 +164,26 @@ class AtlasSpotDetection(ProcessingTool):
         *,
         context: ExecutionContext | None = None,
     ) -> Any:
+        gaussian_std = arguments.gaussian_std
+        if gaussian_std is not None:
+            gaussian_std = integral_value(
+                gaussian_std,
+                "gaussian_std",
+                minimum=0,
+            )
+
+        p_value = arguments.p_value
+        if p_value is not None:
+            p_value = finite_float(p_value, "p_value")
+            if not 0 <= p_value <= 1:
+                raise ValueError("p_value must be finite and between 0 and 1.")
+
+        area_lim = arguments.area_lim
+        if area_lim is not None:
+            area_lim = finite_float(area_lim, "area_lim")
+            if area_lim < 0:
+                raise ValueError("area_lim must be finite and >= 0.")
+
         input_path = Path(arguments.input_image)
         output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,7 +197,9 @@ class AtlasSpotDetection(ProcessingTool):
         else:
             work_dir = context.work_dir
             if context.row_dir is None:
-                raise ValueError("AtlasSpotDetection.process_row requires context.row_dir.")
+                raise ValueError(
+                    "AtlasSpotDetection.process_row requires context.row_dir."
+                )
             row_dir = context.row_dir
         work_dir.mkdir(parents=True, exist_ok=True)
         row_dir.mkdir(parents=True, exist_ok=True)
@@ -170,16 +215,19 @@ class AtlasSpotDetection(ProcessingTool):
 
             command = [
                 "atlas",
-                "-ref", str(blobs_file),
-                "-i", str(input_path),
-                "-o", str(output_path),
+                "-ref",
+                str(blobs_file),
+                "-i",
+                str(input_path),
+                "-o",
+                str(output_path),
             ]
-            if arguments.gaussian_std is not None:
-                command += ["-rad", str(arguments.gaussian_std)]
-            if arguments.p_value is not None:
-                command += ["-pval", str(arguments.p_value)]
-            if arguments.area_lim is not None:
-                command += ["-arealim", str(arguments.area_lim)]
+            if gaussian_std is not None:
+                command += ["-rad", str(gaussian_std)]
+            if p_value is not None:
+                command += ["-pval", str(p_value)]
+            if area_lim is not None:
+                command += ["-arealim", str(area_lim)]
             if arguments.verbose:
                 command.append("-v")
 

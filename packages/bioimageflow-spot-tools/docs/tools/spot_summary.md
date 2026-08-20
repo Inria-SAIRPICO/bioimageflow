@@ -29,4 +29,5 @@ The output dataframe contains one row per label with count and intensity summari
 
 ## Failure Modes
 
-Missing or malformed label and intensity columns fail during validation or numeric conversion.
+Labels must be non-negative integers and intensities must be finite numbers; label `0` is treated as background and omitted.
+Missing or malformed label and intensity columns raise errors.
