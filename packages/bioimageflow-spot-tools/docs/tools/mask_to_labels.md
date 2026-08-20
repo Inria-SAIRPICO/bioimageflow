@@ -7,7 +7,7 @@ Outputs are `label_image` and `label_count`.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, NumPy image allocation, imageio, and package-local connected-component helpers.
+BioImageFlow core APIs, imageio, and scikit-image connected-component labeling.
 
 ## Minimal Example
 
@@ -24,6 +24,7 @@ MaskToLabels().process_row(Arguments(
 ## Expected Results
 
 The output is a `uint32` label image with background `0` and one sequential non-zero label per connected foreground component.
+Every nonzero input pixel is foreground, original nonzero values are discarded, and diagonal contact connects pixels because labeling uses explicit 8-connectivity.
 An empty mask produces an all-zero label image and reports `label_count=0`.
 
 ## Failure Modes

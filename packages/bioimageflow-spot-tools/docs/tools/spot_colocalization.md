@@ -1,6 +1,6 @@
 # SpotColocalization
 
-`SpotColocalization` is a dataframe tool that matches spots from two upstream spot tables with a nearest-neighbor distance threshold.
+`SpotColocalization` is a dataframe tool that globally matches spots from two upstream spot tables with a Euclidean-distance threshold.
 
 Pass the reference spot table as the first positional input and the query spot table as the second positional input.
 Both tables must contain `spot_id`, `y`, and `x` columns.
@@ -13,7 +13,7 @@ No matches CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow dataframe APIs, Pandas dataframe handling, and NumPy Euclidean-distance calculations.
+BioImageFlow dataframe APIs, Pandas, and SciPy global linear assignment.
 
 ## Minimal Example
 
@@ -40,8 +40,9 @@ matches = SpotColocalization().merge_dataframes(
 
 ## Expected Results
 
+For each group, matching first maximizes the number of one-to-one pairs within `max_distance`, then minimizes total distance among maximum-cardinality matchings.
 The output dataframe contains one row per matched reference/query pair and repeats `matched_count` for each group.
 
 ## Failure Modes
 
-Missing spot columns, malformed numeric values, invalid distances, or unrelated input groups raise errors.
+Missing spot columns, non-positive/fractional/duplicate per-group spot IDs, non-finite coordinates, negative or non-finite distances, missing groups, or unrelated input groups raise errors.

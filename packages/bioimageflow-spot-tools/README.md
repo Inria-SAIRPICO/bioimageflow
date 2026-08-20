@@ -12,11 +12,12 @@ Tools for puncta and spot quantification.
 - `RenderSpots`: renders coordinate rows to binary mask or label images.
 - `SpotsToLabels`: combines spot-coordinate rows into one label image.
 - `MaskToLabels`: converts each mask row into a connected-component label image.
-- `SpotColocalization`: matches two upstream spot dataframes between channels by distance.
-- `SpotQualityMetrics`: computes SNR, local background, and nearest-neighbor distances.
+- `SpotColocalization`: computes a maximum-cardinality, minimum-total-distance one-to-one match between two spot tables.
+- `SpotQualityMetrics`: computes annular-background SNR and indexed nearest-neighbor distances.
 
 ATLAS is the primary external spot detection method used by the FISH and parameter-space exploration workflows.
 The local spot table utilities support assignment, rendering, filtering, and summary after detection.
+All coordinate consumers use finite `(y, x)` values and the same nearest-pixel rule: exact half values round upward.
 
 ## Example
 

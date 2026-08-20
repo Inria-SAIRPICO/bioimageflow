@@ -1,7 +1,7 @@
 """Spot detection with LoG/DoG filtering and local maxima extraction."""
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from bioimageflow_core import (
     Arguments,
@@ -18,93 +18,59 @@ from bioimageflow_core import (
     Template,
 )
 
-
-def _gaussian_kernel1d(sigma: float) -> "Any":
-    import numpy as np
-
-    sigma = max(float(sigma), 0.2)
-    radius = max(1, int(3.0 * sigma + 0.5))
-    x = np.arange(-radius, radius + 1, dtype=np.float32)
-    kernel = np.exp(-(x**2) / (2.0 * sigma**2))
-    return kernel / kernel.sum()
-
-
-def _blur(image: "Any", sigma: float) -> "Any":
-    import numpy as np
-
-    kernel = _gaussian_kernel1d(sigma)
-    result = image.astype(np.float32, copy=False)
-    for axis in range(result.ndim):
-        pad = [(0, 0)] * result.ndim
-        pad[axis] = (len(kernel) // 2, len(kernel) // 2)
-        padded = np.pad(result, pad, mode="edge")
-        result = np.apply_along_axis(
-            lambda line: np.convolve(line, kernel, mode="valid"), axis, padded
-        )
-    return result
-
-
-def _laplace(image: "Any") -> "Any":
-    import numpy as np
-
-    if image.ndim != 2:
-        raise ValueError("DetectSpots currently supports 2D scalar images.")
-    padded = np.pad(image, 1, mode="edge")
-    center = padded[1:-1, 1:-1]
-    return (
-        padded[:-2, 1:-1]
-        + padded[2:, 1:-1]
-        + padded[1:-1, :-2]
-        + padded[1:-1, 2:]
-        - 4.0 * center
-    )
-
-
-def _log_score(image: "Any", sigma: float) -> "Any":
-    import numpy as np
-
-    try:
-        from scipy.ndimage import gaussian_laplace
-    except ImportError:
-        return (-(sigma**2) * _laplace(_blur(image, sigma))).astype(np.float32)
-    return (-(sigma**2) * gaussian_laplace(image, sigma=sigma)).astype(np.float32)
+from .validation import finite_float, integral_value, planar_array
 
 
 def _score_image(image: "Any", method: str, sigma: float, sigma_ratio: float) -> "Any":
+    from scipy.ndimage import gaussian_filter, gaussian_laplace
+
     method = method.lower()
     if method not in {"dog", "log", "local_maxima"}:
         raise ValueError("method must be 'dog', 'log', or 'local_maxima'")
     if method == "local_maxima":
         return image.astype("float32", copy=False)
     if method == "log":
-        return _log_score(image, sigma)
-    narrow = _blur(image, sigma)
-    wide = _blur(image, sigma * sigma_ratio)
+        return (
+            -(sigma**2) * gaussian_laplace(image, sigma=sigma, mode="nearest")
+        ).astype("float32")
+    narrow = gaussian_filter(image, sigma=sigma, mode="nearest")
+    wide = gaussian_filter(image, sigma=sigma * sigma_ratio, mode="nearest")
     return narrow - wide
 
 
-def _local_maxima(score: "Any", threshold: float, min_distance: int) -> list[tuple[int, int]]:
+def _local_maxima(
+    score: "Any", threshold: float, min_distance: int
+) -> list[tuple[int, int]]:
     import numpy as np
+    from skimage.measure import label
+    from skimage.morphology import local_maxima
 
-    if score.ndim != 2:
-        raise ValueError("DetectSpots currently supports 2D scalar images.")
-    radius = max(1, int(min_distance))
-    candidates = np.argwhere(score > float(threshold))
-    candidates = sorted(candidates, key=lambda yx: float(score[tuple(yx)]), reverse=True)
+    planar_array(score, "score image")
+    maxima_mask = local_maxima(score, connectivity=2, allow_borders=True)
+    maxima_mask &= score > threshold
+    plateau_labels, plateau_count = cast(
+        tuple[Any, int],
+        label(
+            maxima_mask,
+            connectivity=2,
+            return_num=True,
+        ),
+    )
+    candidates = []
+    for plateau in range(1, plateau_count + 1):
+        coordinates = np.argwhere(plateau_labels == plateau)
+        y, x = min((int(y), int(x)) for y, x in coordinates)
+        candidates.append((y, x))
+    candidates.sort(key=lambda yx: (-float(score[yx]), yx[0], yx[1]))
+
     accepted: list[tuple[int, int]] = []
-    occupied = np.zeros(score.shape, dtype=bool)
     for y, x in candidates:
-        y0 = max(0, int(y) - radius)
-        y1 = min(score.shape[0], int(y) + radius + 1)
-        x0 = max(0, int(x) - radius)
-        x1 = min(score.shape[1], int(x) + radius + 1)
-        window = score[y0:y1, x0:x1]
-        if float(score[y, x]) < float(window.max()):
+        if any(
+            max(abs(y - accepted_y), abs(x - accepted_x)) <= min_distance
+            for accepted_y, accepted_x in accepted
+        ):
             continue
-        if occupied[y0:y1, x0:x1].any():
-            continue
-        accepted.append((int(y), int(x)))
-        occupied[y0:y1, x0:x1] = True
+        accepted.append((y, x))
     return sorted(accepted)
 
 
@@ -141,7 +107,9 @@ class DetectSpots(ProcessingTool):
     class Outputs(IOModel):
         output_labels: Annotated[
             Path,
-            ImageSpec(semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}),
+            ImageSpec(
+                semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}
+            ),
             GUIMeta(display_name="Spot labels"),
         ] = Template("{input_image.stem}_spots.tif")
         spot_id: Annotated[int, GUIMeta(display_name="Spot ID")]
@@ -155,17 +123,35 @@ class DetectSpots(ProcessingTool):
         import imageio.v3 as iio
         import numpy as np
 
-        image = iio.imread(arguments.input_image).astype(np.float32)
+        image = planar_array(
+            iio.imread(arguments.input_image).astype(np.float32),
+            "input_image",
+        )
+        if not np.all(np.isfinite(image)):
+            raise ValueError("input_image must contain only finite intensities.")
+        method = str(arguments.method).lower()
+        sigma = finite_float(arguments.sigma, "sigma")
+        sigma_ratio = finite_float(arguments.sigma_ratio, "sigma_ratio")
+        threshold = finite_float(arguments.threshold, "threshold")
+        min_distance = integral_value(
+            arguments.min_distance,
+            "min_distance",
+            minimum=1,
+        )
+        if sigma <= 0:
+            raise ValueError("sigma must be > 0.")
+        if method == "dog" and sigma_ratio <= 1:
+            raise ValueError("sigma_ratio must be > 1 for Difference-of-Gaussians.")
         score = _score_image(
             image,
-            method=str(arguments.method),
-            sigma=float(arguments.sigma),
-            sigma_ratio=float(arguments.sigma_ratio),
+            method=method,
+            sigma=sigma,
+            sigma_ratio=sigma_ratio,
         )
         maxima = _local_maxima(
             score,
-            threshold=float(arguments.threshold),
-            min_distance=int(arguments.min_distance),
+            threshold=threshold,
+            min_distance=min_distance,
         )
         if len(maxima) > np.iinfo(np.uint32).max:
             raise ValueError("DetectSpots produced more labels than uint32 can store.")

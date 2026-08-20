@@ -73,7 +73,10 @@ def test_spot_label_output_schemas_declare_uint32_label_contract() -> None:
     assert atlas_outputs["output_image"]["image_spec"]["semantics"] == ["binary"]
     assert detect_schema["output_labels"]["image_spec"]["dtypes"] == ["uint32"]
     assert render_schema["output_image"]["image_spec"]["dtypes"] == ["uint32", "uint8"]
-    assert render_schema["output_image"]["image_spec"]["semantics"] == ["binary", "label"]
+    assert render_schema["output_image"]["image_spec"]["semantics"] == [
+        "binary",
+        "label",
+    ]
     assert labels_schema["label_image"]["image_spec"]["dtypes"] == ["uint32"]
 
 
@@ -127,6 +130,35 @@ def test_detect_spots_log_method_finds_synthetic_puncta(tmp_path: Path) -> None:
     assert all(spot.score > 0 for spot in result)
 
 
+def test_local_maxima_keeps_borders_and_selects_one_deterministic_plateau_pixel() -> (
+    None
+):
+    score = np.zeros((7, 7), dtype=np.float32)
+    score[0, 0] = 4
+    score[3:5, 3:5] = 3
+
+    maxima = spot_detection._local_maxima(score, threshold=1, min_distance=1)
+
+    assert maxima == [(0, 0), (3, 3)]
+
+
+def test_detect_spots_rejects_invalid_filter_parameters(tmp_path: Path) -> None:
+    input_image = _spot_image(tmp_path / "puncta.tif")
+
+    with pytest.raises(ValueError, match="sigma_ratio must be > 1"):
+        DetectSpots().process_row(
+            Arguments(
+                input_image=input_image,
+                method="dog",
+                sigma=1,
+                sigma_ratio=1,
+                threshold=0.1,
+                min_distance=1,
+                output_labels=tmp_path / "spots.tif",
+            )
+        )
+
+
 def test_assign_spots_to_labels_and_summarize(tmp_path: Path) -> None:
     spots = [
         Arguments(spot_id=1, y=6, x=6, intensity=10.0, score=4.0),
@@ -146,10 +178,7 @@ def test_assign_spots_to_labels_and_summarize(tmp_path: Path) -> None:
         for spot in spots
     ]
     assigned_table = pd.DataFrame(
-        [
-            {"label": row.label, "intensity": row.intensity}
-            for row in assigned
-        ],
+        [{"label": row.label, "intensity": row.intensity} for row in assigned],
         index=_index([f"spot::{index}" for index in range(len(assigned))]),
     )
     summary = SpotSummary().transform(
@@ -252,9 +281,9 @@ def test_detect_spots_zero_rows_publish_blank_label_artifact(tmp_path: Path) -> 
     record_dir = current_path.parent / "records" / current["record_id"]
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
-            {
-                "asset_type": "file",
-                "digest": manifest["outputs"][0]["digest"],
+        {
+            "asset_type": "file",
+            "digest": manifest["outputs"][0]["digest"],
             "kind": "owned_asset",
             "output_column": "output_labels",
             "path": "assets/blank_spots.tif",
@@ -323,11 +352,16 @@ def test_filter_spots_uses_numeric_thresholds_and_mask(tmp_path: Path) -> None:
 def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) -> None:
     spots = [
         Arguments(spot_id=10, y=4, x=5, image_shape="16,16", radius=1, label_mode=True),
-        Arguments(spot_id=11, y=9, x=12, image_shape="16,16", radius=1, label_mode=True),
+        Arguments(
+            spot_id=11, y=9, x=12, image_shape="16,16", radius=1, label_mode=True
+        ),
     ]
 
     rendered = RenderSpots().process_batch(
-        [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif") for spot in spots]
+        [
+            Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")
+            for spot in spots
+        ]
     )[0][0]
     labels = SpotsToLabels().process_batch(
         [Arguments(**vars(spot), label_image=tmp_path / "labels.tif") for spot in spots]
@@ -461,6 +495,24 @@ def test_mask_to_labels_writes_one_artifact_per_mask(tmp_path: Path) -> None:
     assert int(iio.imread(results[1].label_image).max()) == 1
 
 
+def test_mask_to_labels_uses_nonzero_foreground_and_eight_connectivity(
+    tmp_path: Path,
+) -> None:
+    mask = np.zeros((4, 4), dtype=np.int16)
+    mask[1, 1] = -1
+    mask[2, 2] = 2
+    mask_path = tmp_path / "mask.tif"
+    iio.imwrite(mask_path, mask)
+
+    result = MaskToLabels().process_row(
+        Arguments(mask_image=mask_path, label_image=tmp_path / "labels.tif")
+    )
+
+    labels = iio.imread(result.label_image)
+    assert result.label_count == 1
+    assert labels[1, 1] == labels[2, 2] == 1
+
+
 def test_spots_to_labels_zero_spot_workflow_writes_blank_artifact(
     tmp_path: Path,
 ) -> None:
@@ -569,6 +621,36 @@ def test_spot_label_renderers_accept_integer_like_label_ids(tmp_path: Path) -> N
 
     assert int(iio.imread(rendered.output_image)[4, 5]) == 1
     assert int(iio.imread(labels.label_image)[4, 5]) == 1
+
+
+def test_spots_to_labels_rounds_half_up_and_counts_visible_labels(
+    tmp_path: Path,
+) -> None:
+    result = SpotsToLabels().process_batch(
+        [
+            Arguments(
+                spot_id=1,
+                y=3.5,
+                x=4.5,
+                image_shape="10,10",
+                radius=1,
+                label_image=tmp_path / "labels.tif",
+            ),
+            Arguments(
+                spot_id=2,
+                y=3.5,
+                x=4.5,
+                image_shape="10,10",
+                radius=1,
+                label_image=tmp_path / "labels.tif",
+            ),
+        ]
+    )[0][0]
+
+    labels = iio.imread(result.label_image)
+    assert labels[4, 5] == 2
+    assert labels[3, 5] == 2  # The inclusive-radius boundary is rendered.
+    assert result.label_count == 1
 
 
 @pytest.mark.parametrize(
@@ -694,6 +776,28 @@ def test_spot_colocalization_can_group_by_image_column() -> None:
     ]
 
 
+def test_spot_colocalization_maximizes_cardinality_before_distance() -> None:
+    reference = pd.DataFrame(
+        {"spot_id": [1, 2], "y": [0.0, 2.0], "x": [0.0, 0.0]},
+        index=_index(["image::0", "image::1"]),
+    )
+    query = pd.DataFrame(
+        {"spot_id": [10, 11], "y": [1.0, -1.5], "x": [0.0, 0.0]},
+        index=_index(["image::0", "image::1"]),
+    )
+
+    result = SpotColocalization().merge_dataframes(
+        [reference, query],
+        Arguments(max_distance=2.0),
+    )
+
+    assert list(zip(result["reference_spot_id"], result["query_spot_id"])) == [
+        (1, 11),
+        (2, 10),
+    ]
+    assert list(result["matched_count"]) == [2, 2]
+
+
 def test_spot_colocalization_rejects_malformed_coordinates() -> None:
     with pytest.raises(ValueError, match="missing required column.*'x'"):
         SpotColocalization().merge_dataframes(
@@ -751,6 +855,7 @@ def test_spot_quality_metrics_reports_snr_and_nearest_neighbor(tmp_path: Path) -
     )
 
     assert list(result["nearest_neighbor_distance"]) == [4.0, 4.0]
+    assert list(result["local_background"]) == [1.0, 1.0]
     assert all(result["snr"] > 1.0)
     assert list(result["channel"]) == ["gfp", "gfp"]
     assert list(result["spot_count"]) == [2, 2]
@@ -768,4 +873,20 @@ def test_spot_quality_metrics_rejects_out_of_bounds_coordinates(tmp_path: Path) 
                 index=_index(["image::0"]),
             ),
             Arguments(image=str(image_path), radius=1),
+        )
+
+
+def test_spot_summary_rejects_fractional_labels() -> None:
+    with pytest.raises(ValueError, match="label must be an integer"):
+        SpotSummary().transform(
+            pd.DataFrame({"label": [1.5], "intensity": [2.0]}),
+            Arguments(),
+        )
+
+
+def test_filter_spots_rejects_inverted_thresholds() -> None:
+    with pytest.raises(ValueError, match="min_intensity must be <= max_intensity"):
+        FilterSpots().transform(
+            pd.DataFrame({"intensity": [2.0]}),
+            Arguments(min_intensity=3.0, max_intensity=1.0),
         )

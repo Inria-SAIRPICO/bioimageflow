@@ -7,7 +7,7 @@ Outputs are the original spot row columns plus `label` and `assigned_count`.
 BioImageFlow records assigned spots in the node dataframe, so no assigned spot CSV artifact is written.
 
 Use it after spot detection and segmentation when per-object spot counts are needed.
-Coordinates outside the label image are assigned to background label `0`; malformed coordinates fail during numeric conversion.
+Coordinates use nearest-pixel rounding with exact half values rounded upward and must fall inside the label image.
 
 ## Dependencies and Core Libraries
 
@@ -34,4 +34,4 @@ The output row preserves spot columns and adds `label`; `assigned_count` is `1` 
 
 ## Failure Modes
 
-Missing coordinates, malformed coordinates, missing label images, or unreadable files fail through conversion or imageio errors.
+Missing, non-finite, or out-of-bounds coordinates; invalid spot IDs; non-finite intensities; malformed label rasters; missing label images; or unreadable files raise errors.

@@ -17,6 +17,8 @@ from bioimageflow_core import (
     Semantic,
 )
 
+from .validation import finite_float, label_array, pixel_coordinate, positive_uint32_id
+
 
 class AssignSpotsToLabels(ProcessingTool):
     """Assign each spot coordinate to the label value at the same pixel."""
@@ -37,8 +39,12 @@ class AssignSpotsToLabels(ProcessingTool):
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
-        y: Annotated[float, GUIMeta(display_name="Y", connectable=Connectable.BY_DEFAULT)]
-        x: Annotated[float, GUIMeta(display_name="X", connectable=Connectable.BY_DEFAULT)]
+        y: Annotated[
+            float, GUIMeta(display_name="Y", connectable=Connectable.BY_DEFAULT)
+        ]
+        x: Annotated[
+            float, GUIMeta(display_name="X", connectable=Connectable.BY_DEFAULT)
+        ]
         intensity: Annotated[
             float,
             GUIMeta(display_name="Intensity", connectable=Connectable.BY_DEFAULT),
@@ -69,16 +75,22 @@ class AssignSpotsToLabels(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
 
-        labels = iio.imread(arguments.label_image)
-        y = int(float(arguments.y))
-        x = int(float(arguments.x))
-        label = int(labels[y, x]) if 0 <= y < labels.shape[0] and 0 <= x < labels.shape[1] else 0
+        labels = label_array(iio.imread(arguments.label_image))
+        y, x, y_pixel, x_pixel = pixel_coordinate(
+            arguments.y,
+            arguments.x,
+            labels.shape,
+        )
+        spot_id = positive_uint32_id(arguments.spot_id)
+        intensity = finite_float(arguments.intensity, "intensity")
+        score = finite_float(getattr(arguments, "score", 0.0), "score")
+        label = int(labels[y_pixel, x_pixel])
         return self.Outputs(
-            spot_id=int(arguments.spot_id),
-            y=float(arguments.y),
-            x=float(arguments.x),
-            intensity=float(arguments.intensity),
-            score=float(getattr(arguments, "score", 0.0)),
+            spot_id=spot_id,
+            y=y,
+            x=x,
+            intensity=intensity,
+            score=score,
             label=label,
             assigned_count=1 if label > 0 else 0,
         )

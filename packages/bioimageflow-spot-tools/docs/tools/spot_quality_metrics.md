@@ -9,7 +9,7 @@ No metrics CSV artifact is written.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, imageio, and NumPy local-window and distance calculations.
+BioImageFlow core APIs, imageio, NumPy annular sampling, and SciPy spatial indexing.
 
 ## Minimal Example
 
@@ -25,8 +25,10 @@ metrics = SpotQualityMetrics().transform(spots, Arguments(image="image.tif"))
 
 ## Expected Results
 
-The output dataframe contains SNR and nearest-neighbor distance values for each spot.
+Local background and noise are measured in the clipped annulus from `radius` (exclusive) to `2 * radius` (inclusive), excluding every spot's radius-sized footprint.
+SNR is `(intensity - local_background) / background_standard_deviation`, with a floating-point epsilon floor for zero-noise backgrounds.
+Nearest-neighbor distance uses continuous coordinates and is `0` when the table contains only one spot.
 
 ## Failure Modes
 
-Missing coordinates, out-of-bounds coordinates, unreadable images, and malformed numeric values raise errors.
+Missing, non-finite, or out-of-bounds coordinates, non-positive radii, invalid IDs, non-finite images, empty clipped background annuli, and unreadable images raise errors.
