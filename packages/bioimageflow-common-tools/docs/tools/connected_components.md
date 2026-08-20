@@ -4,7 +4,8 @@
 Every face-connected non-zero region receives a unique integer label; pixels or voxels touching only at a corner remain separate components.
 
 The input is `input_image`, a planar or volumetric binary image.
-Outputs are `output_image`, a UInt32 label image, and `num_labels`, the number of connected components.
+Outputs are `output_image`, a UInt32 TIFF label image, and `num_labels`, the number of connected components.
+The default output always uses `.tif`, even when the input uses a format such as PNG that cannot preserve UInt32 pixels.
 The implementation reads and writes with imageio and labels with scikit-image.
 
 Use it after thresholding, spot detection, or mask cleanup when instance labels are needed.
@@ -35,7 +36,8 @@ ConnectedComponents().process_row(
 
 The output label image has one integer label per connected foreground component.
 It is written as `uint32`; background is `0`, labels are sequential positive component IDs, and `num_labels` matches the number of IDs.
+All finite non-zero input values are foreground, including negative values.
 
 ## Failure Modes
 
-Unsupported formats, missing files, and output write failures stop execution.
+Unsupported formats, missing files, non-finite input values, output paths without a `.tif` or `.tiff` extension, and output write failures stop execution.

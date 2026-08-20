@@ -131,7 +131,7 @@ def _validated_label_image(image: Any, name: str, np: Any) -> Any:
         raise ValueError(f"{name} must contain only non-negative labels.")
     if image.dtype.kind == "f" and not np.equal(image, np.floor(image)).all():
         raise ValueError(f"{name} must contain only integer-valued labels.")
-    max_label = image.max(initial=0)
-    if max_label > np.iinfo(np.uint64).max:
+    max_label = image.max(initial=0).item()
+    if int(max_label) > np.iinfo(np.uint64).max:
         raise ValueError(f"{name} contains labels larger than uint64 supports.")
     return image.astype(np.uint64, copy=False)

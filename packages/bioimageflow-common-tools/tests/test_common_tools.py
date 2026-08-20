@@ -142,6 +142,18 @@ def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
     assert table.to_dict("list") == {"threshold": [0.1, 0.2, 0.5]}
 
 
+@pytest.mark.parametrize("column_name", ["", "   ", None])
+def test_generate_rejects_empty_column_name(column_name: object) -> None:
+    from bioimageflow_common_tools import Generate
+
+    assert Generate.resolve_outputs({"column_name": column_name}) is None
+    with pytest.raises(ValueError, match="non-empty string"):
+        Generate().transform(
+            None,
+            Arguments(column_name=column_name, values=[1]),
+        )
+
+
 def test_files_declares_folder_picker() -> None:
     from bioimageflow_common_tools import Files
 
@@ -160,6 +172,7 @@ def test_connected_components_schema_declares_uint32_labels() -> None:
     schema = serialize_output_schema(ConnectedComponents)
 
     assert schema["output_image"]["image_spec"]["dtypes"] == ["uint32"]
+    assert schema["output_image"]["default"] == "{input_image.stem}_labels.tif"
 
 
 def test_connected_components_uses_general_image_environment() -> None:
@@ -206,6 +219,48 @@ def test_connected_components_uses_face_connectivity(tmp_path: Path) -> None:
     labels = iio.imread(result.output_image)
     assert result.num_labels == 3
     assert set(np.unique(labels)) == {0, 1, 2, 3}
+
+
+def test_connected_components_treats_every_finite_nonzero_value_as_foreground(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    mask = np.array([[0, -1], [0, 2]], dtype=np.int16)
+    input_image = tmp_path / "signed.tif"
+    iio.imwrite(input_image, mask)
+
+    result = ConnectedComponents().process_row(
+        Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+    )
+
+    assert result.num_labels == 1
+
+
+def test_connected_components_rejects_output_format_that_loses_uint32(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "binary.png"
+    iio.imwrite(input_image, np.eye(3, dtype=np.uint8))
+
+    with pytest.raises(ValueError, match="preserve UInt32"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.png")
+        )
+
+
+def test_connected_components_rejects_nonfinite_values(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "nonfinite.tif"
+    iio.imwrite(input_image, np.array([[0.0, np.nan]], dtype=np.float32))
+
+    with pytest.raises(ValueError, match="finite"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+        )
 
 
 def test_connected_components_rejects_unsupported_dimensions(tmp_path: Path) -> None:

@@ -32,10 +32,14 @@ class Generate(DataFrameTool):
     @classmethod
     def resolve_outputs(cls, inputs=None):
         name = (inputs or {}).get("column_name")
-        if not name:
+        if not isinstance(name, str) or not name.strip():
             return None
         return {name: {"type": "any", "default": None, "image_spec": None}}
 
     def transform(self, df, arguments):
         import pandas as pd
-        return pd.DataFrame({arguments.column_name: arguments.values})
+
+        name = arguments.column_name
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Column name must be a non-empty string.")
+        return pd.DataFrame({name: arguments.values})

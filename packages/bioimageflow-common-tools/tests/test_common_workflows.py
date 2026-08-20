@@ -289,6 +289,17 @@ class TestLabelOverlaps:
                 Arguments(label_image=labels_path, reference_image=reference_path)
             )
 
+    def test_rejects_float_label_above_uint64_range(self, tmp_path: Path) -> None:
+        labels_path = tmp_path / "labels.tif"
+        reference_path = tmp_path / "reference.tif"
+        iio.imwrite(labels_path, np.array([[float(2**64)]], dtype=np.float64))
+        iio.imwrite(reference_path, np.zeros((1, 1), dtype=np.uint16))
+
+        with pytest.raises(ValueError, match="larger than uint64"):
+            LabelOverlaps().process_row(
+                Arguments(label_image=labels_path, reference_image=reference_path)
+            )
+
 
 # ---------------------------------------------------------------------------
 # Mosaic tool

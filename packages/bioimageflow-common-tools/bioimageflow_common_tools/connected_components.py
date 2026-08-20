@@ -61,7 +61,7 @@ class ConnectedComponents(ProcessingTool):
                 display_name="Label image",
                 description="Label image where each connected component has a unique integer ID.",
             ),
-        ] = Template("{input_image.stem}_labels{ext}")
+        ] = Template("{input_image.stem}_labels.tif")
         num_labels: Annotated[int, GUIMeta(
             display_name="Label count",
             description="Number of connected components labelled in the image.",
@@ -73,12 +73,21 @@ class ConnectedComponents(ProcessingTool):
         from skimage.measure import label
 
         print("Computing connected components...")
-        foreground = iio.imread(str(arguments.input_image)) > 0
-        if foreground.ndim not in {2, 3}:
+        output_path = Path(arguments.output_image)
+        if output_path.suffix.lower() not in {".tif", ".tiff"}:
+            raise ValueError(
+                "ConnectedComponents output must use a .tif or .tiff extension "
+                "to preserve UInt32 labels."
+            )
+        image = iio.imread(str(arguments.input_image))
+        if image.ndim not in {2, 3}:
             raise ValueError(
                 "Input image must be a 2D or 3D binary image; "
-                f"got shape {foreground.shape}."
+                f"got shape {image.shape}."
             )
+        if not np.isfinite(image).all():
+            raise ValueError("Input image must contain only finite values.")
+        foreground = image != 0
         labeled_result: Any = label(
             foreground,
             connectivity=1,
@@ -91,7 +100,6 @@ class ConnectedComponents(ProcessingTool):
         labeled_array = labeled_array.astype(np.uint32, copy=False)
         print(f"Connected components: {num_labels} labels")
 
-        output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(str(output_path), labeled_array)
 
