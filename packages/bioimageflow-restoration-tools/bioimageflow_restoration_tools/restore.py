@@ -1,4 +1,4 @@
-"""Restoration inference, simple baselines, and metrics."""
+"""Learned restoration inference and restoration metrics."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -18,104 +18,6 @@ from bioimageflow_core import (
     Semantic,
     Template,
 )
-
-def _gaussian_kernel1d(sigma: float) -> "Any":
-    import numpy as np
-
-    sigma = max(float(sigma), 0.2)
-    radius = max(1, int(3.0 * sigma + 0.5))
-    x = np.arange(-radius, radius + 1, dtype=np.float32)
-    kernel = np.exp(-(x**2) / (2.0 * sigma**2))
-    return kernel / kernel.sum()
-
-
-def gaussian_blur(image: "Any", sigma: float) -> "Any":
-    import numpy as np
-
-    kernel = _gaussian_kernel1d(sigma)
-    result = image.astype(np.float32, copy=False)
-    for axis in range(result.ndim):
-        pad = [(0, 0)] * result.ndim
-        pad[axis] = (len(kernel) // 2, len(kernel) // 2)
-        padded = np.pad(result, pad, mode="edge")
-        result = np.apply_along_axis(
-            lambda line: np.convolve(line, kernel, mode="valid"), axis, padded
-        )
-    return result.astype(np.float32)
-
-
-def restore_array(image: "Any", method: str = "tv_chambolle", weight: float = 0.1) -> "Any":
-    """Restore an image with a simple image-processing baseline."""
-    import numpy as np
-
-    image = image.astype(np.float32, copy=False)
-    method = method.lower()
-    try:
-        from skimage.restoration import denoise_tv_chambolle, denoise_bilateral
-    except ImportError:
-        if method in {"tv_chambolle", "gaussian"}:
-            return gaussian_blur(image, max(float(weight) * 4.0, 0.4))
-        if method == "unsharp":
-            low = gaussian_blur(image, 1.0)
-            return np.clip(image + float(weight) * (image - low), 0.0, 1.0)
-        raise ValueError(f"Unsupported restoration method: {method}")
-
-    if method == "tv_chambolle":
-        return denoise_tv_chambolle(image, weight=float(weight)).astype(np.float32)
-    if method == "bilateral":
-        return denoise_bilateral(image, sigma_color=float(weight), channel_axis=None).astype(
-            np.float32
-        )
-    if method == "gaussian":
-        return gaussian_blur(image, max(float(weight) * 4.0, 0.4))
-    if method == "unsharp":
-        low = gaussian_blur(image, 1.0)
-        return np.clip(image + float(weight) * (image - low), 0.0, 1.0)
-    raise ValueError(f"Unsupported restoration method: {method}")
-
-
-class RestoreImage(ProcessingTool):
-    """Apply a simple image-processing restoration baseline to a scalar image."""
-
-    row_consumption = RowConsumption.MAPPED
-    display_name = "Restore Image"
-    documentation = (
-        "Restore a noisy or blurred image with a simple image-processing baseline."
-    )
-    category = Category.RESTORATION
-    tags = ["restoration", "denoise", "baseline"]
-    environment = GENERAL_ENV
-
-    class Inputs(IOModel):
-        input_image: Annotated[
-            Path,
-            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
-            GUIMeta(
-                display_name="Input image",
-                description="2D scalar image to restore.",
-                connectable=Connectable.BY_DEFAULT,
-            ),
-        ]
-        method: str = "tv_chambolle"
-        weight: Annotated[float, GUIMeta(min=0.0, max=1.0, step=0.01)] = 0.1
-
-    class Outputs(IOModel):
-        output_image: Annotated[
-            Path,
-            ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
-            GUIMeta(display_name="Restored image"),
-        ] = Template("{input_image.stem}_restored.tif")
-
-    def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
-        import imageio.v3 as iio
-        import numpy as np
-
-        image = iio.imread(arguments.input_image).astype(np.float32)
-        restored = restore_array(image, method=arguments.method, weight=arguments.weight)
-        output = Path(arguments.output_image)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        iio.imwrite(output, restored.astype(np.float32))
-        return self.Outputs(output_image=output)
 
 
 careamics_env = EnvironmentSpec(
@@ -155,13 +57,14 @@ class CAREamicsPredict(ProcessingTool):
             ),
         ]
         checkpoint: Annotated[
-            Path | None,
+            Path,
             GUIMeta(
                 display_name="Checkpoint",
-                description="Optional CAREamics checkpoint path.",
+                description="CAREamics checkpoint containing the model and configuration.",
                 connectable=Connectable.NEVER,
             ),
-        ] = None
+        ]
+
     class Outputs(IOModel):
         output_image: Annotated[
             Path,
@@ -175,12 +78,18 @@ class CAREamicsPredict(ProcessingTool):
         import numpy as np
 
         image = iio.imread(arguments.input_image).astype(np.float32)
-        restored = _careamics_predict(image, arguments.checkpoint)
+        if image.ndim != 2:
+            raise ValueError(f"input_image must be a 2D image; got shape {image.shape}.")
+        if image.size == 0 or not np.isfinite(image).all():
+            raise ValueError("input_image must be non-empty and contain only finite values.")
+        checkpoint = Path(arguments.checkpoint)
+        if not checkpoint.is_file():
+            raise ValueError(f"checkpoint must be an existing file: {checkpoint}")
+        restored = _careamics_predict(image, checkpoint)
         output = Path(arguments.output_image)
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, np.asarray(restored, dtype=np.float32))
-        model_source = str(arguments.checkpoint) if arguments.checkpoint else "careamics-default"
-        return self.Outputs(output_image=output, model_source=model_source)
+        return self.Outputs(output_image=output, model_source=str(checkpoint))
 
 
 class RestorationMetrics(ProcessingTool):
@@ -209,6 +118,14 @@ class RestorationMetrics(ProcessingTool):
             ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR}),
             GUIMeta(display_name="Restored image", connectable=Connectable.BY_DEFAULT),
         ]
+        data_range: Annotated[
+            float | None,
+            GUIMeta(
+                display_name="Data range",
+                description="Positive intensity range used to calculate PSNR. Required for constant references.",
+                min=0.001,
+            ),
+        ] = None
 
     class Outputs(IOModel):
         clean_image: Annotated[str, GUIMeta(display_name="Clean image")]
@@ -224,41 +141,75 @@ class RestorationMetrics(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         import imageio.v3 as iio
         import numpy as np
+        from skimage.metrics import mean_squared_error, peak_signal_noise_ratio
 
-        clean = iio.imread(arguments.clean_image).astype(np.float32)
-        degraded = iio.imread(arguments.degraded_image).astype(np.float32)
-        restored = iio.imread(arguments.restored_image).astype(np.float32)
+        clean = iio.imread(arguments.clean_image).astype(np.float64)
+        degraded = iio.imread(arguments.degraded_image).astype(np.float64)
+        restored = iio.imread(arguments.restored_image).astype(np.float64)
+        if any(image.ndim != 2 for image in (clean, degraded, restored)):
+            raise ValueError(
+                "clean_image, degraded_image, and restored_image must be 2D images."
+            )
         if clean.shape != degraded.shape or clean.shape != restored.shape:
             raise ValueError("clean_image, degraded_image, and restored_image must match.")
+        if clean.size == 0:
+            raise ValueError("Metric input images must not be empty.")
+        if not all(np.isfinite(image).all() for image in (clean, degraded, restored)):
+            raise ValueError("Metric input images must contain only finite values.")
 
-        mse_degraded = float(np.mean((degraded - clean) ** 2))
-        mse_restored = float(np.mean((restored - clean) ** 2))
+        if arguments.data_range is None:
+            data_range = float(clean.max() - clean.min())
+            if data_range <= 0.0:
+                raise ValueError(
+                    "data_range is required when clean_image has a constant value."
+                )
+        else:
+            data_range = float(arguments.data_range)
+            if not np.isfinite(data_range) or data_range <= 0.0:
+                raise ValueError("data_range must be a finite value greater than zero.")
+
+        mse_degraded = float(mean_squared_error(clean, degraded))
+        mse_restored = float(mean_squared_error(clean, restored))
+        with np.errstate(divide="ignore"):
+            degraded_psnr = float(
+                peak_signal_noise_ratio(clean, degraded, data_range=data_range)
+            )
+            restored_psnr = float(
+                peak_signal_noise_ratio(clean, restored, data_range=data_range)
+            )
         return self.Outputs(
             clean_image=str(arguments.clean_image),
             degraded_image=str(arguments.degraded_image),
             restored_image=str(arguments.restored_image),
             mse_degraded=mse_degraded,
             mse_restored=mse_restored,
-            degraded_psnr=_psnr(mse_degraded, clean),
-            restored_psnr=_psnr(mse_restored, clean),
+            degraded_psnr=degraded_psnr,
+            restored_psnr=restored_psnr,
             residual_noise_degraded=float(np.std(degraded - clean)),
             residual_noise_restored=float(np.std(restored - clean)),
         )
 
 
-def _careamics_predict(image: Any, checkpoint: Path | None) -> Any:
-    careamics = __import__("careamics")
-    if hasattr(careamics, "predict"):
-        return careamics.predict(image, checkpoint=checkpoint)
-    model = careamics.CAREamist(source=checkpoint)
-    return model.predict(image)
-
-
-def _psnr(mse: float, clean: Any) -> float:
-    import math
+def _careamics_predict(image: Any, checkpoint: Path) -> Any:
     import numpy as np
 
-    if mse <= 0.0:
-        return float("inf")
-    data_range = float(np.max(clean) - np.min(clean)) or 1.0
-    return float(20.0 * math.log10(data_range) - 10.0 * math.log10(mse))
+    careamics = __import__("careamics")
+    model = careamics.CAREamist(
+        checkpoint_path=checkpoint,
+        enable_progress_bar=False,
+    )
+    result = model.predict(pred_data=image, axes="YX", data_type="array")
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise ValueError("CAREamist.predict must return (predictions, sources).")
+    predictions, _sources = result
+    if not isinstance(predictions, (list, tuple)) or len(predictions) != 1:
+        raise ValueError("CAREamics prediction must return exactly one image.")
+    restored = np.asarray(predictions[0], dtype=np.float32)
+    if restored.shape != image.shape:
+        raise ValueError(
+            "CAREamics prediction shape must match input_image: "
+            f"expected {image.shape}, got {restored.shape}."
+        )
+    if not np.isfinite(restored).all():
+        raise ValueError("CAREamics prediction must contain only finite values.")
+    return restored

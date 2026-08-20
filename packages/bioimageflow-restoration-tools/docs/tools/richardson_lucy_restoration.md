@@ -1,12 +1,11 @@
 # RichardsonLucyRestoration
 
-`RichardsonLucyRestoration` applies a lightweight Richardson-Lucy
-deconvolution baseline to a 2D intensity image.
+`RichardsonLucyRestoration` applies scikit-image Richardson-Lucy deconvolution to a 2D intensity image.
 
 ## Inputs
 
 - `input_image`: 2D intensity image.
-- `psf_image`: optional 2D point-spread-function image.
+- `psf_image`: optional finite, non-negative 2D point-spread-function image with positive sum; a normalized 5×5 Gaussian PSF is used when omitted.
 - `iterations`: number of Richardson-Lucy updates.
 - `clip`: optionally clip output to `[0, 1]`.
 
@@ -16,13 +15,11 @@ deconvolution baseline to a 2D intensity image.
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and the package-local Richardson-Lucy baseline.
+imageio, NumPy, and scikit-image.
 
 ## Assumptions
 
-This is a lightweight public-library baseline. It is useful for demonstrative
-deblurring tests but should not replace validated microscope-specific
-deconvolution workflows.
+Use a measured or microscope-specific PSF for quantitative workflows.
 
 ## Minimal Example
 
