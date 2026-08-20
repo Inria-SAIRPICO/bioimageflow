@@ -13,7 +13,7 @@
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and the package-local Gaussian smoothing helper.
+imageio, NumPy, and SciPy.
 
 ## Assumptions
 

@@ -1,13 +1,12 @@
 # BackgroundSubtract
 
-`BackgroundSubtract` subtracts a Gaussian-smoothed background estimate from a
-2D intensity image.
+`BackgroundSubtract` subtracts a SciPy Gaussian-smoothed background estimate from a 2D intensity image.
 
 ## Inputs
 
 - `input_image`: 2D intensity image.
 - `sigma`: Gaussian sigma used for background estimation.
-- `preserve_range`: shift output so the minimum is zero.
+- `shift_to_zero`: shift output so the minimum is zero; otherwise retain signed residuals.
 
 ## Outputs
 
@@ -15,7 +14,7 @@
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, and the package-local Gaussian smoothing helper.
+imageio, NumPy, and SciPy.
 
 ## Assumptions
 

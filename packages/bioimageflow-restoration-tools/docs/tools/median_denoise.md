@@ -1,7 +1,6 @@
 # MedianDenoise
 
-`MedianDenoise` applies a median filter to a 2D intensity image. It uses SciPy
-when available and a small NumPy fallback otherwise.
+`MedianDenoise` applies a SciPy median filter to a 2D intensity image.
 
 ## Inputs
 
@@ -14,8 +13,7 @@ when available and a small NumPy fallback otherwise.
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, SciPy median filtering when available, and a small NumPy
-fallback.
+imageio, NumPy, and SciPy.
 
 ## Assumptions
 
