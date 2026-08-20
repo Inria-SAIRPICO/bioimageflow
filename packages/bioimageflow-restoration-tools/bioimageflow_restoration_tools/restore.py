@@ -123,7 +123,7 @@ class RestorationMetrics(ProcessingTool):
             GUIMeta(
                 display_name="Data range",
                 description="Positive intensity range used to calculate PSNR. Required for constant references.",
-                min=0.0,
+                min=0.001,
             ),
         ] = None
 
@@ -146,6 +146,10 @@ class RestorationMetrics(ProcessingTool):
         clean = iio.imread(arguments.clean_image).astype(np.float64)
         degraded = iio.imread(arguments.degraded_image).astype(np.float64)
         restored = iio.imread(arguments.restored_image).astype(np.float64)
+        if any(image.ndim != 2 for image in (clean, degraded, restored)):
+            raise ValueError(
+                "clean_image, degraded_image, and restored_image must be 2D images."
+            )
         if clean.shape != degraded.shape or clean.shape != restored.shape:
             raise ValueError("clean_image, degraded_image, and restored_image must match.")
         if clean.size == 0:
@@ -194,7 +198,7 @@ def _careamics_predict(image: Any, checkpoint: Path) -> Any:
         checkpoint_path=checkpoint,
         enable_progress_bar=False,
     )
-    result = model.predict(pred_data=image)
+    result = model.predict(pred_data=image, axes="YX", data_type="array")
     if not isinstance(result, tuple) or len(result) != 2:
         raise ValueError("CAREamist.predict must return (predictions, sources).")
     predictions, _sources = result

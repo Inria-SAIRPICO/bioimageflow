@@ -152,6 +152,19 @@ def test_metrics_require_range_for_constant_reference(tmp_path: Path) -> None:
     assert metrics.degraded_psnr == float("inf")
 
 
+def test_metrics_reject_non_planar_images(tmp_path: Path) -> None:
+    volume = _write(tmp_path / "volume.tif", np.zeros((2, 5, 5), dtype=np.float32))
+    with pytest.raises(ValueError, match="2D"):
+        RestorationMetrics().process_row(
+            Arguments(
+                clean_image=volume,
+                degraded_image=volume,
+                restored_image=volume,
+                data_range=1.0,
+            )
+        )
+
+
 @pytest.mark.parametrize("failure", ["shape", "nan"])
 def test_metrics_reject_invalid_images(tmp_path: Path, failure: str) -> None:
     clean = np.zeros((5, 5), dtype=np.float32)
@@ -187,8 +200,12 @@ def test_careamics_uses_pinned_careamist_contract(
             calls["checkpoint_path"] = checkpoint_path
             calls["enable_progress_bar"] = enable_progress_bar
 
-        def predict(self, *, pred_data: np.ndarray) -> tuple[list[np.ndarray], list[str]]:
+        def predict(
+            self, *, pred_data: np.ndarray, axes: str, data_type: str
+        ) -> tuple[list[np.ndarray], list[str]]:
             calls["pred_data"] = pred_data
+            calls["axes"] = axes
+            calls["data_type"] = data_type
             return [pred_data + 1.0], []
 
     module.CAREamist = FakeCAREamist
@@ -205,6 +222,8 @@ def test_careamics_uses_pinned_careamist_contract(
     )
     assert calls["checkpoint_path"] == checkpoint
     assert calls["enable_progress_bar"] is False
+    assert calls["axes"] == "YX"
+    assert calls["data_type"] == "array"
     assert result.model_source == str(checkpoint)
     np.testing.assert_array_equal(iio.imread(result.output_image), np.ones((8, 8)))
 
@@ -231,7 +250,9 @@ def test_careamics_validates_prediction_contract(
         ) -> None:
             pass
 
-        def predict(self, *, pred_data: np.ndarray) -> tuple[list[np.ndarray], list[str]]:
+        def predict(
+            self, *, pred_data: np.ndarray, axes: str, data_type: str
+        ) -> tuple[list[np.ndarray], list[str]]:
             return predictions, []
 
     module.CAREamist = FakeCAREamist
