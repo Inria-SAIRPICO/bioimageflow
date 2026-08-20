@@ -3,6 +3,7 @@
 `LocalThresholdSegment` computes a Sauvola adaptive threshold with
 `skimage.filters.threshold_sauvola`, applies an optional offset, and labels
 connected foreground components.
+Components use face connectivity, and `above=True` selects values strictly greater than the local threshold.
 
 Inputs are `input_image`, `block_size`, `k`, `offset`, and `above`. `block_size`
 must be an odd integer greater than or equal to 3.

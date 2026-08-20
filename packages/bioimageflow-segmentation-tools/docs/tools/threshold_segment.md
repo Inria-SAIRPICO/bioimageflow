@@ -3,17 +3,16 @@
 `ThresholdSegment` creates a foreground mask from an intensity or probability
 image and labels each connected component.
 
-Inputs are `input_image`, `threshold`, and `above`. Output `labels` is a label
-image; `object_count` is the maximum assigned component label. The implementation
-uses package-local connected-component logic over the generated foreground mask.
+Inputs are `input_image`, `threshold`, and `above`. Output `labels` is a label image; `object_count` is the number of distinct foreground components.
+Foreground uses `image > threshold` when `above` is true and `image <= threshold` otherwise.
+Connected components use scikit-image face connectivity, so pixels or voxels that touch only diagonally remain separate objects.
 
 Use it for simple classical segmentation when one scalar threshold is appropriate.
 If objects touch, they remain one component; use `WatershedSegment` when marker-controlled splitting is needed.
 
 ## Dependencies and Core Libraries
 
-BioImageFlow core APIs, imageio, NumPy, and the package's connected-component
-labeling helper.
+BioImageFlow core APIs, imageio, NumPy, and scikit-image connected-component labeling.
 
 ## Assumptions
 

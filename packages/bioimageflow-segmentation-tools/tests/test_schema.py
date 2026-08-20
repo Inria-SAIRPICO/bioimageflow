@@ -14,7 +14,6 @@ from bioimageflow_segmentation_tools import (
     DistanceWatershedSegment,
     FilterLabels,
     LocalThresholdSegment,
-    nnInteractive,
     OtsuThresholdSegment,
     PostprocessLabels,
     SplitTouchingObjects,
@@ -25,7 +24,6 @@ from bioimageflow_segmentation_tools import (
 SEGMENTATION_TOOLS = [
     Cellpose3,
     CellposeSAM,
-    nnInteractive,
     StarDistSegmenter,
     ThresholdSegment,
     OtsuThresholdSegment,
@@ -55,7 +53,6 @@ def test_segmentation_package_all_exports_only_public_tools() -> None:
         "StarDistSegmenter",
         "ThresholdSegment",
         "WatershedSegment",
-        "nnInteractive",
     ]
     assert "classical" not in segmentation.__all__
     assert all(issubclass(getattr(segmentation, name), BaseTool) for name in segmentation.__all__)

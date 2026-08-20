@@ -18,6 +18,15 @@ from bioimageflow_core import (
     Template,
 )
 
+from ._arrays import (
+    finite_float,
+    integer_parameter,
+    object_count,
+    validate_image,
+    validate_labels,
+    write_labels,
+)
+
 stardist_env = EnvironmentSpec(
     name="segmentation-stardist",
     dependencies={
@@ -96,8 +105,8 @@ class StarDistSegmenter(ProcessingTool):
             GUIMeta(
                 display_name="Channel",
                 description=(
-                    "Channel index to segment for channel-first images. Ignored for "
-                    "2D grayscale images and for the H&E RGB model."
+                    "Zero-based channel index for fluorescence images. Must be zero "
+                    "for 2D grayscale images and is ignored for the H&E model."
                 ),
                 min=0,
                 max=512,
@@ -105,6 +114,14 @@ class StarDistSegmenter(ProcessingTool):
                 group="channels",
             ),
         ] = 0
+        channel_axis: Annotated[
+            Literal["first", "last"],
+            GUIMeta(
+                display_name="Channel axis",
+                description="Location of the channel axis in three-dimensional input images.",
+                group="channels",
+            ),
+        ] = "last"
         prob_thresh: Annotated[
             float | None,
             GUIMeta(
@@ -173,49 +190,97 @@ class StarDistSegmenter(ProcessingTool):
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         from csbdeep.utils import normalize  # type: ignore
         import imageio.v3 as iio
-        import numpy as np
 
-        image = iio.imread(str(arguments.input_image))
-        image = self._prepare_image(image, arguments.model_name, arguments.channel)
+        source = validate_image(
+            iio.imread(str(arguments.input_image)),
+            name="input_image",
+            dimensions=(2, 3),
+        )
+        channel = integer_parameter(arguments.channel, name="channel")
+        model_name = str(arguments.model_name)
+        if model_name not in {
+            "2D_versatile_fluo",
+            "2D_paper_dsb2018",
+            "2D_versatile_he",
+        }:
+            raise ValueError(f"Unsupported StarDist model_name: {model_name!r}.")
+        channel_axis = str(arguments.channel_axis)
+        if channel_axis not in {"first", "last"}:
+            raise ValueError("channel_axis must be 'first' or 'last'.")
+        image = self._prepare_image(source, model_name, channel, channel_axis)
+        normalize_low = finite_float(arguments.normalize_low, name="normalize_low")
+        normalize_high = finite_float(arguments.normalize_high, name="normalize_high")
+        if not 0.0 <= normalize_low < normalize_high <= 100.0:
+            raise ValueError(
+                "normalize_low and normalize_high must satisfy "
+                "0 <= normalize_low < normalize_high <= 100."
+            )
         normalized = normalize(
             image,
-            arguments.normalize_low,
-            arguments.normalize_high,
+            normalize_low,
+            normalize_high,
             axis=(0, 1),
         )
 
-        print(f"Performing StarDist segmentation (model={arguments.model_name})...")
-        model = self._get_model(arguments.model_name)
+        print(f"Performing StarDist segmentation (model={model_name})...")
+        model = self._get_model(model_name)
         predict_kwargs: dict[str, float] = {}
         if arguments.prob_thresh is not None:
-            predict_kwargs["prob_thresh"] = arguments.prob_thresh
+            prob_thresh = finite_float(arguments.prob_thresh, name="prob_thresh")
+            if not 0.0 <= prob_thresh <= 1.0:
+                raise ValueError("prob_thresh must be between 0 and 1.")
+            predict_kwargs["prob_thresh"] = prob_thresh
         if arguments.nms_thresh is not None:
-            predict_kwargs["nms_thresh"] = arguments.nms_thresh
+            nms_thresh = finite_float(arguments.nms_thresh, name="nms_thresh")
+            if not 0.0 <= nms_thresh <= 1.0:
+                raise ValueError("nms_thresh must be between 0 and 1.")
+            predict_kwargs["nms_thresh"] = nms_thresh
         labels, _ = model.predict_instances(normalized, **predict_kwargs)
+        labels = validate_labels(
+            labels,
+            name="StarDist mask",
+            dimensions=(2,),
+            expected_shape=image.shape[:2],
+        )
 
-        object_count = int(labels.max())
-        print(f"StarDist: {object_count} objects detected")
+        count = object_count(labels)
+        print(f"StarDist: {count} objects detected")
 
         mask_path = Path(arguments.mask)
-        mask_path.parent.mkdir(parents=True, exist_ok=True)
-        iio.imwrite(str(mask_path), labels.astype(np.uint32))
+        write_labels(mask_path, labels)
 
-        return self.Outputs(mask=mask_path, object_count=object_count)
+        return self.Outputs(mask=mask_path, object_count=count)
 
     @staticmethod
-    def _prepare_image(image: Any, model_name: str, channel: int) -> Any:
+    def _prepare_image(
+        image: Any,
+        model_name: str,
+        channel: int,
+        channel_axis: str,
+    ) -> Any:
+        import numpy as np
+
         if image.ndim == 2:
+            if model_name == "2D_versatile_he":
+                raise ValueError("The H&E StarDist model requires an RGB image.")
+            if channel != 0:
+                raise ValueError("A 2D grayscale image requires channel=0.")
             return image
         if model_name == "2D_versatile_he":
-            if image.ndim == 3 and image.shape[0] in {3, 4}:
-                image = image[:3].transpose(1, 2, 0)
-            elif image.ndim == 3 and image.shape[-1] == 4:
-                image = image[..., :3]
-            return image
-        if image.ndim == 3:
-            if image.shape[-1] in {3, 4} and image.shape[0] > 4:
-                return image[..., channel]
-            return image[channel]
-        raise ValueError(
-            f"StarDistSegmenter expects a 2D or 3D channel image, got shape {image.shape}"
-        )
+            axis = 0 if channel_axis == "first" else -1
+            channel_count = image.shape[axis]
+            if channel_count not in {3, 4}:
+                raise ValueError(
+                    "The H&E StarDist model requires three RGB channels or four RGBA "
+                    f"channels on the declared channel axis; got shape {image.shape}."
+                )
+            channel_last = np.moveaxis(image, axis, -1)
+            return channel_last[..., :3]
+
+        axis = 0 if channel_axis == "first" else image.ndim - 1
+        channel_count = image.shape[axis]
+        if channel >= channel_count:
+            raise ValueError(
+                f"channel={channel} is out of range for {channel_count} channels."
+            )
+        return np.take(image, channel, axis=axis)

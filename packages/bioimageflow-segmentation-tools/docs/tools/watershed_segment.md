@@ -18,8 +18,8 @@ functions.
 
 ## Assumptions
 
-The foreground is defined by `input_image >= threshold`, and marker labels, when
-provided, are aligned with the input image.
+The foreground is defined by `input_image > threshold`, and marker labels, when provided, are aligned with the input image.
+Automatically generated markers use face-connected components.
 
 ## Minimal Example
 

@@ -19,7 +19,6 @@ from bioimageflow_segmentation_tools import (
     DistanceWatershedSegment,
     FilterLabels,
     LocalThresholdSegment,
-    nnInteractive,
     OtsuThresholdSegment,
     PostprocessLabels,
     SplitTouchingObjects,
@@ -48,6 +47,38 @@ def test_threshold_segment_labels_synthetic_objects(tmp_path: Path) -> None:
     assert set(np.unique(labels)) == {0, 1, 2}
 
 
+def test_threshold_segment_uses_strict_threshold_and_face_connectivity(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "input.tif"
+    labels_path = tmp_path / "labels.tif"
+    image = np.array([[5, 0], [0, 6]], dtype=np.uint8)
+    iio.imwrite(image_path, image)
+
+    result = ThresholdSegment().process_row(
+        Arguments(input_image=image_path, labels=labels_path, threshold=5.0, above=True)
+    )
+
+    labels = iio.imread(labels_path)
+    assert result.object_count == 1
+    assert labels[0, 0] == 0
+    assert labels[1, 1] == 1
+
+
+def test_threshold_segment_keeps_diagonal_objects_separate(tmp_path: Path) -> None:
+    image_path = tmp_path / "diagonal.tif"
+    labels_path = tmp_path / "labels.tif"
+    image = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+    iio.imwrite(image_path, image)
+
+    result = ThresholdSegment().process_row(
+        Arguments(input_image=image_path, labels=labels_path, threshold=0.0, above=True)
+    )
+
+    assert result.object_count == 2
+    assert set(np.unique(iio.imread(labels_path))) == {0, 1, 2}
+
+
 def test_cellpose_sam_executes_with_fake_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -57,14 +88,14 @@ def test_cellpose_sam_executes_with_fake_runtime(
     created_models: list[str] = []
 
     class FakeCellposeModel:
-        def __init__(self, model_type: str) -> None:
-            self.model_type = model_type
-            created_models.append(model_type)
+        def __init__(self, pretrained_model: str) -> None:
+            self.pretrained_model = pretrained_model
+            created_models.append(pretrained_model)
 
         def eval(self, image: np.ndarray, **_: object) -> tuple[np.ndarray]:
             labels = np.zeros(image.shape[-2:], dtype=np.uint32)
             labels[2:5, 2:5] = 1
-            labels[6:8, 6:8] = 2
+            labels[6:8, 6:8] = 7
             return (labels,)
 
     models_module.CellposeModel = FakeCellposeModel
@@ -78,8 +109,9 @@ def test_cellpose_sam_executes_with_fake_runtime(
     result = tool.process_row(
         Arguments(
             input_image=image_path,
-            model_type="cpsam",
+            pretrained_model="cpsam_v2",
             diameter=0.0,
+            channel_axis="last",
             flow_threshold=0.4,
             cellprob_threshold=0.0,
             mask=tmp_path / "mask.tif",
@@ -88,8 +120,9 @@ def test_cellpose_sam_executes_with_fake_runtime(
     second_result = tool.process_row(
         Arguments(
             input_image=image_path,
-            model_type="cpsam",
+            pretrained_model="cpsam_v2",
             diameter=12.0,
+            channel_axis="last",
             flow_threshold=0.7,
             cellprob_threshold=-1.0,
             mask=tmp_path / "second_mask.tif",
@@ -97,9 +130,9 @@ def test_cellpose_sam_executes_with_fake_runtime(
     )
 
     assert result.cell_count == 2
-    assert int(iio.imread(result.mask).max()) == 2
+    assert set(np.unique(iio.imread(result.mask))) == {0, 1, 7}
     assert second_result.cell_count == 2
-    assert created_models == ["cpsam"]
+    assert created_models == ["cpsam_v2"]
 
 
 def test_cellpose3_model_cache_is_keyed_and_clearable(
@@ -140,9 +173,9 @@ def test_cellpose_sam_model_cache_is_keyed_and_clearable(
     created_models: list[str] = []
 
     class FakeCellposeModel:
-        def __init__(self, model_type: str) -> None:
-            self.model_type = model_type
-            created_models.append(model_type)
+        def __init__(self, pretrained_model: str) -> None:
+            self.pretrained_model = pretrained_model
+            created_models.append(pretrained_model)
 
     models_module.CellposeModel = FakeCellposeModel
     cellpose_module.models = models_module
@@ -150,16 +183,16 @@ def test_cellpose_sam_model_cache_is_keyed_and_clearable(
     monkeypatch.setitem(sys.modules, "cellpose.models", models_module)
     tool = CellposeSAM()
 
-    first = tool._get_model("cpsam")
-    assert tool._get_model("cpsam") is first
+    first = tool._get_model("cpsam_v2")
+    assert tool._get_model("cpsam_v2") is first
     second = tool._get_model("alternate")
 
     assert second is not first
-    assert created_models == ["cpsam", "alternate"]
+    assert created_models == ["cpsam_v2", "alternate"]
 
     tool.clear_model_cache()
     assert tool._get_model("alternate") is not second
-    assert created_models == ["cpsam", "alternate", "alternate"]
+    assert created_models == ["cpsam_v2", "alternate", "alternate"]
 
 
 def test_stardist_model_cache_is_keyed_and_clearable(
@@ -197,39 +230,53 @@ def test_stardist_model_cache_is_keyed_and_clearable(
     ]
 
 
-def test_nninteractive_executes_with_fake_predict_function(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    nninteractive_module = types.ModuleType("nninteractive")
+def test_stardist_prepares_explicit_channel_axes() -> None:
+    channel_first = np.zeros((2, 5, 7), dtype=np.float32)
+    channel_first[1] = 3.0
+    channel_last = np.moveaxis(channel_first, 0, -1)
 
-    def fake_predict(
-        image: np.ndarray,
-        *,
-        model_path: Path | None,
-        prompt_points: list[tuple[int, int]],
-    ) -> np.ndarray:
-        labels = np.zeros(image.shape, dtype=np.uint32)
-        for label, (y, x) in enumerate(prompt_points, start=1):
-            labels[y, x] = label
-        return labels
-
-    nninteractive_module.predict = fake_predict
-    monkeypatch.setitem(sys.modules, "nninteractive", nninteractive_module)
-
-    image_path = tmp_path / "input.tif"
-    iio.imwrite(image_path, np.zeros((10, 10), dtype=np.float32))
-    result = nnInteractive().process_row(
-        Arguments(
-            input_image=image_path,
-            model_path=None,
-            prompt_points="2,3;7,8",
-            mask=tmp_path / "mask.tif",
-        )
+    first_result = StarDistSegmenter._prepare_image(
+        channel_first,
+        "2D_versatile_fluo",
+        1,
+        "first",
+    )
+    last_result = StarDistSegmenter._prepare_image(
+        channel_last,
+        "2D_versatile_fluo",
+        1,
+        "last",
     )
 
-    assert result.object_count == 2
-    assert int(iio.imread(result.mask).max()) == 2
+    assert first_result.shape == (5, 7)
+    assert np.array_equal(first_result, last_result)
+    assert np.all(first_result == 3.0)
+
+
+def test_stardist_validates_he_channels_and_grayscale_selection() -> None:
+    rgba = np.zeros((4, 5, 7), dtype=np.uint8)
+    prepared = StarDistSegmenter._prepare_image(
+        rgba,
+        "2D_versatile_he",
+        0,
+        "first",
+    )
+    assert prepared.shape == (5, 7, 3)
+
+    with pytest.raises(ValueError, match="requires an RGB image"):
+        StarDistSegmenter._prepare_image(
+            np.zeros((5, 7)),
+            "2D_versatile_he",
+            0,
+            "last",
+        )
+    with pytest.raises(ValueError, match="requires channel=0"):
+        StarDistSegmenter._prepare_image(
+            np.zeros((5, 7)),
+            "2D_versatile_fluo",
+            1,
+            "last",
+        )
 
 
 def test_otsu_threshold_segment_uses_global_otsu_threshold(tmp_path: Path) -> None:
@@ -389,7 +436,7 @@ def test_filter_labels_removes_by_area_border_and_intensity(tmp_path: Path) -> N
     assert output[6, 6] == 0
 
 
-def test_filter_labels_handles_volumetric_labels_without_2d_shape_filters(
+def test_filter_labels_handles_volumetric_labels_with_default_shape_filters(
     tmp_path: Path,
 ) -> None:
     input_path = tmp_path / "labels_3d.tif"
@@ -408,8 +455,8 @@ def test_filter_labels_handles_volumetric_labels_without_2d_shape_filters(
             remove_border_touching=True,
             intensity_image="",
             min_mean_intensity=0.0,
-            min_solidity=0.9,
-            max_eccentricity=0.1,
+            min_solidity=0.0,
+            max_eccentricity=1.0,
         )
     )
 
@@ -418,6 +465,28 @@ def test_filter_labels_handles_volumetric_labels_without_2d_shape_filters(
     assert set(np.unique(output)) == {0, 1}
     assert output[1, 3, 3] == 1
     assert output[1, 0, 0] == 0
+
+
+def test_filter_labels_rejects_planar_shape_filters_for_volume(tmp_path: Path) -> None:
+    input_path = tmp_path / "labels_3d.tif"
+    labels = np.zeros((3, 4, 4), dtype=np.uint16)
+    labels[1, 1:3, 1:3] = 1
+    iio.imwrite(input_path, labels, photometric="minisblack")
+
+    with pytest.raises(ValueError, match="only defined for planar labels"):
+        FilterLabels().process_row(
+            Arguments(
+                labels=input_path,
+                output_labels=tmp_path / "filtered.tif",
+                min_area=0,
+                max_area=0,
+                remove_border_touching=False,
+                intensity_image="",
+                min_mean_intensity=0.0,
+                min_solidity=0.5,
+                max_eccentricity=1.0,
+            )
+        )
 
 
 def test_postprocess_labels_removes_small_objects_and_relabels(tmp_path: Path) -> None:
@@ -439,17 +508,37 @@ def test_postprocess_labels_removes_small_objects_and_relabels(tmp_path: Path) -
     assert output[6, 6] == 0
 
 
+def test_postprocess_labels_rejects_fractional_label_ids(tmp_path: Path) -> None:
+    input_path = tmp_path / "fractional.tif"
+    iio.imwrite(input_path, np.array([[0.0, 1.5]], dtype=np.float32))
+
+    with pytest.raises(ValueError, match="integer label IDs"):
+        PostprocessLabels().process_row(
+            Arguments(
+                labels=input_path,
+                output_labels=tmp_path / "output.tif",
+                min_size=0,
+            )
+        )
+
+
 def test_heavy_segmentation_tools_build_graph_without_model_dependencies(
     tmp_path: Path,
 ) -> None:
     with Workflow(engine="direct", storage_path=tmp_path / "results") as wf:
         Cellpose3()(input_image=tmp_path / "image.tif", name="cellpose")
+        CellposeSAM()(input_image=tmp_path / "image.tif", name="cellpose_sam")
         StarDistSegmenter()(input_image=tmp_path / "image.tif", name="stardist")
 
         assert isinstance(wf.nodes["cellpose"].tool, Cellpose3)
+        assert isinstance(wf.nodes["cellpose_sam"].tool, CellposeSAM)
         assert isinstance(wf.nodes["stardist"].tool, StarDistSegmenter)
         assert (
             wf.get_environment(Cellpose3.environment).name == Cellpose3.environment.name
+        )
+        assert (
+            wf.get_environment(CellposeSAM.environment).name
+            == CellposeSAM.environment.name
         )
         assert (
             wf.get_environment(StarDistSegmenter.environment).name
@@ -479,6 +568,7 @@ def test_cellpose3_runtime_segments_tiny_synthetic_image(
             model_type="cyto3",
             channel=0,
             nuclear_channel=0,
+            channel_axis="last",
             flow_threshold=0.4,
             cellprob_threshold=-6.0,
             name="cellpose3_runtime",
@@ -488,7 +578,43 @@ def test_cellpose3_runtime_segments_tiny_synthetic_image(
     mask_path = Path(result.iloc[0]["mask"])
     labels = iio.imread(mask_path)
     assert labels.shape == image.shape
-    assert int(result.iloc[0]["cell_count"]) == int(labels.max())
+    assert int(result.iloc[0]["cell_count"]) == int(np.count_nonzero(np.unique(labels)))
+
+
+@pytest.mark.model_runtime
+@pytest.mark.complete
+@pytest.mark.wetlands
+def test_cellpose_sam_runtime_segments_tiny_synthetic_image(
+    tmp_path: Path,
+    complete_wetlands_config: dict,
+) -> None:
+    image_path = tmp_path / "cellpose_sam_input.tif"
+    image = np.zeros((32, 32), dtype=np.float32)
+    image[10:22, 10:22] = 1.0
+    iio.imwrite(image_path, image)
+
+    with Workflow(
+        storage_path=tmp_path / "results",
+        engine="wetlands",
+        wetlands_config=complete_wetlands_config,
+    ) as wf:
+        cellpose_sam = CellposeSAM()(
+            input_image=image_path,
+            pretrained_model="cpsam_v2",
+            diameter=12.0,
+            channel_axis="last",
+            flow_threshold=0.4,
+            cellprob_threshold=-6.0,
+            name="cellpose_sam_runtime",
+        )
+        result = wf.compute(cellpose_sam)
+
+    mask_path = Path(result.iloc[0]["mask"])
+    labels = iio.imread(mask_path)
+    assert labels.shape == image.shape
+    assert int(result.iloc[0]["cell_count"]) == int(
+        np.count_nonzero(np.unique(labels))
+    )
 
 
 @pytest.mark.model_runtime
@@ -511,6 +637,7 @@ def test_stardist_runtime_segments_tiny_synthetic_image(
             input_image=image_path,
             model_name="2D_versatile_fluo",
             channel=0,
+            channel_axis="last",
             prob_thresh=0.1,
             nms_thresh=0.4,
             normalize_low=1.0,
@@ -522,4 +649,6 @@ def test_stardist_runtime_segments_tiny_synthetic_image(
     mask_path = Path(result.iloc[0]["mask"])
     labels = iio.imread(mask_path)
     assert labels.shape == image.shape
-    assert int(result.iloc[0]["object_count"]) == int(labels.max())
+    assert int(result.iloc[0]["object_count"]) == int(
+        np.count_nonzero(np.unique(labels))
+    )
