@@ -1,8 +1,7 @@
 # SelectColumns
 
-`SelectColumns` keeps a comma-separated list of columns and optionally renames
-them. It is useful before reports, exports, or joins that need a compact table
-shape.
+`SelectColumns` keeps a comma-separated list of columns and optionally renames them.
+It is useful before reports, exports, or joins that need a compact table shape.
 
 ## Inputs
 
@@ -33,15 +32,14 @@ pandas.
 
 ## Assumptions
 
-All selected columns exist in the upstream table. Rename mappings must refer
-to selected columns.
+All selected columns exist in the upstream table.
+Selections and rename sources must not be repeated, rename mappings must refer to selected columns, and final output names must be unique.
 
 ## Expected Results
 
-The output table contains only the selected columns, in the requested order,
-with requested renames applied.
+The output table contains only the selected columns, in the requested order, with requested renames applied.
 
 ## Failure Modes
 
-Missing selected columns raise `KeyError`. Malformed rename mappings raise
-`ValueError`.
+Missing selected columns and mappings for unselected columns raise `KeyError`.
+Malformed mappings, duplicate selections, repeated rename sources, and final-name collisions raise `ValueError`.

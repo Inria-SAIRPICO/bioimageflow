@@ -7,7 +7,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
-    EnvironmentSpec,
+    GENERAL_ENV,
     GUIMeta,
     ImageSpec,
     IOModel,
@@ -18,22 +18,12 @@ from bioimageflow_core import (
     Template,
 )
 
-simpleitk_env = EnvironmentSpec(
-    name="simpleitk",
-    dependencies={
-        "python": "3.12",
-        "pip": ["SimpleITK==2.5.5", "numpy==2.5.0", "tifffile==2026.6.1"],
-    },
-)
-
 
 class ConnectedComponents(ProcessingTool):
-    """Label connected components in a binary image using SimpleITK.
+    """Label face-connected components in a binary image.
 
     Converts a binary detection map into a labeled image where each
     connected region receives a unique integer identifier.
-    Uses SimpleITK for input I/O and processing, and tifffile for UInt32 TIFF
-    output because SimpleITK's TIFF writer does not support UInt32.
     """
     row_consumption = RowConsumption.MAPPED
     display_name = "Connected Components"
@@ -43,7 +33,7 @@ class ConnectedComponents(ProcessingTool):
     )
     category = Category.SEGMENTATION
     tags = ["labeling", "segmentation"]
-    environment = simpleitk_env
+    environment = GENERAL_ENV
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -71,29 +61,46 @@ class ConnectedComponents(ProcessingTool):
                 display_name="Label image",
                 description="Label image where each connected component has a unique integer ID.",
             ),
-        ] = Template("{input_image.stem}_labels{ext}")
+        ] = Template("{input_image.stem}_labels.tif")
         num_labels: Annotated[int, GUIMeta(
             display_name="Label count",
             description="Number of connected components labelled in the image.",
         )]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
+        import imageio.v3 as iio
         import numpy as np
-        import SimpleITK as sitk    # type: ignore
-        import tifffile
-
-        sitk_image = sitk.ReadImage(str(arguments.input_image))
-        # Binarize: threshold > 0
-        binary = sitk.Cast(sitk_image > 0, sitk.sitkUInt8)
+        from skimage.measure import label
 
         print("Computing connected components...")
-        labeled = sitk.ConnectedComponent(binary)
-        labeled_array = sitk.GetArrayFromImage(labeled)
-        num_labels = int(labeled_array.max())
+        output_path = Path(arguments.output_image)
+        if output_path.suffix.lower() not in {".tif", ".tiff"}:
+            raise ValueError(
+                "ConnectedComponents output must use a .tif or .tiff extension "
+                "to preserve UInt32 labels."
+            )
+        image = iio.imread(str(arguments.input_image))
+        if image.ndim not in {2, 3}:
+            raise ValueError(
+                "Input image must be a 2D or 3D binary image; "
+                f"got shape {image.shape}."
+            )
+        if not np.isfinite(image).all():
+            raise ValueError("Input image must contain only finite values.")
+        foreground = image != 0
+        labeled_result: Any = label(
+            foreground,
+            connectivity=1,
+            return_num=True,
+        )
+        labeled_array, num_labels = labeled_result
+        num_labels = int(num_labels)
+        if num_labels > np.iinfo(np.uint32).max:
+            raise OverflowError("Connected-component count exceeds uint32 capacity.")
+        labeled_array = labeled_array.astype(np.uint32, copy=False)
         print(f"Connected components: {num_labels} labels")
 
-        output_path = Path(arguments.output_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        tifffile.imwrite(str(output_path), labeled_array.astype(np.uint32, copy=False))
+        iio.imwrite(str(output_path), labeled_array)
 
         return self.Outputs(output_image=output_path, num_labels=num_labels)

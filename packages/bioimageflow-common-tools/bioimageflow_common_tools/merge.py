@@ -21,6 +21,83 @@ def _all_resolved(
     return all(s is not None for s in schemas)
 
 
+def _require_unique_columns(columns: Any, source: str) -> list[Any]:
+    names = list(columns)
+    seen: set[Any] = set()
+    duplicate_set: set[Any] = set()
+    duplicates: list[Any] = []
+    for name in names:
+        if name in seen and name not in duplicate_set:
+            duplicates.append(name)
+            duplicate_set.add(name)
+        seen.add(name)
+    if duplicates:
+        rendered = ", ".join(repr(name) for name in duplicates)
+        raise ValueError(f"{source} contains duplicate column name(s): {rendered}.")
+    return names
+
+
+def _validated_suffixes(value: Any) -> tuple[str, str]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("Column suffixes must contain exactly two strings.")
+    left, right = value
+    if not isinstance(left, str) or not isinstance(right, str):
+        raise ValueError("Column suffixes must contain exactly two strings.")
+    if left == right:
+        raise ValueError("Column suffixes must be distinct to avoid ambiguous names.")
+    return left, right
+
+
+def _suffixes_for_step(suffixes: tuple[str, str], step: int) -> tuple[str, str]:
+    return suffixes if step == 1 else ("", f"_{step + 1}")
+
+
+def _plan_pair_columns(
+    left_columns: Any,
+    right_columns: Any,
+    *,
+    suffixes: tuple[str, str],
+    shared_columns: set[Any] | None = None,
+) -> tuple[dict[Any, Any], dict[Any, Any], list[Any]]:
+    """Plan one merge and reject names that would be duplicated or overwritten."""
+    left = _require_unique_columns(left_columns, "Left table")
+    right = _require_unique_columns(right_columns, "Right table")
+    shared = shared_columns or set()
+    overlap = (set(left) & set(right)) - shared
+    left_rename = {name: f"{name}{suffixes[0]}" for name in overlap}
+    right_rename = {name: f"{name}{suffixes[1]}" for name in overlap}
+    output = [left_rename.get(name, name) for name in left]
+    output.extend(
+        right_rename.get(name, name)
+        for name in right
+        if name not in shared or name not in left
+    )
+    duplicates = _require_unique_columns(output, "Planned merge output")
+    return left_rename, right_rename, duplicates
+
+
+def _plan_collected_columns(
+    existing_columns: Any,
+    incoming_columns: Any,
+) -> tuple[dict[Any, Any], list[Any]]:
+    existing = _require_unique_columns(existing_columns, "Collected table")
+    incoming = _require_unique_columns(incoming_columns, "Incoming table")
+    reserved = set(existing) | set(incoming)
+    rename: dict[Any, Any] = {}
+    for column in incoming:
+        if column not in existing:
+            continue
+        suffix = 1
+        candidate = f"{column}_{suffix}"
+        while candidate in reserved:
+            suffix += 1
+            candidate = f"{column}_{suffix}"
+        rename[column] = candidate
+        reserved.add(candidate)
+    output = [*existing, *(rename.get(column, column) for column in incoming)]
+    return rename, _require_unique_columns(output, "Planned collection output")
+
+
 class InnerJoin(DataFrameTool):
     """Inner join upstream DataFrames on index (default merge behavior)."""
     display_name = "Inner Join"
@@ -29,7 +106,17 @@ class InnerJoin(DataFrameTool):
 
     class Inputs(IOModel):
         pass
-    # Uses default merge_dataframes (inner join on index)
+
+    def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
+        if not dfs:
+            return pd.DataFrame()
+        result = dfs[0].copy()
+        _require_unique_columns(result.columns, "Upstream table 1")
+        for position, df in enumerate(dfs[1:], start=2):
+            incoming = _require_unique_columns(df.columns, f"Upstream table {position}")
+            new_columns = [column for column in incoming if column not in result.columns]
+            result = result.join(df.loc[:, new_columns], how="inner")
+        return result
 
     @classmethod
     def resolve_merge_schema(cls, upstream_schemas, inputs=None):
@@ -59,37 +146,46 @@ class CrossJoin(DataFrameTool):
         )] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
+        suffixes = _validated_suffixes(getattr(arguments, "suffixes", ("_left", "_right")))
         if not dfs:
             return pd.DataFrame()
         if len(dfs) == 1:
+            _require_unique_columns(dfs[0].columns, "Upstream table 1")
             return dfs[0].copy()
-        suffixes: tuple[str, str] = arguments.suffixes if hasattr(arguments, 'suffixes') else ("_left", "_right")
-        result = dfs[0]
-        for i, df in enumerate(dfs[1:], 1):
-            left_suffix = suffixes[0] if i == 1 else ""
-            right_suffix = suffixes[1] if i == 1 else f"_{i+1}"
-            result = result.merge(df, how="cross", suffixes=(left_suffix, right_suffix))
+        result = dfs[0].copy()
+        for step, df in enumerate(dfs[1:], 1):
+            left_rename, right_rename, _ = _plan_pair_columns(
+                result.columns,
+                df.columns,
+                suffixes=_suffixes_for_step(suffixes, step),
+            )
+            result = result.rename(columns=left_rename).merge(
+                df.rename(columns=right_rename),
+                how="cross",
+            )
         return result
 
     @classmethod
     def resolve_merge_schema(cls, upstream_schemas, inputs=None):
         if not upstream_schemas or not _all_resolved(upstream_schemas):
             return None
-        suffixes = (inputs or {}).get("suffixes", ("_left", "_right"))
-        # Mirror pandas.merge's suffix-on-overlap semantics. Two-DF: overlap
-        # columns get suffixes[0] / suffixes[1]; further DFs at index i (>=2)
-        # use "" / f"_{i+1}", matching merge_dataframes above.
+        suffixes = _validated_suffixes(
+            (inputs or {}).get("suffixes", ("_left", "_right"))
+        )
         result: dict[str, dict[str, Any]] = dict(upstream_schemas[0])
-        for i, schema in enumerate(upstream_schemas[1:], 1):
-            left_suffix = suffixes[0] if i == 1 else ""
-            right_suffix = suffixes[1] if i == 1 else f"_{i+1}"
-            overlap = set(result.keys()) & set(schema.keys())
-            new_result: dict[str, dict[str, Any]] = {}
-            for col, entry in result.items():
-                new_result[f"{col}{left_suffix}" if col in overlap else col] = entry
-            for col, entry in schema.items():
-                new_result[f"{col}{right_suffix}" if col in overlap else col] = entry
-            result = new_result
+        for step, schema in enumerate(upstream_schemas[1:], 1):
+            left_rename, right_rename, output = _plan_pair_columns(
+                result,
+                schema,
+                suffixes=_suffixes_for_step(suffixes, step),
+            )
+            result = _planned_schema(
+                result,
+                schema,
+                left_rename,
+                right_rename,
+                output,
+            )
         return result
 
 
@@ -117,17 +213,37 @@ class JoinOnColumn(DataFrameTool):
         )] = ("_left", "_right")
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
+        join_column = arguments.join_column
+        if not isinstance(join_column, str) or not join_column:
+            raise ValueError("Join column must be a non-empty string.")
+        if arguments.how not in {"inner", "left", "right", "outer"}:
+            raise ValueError("Join type must be one of: inner, left, right, outer.")
+        suffixes = _validated_suffixes(arguments.suffixes)
         if not dfs:
             return pd.DataFrame()
         if len(dfs) == 1:
+            columns = _require_unique_columns(dfs[0].columns, "Upstream table 1")
+            if join_column not in columns:
+                raise KeyError(f"Join column '{join_column}' is missing from upstream table 1.")
             return dfs[0].copy()
-        result = dfs[0]
-        for df in dfs[1:]:
-            result = result.merge(
-                df,
-                on=arguments.join_column,
+        result = dfs[0].copy()
+        for step, df in enumerate(dfs[1:], 1):
+            if join_column not in result.columns:
+                raise KeyError(f"Join column '{join_column}' is missing from merged table.")
+            if join_column not in df.columns:
+                raise KeyError(
+                    f"Join column '{join_column}' is missing from upstream table {step + 1}."
+                )
+            left_rename, right_rename, _ = _plan_pair_columns(
+                result.columns,
+                df.columns,
+                suffixes=_suffixes_for_step(suffixes, step),
+                shared_columns={join_column},
+            )
+            result = result.rename(columns=left_rename).merge(
+                df.rename(columns=right_rename),
+                on=join_column,
                 how=arguments.how,
-                suffixes=arguments.suffixes,
             )
         return result
 
@@ -138,19 +254,30 @@ class JoinOnColumn(DataFrameTool):
         join_column = (inputs or {}).get("join_column")
         if not join_column:
             return None
-        suffixes = (inputs or {}).get("suffixes", ("_left", "_right"))
+        how = (inputs or {}).get("how", "inner")
+        if how not in {"inner", "left", "right", "outer"}:
+            raise ValueError("Join type must be one of: inner, left, right, outer.")
+        suffixes = _validated_suffixes(
+            (inputs or {}).get("suffixes", ("_left", "_right"))
+        )
         result: dict[str, dict[str, Any]] = dict(upstream_schemas[0])
-        for schema in upstream_schemas[1:]:
-            # Overlap minus the join column (which is kept once).
-            overlap = (set(result.keys()) & set(schema.keys())) - {join_column}
-            new_result: dict[str, dict[str, Any]] = {}
-            for col, entry in result.items():
-                new_result[f"{col}{suffixes[0]}" if col in overlap else col] = entry
-            for col, entry in schema.items():
-                if col == join_column and col in result:
-                    continue  # already present, kept once
-                new_result[f"{col}{suffixes[1]}" if col in overlap else col] = entry
-            result = new_result
+        for step, schema in enumerate(upstream_schemas[1:], 1):
+            if join_column not in result or join_column not in schema:
+                return None
+            left_rename, right_rename, output = _plan_pair_columns(
+                result,
+                schema,
+                suffixes=_suffixes_for_step(suffixes, step),
+                shared_columns={join_column},
+            )
+            result = _planned_schema(
+                result,
+                schema,
+                left_rename,
+                right_rename,
+                output,
+                {join_column},
+            )
         return result
 
 
@@ -166,6 +293,8 @@ class Concat(DataFrameTool):
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
         if not dfs:
             return pd.DataFrame()
+        for position, df in enumerate(dfs, start=1):
+            _require_unique_columns(df.columns, f"Upstream table {position}")
         result = pd.concat(dfs)
         if result.index.duplicated().any():
             # Deduplicate to preserve :: lineage without collisions
@@ -204,22 +333,12 @@ class Collect(DataFrameTool):
         if not dfs:
             return pd.DataFrame()
         if len(dfs) == 1:
+            _require_unique_columns(dfs[0].columns, "Upstream table 1")
             return dfs[0].copy()
         result = dfs[0].copy()
         for df in dfs[1:]:
-            # Add numeric suffix (_1, _2, ...) for duplicate columns
-            overlap_cols = set(result.columns) & set(df.columns)
-            if overlap_cols:
-                rename_map = {}
-                for col in overlap_cols:
-                    suffix = 1
-                    new_name = f"{col}_{suffix}"
-                    while new_name in result.columns or new_name in df.columns:
-                        suffix += 1
-                        new_name = f"{col}_{suffix}"
-                    rename_map[col] = new_name
-                df = df.rename(columns=rename_map)
-            result = result.join(df, how="inner")
+            rename_map, _ = _plan_collected_columns(result.columns, df.columns)
+            result = result.join(df.rename(columns=rename_map), how="inner")
         return result
 
     @classmethod
@@ -231,17 +350,30 @@ class Collect(DataFrameTool):
         # the accumulator and the incoming schema.
         result: dict[str, dict[str, Any]] = dict(upstream_schemas[0])
         for schema in upstream_schemas[1:]:
-            overlap = set(result.keys()) & set(schema.keys())
-            renamed: dict[str, dict[str, Any]] = {}
-            for col, entry in schema.items():
-                if col in overlap:
-                    suffix = 1
-                    new_name = f"{col}_{suffix}"
-                    while new_name in result or new_name in schema or new_name in renamed:
-                        suffix += 1
-                        new_name = f"{col}_{suffix}"
-                    renamed[new_name] = entry
-                else:
-                    renamed[col] = entry
-            result = {**result, **renamed}
+            rename_map, _ = _plan_collected_columns(result, schema)
+            result = {
+                **result,
+                **{rename_map.get(column, column): entry for column, entry in schema.items()},
+            }
         return result
+
+
+def _planned_schema(
+    left: dict[str, dict[str, Any]],
+    right: dict[str, dict[str, Any]],
+    left_rename: dict[Any, Any],
+    right_rename: dict[Any, Any],
+    output: list[Any],
+    shared: set[Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Apply a runtime column plan to static schema entries."""
+    shared = shared or set()
+    entries = [(left_rename.get(name, name), entry) for name, entry in left.items()]
+    entries.extend(
+        (right_rename.get(name, name), entry)
+        for name, entry in right.items()
+        if name not in shared or name not in left
+    )
+    if [name for name, _ in entries] != output:
+        raise AssertionError("Merge column plan and schema sources diverged.")
+    return dict(entries)

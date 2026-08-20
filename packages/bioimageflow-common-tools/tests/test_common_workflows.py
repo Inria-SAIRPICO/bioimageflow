@@ -1,9 +1,7 @@
 """Integration tests for bioimageflow-common-tools.
 
-These tests exercise the tool definitions, graph construction, and
-workflow execution using stub data. They do NOT require heavy deps
-(bioio, cellpose, SimpleITK, atlas CLI) — processing tools that call
-external libs are tested for graph construction only.
+These tests exercise the tool definitions, graph construction, and workflow
+execution using generated data.
 """
 
 from pathlib import Path
@@ -13,13 +11,13 @@ import imageio.v3 as iio
 import numpy as np
 import pandas as pd
 import pytest
+from PIL import Image
 
 from bioimageflow_core import (
     Arguments,
     EnvironmentSpec,
     IOModel,
     ImageSpec,
-    Layout,
     ProcessingTool,
     RowConsumption,
     Semantic,
@@ -28,7 +26,6 @@ from bioimageflow_core import (
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_input_schema
 from bioimageflow_common_tools import (
-    ExtractChannel,
     Files,
     LabelOverlaps,
     Mosaic,
@@ -123,6 +120,24 @@ class TestFiles:
 
         assert result["path"].tolist() == [str(first), str(second)]
 
+    def test_returns_resolved_absolute_paths(
+        self, image_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(image_dir.parent)
+
+        result = Files().transform(
+            None,
+            Arguments(
+                path=Path("images"),
+                files=None,
+                pattern="*.tif",
+                recursive=False,
+            ),
+        )
+
+        assert all(Path(path).is_absolute() for path in result["path"])
+        assert all(Path(path).is_file() for path in result["path"])
+
     def test_recursive_directory_scan(self, image_dir: Path) -> None:
         nested = image_dir / "nested"
         nested.mkdir()
@@ -135,6 +150,20 @@ class TestFiles:
         )
 
         assert nested_file in {Path(path) for path in result["path"]}
+
+    def test_unmatched_scan_preserves_output_schema(self, image_dir: Path) -> None:
+        result = Files().transform(
+            None,
+            Arguments(
+                path=image_dir,
+                files=None,
+                pattern="*.does-not-exist",
+                recursive=False,
+            ),
+        )
+
+        assert result.empty
+        assert list(result.columns) == ["path"]
 
     @pytest.mark.parametrize(
         ("arguments", "message"),
@@ -195,40 +224,6 @@ class TestFiles:
 
 
 # ---------------------------------------------------------------------------
-# ExtractChannel tool
-# ---------------------------------------------------------------------------
-
-class TestExtractChannel:
-    def test_extracts_channel(self, image_dir: Path) -> None:
-        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
-            files = Files()(path=str(image_dir), pattern="*.tif")
-            ch0 = ExtractChannel()(input_image=files["path"], channel=0)
-            result = wf.compute(ch0)
-            assert len(result) == 2
-            assert "output_image" in result.columns
-
-            # Verify the output is a 2D image (single channel)
-            out_path = result.iloc[0]["output_image"]
-            img = iio.imread(str(out_path))
-            assert img.ndim == 2
-            assert img.shape == (64, 64)
-
-    def test_extracts_different_channels(self, image_dir: Path) -> None:
-        with Workflow(engine="direct", storage_path=str(image_dir.parent / "bif")) as wf:
-            files = Files()(path=str(image_dir), pattern="*.tif")
-            ch0 = ExtractChannel()(
-                input_image=files["path"], channel=0, name="ch0"
-            )
-            ch2 = ExtractChannel()(
-                input_image=files["path"], channel=2, name="ch2"
-            )
-            results = wf.compute(ch0, ch2)
-            assert len(results) == 2
-            assert len(results["ch0"]) == 2
-            assert len(results["ch2"]) == 2
-
-
-# ---------------------------------------------------------------------------
 # LabelOverlaps tool
 # ---------------------------------------------------------------------------
 
@@ -264,6 +259,47 @@ class TestLabelOverlaps:
         nucleus_3_spots = real[real["reference_label"] == 3]
         assert set(nucleus_3_spots["spot_label"]) == {4, 5}
 
+    def test_rejects_mismatched_shapes(self, tmp_path: Path) -> None:
+        labels = tmp_path / "labels.tif"
+        reference = tmp_path / "reference.tif"
+        iio.imwrite(labels, np.zeros((4, 4), dtype=np.uint16))
+        iio.imwrite(reference, np.zeros((3, 4), dtype=np.uint16))
+
+        with pytest.raises(ValueError, match="same shape"):
+            LabelOverlaps().process_row(
+                Arguments(label_image=labels, reference_image=reference)
+            )
+
+    @pytest.mark.parametrize(
+        ("bad_value", "message"),
+        [(-1.0, "non-negative"), (1.5, "integer-valued"), (np.nan, "finite")],
+    )
+    def test_rejects_invalid_label_values(
+        self, tmp_path: Path, bad_value: float, message: str
+    ) -> None:
+        labels = np.zeros((3, 3), dtype=np.float32)
+        labels[1, 1] = bad_value
+        labels_path = tmp_path / "labels.tif"
+        reference_path = tmp_path / "reference.tif"
+        iio.imwrite(labels_path, labels)
+        iio.imwrite(reference_path, np.zeros((3, 3), dtype=np.uint16))
+
+        with pytest.raises(ValueError, match=message):
+            LabelOverlaps().process_row(
+                Arguments(label_image=labels_path, reference_image=reference_path)
+            )
+
+    def test_rejects_float_label_above_uint64_range(self, tmp_path: Path) -> None:
+        labels_path = tmp_path / "labels.tif"
+        reference_path = tmp_path / "reference.tif"
+        iio.imwrite(labels_path, np.array([[float(2**64)]], dtype=np.float64))
+        iio.imwrite(reference_path, np.zeros((1, 1), dtype=np.uint16))
+
+        with pytest.raises(ValueError, match="larger than uint64"):
+            LabelOverlaps().process_row(
+                Arguments(label_image=labels_path, reference_image=reference_path)
+            )
+
 
 # ---------------------------------------------------------------------------
 # Mosaic tool
@@ -297,108 +333,134 @@ class TestMosaic:
             binary = BinaryProducer()(name="binary")
             Mosaic()(input_image=binary["output_image"], name="mosaic")
 
+    def test_empty_batch_returns_no_outputs(self) -> None:
+        assert Mosaic().process_batch([]) == []
 
-# ---------------------------------------------------------------------------
-# Full pipeline (Files → ExtractChannel → LabelOverlaps → Stats)
-# ---------------------------------------------------------------------------
-
-class TestMiniPipeline:
-    def test_full_pipeline(
-        self, tmp_path: Path, image_dir: Path
+    def test_uses_largest_cell_for_heterogeneous_grayscale_tiles(
+        self, tmp_path: Path
     ) -> None:
-        """Test Files → ExtractChannel pipeline (branching topology)."""
-        with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
-            files = Files()(path=str(image_dir), pattern="*.tif")
-            ch0 = ExtractChannel()(
-                input_image=files["path"], channel=0, name="ch0"
+        first = tmp_path / "first.png"
+        second = tmp_path / "second.png"
+        output = tmp_path / "mosaic.png"
+        iio.imwrite(first, np.full((2, 3), 50, dtype=np.uint8))
+        iio.imwrite(second, np.full((4, 1), 100, dtype=np.uint8))
+        arguments = [
+            Arguments(
+                input_image=path,
+                columns=2,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
             )
-            ch1 = ExtractChannel()(
-                input_image=files["path"], channel=1, name="ch1"
-            )
-            ch2 = ExtractChannel()(
-                input_image=files["path"], channel=2, name="ch2"
-            )
-            results = wf.compute(ch0, ch1, ch2)
-            # 2 images × 3 channels = 6 outputs total
-            for name in ["ch0", "ch1", "ch2"]:
-                assert len(results[name]) == 2
-                for out_path in results[name]["output_image"]:
-                    assert Path(out_path).exists()
+            for path in (first, second)
+        ]
 
-    def test_overlap_to_stats_pipeline(
-        self, tmp_path: Path, label_images: tuple[Path, Path]
+        result = Mosaic().process_batch(arguments)
+
+        with Image.open(result[0].mosaic_path) as mosaic:
+            assert mosaic.mode == "L"
+            assert mosaic.size == (6, 4)
+        assert all(row.image_count == 2 for row in result)
+
+    def test_preserves_rgb_and_rgba_modes(self, tmp_path: Path) -> None:
+        rgb_path = tmp_path / "rgb.png"
+        rgba_path = tmp_path / "rgba.png"
+        output = tmp_path / "mosaic.png"
+        rgb = np.zeros((2, 2, 3), dtype=np.uint8)
+        rgb[..., 1] = 200
+        rgba = np.zeros((2, 2, 4), dtype=np.uint8)
+        rgba[..., 0] = 255
+        rgba[..., 3] = 128
+        iio.imwrite(rgb_path, rgb)
+        iio.imwrite(rgba_path, rgba)
+        arguments = [
+            Arguments(
+                input_image=path,
+                columns=2,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
+            )
+            for path in (rgb_path, rgba_path)
+        ]
+
+        Mosaic().process_batch(arguments)
+
+        with Image.open(output) as mosaic:
+            assert mosaic.mode == "RGBA"
+            assert mosaic.size == (4, 2)
+            assert mosaic.getpixel((0, 0)) == (0, 200, 0, 255)
+            assert mosaic.getpixel((2, 0)) == (255, 0, 0, 128)
+
+    def test_preserves_uint16_grayscale_values(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "uint16.tif"
+        output = tmp_path / "mosaic.png"
+        pixels = np.array([[0, 256], [1000, 65535]], dtype=np.uint16)
+        iio.imwrite(input_path, pixels)
+
+        Mosaic().process_batch([
+            Arguments(
+                input_image=input_path,
+                columns=1,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
+            )
+        ])
+
+        with Image.open(output) as mosaic:
+            assert mosaic.mode == "I;16"
+            np.testing.assert_array_equal(np.asarray(mosaic), pixels)
+
+    def test_preserves_palette_transparency(self, tmp_path: Path) -> None:
+        input_path = tmp_path / "palette.png"
+        output = tmp_path / "mosaic.png"
+        palette = Image.new("P", (2, 1))
+        palette.putpalette([255, 0, 0, 0, 255, 0] + [0] * (256 * 3 - 6))
+        palette.putdata([0, 1])
+        palette.info["transparency"] = 0
+        palette.save(input_path)
+
+        Mosaic().process_batch([
+            Arguments(
+                input_image=input_path,
+                columns=1,
+                tile_width=None,
+                tile_height=None,
+                mosaic_path=output,
+            )
+        ])
+
+        with Image.open(output) as mosaic:
+            assert mosaic.mode == "RGBA"
+            assert mosaic.getpixel((0, 0)) == (255, 0, 0, 0)
+            assert mosaic.getpixel((1, 0)) == (0, 255, 0, 255)
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("columns", 1.5, "Columns must be a positive integer"),
+            ("tile_width", 0, "Tile width must be a positive integer"),
+            ("tile_height", True, "Tile height must be a positive integer"),
+        ],
+    )
+    def test_rejects_non_positive_integer_layout_settings(
+        self,
+        tmp_path: Path,
+        field: str,
+        value: object,
+        message: str,
     ) -> None:
-        """Test LabelOverlaps pipeline with stub labeler.
+        input_path = tmp_path / "input.png"
+        iio.imwrite(input_path, np.zeros((2, 2), dtype=np.uint8))
+        values = {
+            "input_image": input_path,
+            "columns": 1,
+            "tile_width": None,
+            "tile_height": None,
+            "mosaic_path": tmp_path / "mosaic.png",
+        }
+        values[field] = value
 
-        Simulates the FISH pattern: a single 2-channel image where ch0
-        is spot labels and ch1 is nucleus labels. Uses StubLabeler to
-        produce output with LABEL semantics.
-        """
-        spots_path, ref_path = label_images
-
-        stub_env = EnvironmentSpec(
-            name="stub", dependencies={"pip": ["numpy==2.4.2"]}
-        )
-
-        class StubLabeler(ProcessingTool):
-            """Passthrough that re-tags an image as LABEL semantic."""
-            row_consumption = RowConsumption.MAPPED
-            display_name = "Stub Labeler"
-            environment = stub_env
-
-            class Inputs(IOModel):
-                input_image: Annotated[
-                    Path,
-                    ImageSpec(semantics={Semantic.INTENSITY}),
-                ]
-
-            class Outputs(IOModel):
-                output_image: Annotated[
-                    Path,
-                    ImageSpec(
-                        semantics={Semantic.LABEL},
-                        layouts={Layout.PLANAR},
-                    ),
-                ] = Template("{input_image.stem}_labeled{ext}")
-
-            def process_row(self, arguments: Any, *, context: object | None = None) -> Any:
-                import shutil
-                out = Path(arguments.output_image)
-                out.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(str(arguments.input_image), str(out))
-                return self.Outputs(output_image=out)
-
-        # Stack spots and reference as a 2-channel image
-        spots_data = iio.imread(str(spots_path))
-        ref_data = iio.imread(str(ref_path))
-        combined = np.stack([spots_data, ref_data], axis=0)
-
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        iio.imwrite(str(data_dir / "sample.tif"), combined)
-
-        with Workflow(engine="direct", storage_path=str(tmp_path / "bif")) as wf:
-            files = Files()(path=str(data_dir))
-            ch_spots = ExtractChannel()(
-                input_image=files["path"], channel=0, name="ch_spots"
-            )
-            ch_refs = ExtractChannel()(
-                input_image=files["path"], channel=1, name="ch_refs"
-            )
-            # Re-tag as LABEL (simulating segmentation label producers)
-            labeled_spots = StubLabeler()(
-                input_image=ch_spots["output_image"], name="label_spots"
-            )
-            labeled_refs = StubLabeler()(
-                input_image=ch_refs["output_image"], name="label_refs"
-            )
-            overlaps = LabelOverlaps()(
-                label_image=labeled_spots["output_image"],
-                reference_image=labeled_refs["output_image"],
-            )
-            result = wf.compute(overlaps)
-            assert {"reference_label", "spot_label", "overlap_count"}.issubset(
-                result.columns
-            )
-            real = result[result["spot_label"] > 0]
-            assert len(real) > 0
+        with pytest.raises(ValueError, match=message):
+            Mosaic().process_batch([Arguments(**values)])

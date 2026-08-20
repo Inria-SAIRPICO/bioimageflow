@@ -38,7 +38,7 @@ def test_common_exports_exclude_moved_heavy_tools() -> None:
     assert hasattr(common, "WriteTable")
     assert hasattr(common, "FilterTableRows")
     assert hasattr(common, "SelectColumns")
-    assert hasattr(common, "ExtractChannel")
+    assert not hasattr(common, "ExtractChannel")
     assert hasattr(common, "LabelOverlaps")
     assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_v3") is None
     assert importlib.util.find_spec("bioimageflow_common_tools.cellpose_sam") is None
@@ -57,7 +57,6 @@ def test_common_package_all_exports_only_public_tools() -> None:
         "Concat",
         "ConnectedComponents",
         "CrossJoin",
-        "ExtractChannel",
         "Files",
         "FilterTableRows",
         "Generate",
@@ -115,14 +114,15 @@ def test_common_docs_list_only_public_tools() -> None:
     assert "ConvertImage" not in public_tools
 
 
-def test_common_pyproject_declares_public_tool_runtime_dependencies() -> None:
+def test_common_pyproject_keeps_worker_dependencies_out_of_main_environment() -> None:
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     dependencies = {
         dependency.split(">=", maxsplit=1)[0].split("==", maxsplit=1)[0].lower()
         for dependency in pyproject["project"]["dependencies"]
     }
 
-    assert {"pandas", "imageio", "numpy", "pillow"} <= dependencies
+    assert "pandas" in dependencies
+    assert {"imageio", "numpy", "pillow"}.isdisjoint(dependencies)
 
 
 def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
@@ -143,6 +143,18 @@ def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:
     assert table.to_dict("list") == {"threshold": [0.1, 0.2, 0.5]}
 
 
+@pytest.mark.parametrize("column_name", ["", "   ", None])
+def test_generate_rejects_empty_column_name(column_name: object) -> None:
+    from bioimageflow_common_tools import Generate
+
+    assert Generate.resolve_outputs({"column_name": column_name}) is None
+    with pytest.raises(ValueError, match="non-empty string"):
+        Generate().transform(
+            None,
+            Arguments(column_name=column_name, values=[1]),
+        )
+
+
 def test_files_declares_folder_picker() -> None:
     from bioimageflow_common_tools import Files
 
@@ -161,16 +173,18 @@ def test_connected_components_schema_declares_uint32_labels() -> None:
     schema = serialize_output_schema(ConnectedComponents)
 
     assert schema["output_image"]["image_spec"]["dtypes"] == ["uint32"]
+    assert schema["output_image"]["default"] == "{input_image.stem}_labels.tif"
 
 
-def test_connected_components_environment_declares_uint32_tiff_writer() -> None:
-    from bioimageflow_common_tools.connected_components import simpleitk_env
+def test_connected_components_uses_general_image_environment() -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+    from bioimageflow_core import GENERAL_ENV
 
-    assert "tifffile==2026.6.1" in simpleitk_env.dependencies["pip"]
+    assert ConnectedComponents.environment is GENERAL_ENV
+    assert "scikit-image==0.26.0" in GENERAL_ENV.dependencies["pip"]
 
 
 def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:
-    pytest.importorskip("SimpleITK")
     from bioimageflow_common_tools import ConnectedComponents
 
     mask = np.zeros((16, 16), dtype=np.uint8)
@@ -190,3 +204,73 @@ def test_connected_components_writes_uint32_label_image(tmp_path: Path) -> None:
     assert labels.dtype == np.uint32
     assert result.num_labels == 2
     assert int(labels.max()) == 2
+
+
+def test_connected_components_uses_face_connectivity(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    mask = np.eye(3, dtype=np.uint8)
+    input_image = tmp_path / "diagonal.tif"
+    iio.imwrite(input_image, mask)
+
+    result = ConnectedComponents().process_row(
+        Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+    )
+
+    labels = iio.imread(result.output_image)
+    assert result.num_labels == 3
+    assert set(np.unique(labels)) == {0, 1, 2, 3}
+
+
+def test_connected_components_treats_every_finite_nonzero_value_as_foreground(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    mask = np.array([[0, -1], [0, 2]], dtype=np.int16)
+    input_image = tmp_path / "signed.tif"
+    iio.imwrite(input_image, mask)
+
+    result = ConnectedComponents().process_row(
+        Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+    )
+
+    assert result.num_labels == 1
+
+
+def test_connected_components_rejects_output_format_that_loses_uint32(
+    tmp_path: Path,
+) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "binary.png"
+    iio.imwrite(input_image, np.eye(3, dtype=np.uint8))
+
+    with pytest.raises(ValueError, match="preserve UInt32"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.png")
+        )
+
+
+def test_connected_components_rejects_nonfinite_values(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "nonfinite.tif"
+    iio.imwrite(input_image, np.array([[0.0, np.nan]], dtype=np.float32))
+
+    with pytest.raises(ValueError, match="finite"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+        )
+
+
+def test_connected_components_rejects_unsupported_dimensions(tmp_path: Path) -> None:
+    from bioimageflow_common_tools import ConnectedComponents
+
+    input_image = tmp_path / "four-dimensional.tif"
+    iio.imwrite(input_image, np.zeros((2, 2, 2, 2), dtype=np.uint8))
+
+    with pytest.raises(ValueError, match="2D or 3D"):
+        ConnectedComponents().process_row(
+            Arguments(input_image=input_image, output_image=tmp_path / "labels.tif")
+        )

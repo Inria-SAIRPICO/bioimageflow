@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .connected_components import ConnectedComponents as ConnectedComponents
-    from .extract_channel import ExtractChannel as ExtractChannel
     from .files import Files as Files
     from .generate import Generate as Generate
     from .label_overlaps import LabelOverlaps as LabelOverlaps
@@ -26,7 +25,6 @@ _EXPORTS = {
     "Concat": ("merge", "Concat"),
     "ConnectedComponents": ("connected_components", "ConnectedComponents"),
     "CrossJoin": ("merge", "CrossJoin"),
-    "ExtractChannel": ("extract_channel", "ExtractChannel"),
     "Files": ("files", "Files"),
     "FilterTableRows": ("table", "FilterTableRows"),
     "Generate": ("generate", "Generate"),
@@ -44,7 +42,6 @@ __all__ = [
     "Concat",
     "ConnectedComponents",
     "CrossJoin",
-    "ExtractChannel",
     "Files",
     "FilterTableRows",
     "Generate",

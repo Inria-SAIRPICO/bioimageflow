@@ -4,9 +4,8 @@
 parameter sweeps, small condition tables, and workflow smoke tests where a
 full metadata file would be unnecessary.
 
-Inputs are `column_name` and `values`. The output schema is resolved from
-`column_name`; if the name is missing, schema resolution returns `None` because
-the column cannot be known statically.
+Inputs are `column_name` and `values`.
+The output schema is resolved from `column_name`; if the name is missing or blank, schema resolution returns `None` because the column cannot be known statically.
 
 The tool does not validate value types beyond pandas table construction. Use
 it for compact lists, not large experimental metadata.
@@ -38,5 +37,4 @@ known.
 
 ## Failure Modes
 
-Missing `column_name` prevents static output-schema resolution; invalid values
-fail through pandas construction.
+A missing or blank `column_name` prevents static output-schema resolution and raises `ValueError` at execution; invalid values fail through pandas construction.

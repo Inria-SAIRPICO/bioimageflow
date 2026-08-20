@@ -9,7 +9,7 @@ The directory mode applies `pattern` as a glob and sorts matching regular files 
 Set `recursive` to `true` to apply the pattern below the directory recursively.
 `pattern` and `recursive` are ignored when `files` is set.
 
-The output is a table with one `path` column containing file paths.
+The output is a table with one `path` column containing resolved absolute file paths.
 
 ```python
 from pathlib import Path
@@ -45,6 +45,7 @@ BioImageFlow DataFrameTool APIs, pathlib, and pandas.
 
 Explicit paths keep their input order.
 Directory matches are sorted by path.
+Both source modes return resolved absolute paths.
 
 ## Failure Modes
 
