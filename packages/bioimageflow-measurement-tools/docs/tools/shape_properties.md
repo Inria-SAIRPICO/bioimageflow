@@ -1,14 +1,11 @@
 # ShapeProperties
 
-`ShapeProperties` computes deterministic size and shape descriptors for each
-non-zero label in a 2D label image.
+`ShapeProperties` computes standard scikit-image size and shape descriptors for each positive label in a 2D label image.
 
-Inputs are `label_image`. Outputs include `label`, `area`, pixel-edge
-`perimeter`, `bbox_area`, `extent`, `aspect_ratio`, and
-`equivalent_diameter`.
+Input is `label_image`.
+Outputs include `label`, `area`, contour `perimeter`, `bbox_area`, `extent`, `aspect_ratio`, and `equivalent_diameter`.
 
-Use it when segmentation outputs need lightweight morphology features without
-adding heavier measurement dependencies.
+Use it when segmentation outputs need standard morphology features.
 
 ## Minimal Example
 
@@ -25,26 +22,22 @@ rows = ShapeProperties().process_row(Arguments(label_image="labels.tif"))
 
 ## Outputs
 
-- one dataframe row per non-zero label.
-- `object_count`: number of measured objects.
-- table columns: `label`, `area`, pixel-edge `perimeter`, `bbox_area`,
-  `extent`, `aspect_ratio`, and `equivalent_diameter`.
+- one DataFrame row per positive label.
+- table columns: `label`, `area`, contour `perimeter`, `bbox_area`, `extent`, `aspect_ratio`, and `equivalent_diameter`.
 
 ## Dependencies and Core Libraries
 
-imageio, NumPy, pandas, and deterministic package-local geometry helpers.
+imageio, NumPy, and scikit-image region measurements.
 
 ## Assumptions
 
-Labels are integer object IDs and background is zero. The current implementation
-is intentionally deterministic and 2D-oriented.
+Labels are finite, non-negative integer object IDs and background is zero.
 
 ## Expected Results
 
-Synthetic rectangle fixtures produce exact areas, bounding boxes, aspect ratios,
-and equivalent diameters.
+Synthetic rectangle fixtures produce exact areas, bounding boxes, aspect ratios, standard contour perimeters, and equivalent diameters.
 
 ## Failure Modes
 
-Unreadable images or unsupported dimensions fail through the image reader or
-measurement code. Empty label images return an empty table and zero objects.
+Unreadable or invalid label images raise errors.
+Empty label images return no object rows.
