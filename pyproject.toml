@@ -3,20 +3,20 @@ name = "bioimageflow-workspace"
 version = "0.0.1"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.2.1,<0.3",
+    "bioimageflow-core>=0.3.0,<0.4",
 ]
 
 [dependency-groups]
 dev = [
-    "bioimageflow>=0.3.0",
-    "bioimageflow-common-tools>=0.1.7",
-    "bioimageflow-io-tools>=0.1.7",
-    "bioimageflow-measurement-tools>=0.1.7",
-    "bioimageflow-segmentation-tools>=0.1.7",
-    "bioimageflow-sairpico-tools>=0.1.7",
-    "bioimageflow-restoration-tools>=0.1.7",
-    "bioimageflow-spot-tools>=0.1.7",
-    "bioimageflow-tracking-tools>=0.1.7",
+    "bioimageflow>=0.6.0",
+    "bioimageflow-common-tools>=0.2.0",
+    "bioimageflow-io-tools>=0.2.0",
+    "bioimageflow-measurement-tools>=0.2.0",
+    "bioimageflow-segmentation-tools>=0.2.0",
+    "bioimageflow-sairpico-tools>=0.2.0",
+    "bioimageflow-restoration-tools>=0.2.0",
+    "bioimageflow-spot-tools>=0.2.0",
+    "bioimageflow-tracking-tools>=0.2.0",
     "furo>=2025.12.19",
     "imageio>=2.31.0",
     "numpy>=1.23.5",
