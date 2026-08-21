@@ -48,6 +48,9 @@ hotspot_env = EnvironmentSpec(
         "python": "3.9",
         "conda": [
             "bioimageit::hotspot==1.0.0",
+            "libtiff==4.4.0",
+        ],
+        "pip": [
             "imageio==2.37.0",
             "numpy==1.26.4",
             "scipy==1.13.1",

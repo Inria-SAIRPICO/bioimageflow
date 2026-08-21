@@ -30,7 +30,7 @@ The package declares three environments:
   `bioimageit`; used by PSF, deconvolution, and median-denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0` from `conda-forge` and
   `bioimageit`; used by `CImgDenoising`.
-- `hotspot`: `bioimageit::hotspot==1.0.0` plus pinned NumPy, SciPy, imageio, and tifffile dependencies from `conda-forge` and `bioimageit`; used by `HotspotDetection` and `HotspotToSpots`.
+- `hotspot`: `bioimageit::hotspot==1.0.0` with its compatible libtiff 4.4 ABI plus pinned PyPI NumPy, SciPy, imageio, and tifffile dependencies; used by `HotspotDetection` and `HotspotToSpots`.
 
 Inputs are image files, with public image wrappers declaring `png`, `tif`, and `tiff` formats.
 Image outputs default to fixed `.tif` paths, and mode values map to an explicit executable allowlist.
