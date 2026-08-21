@@ -209,10 +209,7 @@ def test_sairpico_binary_environments_are_pinned_to_python39() -> None:
 def test_hotspot_worker_environment_pins_all_runtime_dependencies() -> None:
     dependencies = HotspotToSpots.environment.dependencies
 
-    expected_conda = {"bioimageit::hotspot==1.0.0"}
-    if sys.platform.startswith("linux"):
-        expected_conda.add("libtiff==4.4.0")
-    assert set(dependencies["conda"]) == expected_conda
+    assert dependencies["conda"] == ["bioimageit::hotspot==1.0.0"]
     assert set(dependencies["pip"]) == {
         "imageio==2.37.0",
         "numpy==1.26.4",

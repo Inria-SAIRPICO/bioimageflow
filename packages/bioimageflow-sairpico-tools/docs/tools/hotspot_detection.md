@@ -32,7 +32,7 @@ the primary controls.
 ## Dependencies and Core Libraries
 
 - BioImageFlow core processing and image schema classes.
-- SAIRPICO `hotspot` environment with `bioimageit::hotspot==1.0.0` and pinned scientific image I/O dependencies; Linux additionally pins the libtiff 4.4 ABI required by the published Linux executable.
+- SAIRPICO `hotspot` environment with `bioimageit::hotspot==1.0.0` and pinned scientific image I/O dependencies. Hotspot build 2 declares its current libtiff ABI through the conda package metadata on every supported platform.
 - External command: `hotSpotDetection`.
 
 ## Minimal Example

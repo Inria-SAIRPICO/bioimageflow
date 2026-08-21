@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import math
-import sys
 from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Optional
@@ -43,15 +42,11 @@ cimgdenoising_env = EnvironmentSpec(
     },
 )
 
-hotspot_conda_dependencies = ["bioimageit::hotspot==1.0.0"]
-if sys.platform.startswith("linux"):
-    hotspot_conda_dependencies.append("libtiff==4.4.0")
-
 hotspot_env = EnvironmentSpec(
     name="hotspot",
     dependencies={
         "python": "3.9",
-        "conda": hotspot_conda_dependencies,
+        "conda": ["bioimageit::hotspot==1.0.0"],
         "pip": [
             "imageio==2.37.0",
             "numpy==1.26.4",
