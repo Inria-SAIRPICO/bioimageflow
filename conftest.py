@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
 
@@ -63,18 +62,18 @@ def pytest_collection_modifyitems(
             item.add_marker(skip_external)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def complete_wetlands_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[dict[str, Any]]:
-    """Return an isolated Wetlands config for complete portability tests."""
+    """Return one isolated Wetlands config shared by complete portability tests."""
     from bioimageflow.env_manager import _reset_shared_manager
 
-    home = tmp_path / "bioimageflow-home"
+    home = tmp_path_factory.mktemp("complete-bioimageflow-home")
     wetlands_root = home / "wetlands"
     tool_store = home / "tool_packages"
 
+    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("BIOIMAGEFLOW_HOME", str(home))
     monkeypatch.setenv("BIOIMAGEFLOW_WETLANDS", str(wetlands_root))
     monkeypatch.setenv("BIOIMAGEFLOW_TOOL_STORE", str(tool_store))
@@ -87,3 +86,4 @@ def complete_wetlands_config(
         }
     finally:
         _reset_shared_manager()
+        monkeypatch.undo()

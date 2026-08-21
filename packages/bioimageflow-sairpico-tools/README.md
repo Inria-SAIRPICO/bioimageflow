@@ -33,7 +33,7 @@ The package declares three `EnvironmentSpec` instances:
   median denoising tools.
 - `cimgdenoising`: `bioimageit::cimgdenoising==1.0.0`, used by
   `CImgDenoising`.
-- `hotspot`: `bioimageit::hotspot==1.0.0` with its compatible libtiff 4.4 ABI plus pinned PyPI NumPy, SciPy, imageio, and tifffile dependencies, used by `HotspotDetection` and `HotspotToSpots`.
+- `hotspot`: `bioimageit::hotspot==1.0.0` plus pinned PyPI NumPy, SciPy, imageio, and tifffile dependencies, used by `HotspotDetection` and `HotspotToSpots`; Linux additionally pins the libtiff 4.4 ABI required by the published Linux executable.
 
 The original SAIRPICO inventory listed platform selectors for these packages:
 
