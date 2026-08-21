@@ -82,7 +82,7 @@ def complete_wetlands_config(
     _reset_shared_manager()
     try:
         yield {
-            "wetlands_instance_path": wetlands_root,
+            "root": wetlands_root,
             "use_local_bioimageflow_core": True,
         }
     finally:

@@ -29,6 +29,7 @@ cellpose_sam_env = EnvironmentSpec(
             "cellpose==4.2.1.1",
             "imageio==2.37.3",
             "numpy==2.5.0",
+            "packaging==26.2",
             "tifffile==2026.6.1",
         ],
     }

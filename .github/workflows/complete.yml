@@ -70,7 +70,17 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run complete public-data tests
-        run: uv run pytest -m "complete and public_data" --run-complete -rsx
+        shell: bash
+        run: |
+          set +e
+          uv run pytest -m "complete and public_data" --run-complete -rsx
+          test_status=$?
+          set -e
+          if [[ $test_status -eq 5 ]]; then
+            echo "::warning::The public-data validation tier currently has no tests; restore this gate when public-data coverage is added."
+            exit 0
+          fi
+          exit "$test_status"
 
   external-binaries:
     name: Complete external-binary validation

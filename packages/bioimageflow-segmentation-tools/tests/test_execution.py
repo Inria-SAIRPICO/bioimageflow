@@ -610,6 +610,10 @@ def test_heavy_segmentation_tools_build_graph_without_model_dependencies(
         )
 
 
+def test_cellpose_sam_environment_includes_fastremap_runtime_dependency() -> None:
+    assert "packaging==26.2" in CellposeSAM.environment.dependencies["pip"]
+
+
 @pytest.mark.model_runtime
 @pytest.mark.complete
 @pytest.mark.wetlands
