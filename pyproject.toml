@@ -12,11 +12,12 @@ dev = [
     "bioimageflow-common-tools>=0.2.0",
     "bioimageflow-io-tools>=0.2.0",
     "bioimageflow-measurement-tools>=0.2.0",
-    "bioimageflow-segmentation-tools>=0.2.0",
+    "bioimageflow-phasor-tools>=0.1.0",
+    "bioimageflow-segmentation-tools>=0.3.0",
     "bioimageflow-sairpico-tools>=0.2.0",
     "bioimageflow-restoration-tools>=0.2.0",
     "bioimageflow-spot-tools>=0.2.0",
-    "bioimageflow-tracking-tools>=0.2.0",
+    "bioimageflow-tracking-tools>=0.3.0",
     "furo>=2025.12.19",
     "imageio>=2.31.0",
     "numpy>=1.23.5",
@@ -48,6 +49,7 @@ bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
 bioimageflow-io-tools = { workspace = true }
 bioimageflow-measurement-tools = { workspace = true }
+bioimageflow-phasor-tools = { workspace = true }
 bioimageflow-segmentation-tools = { workspace = true }
 bioimageflow-sairpico-tools = { workspace = true }
 bioimageflow-restoration-tools = { workspace = true }

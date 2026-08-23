@@ -28,6 +28,7 @@ from bioimageflow_common_tools import Concat
 from bioimageflow_segmentation_tools import (
     Cellpose3,
     CellposeSAM,
+    InstanSegSegment,
     StarDistSegmenter,
     ThresholdSegment,
 )
@@ -306,6 +307,13 @@ def build_workflow(
             model_name="2D_versatile_fluo",
             name="stardist_segmentation",
         )
+        instanseg = InstanSegSegment()(
+            input_image=segmentation_input["segmentation_image"],
+            model_name="fluorescence_nuclei_and_cells",
+            target="nuclei",
+            processing_method="auto",
+            name="instanseg_segmentation",
+        )
         classical = ThresholdSegment()(
             input_image=segmentation_input["segmentation_image"],
             threshold=0.5,
@@ -333,6 +341,13 @@ def build_workflow(
             reference_label_image=reference["reference_label_image"],
             name="benchmark_stardist",
         )
+        instanseg_metrics = BenchmarkSegmentationMethod()(
+            method="instanseg",
+            input_image=samples["input_image"],
+            predicted_label_image=instanseg["mask"],
+            reference_label_image=reference["reference_label_image"],
+            name="benchmark_instanseg",
+        )
         classical_metrics = BenchmarkSegmentationMethod()(
             method="classical_threshold",
             input_image=samples["input_image"],
@@ -344,6 +359,7 @@ def build_workflow(
             cellpose3_metrics,
             cellpose_sam_metrics,
             stardist_metrics,
+            instanseg_metrics,
             classical_metrics,
             name="bbbc038_benchmark_metrics",
         )

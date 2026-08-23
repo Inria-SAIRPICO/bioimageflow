@@ -16,6 +16,10 @@ The examples are deliberately scoped so the graph can be read and adapted, while
    low_snr_restoration
    sairpico_deconvolution
    live_cell_tracking
+   instanseg_cell_segmentation
+   nagini3d_caps_segmentation
+   flim_phasor_analysis
+   cell_lineage_tracking
 
 Start with :doc:`fish_analysis` for the most complete end-to-end example.
-The remaining pages cover spot-detection parameter sweeps, segmentation benchmarking, object measurement, restoration, deconvolution, and migration tracking.
+The remaining pages cover spot-detection parameter sweeps, segmentation benchmarking, object measurement, restoration, deconvolution, migration tracking, lineage tracking, volumetric surface segmentation, and FLIM phasor analysis.

@@ -13,6 +13,7 @@ Custom package docs can be added to a local documentation build by setting `BIOI
 - [bioimageflow-io-tools](bioimageflow-io-tools/index.md)
 - [bioimageflow-segmentation-tools](bioimageflow-segmentation-tools/index.md)
 - [bioimageflow-measurement-tools](bioimageflow-measurement-tools/index.md)
+- [bioimageflow-phasor-tools](bioimageflow-phasor-tools/index.md)
 - [bioimageflow-spot-tools](bioimageflow-spot-tools/index.md)
 - [bioimageflow-tracking-tools](bioimageflow-tracking-tools/index.md)
 - [bioimageflow-restoration-tools](bioimageflow-restoration-tools/index.md)

@@ -1,0 +1,19 @@
+workflow: cell_lineage_tracking
+outputs:
+  required_nodes:
+    - objects_from_labels
+    - laptrack_lineages
+    - validate_track_table
+    - lineage_migration_metrics
+    - lineage_quality
+    - render_lineage_labels
+  required_columns:
+    - track_id
+    - lineage_id
+    - parent_track_id
+    - generation
+    - track_labels
+  invariants:
+    - track IDs are positive and zero remains background in rendered labels
+    - every non-root track has exactly one parent and generation is parent generation plus one
+    - merges are disabled

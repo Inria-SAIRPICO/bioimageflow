@@ -7,6 +7,8 @@ Segmentation-focused tool package for BioImageFlow.
 - `Cellpose3`: Cellpose v3 pretrained model wrapper.
 - `CellposeSAM`: Cellpose-SAM pretrained model wrapper.
 - `StarDistSegmenter`: StarDist 2D pretrained model wrapper.
+- `InstanSegSegment`: selected-target nuclei or cell segmentation with named or local InstanSeg models.
+- `Nagini3DSegment`: volumetric NAGINI-3D segmentation with probability, parametric surfaces, and curvature outputs.
 - `ThresholdSegment`: threshold an intensity image and label connected foreground objects.
 - `OtsuThresholdSegment`: compute a global Otsu threshold and label foreground objects.
 - `LocalThresholdSegment`: compute a Sauvola local threshold and label foreground objects.
@@ -23,6 +25,12 @@ Heavy model dependencies are declared in isolated `EnvironmentSpec` objects and 
 `Cellpose3`, `CellposeSAM`, and `StarDistSegmenter` lazily keep one model per worker-side tool instance.
 Repeated calls with the same model selection reuse the weights; changing `model_type` or `model_name` replaces the cached model, and `clear_model_cache()` releases it explicitly.
 Applications can invalidate remote worker caches by stopping the corresponding Wetlands environment.
+
+## NAGINI-3D license boundary
+
+`Nagini3DSegment` installs and executes the third-party `nagini3D` runtime, which is distributed under AGPL-3.0.
+The BioImageFlow wrapper remains BSD-4-Clause, but downstream distributors must review and comply with NAGINI-3D's license before publishing an environment or product containing that runtime.
+NAGINI model weights and datasets are not bundled in this package.
 
 The former `nnInteractive` wrapper was removed because nnInteractive requires a stateful volumetric inference session; its public point-list-to-2D-mask contract did not represent the upstream API.
 

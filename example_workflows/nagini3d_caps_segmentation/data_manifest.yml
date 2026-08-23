@@ -1,0 +1,11 @@
+workflow: nagini3d_caps_segmentation
+data:
+  source: NAGINI-3D CAPS dataset and pretrained CAPS model bundle
+  source_url: https://github.com/QuentinRapilly/NAGINI-3D
+  model_source_url: https://github.com/QuentinRapilly/nagini3d-napari
+  license: Dataset terms from the upstream CAPS distribution; NAGINI runtime is AGPL-3.0
+  acquisition_layout: ZYX TIFF
+  checksum_policy: Record and verify SHA-256 for the selected volume and complete model bundle before execution
+  markers:
+    - public_data
+    - model_runtime

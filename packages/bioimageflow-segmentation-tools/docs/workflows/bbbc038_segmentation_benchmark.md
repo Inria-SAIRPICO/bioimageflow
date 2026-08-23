@@ -4,7 +4,7 @@ This demo workflow compares several nuclei segmentation methods on BBBC038-style
 
 ## Goal
 
-Benchmark Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method on a shared nuclei segmentation task.
+Benchmark Cellpose v3, Cellpose-SAM, StarDist, InstanSeg, and a classical threshold method on a shared nuclei segmentation task.
 
 ## Data
 
@@ -17,7 +17,7 @@ The workflow lists sample folders, combines the per-object mask files into one r
 
 ## Results
 
-- Predicted label images from Cellpose v3, Cellpose-SAM, StarDist, and a classical threshold method.
+- Predicted label images from Cellpose v3, Cellpose-SAM, StarDist, InstanSeg, and a classical threshold method.
 - Overlay previews for visual comparison.
 - A benchmark table with object counts, foreground IoU, and Dice scores.
 

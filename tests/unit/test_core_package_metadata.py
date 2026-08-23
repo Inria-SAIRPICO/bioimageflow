@@ -24,6 +24,7 @@ FIRST_PARTY_DISTRIBUTIONS = {
     "bioimageflow-core",
     "bioimageflow-io-tools",
     "bioimageflow-measurement-tools",
+    "bioimageflow-phasor-tools",
     "bioimageflow-restoration-tools",
     "bioimageflow-sairpico-tools",
     "bioimageflow-segmentation-tools",

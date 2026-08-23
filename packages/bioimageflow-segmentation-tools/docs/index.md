@@ -32,11 +32,20 @@ Default label-output paths use TIFF so label IDs are not written to an unsuitabl
 - [CellposeSAM](tools/cellpose_sam.md): Cellpose-SAM model wrapper.
 - [StarDistSegmenter](tools/stardist_segmenter.md): StarDist 2D pretrained
   model wrapper.
+- [InstanSegSegment](tools/instanseg_segmenter.md): nuclei or cell segmentation with a named or local model.
+- [Nagini3DSegment](tools/nagini3d_segmenter.md): volumetric labels, probabilities, parametric surfaces, and curvature.
 
 ## Demo Workflow
 
 - [BBBC038 segmentation benchmark](workflows/bbbc038_segmentation_benchmark.md):
-  comparison of Cellpose v3, Cellpose-SAM, StarDist, and a classical branch on BBBC038-style nuclei masks.
+  comparison of Cellpose v3, Cellpose-SAM, StarDist, InstanSeg, and a classical branch on BBBC038-style nuclei masks.
+- [InstanSeg cell segmentation](workflows/instanseg_cell_segmentation.md): cell masks and region measurements.
+- [NAGINI-3D CAPS segmentation](workflows/nagini3d_caps_segmentation.md): volumetric segmentation and surface-curvature summaries.
+
+## NAGINI-3D License
+
+The third-party `nagini3D` runtime is AGPL-3.0 and is installed only inside its isolated execution environment.
+Review that license before distributing an environment containing NAGINI-3D; weights and datasets are not bundled.
 
 ## Tests and Demo Data
 

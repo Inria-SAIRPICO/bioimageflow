@@ -18,6 +18,7 @@ FIRST_PARTY_ORDER = [
     "bioimageflow-io-tools",
     "bioimageflow-segmentation-tools",
     "bioimageflow-measurement-tools",
+    "bioimageflow-phasor-tools",
     "bioimageflow-spot-tools",
     "bioimageflow-tracking-tools",
     "bioimageflow-restoration-tools",

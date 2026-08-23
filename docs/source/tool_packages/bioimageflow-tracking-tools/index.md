@@ -12,9 +12,11 @@
 
 tools/filter_objects
 tools/labels_to_objects
+tools/laptrack_link
 tools/nearest_neighbor_link
 tools/track_metrics
 tools/track_quality_metrics
 tools/track_table_validate
 tools/tracks_to_labels
+workflows/cell_lineage_tracking
 ```

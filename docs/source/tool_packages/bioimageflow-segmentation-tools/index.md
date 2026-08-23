@@ -14,7 +14,9 @@ tools/cellpose3
 tools/cellpose_sam
 tools/distance_watershed_segment
 tools/filter_labels
+tools/instanseg_segmenter
 tools/local_threshold_segment
+tools/nagini3d_segmenter
 tools/otsu_threshold_segment
 tools/postprocess_labels
 tools/split_touching_objects
@@ -22,4 +24,6 @@ tools/stardist_segmenter
 tools/threshold_segment
 tools/watershed_segment
 workflows/bbbc038_segmentation_benchmark
+workflows/instanseg_cell_segmentation
+workflows/nagini3d_caps_segmentation
 ```

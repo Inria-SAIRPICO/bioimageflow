@@ -92,6 +92,7 @@ Features
    tool_packages/bioimageflow-io-tools/index
    tool_packages/bioimageflow-segmentation-tools/index
    tool_packages/bioimageflow-measurement-tools/index
+   tool_packages/bioimageflow-phasor-tools/index
    tool_packages/bioimageflow-spot-tools/index
    tool_packages/bioimageflow-tracking-tools/index
    tool_packages/bioimageflow-restoration-tools/index
@@ -103,5 +104,6 @@ Features
 
    reference/index
    specs
+   tool_integration_roadmap
    remote_cluster_experience_spec
    remote_cluster_technical_spec

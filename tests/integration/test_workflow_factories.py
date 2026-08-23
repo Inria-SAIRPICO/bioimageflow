@@ -10,10 +10,14 @@ from bioimageflow import Workflow
 WORKFLOW_DEFINITION_MODULES = (
     "example_workflows/bbbc038_segmentation_benchmark/workflow.py",
     "example_workflows/cell_counting_phenotyping/workflow.py",
+    "example_workflows/cell_lineage_tracking/workflow.py",
+    "example_workflows/flim_phasor_analysis/workflow.py",
     "example_workflows/fish_analysis/workflow.py",
     "example_workflows/fish_analysis/tools/marker_spot_analysis.py",
     "example_workflows/live_cell_tracking/workflow.py",
     "example_workflows/low_snr_restoration/workflow.py",
+    "example_workflows/instanseg_cell_segmentation/workflow.py",
+    "example_workflows/nagini3d_caps_segmentation/workflow.py",
     "example_workflows/parameter_space_exploration/workflow.py",
     "example_workflows/sairpico_deconvolution/workflow.py",
 )

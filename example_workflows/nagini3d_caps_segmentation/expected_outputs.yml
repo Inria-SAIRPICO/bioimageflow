@@ -1,0 +1,14 @@
+workflow: nagini3d_caps_segmentation
+outputs:
+  required_nodes:
+    - nagini3d_segmentation
+    - surface_curvature_summary
+  required_artifacts:
+    - mask
+    - probability
+    - surfaces
+    - model_provenance
+  invariants:
+    - mask is uint32 ZYX and matches the input shape
+    - probability is float32 ZYX and matches the input shape
+    - surface and curvature counts equal the positive mask-label count

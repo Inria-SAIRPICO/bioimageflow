@@ -118,13 +118,14 @@ def _write_artifacts(artifact_dir: Path, package: Package) -> None:
 def test_workspace_packages_are_discovered_independently() -> None:
     packages = discover_packages()
 
-    assert len(packages) == 10
+    assert len(packages) == 11
     assert {package.name for package in packages} == {
         "bioimageflow",
         "bioimageflow-common-tools",
         "bioimageflow-core",
         "bioimageflow-io-tools",
         "bioimageflow-measurement-tools",
+        "bioimageflow-phasor-tools",
         "bioimageflow-restoration-tools",
         "bioimageflow-sairpico-tools",
         "bioimageflow-segmentation-tools",

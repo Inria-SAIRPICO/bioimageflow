@@ -1,0 +1,14 @@
+workflow: instanseg_cell_segmentation
+outputs:
+  required_nodes:
+    - instanseg_cells
+    - cell_region_properties
+  required_columns:
+    - mask
+    - object_count
+    - model_provenance
+    - label
+    - area
+  invariants:
+    - mask is uint32 YX and matches the input spatial shape
+    - object_count equals the number of distinct positive labels

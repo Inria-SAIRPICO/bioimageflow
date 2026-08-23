@@ -1,0 +1,9 @@
+workflow: flim_phasor_analysis
+data:
+  source: PhasorPy FLIM test data
+  source_url: https://github.com/phasorpy/phasorpy/tree/main/tests/data
+  documentation: https://www.phasorpy.org/docs/stable/tutorials/api/phasorpy_io/
+  license: Refer to the PhasorPy test-data manifest for each acquisition
+  checksum_policy: Use PhasorPy's versioned dataset registry and verify downloaded hashes
+  markers:
+    - public_data

@@ -21,6 +21,7 @@ members = [
     "bioimageflow-core",
     "bioimageflow-io-tools",
     "bioimageflow-measurement-tools",
+    "bioimageflow-phasor-tools",
     "bioimageflow-restoration-tools",
     "bioimageflow-sairpico-tools",
     "bioimageflow-segmentation-tools",
@@ -215,6 +216,25 @@ requires-dist = [
 ]
 
 [[package]]
+name = "bioimageflow-phasor-tools"
+version = "0.1.0"
+source = { editable = "packages/bioimageflow-phasor-tools" }
+dependencies = [
+    { name = "bioimageflow-core" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
+    { name = "numpy", specifier = ">=1.23.5" },
+    { name = "tifffile", specifier = ">=2023.7.10" },
+]
+
+[[package]]
 name = "bioimageflow-restoration-tools"
 version = "0.2.0"
 source = { editable = "packages/bioimageflow-restoration-tools" }
@@ -252,7 +272,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-segmentation-tools"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-segmentation-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -305,7 +325,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-tracking-tools"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-tracking-tools" }
 dependencies = [
     { name = "bioimageflow" },
@@ -346,6 +366,7 @@ dev = [
     { name = "bioimageflow-common-tools" },
     { name = "bioimageflow-io-tools" },
     { name = "bioimageflow-measurement-tools" },
+    { name = "bioimageflow-phasor-tools" },
     { name = "bioimageflow-restoration-tools" },
     { name = "bioimageflow-sairpico-tools" },
     { name = "bioimageflow-segmentation-tools" },
@@ -393,6 +414,7 @@ dev = [
     { name = "bioimageflow-common-tools", editable = "packages/bioimageflow-common-tools" },
     { name = "bioimageflow-io-tools", editable = "packages/bioimageflow-io-tools" },
     { name = "bioimageflow-measurement-tools", editable = "packages/bioimageflow-measurement-tools" },
+    { name = "bioimageflow-phasor-tools", editable = "packages/bioimageflow-phasor-tools" },
     { name = "bioimageflow-restoration-tools", editable = "packages/bioimageflow-restoration-tools" },
     { name = "bioimageflow-sairpico-tools", editable = "packages/bioimageflow-sairpico-tools" },
     { name = "bioimageflow-segmentation-tools", editable = "packages/bioimageflow-segmentation-tools" },

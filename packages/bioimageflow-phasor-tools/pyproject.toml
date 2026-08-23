@@ -1,0 +1,66 @@
+[project]
+name = "bioimageflow-phasor-tools"
+version = "0.1.0"
+description = "PhasorPy-based FLIM conversion, calibration, filtering, and lifetime tools"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "BioImageFlow Contributors" }]
+license = "BSD-4-Clause"
+license-files = ["LICENSE"]
+keywords = ["bioimage-analysis", "bioimageflow", "flim", "phasor", "workflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "bioimageflow-core>=0.3.0,<0.4",
+    "numpy>=1.23.5",
+    "tifffile>=2023.7.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/Inria-SAIRPICO/bioimageflow"
+Documentation = "https://bioimageflow.readthedocs.io/latest/"
+Repository = "https://github.com/Inria-SAIRPICO/bioimageflow"
+Issues = "https://github.com/Inria-SAIRPICO/bioimageflow/issues"
+
+[tool.uv.sources]
+bioimageflow-core = { workspace = true }
+
+[tool.hatch.build]
+exclude = [
+    "/.DS_Store",
+    "/.gitignore",
+    "/.mypy_cache/",
+    "/.pytest_cache/",
+    "/.ruff_cache/",
+    "/.vscode/",
+    "/__pycache__/",
+    "/build/",
+    "/dist/",
+]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".DS_Store",
+    ".gitignore",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".vscode/",
+    "__pycache__/",
+    "build/",
+    "dist/",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

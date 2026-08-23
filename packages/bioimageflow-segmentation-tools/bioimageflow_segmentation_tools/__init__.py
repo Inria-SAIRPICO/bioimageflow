@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from .classical import SplitTouchingObjects as SplitTouchingObjects
     from .classical import ThresholdSegment as ThresholdSegment
     from .classical import WatershedSegment as WatershedSegment
+    from .instanseg_segmenter import InstanSegSegment as InstanSegSegment
+    from .nagini3d_segmenter import Nagini3DSegment as Nagini3DSegment
     from .stardist_segmenter import StarDistSegmenter as StarDistSegmenter
 
 
@@ -22,7 +24,9 @@ _EXPORTS = {
     "Cellpose3": ("cellpose_v3", "Cellpose3"),
     "DistanceWatershedSegment": ("classical", "DistanceWatershedSegment"),
     "FilterLabels": ("classical", "FilterLabels"),
+    "InstanSegSegment": ("instanseg_segmenter", "InstanSegSegment"),
     "LocalThresholdSegment": ("classical", "LocalThresholdSegment"),
+    "Nagini3DSegment": ("nagini3d_segmenter", "Nagini3DSegment"),
     "OtsuThresholdSegment": ("classical", "OtsuThresholdSegment"),
     "PostprocessLabels": ("classical", "PostprocessLabels"),
     "SplitTouchingObjects": ("classical", "SplitTouchingObjects"),
@@ -36,7 +40,9 @@ __all__ = [
     "Cellpose3",
     "DistanceWatershedSegment",
     "FilterLabels",
+    "InstanSegSegment",
     "LocalThresholdSegment",
+    "Nagini3DSegment",
     "OtsuThresholdSegment",
     "PostprocessLabels",
     "SplitTouchingObjects",

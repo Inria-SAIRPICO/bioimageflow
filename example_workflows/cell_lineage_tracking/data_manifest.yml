@@ -1,0 +1,9 @@
+workflow: cell_lineage_tracking
+data:
+  source: LapTrack C2C12 cell-segmentation example
+  source_url: https://laptrack.readthedocs.io/en/stable/examples/cell_segmentation.html
+  license: CC BY 4.0 for the documented C2C12 dataset; verify the selected release
+  expected_layout: TYX labels
+  checksum_policy: Pin the selected cropped label stack by SHA-256 in complete-test configuration
+  markers:
+    - public_data

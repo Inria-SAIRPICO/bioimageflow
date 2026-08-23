@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .laptrack_linking import LapTrackLink as LapTrackLink
     from .labels import LabelsToObjects as LabelsToObjects
     from .linking import NearestNeighborLink as NearestNeighborLink
     from .metrics import TrackMetrics as TrackMetrics
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 
 _EXPORTS = {
+    "LapTrackLink": ("laptrack_linking", "LapTrackLink"),
     "FilterObjects": ("table_tools", "FilterObjects"),
     "LabelsToObjects": ("labels", "LabelsToObjects"),
     "NearestNeighborLink": ("linking", "NearestNeighborLink"),
@@ -24,6 +26,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "LapTrackLink",
     "FilterObjects",
     "LabelsToObjects",
     "NearestNeighborLink",

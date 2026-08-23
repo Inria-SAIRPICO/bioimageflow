@@ -1,0 +1,17 @@
+workflow: flim_phasor_analysis
+outputs:
+  required_nodes:
+    - sample_ptu_to_phasor
+    - reference_ptu_to_phasor
+    - calibrate_sample_phasor
+    - filter_sample_phasor
+    - apparent_lifetimes
+  required_artifacts:
+    - sample_phasor
+    - calibrated_phasor
+    - filtered_phasor
+    - phase_lifetime
+    - modulation_lifetime
+  invariants:
+    - all Phasor OME-TIFF artifacts retain matching frequency and harmonic metadata
+    - lifetime images are float32 and match the phasor spatial shape

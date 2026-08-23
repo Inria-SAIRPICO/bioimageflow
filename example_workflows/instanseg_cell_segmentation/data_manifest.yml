@@ -1,0 +1,11 @@
+workflow: instanseg_cell_segmentation
+data:
+  source: InstanSeg public fluorescence examples and official model registry
+  source_url: https://github.com/instanseg/instanseg
+  model: fluorescence_nuclei_and_cells
+  license: Verify the selected example image and model-card licenses upstream
+  expected_layout: CYX or YX
+  checksum_policy: Pin the selected image and resolved model bundle by SHA-256 in complete-test configuration
+  markers:
+    - public_data
+    - model_runtime
