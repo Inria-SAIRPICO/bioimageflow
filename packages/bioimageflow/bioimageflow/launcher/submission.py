@@ -162,6 +162,11 @@ def _submit_workflow(
     """Persist and launch one workflow, optionally using a bound server run ID."""
     if not isinstance(workflow, Workflow):
         raise TypeError("workflow must be a Workflow.")
+    if workflow.storage_path is None:
+        raise ValueError(
+            "Legacy submitted execution requires Workflow.storage_path; "
+            "use RemoteCluster.submit() for storage-free workflows."
+        )
     if type(parsl_config) is not ParslConfigRef:
         raise TypeError("parsl_config must be a ParslConfigRef.")
     if launch is not None and type(launch) not in {
@@ -290,6 +295,11 @@ def submit_workflow(
     transport: SSHSubmissionTransport | None = None,
 ) -> WorkflowRun | RemoteWorkflowRun:
     """Persist and launch one reconnectable submitted Parsl workflow."""
+    if workflow.storage_path is None:
+        raise ValueError(
+            "Legacy submitted execution requires Workflow.storage_path; "
+            "use RemoteCluster.submit() for storage-free workflows."
+        )
     if pre_launch is not None and type(pre_launch) is not PreLaunchScript:
         raise TypeError("pre_launch must be a PreLaunchScript or None.")
     if transport is not None:

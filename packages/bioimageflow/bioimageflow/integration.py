@@ -81,8 +81,7 @@ class ParslConfigValidationReport:
             executor_labels=tuple(value["executor_labels"]),
             retries=value["retries"],
             diagnostics=tuple(
-                IntegrationDiagnostic.from_dict(item)
-                for item in value["diagnostics"]
+                IntegrationDiagnostic.from_dict(item) for item in value["diagnostics"]
             ),
         )
 
@@ -255,7 +254,9 @@ class NodeFailureDiagnostic:
         failure = getattr(exception, "failure", None)
         if failure is not None:
             remote = getattr(failure, "remote_exception", None)
-            failure_category = getattr(getattr(failure, "category", None), "value", None)
+            failure_category = getattr(
+                getattr(failure, "category", None), "value", None
+            )
             return cls(
                 scoped_node_path=scoped_node_path,
                 category=failure_category or category,
@@ -279,13 +280,15 @@ class NodeFailureDiagnostic:
             category=category,
             exception_type=type(exception).__name__,
             message=_sanitize_text(str(exception)) or "",
-            traceback=_sanitize_text("".join(
-                traceback.format_exception(
-                    type(exception),
-                    exception,
-                    exception.__traceback__,
+            traceback=_sanitize_text(
+                "".join(
+                    traceback.format_exception(
+                        type(exception),
+                        exception,
+                        exception.__traceback__,
+                    )
                 )
-            )),
+            ),
             attempt_id=attempt_id,
         )
 
@@ -360,6 +363,9 @@ def get_execution_capabilities() -> ExecutionCapabilityReport:
             None if enabled else f"Install the {package!r} optional dependency.",
         )
 
+    def pending(reason: str) -> CapabilityStatus:
+        return CapabilityStatus(False, reason)
+
     return ExecutionCapabilityReport(
         capabilities={
             "direct": CapabilityStatus(True),
@@ -375,6 +381,24 @@ def get_execution_capabilities() -> ExecutionCapabilityReport:
             "non_allocating_planning": CapabilityStatus(True),
             "structured_node_failures": CapabilityStatus(True),
             "immutable_upload_preparation": CapabilityStatus(True),
+            "remote_cluster_bootstrap": CapabilityStatus(True),
+            "managed_uv_environment": CapabilityStatus(True),
+            "managed_pixi_environment": pending(
+                "Locked target selection, artifact installation, and realization checks are not implemented."
+            ),
+            "managed_pylock_environment": pending(
+                "Target marker evaluation and locked build-closure installation are not implemented."
+            ),
+            "offline_wheelhouse_environment": pending(
+                "Target compatibility selection and offline environment installation are not implemented."
+            ),
+            "existing_python_attestation": CapabilityStatus(True),
+            "managed_setup_scripts": CapabilityStatus(True),
+            "remote_cluster_validation": CapabilityStatus(True),
+            "remote_cluster_planning": CapabilityStatus(True),
+            "idempotent_planned_submission": CapabilityStatus(True),
+            "durable_remote_diagnostics": CapabilityStatus(True),
+            "cluster_cleanup_planning": CapabilityStatus(True),
             "submitted_run_retry": CapabilityStatus(True),
             "submitted_recompute": CapabilityStatus(True),
             "submitted_result_export": CapabilityStatus(True),

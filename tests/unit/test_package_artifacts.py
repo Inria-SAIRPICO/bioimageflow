@@ -342,8 +342,28 @@ def test_orchestrator_wheel_declares_bounded_runtime_extras(
         for requirement in requirements
         if Requirement(requirement).name == "psij-python"
     ]
+    packaging_requirements = [
+        Requirement(requirement)
+        for requirement in requirements
+        if Requirement(requirement).name == "packaging"
+    ]
+    tomli_requirements = [
+        Requirement(requirement)
+        for requirement in requirements
+        if Requirement(requirement).name == "tomli"
+    ]
 
-    assert metadata.get_all("Provides-Extra") == ["parsl", "psij"]
+    assert metadata.get_all("Provides-Extra") == ["cluster", "parsl", "psij"]
+    assert len(packaging_requirements) == 1
+    [packaging_requirement] = packaging_requirements
+    assert str(packaging_requirement.specifier) == ">=24.0"
+    assert str(packaging_requirement.marker) == 'extra == "cluster"'
+    assert len(tomli_requirements) == 1
+    [tomli_requirement] = tomli_requirements
+    assert str(tomli_requirement.specifier) == ">=2.0"
+    assert str(tomli_requirement.marker) == (
+        'python_version < "3.11" and extra == "cluster"'
+    )
     assert len(parsl_requirements) == 1
     [parsl_requirement] = parsl_requirements
     assert str(parsl_requirement.specifier) == "<2026.6,>=2026.5.25"

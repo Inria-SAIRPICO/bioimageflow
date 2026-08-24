@@ -282,6 +282,11 @@ def prepare_remote_submission(
     lifetime: float = 3600.0,
 ) -> PreparedRemoteSubmission:
     """Prepare immutable remote invocation bytes without network operations."""
+    if workflow.storage_path is None:
+        raise ValueError(
+            "Legacy remote preparation requires Workflow.storage_path; "
+            "use RemoteCluster.prepare() for storage-free workflows."
+        )
     if type(lifetime) not in {int, float} or lifetime <= 0:
         raise ValueError("lifetime must be a positive number of seconds.")
     context = prepare_cluster_bundle(

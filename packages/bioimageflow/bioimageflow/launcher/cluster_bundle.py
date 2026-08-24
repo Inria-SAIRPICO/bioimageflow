@@ -401,6 +401,11 @@ def prepare_cluster_bundle(
     node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Iterator[PreparedClusterBundle]:
     """Build one private, self-contained laptop-to-cluster request bundle."""
+    if workflow.storage_path is None:
+        raise ValueError(
+            "Legacy transported execution requires Workflow.storage_path; "
+            "use RemoteCluster for storage-free remote workflows."
+        )
     if targets is not None and inputs is not None:
         raise ValueError("inputs and targets are mutually exclusive.")
     temporary = tempfile.TemporaryDirectory(prefix="bioimageflow-cluster-submit-")

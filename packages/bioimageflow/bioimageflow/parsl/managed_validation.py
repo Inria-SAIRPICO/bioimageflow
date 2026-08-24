@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import math
 import multiprocessing
 import os
 import shutil
@@ -424,8 +425,12 @@ def validate_managed_factory(
         raise TypeError("runtime must be ParslFactoryRuntime.")
     if type(factory) is not str or not factory:
         raise ValueError("factory must be a non-empty module reference.")
-    if type(timeout) not in {int, float} or timeout <= 0:
-        raise ValueError("timeout must be positive.")
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(float(timeout))
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be positive and finite.")
     arguments = dict(kwargs or {})
     references = dict(secret_refs or {})
     if set(arguments).intersection(references):

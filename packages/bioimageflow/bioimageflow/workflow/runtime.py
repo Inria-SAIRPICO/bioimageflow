@@ -279,6 +279,11 @@ class _RuntimeMixin:
         run_context: WorkflowExecutionContext | None = None,
     ) -> Any:
         """Execute the workflow and return results."""
+        if self.storage_path is None:
+            raise RuntimeError(
+                "Local execution requires a runtime storage_path; bind one when "
+                "constructing or loading the workflow."
+            )
         context = run_context or WorkflowExecutionContext()
         self._begin_public_execution(context)
         try:
@@ -392,6 +397,11 @@ class _RuntimeMixin:
         If ``step.execute()`` is not called before advancing to the next
         iteration, the step auto-executes to keep downstream nodes consistent.
         """
+        if self.storage_path is None:
+            raise RuntimeError(
+                "Local execution requires a runtime storage_path; bind one when "
+                "constructing or loading the workflow."
+            )
         context = run_context or WorkflowExecutionContext()
         self._begin_public_execution(context)
         engine_reserved = False

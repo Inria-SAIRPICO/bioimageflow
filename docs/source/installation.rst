@@ -46,10 +46,12 @@ Install managed cluster support on the laptop:
    pip install "bioimageflow[cluster]"
 
 The cluster extra supplies the SSH client, bootstrap, preparation, and managed API support without starting a laptop-side Parsl DataFlowKernel or requiring a laptop-side PSI/J scheduler plugin.
-The currently runnable managed path uses :meth:`~bioimageflow.cluster.ClusterEnvironment.from_existing_python`.
+Runnable managed paths use :meth:`~bioimageflow.cluster.ClusterEnvironment.from_uv_project` or :meth:`~bioimageflow.cluster.ClusterEnvironment.from_existing_python`.
+The locked uv adapter captures the frozen package and installer wheel closure on the laptop, selects compatible artifacts for the gateway interpreter, and publishes a verified offline environment without downloading Python.
+The lock must include the exact BioImageFlow, Parsl, PSI/J, scheduler-plugin, and application runtime closure required by the selected project.
 The selected absolute cluster interpreter must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and the workflow's tool packages.
 It is attested before reuse, but remains externally managed.
-Locked uv sources can be captured locally, but installing them into a target deployment is not implemented yet; Pixi, pylock, and wheelhouse target realization are also not implemented.
+Pixi, pylock, and wheelhouse target realization are not implemented yet.
 The cluster must additionally provide the scheduler client, shared writable root, required drivers and privileged system libraries, and permission for the orchestrator allocation to submit worker jobs.
 No hostname, account, queue, credential, home directory, or scheduler command has a library default.
 

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from bioimageflow.cluster import gateway_artifact as gateway_artifact_module
 from bioimageflow.cluster.protocol import GatewayResponse
 from bioimageflow.cluster.transport import GatewayClientTransport
 
@@ -73,6 +74,62 @@ def test_connection_reports_fresh_root_without_bootstrapping(
 def test_transport_rejects_unsafe_destination(host: str) -> None:
     with pytest.raises(ValueError):
         GatewayClientTransport(host, "/cluster/alice/bif")
+
+
+def test_transport_returns_final_managed_uv_deployment_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "prepared"
+    source.mkdir()
+    (source / "deployment-manifest.json").write_text("{}", encoding="utf-8")
+    prepared_id = "sha256:" + "1" * 64
+    final_id = "sha256:" + "2" * 64
+    prepared = SimpleNamespace(
+        root=source,
+        deployment_id=prepared_id,
+        manifest={"manifest_digest": prepared_id, "setup": None},
+        verify=lambda: None,
+    )
+    artifact = SimpleNamespace(
+        digest="sha256:" + "3" * 64,
+        path=tmp_path / "gateway.pyz",
+        verify=lambda: None,
+        close=lambda: None,
+    )
+    monkeypatch.setattr(
+        gateway_artifact_module, "build_gateway_artifact", lambda: artifact
+    )
+    transport = GatewayClientTransport("hpc", "/cluster/alice/bif")
+    monkeypatch.setattr(
+        transport,
+        "check_connection",
+        lambda: {"bootstrap_required": False, "gateway_available": True},
+    )
+    monkeypatch.setattr(transport, "upload_file", lambda source, destination: None)
+
+    def request(operation, arguments, operation_id=None, **kwargs):
+        if operation == "allocate_upload":
+            return {"upload_path": "/cluster/upload", "upload_token": "a" * 32}
+        if operation == "commit_upload":
+            return {"object_id": kwargs["payload_digest"]}
+        assert operation == "publish_deployment"
+        assert arguments["deployment_id"] == prepared_id
+        return {
+            "deployment_id": final_id,
+            "manifest_digest": prepared_id,
+            "environment_installed": True,
+            "environment_kind": "uv",
+            "external_attestation_digest": None,
+            "reused": False,
+            "gateway_publication_id": "gateway-v1",
+        }
+
+    monkeypatch.setattr(transport, "request", request)
+
+    result = transport.publish_deployment(prepared)
+
+    assert result["deployment_id"] == final_id
+    assert result["external_attestation_digest"] is None
 
 
 def test_submit_plan_snapshots_before_network_and_resumes_one_attempt(

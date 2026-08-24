@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import bioimageflow.cluster.gateway as gateway_module
+import bioimageflow.cluster._gateway_state as gateway_state_module
 from bioimageflow.cluster.deployment import prepare_deployment
 from bioimageflow.cluster.gateway import GatewayState, handle_request
 from bioimageflow.cluster.protocol import GatewayRequest
@@ -169,14 +169,14 @@ def build(runtime, credential):
         == published.payload["external_attestation_digest"]
     )
 
-    original_attestation = gateway_module._attest_existing_python
+    original_attestation = gateway_state_module._attest_existing_python
 
     def changed_attestation(*args, **kwargs):
         attestation, _digest = original_attestation(*args, **kwargs)
         return attestation, "sha256:" + "f" * 64
 
     monkeypatch.setattr(
-        gateway_module, "_attest_existing_python", changed_attestation
+        gateway_state_module, "_attest_existing_python", changed_attestation
     )
     drifted = _request(
         state,

@@ -121,6 +121,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cluster = [
+    { name = "packaging" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
 parsl = [
     { name = "parsl" },
 ]
@@ -132,14 +136,16 @@ psij = [
 requires-dist = [
     { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
     { name = "numpy", specifier = ">=1.23.5" },
+    { name = "packaging", marker = "extra == 'cluster'", specifier = ">=24.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "parsl", marker = "extra == 'parsl'", specifier = ">=2026.5.25,<2026.6" },
     { name = "psij-python", marker = "extra == 'psij'", specifier = ">=0.9.11,<0.10" },
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'cluster'", specifier = ">=2.0" },
     { name = "wetlands", specifier = ">=2.3.3,<3" },
 ]
-provides-extras = ["parsl", "psij"]
+provides-extras = ["parsl", "psij", "cluster"]
 
 [[package]]
 name = "bioimageflow-common-tools"

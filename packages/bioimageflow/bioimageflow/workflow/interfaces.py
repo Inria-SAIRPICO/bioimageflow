@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 class _InterfacesMixin:
     def __init__(
         self,
-        storage_path: str | Path,
+        storage_path: str | Path | None = None,
         *,
         name: str = "workflow",
         display_name: str | None = None,
@@ -59,7 +59,9 @@ class _InterfacesMixin:
             )
         self.name = name
         self.display_name = display_name if display_name is not None else name
-        self.storage_path = _absolute_runtime_path(storage_path)
+        self.storage_path = (
+            None if storage_path is None else _absolute_runtime_path(storage_path)
+        )
         self.engine_type = engine
         self.execution = execution
         self.on_progress = on_progress
@@ -346,7 +348,7 @@ class _InterfacesMixin:
 
     def _inherit_runtime_storage(
         self,
-        storage_path: str | Path,
+        storage_path: str | Path | None,
         seen: set[int] | None = None,
     ) -> None:
         """Apply one root runtime storage path through nested snapshots."""
@@ -356,7 +358,9 @@ class _InterfacesMixin:
         if id(self) in seen:
             return
         seen.add(id(self))
-        self.storage_path = _absolute_runtime_path(storage_path)
+        self.storage_path = (
+            None if storage_path is None else _absolute_runtime_path(storage_path)
+        )
         for node in self._nodes.values():
             if isinstance(node, WorkflowNode):
                 node.workflow._inherit_runtime_storage(self.storage_path, seen)

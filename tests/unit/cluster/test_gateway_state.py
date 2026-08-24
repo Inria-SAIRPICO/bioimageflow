@@ -14,9 +14,21 @@ from bioimageflow.cluster.gateway import (
     ROOT_NAMESPACES,
     GatewayOperationFailure,
     GatewayState,
+    capabilities,
     handle_request,
 )
 from bioimageflow.cluster.protocol import GatewayRequest
+
+
+def test_gateway_advertises_realized_environment_adapters() -> None:
+    report = capabilities()
+
+    assert report["environment_installation_supported"] is True
+    assert report["existing_python_attestation_supported"] is True
+    assert report["environment_adapter_versions"] == {
+        "existing_python": 1,
+        "uv": 1,
+    }
 
 
 def test_gateway_initializes_private_namespaces(tmp_path: Path) -> None:

@@ -42,8 +42,9 @@ Also install the PSI/J scheduler adapter required by the site if it is distribut
 Use an immutable or administratively controlled path and record how it was created; BioImageFlow attests the interpreter and installed distributions, but it does not own or update this environment.
 
 The public API also accepts locked uv, Pixi, pylock, and wheelhouse descriptions.
-Locked uv projects are captured and checked on the laptop, but target installation is not implemented yet; Pixi, pylock, and wheelhouse target realization are also not implemented.
-Use ``from_existing_python()`` for an end-to-end managed run in this release.
+Locked uv projects are captured with their exact hashed package and uv installer wheels, then installed on a compatible gateway target with frozen, offline, non-editable semantics and no implicit Python download.
+The selected lock must contain the complete BioImageFlow, Parsl, PSI/J, scheduler-plugin, and application runtime closure.
+Pixi, pylock, and wheelhouse target realization are not implemented yet.
 
 Build a storage-independent workflow
 ------------------------------------

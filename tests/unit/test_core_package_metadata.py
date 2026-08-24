@@ -336,6 +336,10 @@ def test_only_orchestrator_declares_bounded_parsl_extra() -> None:
     }
 
     assert extras.pop("packages/bioimageflow/pyproject.toml") == {
+        "cluster": [
+            "packaging>=24.0",
+            "tomli>=2.0; python_version < '3.11'",
+        ],
         "parsl": ["parsl>=2026.5.25,<2026.6"],
         "psij": ["psij-python>=0.9.11,<0.10"],
     }

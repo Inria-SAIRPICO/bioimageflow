@@ -16,6 +16,11 @@ from bioimageflow.cluster.bootstrap import (
 from bioimageflow.cluster.gateway import GatewayState
 from bioimageflow.cluster.gateway_artifact import build_gateway_artifact
 from bioimageflow.cluster.protocol import GatewayRequest, GatewayResponse
+from tests.unit.cluster.test_gateway_runs import (
+    _invocation_archive,
+    _plan,
+    _submit_request,
+)
 
 
 def test_probe_uses_constant_command_and_data_only_stdin(
@@ -126,3 +131,65 @@ def test_gateway_artifact_is_deterministic() -> None:
     with build_gateway_artifact() as first, build_gateway_artifact() as second:
         assert first.digest == second.digest
         assert first.path.read_bytes() == second.path.read_bytes()
+
+
+def test_isolated_installed_artifact_validates_submit_and_retry_wire_values(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "isolated-cluster-root"
+    GatewayState.initialize(root)
+    operation_id = str(uuid.uuid4())
+    candidate = root / "temporary" / f"bootstrap-{operation_id}"
+    candidate.mkdir(mode=0o700)
+    setup = candidate / "setup.sh"
+    setup.write_bytes(b"true\n")
+    setup.chmod(0o600)
+    archive, manifest, invocation_digest = _invocation_archive(tmp_path)
+    plan = _plan(root, invocation_digest)
+
+    with build_gateway_artifact() as artifact:
+        remote_artifact = candidate / "gateway.pyz"
+        shutil.copyfile(artifact.path, remote_artifact)
+        remote_artifact.chmod(0o600)
+        installed = subprocess.run(
+            [
+                "python",
+                "-I",
+                str(remote_artifact),
+                "--install-root",
+                str(root),
+                "--operation-id",
+                operation_id,
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert installed.returncode == 0, installed.stderr.decode()
+
+        submitted = subprocess.run(
+            [str(root / "gateway" / "entry")],
+            input=_submit_request(plan, manifest, archive).encode(),
+            capture_output=True,
+            check=False,
+            cwd=tmp_path,
+        )
+        submit_response = GatewayResponse.decode(submitted.stdout.rstrip(b"\n"))
+        assert submitted.returncode == 0, submitted.stderr.decode()
+        assert submit_response.status == "ok"
+        assert submit_response.payload["upload_required"] is True
+
+        retried = subprocess.run(
+            [str(root / "gateway" / "entry")],
+            input=GatewayRequest.create(
+                "start-retry",
+                {"plan": {}},
+                operation_id=str(uuid.uuid4()),
+            ).encode(),
+            capture_output=True,
+            check=False,
+            cwd=tmp_path,
+        )
+        retry_response = GatewayResponse.decode(retried.stdout.rstrip(b"\n"))
+        assert retried.returncode == 0, retried.stderr.decode()
+        assert retry_response.status == "error"
+        assert retry_response.diagnostic["category"] == "invalid-retry"

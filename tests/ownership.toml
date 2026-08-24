@@ -153,6 +153,15 @@ edit_tests = [
 precommit_suites = ["unit", "parsl-fast"]
 
 [[areas]]
+name = "managed-cluster"
+sources = ["packages/bioimageflow/bioimageflow/cluster"]
+edit_tests = [
+    "tests/unit/cluster",
+    "tests/unit/test_workflow_clean_api.py",
+]
+precommit_suites = ["unit", "parsl-fast"]
+
+[[areas]]
 name = "launcher"
 sources = ["packages/bioimageflow/bioimageflow/launcher"]
 edit_tests = [

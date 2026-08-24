@@ -754,6 +754,11 @@ def submit_cluster_workflow(
     node_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
     """Package and transport one workflow through the cluster agent."""
+    if workflow.storage_path is None:
+        raise ValueError(
+            "Legacy transported execution requires Workflow.storage_path; "
+            "use RemoteCluster.submit() for storage-free workflows."
+        )
     try:
         with prepare_cluster_bundle(
             workflow,

@@ -16,7 +16,17 @@ from bioimageflow.node import get_active_workflow
 PUBLIC_EXPORTS = {
     "BackendNotSupportedError",
     "BindingError",
+    "CLUSTER_DIAGNOSTIC_CATEGORIES",
     "CapabilityStatus",
+    "ClusterCleanupCandidate",
+    "ClusterCleanupPlan",
+    "ClusterCleanupReport",
+    "ClusterConnectionReport",
+    "ClusterDeployment",
+    "ClusterDiagnostic",
+    "ClusterEnvironment",
+    "ClusterOperationError",
+    "ClusterValidationReport",
     "ColumnNotFoundError",
     "ColumnRef",
     "CycleInWorkflowError",
@@ -48,12 +58,18 @@ PUBLIC_EXPORTS = {
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
     "ParslConfigValidationReport",
+    "ParslConfiguration",
     "ParslEngine",
+    "ParslFactoryResult",
+    "ParslFactoryRuntime",
     "ParslTaskError",
     "ParslTaskPolicy",
     "Passthrough",
     "PreLaunchScript",
     "PreparedRemoteSubmission",
+    "PreparedClusterInvocation",
+    "PreparedInvocationEntry",
+    "PreparedInvocationManifest",
     "PreparedSubmissionEntry",
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
@@ -63,6 +79,11 @@ PUBLIC_EXPORTS = {
     "RemoteProfileDiagnostic",
     "RemoteNodePathInput",
     "RemoteNodePathPlan",
+    "RemoteCluster",
+    "RemoteExecutionPlan",
+    "RemoteNodePlan",
+    "RemoteRunObservation",
+    "RemoteSubmissionUncertainError",
     "RemoteWorkflowRun",
     "RecomputeRequest",
     "RetryInvalidation",
@@ -70,8 +91,10 @@ PUBLIC_EXPORTS = {
     "SSHSubmissionTransport",
     "SSHTransportError",
     "SchemaSerializationError",
+    "SchedulerJob",
     "SequentialEngine",
     "SourceToolUpstreamError",
+    "SetupScript",
     "ToolMetadata",
     "ToolRegistry",
     "ValidationError",
@@ -79,6 +102,7 @@ PUBLIC_EXPORTS = {
     "WetlandsEnvManager",
     "WorkerEnvironmentAttestation",
     "WorkerSlotCapacity",
+    "WorkerSlot",
     "WorkerTaskError",
     "WorkerTimeoutError",
     "Workflow",
@@ -131,9 +155,11 @@ def test_public_exports_match_explicit_allowlist() -> None:
     assert set(bioimageflow.__all__) == PUBLIC_EXPORTS
 
 
-def test_executable_workflow_apis_require_storage_path() -> None:
+def test_reusable_workflow_can_be_storage_free_but_materializers_require_storage() -> None:
+    parameter = inspect.signature(Workflow).parameters["storage_path"]
+    assert parameter.default is None
+
     callables = (
-        Workflow,
         Workflow.from_dict,
         Workflow.load,
         Workflow.import_archive,

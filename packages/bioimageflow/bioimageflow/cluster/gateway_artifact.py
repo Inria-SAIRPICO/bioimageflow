@@ -8,6 +8,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import packaging
+
 
 _MAIN = r'''from __future__ import annotations
 
@@ -65,6 +67,19 @@ def install(root_text, operation_id):
         metadata = path.stat(follow_symlinks=False)
         if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o022:
             raise SystemExit(2)
+    cleanup_key = gateway / "cleanup-plan.key"
+    if cleanup_key.exists() or cleanup_key.is_symlink():
+        key_metadata = cleanup_key.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(key_metadata.st_mode)
+            or key_metadata.st_uid != os.geteuid()
+            or key_metadata.st_mode & 0o077
+            or key_metadata.st_nlink != 1
+            or key_metadata.st_size != 32
+        ):
+            raise SystemExit(2)
+    else:
+        atomic_bytes(cleanup_key, os.urandom(32), 0o600)
     setup_metadata = setup_source.stat(follow_symlinks=False)
     source_metadata = source.stat(follow_symlinks=False)
     if not stat.S_ISREG(setup_metadata.st_mode) or setup_metadata.st_nlink != 1:
@@ -116,7 +131,7 @@ actual_artifact=\"sha256:$(sha256sum -- {artifact} | cut -d ' ' -f 1)\"
 export BIOIMAGEFLOW_CLUSTER_ROOT={root}
 export BIOIMAGEFLOW_GATEWAY_ARTIFACT_DIGEST={artifact_digest}
 export BIOIMAGEFLOW_GATEWAY_PUBLICATION_ID={publication_id}
-exec {python} {artifact}
+exec {python} -I {artifact}
 """.format(
         setup=shlex.quote(str(setup)),
         setup_digest=shlex.quote(setup_digest),
@@ -196,10 +211,43 @@ def build_gateway_artifact() -> GatewayArtifact:
         "bioimageflow/__init__.py": b"",
         "bioimageflow/cluster/__init__.py": b"",
         "bioimageflow/cluster/_common.py": (cluster_root / "_common.py").read_bytes(),
+        "bioimageflow/cluster/_gateway_archive.py": (
+            cluster_root / "_gateway_archive.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_cleanup_state.py": (
+            cluster_root / "_gateway_cleanup_state.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_receipts.py": (
+            cluster_root / "_gateway_receipts.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_run_state.py": (
+            cluster_root / "_gateway_run_state.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_scripts.py": (
+            cluster_root / "_gateway_scripts.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_state.py": (
+            cluster_root / "_gateway_state.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_support.py": (
+            cluster_root / "_gateway_support.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_uv.py": (
+            cluster_root / "_gateway_uv.py"
+        ).read_bytes(),
+        "bioimageflow/cluster/_gateway_wire.py": (
+            cluster_root / "_gateway_wire.py"
+        ).read_bytes(),
         "bioimageflow/cluster/gateway.py": (cluster_root / "gateway.py").read_bytes(),
         "bioimageflow/cluster/protocol.py": (cluster_root / "protocol.py").read_bytes(),
         "bioimageflow/storage/__init__.py": _STORAGE.encode(),
     }
+    packaging_root = Path(packaging.__file__).parent
+    for source in sorted(packaging_root.rglob("*.py")):
+        relative = source.relative_to(packaging_root)
+        if source.is_symlink() or not source.is_file():
+            raise RuntimeError("The local packaging runtime is not a regular source tree.")
+        entries[f"packaging/{relative.as_posix()}"] = source.read_bytes()
     try:
         with zipfile.ZipFile(path, "x") as archive:
             for name, content in sorted(entries.items()):

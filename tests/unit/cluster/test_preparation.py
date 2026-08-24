@@ -137,3 +137,9 @@ def test_prepared_summary_rejects_unknown_serialized_fields() -> None:
 
     with pytest.raises(ValueError, match="Invalid PreparedInvocationManifest"):
         PreparedClusterInvocation.from_dict({**payload, "unknown": None})
+
+
+@pytest.mark.parametrize("lifetime", [0, -1, float("nan"), float("inf")])
+def test_preparation_lifetime_must_be_positive_and_finite(lifetime: float) -> None:
+    with pytest.raises(ValueError, match="positive finite"):
+        prepare_cluster_invocation(Workflow(name="strict-lifetime"), lifetime=lifetime)

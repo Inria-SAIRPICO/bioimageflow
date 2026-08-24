@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 import pytest
 
 from bioimageflow.cluster.reports import (
+    CLUSTER_DIAGNOSTIC_CATEGORIES,
     ClusterConnectionReport,
     ClusterDeployment,
     ClusterDiagnostic,
@@ -87,7 +88,7 @@ _DIGEST = "sha256:" + "a" * 64
             ClusterValidationReport(
                 _DIGEST,
                 True,
-                _DIGEST,
+                None,
                 "2026-08-24T12:00:00Z",
                 executor_bindings={"cpu": {"cores": 4}},
             ),
@@ -95,7 +96,9 @@ _DIGEST = "sha256:" + "a" * 64
         ),
     ],
 )
-def test_public_values_have_strict_json_round_trips(value: object, loader: object) -> None:
+def test_public_values_have_strict_json_round_trips(
+    value: object, loader: object
+) -> None:
     payload = value.to_dict()  # type: ignore[attr-defined]
 
     assert json.loads(json.dumps(payload)) == payload
@@ -194,6 +197,10 @@ def test_scheduler_values_normalize_resources_and_reject_shell_fragments() -> No
             timedelta(minutes=5),
             attributes={"native": {"directive": "--exclusive"}},
         )
+    with pytest.raises(ValueError, match="whole seconds"):
+        SchedulerJob("slurm", timedelta(microseconds=1))
+    with pytest.raises(TypeError, match="memory"):
+        SchedulerJob("slurm", timedelta(minutes=5), memory=True)  # type: ignore[arg-type]
 
 
 def test_secret_bearing_json_values_are_rejected() -> None:
@@ -207,4 +214,99 @@ def test_secret_bearing_json_values_are_rejected() -> None:
             "site.parsl:build",
             kwargs={"workers": 2},
             secret_refs={"workers": "PARSL_WORKERS"},
+        )
+
+
+@pytest.mark.parametrize(
+    "payload_update",
+    [
+        {"kind": "uv", "environment": "default"},
+        {"kind": "pixi", "groups": ["analysis"], "environment": "default"},
+        {"kind": "pylock", "package": "example"},
+        {"kind": "wheelhouse", "auth_refs": {"index": "INDEX_TOKEN"}},
+    ],
+)
+def test_cluster_environment_rejects_fields_for_another_adapter(
+    tmp_path,
+    payload_update: dict[str, object],
+) -> None:
+    lock = tmp_path / "pylock.toml"
+    lock.write_text('lock-version = "1.0"\n', encoding="utf-8")
+    payload = ClusterEnvironment.from_pylock(lock).to_dict()
+    payload.update(payload_update)
+    if payload["kind"] == "uv":
+        payload.update({"source": str(tmp_path), "lock": None})
+    elif payload["kind"] == "pixi":
+        payload.update({"source": str(tmp_path), "lock": None})
+    elif payload["kind"] == "wheelhouse":
+        payload.update({"source": str(tmp_path), "lock": str(lock)})
+
+    with pytest.raises(ValueError):
+        ClusterEnvironment.from_dict(payload)
+
+
+def test_cluster_environment_round_trip_rejects_non_array_selections(tmp_path) -> None:
+    payload = ClusterEnvironment.from_uv_project(tmp_path).to_dict()
+    payload["groups"] = "analysis"
+
+    with pytest.raises(ValueError, match="arrays"):
+        ClusterEnvironment.from_dict(payload)
+
+
+@pytest.mark.parametrize("value", [" default", "default ", "bad\nname"])
+def test_environment_selection_names_are_trimmed_and_control_free(
+    tmp_path,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError):
+        ClusterEnvironment.from_pixi_project(tmp_path, environment=value)
+
+
+def test_normative_diagnostic_categories_are_registered() -> None:
+    assert {
+        "deployment-install-failed",
+        "environment-installer-unavailable",
+        "parsl-factory-failed",
+        "submission-uncertain",
+        "result-integrity-failed",
+        "cleanup-conflict",
+    } <= CLUSTER_DIAGNOSTIC_CATEGORIES
+
+
+def test_reports_reject_inconsistent_or_malformed_state() -> None:
+    with pytest.raises(ValueError, match="available gateway"):
+        ClusterConnectionReport(False, True, False)
+    with pytest.raises(TypeError, match="boolean"):
+        ClusterValidationReport(
+            _DIGEST,
+            1,  # type: ignore[arg-type]
+            None,
+            "2026-08-24T12:00:00Z",
+        )
+    with pytest.raises(ValueError, match="RFC 3339"):
+        ClusterValidationReport(_DIGEST, True, None, "tomorrow")
+
+
+def test_validation_report_digest_rejects_content_tampering() -> None:
+    report = ClusterValidationReport(
+        _DIGEST,
+        True,
+        None,
+        "2999-08-24T12:00:00Z",
+        executor_bindings={"cpu": {"cores": 4}},
+    )
+    payload = report.to_dict()
+    payload["valid"] = False
+
+    with pytest.raises(ValueError, match="digest mismatch"):
+        ClusterValidationReport.from_dict(payload)
+
+
+@pytest.mark.parametrize("timeout", [0, float("nan"), float("inf"), 601])
+def test_cluster_connection_timeout_is_bounded(timeout: float) -> None:
+    with pytest.raises(ValueError, match="connect_timeout"):
+        RemoteClusterConfig(
+            "login.example",
+            PurePosixPath("/cluster/alice/bioimageflow"),
+            connect_timeout=timeout,
         )
