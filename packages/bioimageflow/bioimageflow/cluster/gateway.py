@@ -8,9 +8,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import unicodedata
 import uuid
 import zipfile
@@ -21,7 +23,7 @@ from typing import Any
 
 from bioimageflow.storage import canonical_json_bytes
 
-from ._common import DIGEST_RE, canonical_digest, normalized_cluster_path
+from ._common import DIGEST_RE, canonical_digest, normalized_cluster_path, thaw_json
 from .protocol import (
     GATEWAY_VERSION,
     MAX_REQUEST_BYTES,
@@ -49,6 +51,7 @@ _MAX_UPLOAD_BYTES = 16 * 1024 * 1024 * 1024
 _MAX_ARCHIVE_ENTRIES = 100_000
 _MAX_ARCHIVE_EXPANDED_BYTES = 16 * 1024 * 1024 * 1024
 _MAX_ATTESTATION_BYTES = 64 * 1024
+_MAX_CHILD_RESPONSE_BYTES = MAX_REQUEST_BYTES
 
 _ATTESTATION_SCRIPT = r'''from __future__ import annotations
 import importlib.metadata as metadata
@@ -178,6 +181,125 @@ if __name__ == "__main__":
     main()
 '''
 
+_RUN_SUBMITTER_SCRIPT = r'''from __future__ import annotations
+import json
+import sys
+from pathlib import Path
+
+
+def main():
+    request = json.loads(Path(sys.argv[1]).read_bytes())
+    content = Path(request["deployment_content"])
+    parsl_root = content / "parsl"
+    sys.path.insert(0, str(parsl_root))
+    include = parsl_root / "include"
+    if include.is_dir():
+        for child in sorted(include.iterdir()):
+            if child.is_dir():
+                sys.path.insert(0, str(child))
+
+    import bioimageflow.launcher.submission as submission_module
+    from bioimageflow.launcher.cluster_submit import _load_inputs, _load_node_input_overrides
+    from bioimageflow.launcher.payload import load_workflow_payload
+    from bioimageflow.launcher.pre_launch import PreLaunchScript
+    from bioimageflow.launcher.remote_control import inspect_run
+    from bioimageflow.launcher.submission import _submit_workflow
+    from bioimageflow.launcher.types import ParslConfigRef, PSIJLaunchConfig
+    from bioimageflow.parsl import ExecutorBinding, ParslTaskPolicy
+
+    # Secrets are resolved by the gateway into the run-private pre-launch
+    # handoff. They must not enter this submitter process environment.
+    submission_module.verify_secret_references = lambda _reference: None
+    invocation_root = Path(request["invocation_root"])
+    invocation = json.loads((invocation_root / "invocation.json").read_bytes())
+    workflow = load_workflow_payload(
+        invocation["workflow"], storage_path=Path(request["storage_path"])
+    )
+    _load_node_input_overrides(
+        invocation_root, workflow, invocation["node_input_overrides"]
+    )
+    inputs = _load_inputs(invocation_root, workflow, invocation["inputs"])
+    run = _submit_workflow(
+        workflow,
+        inputs=inputs if invocation["targets"] is None else None,
+        targets=invocation["targets"],
+        parsl_config=ParslConfigRef.from_dict(request["parsl_config"]),
+        executor_bindings={
+            label: ExecutorBinding.from_dict(value)
+            for label, value in request["executor_bindings"].items()
+        },
+        node_routes=request["node_routes"],
+        environment_routes={},
+        shared_runtime_root=Path(request["shared_runtime_root"]),
+        task_policy=ParslTaskPolicy.from_dict(invocation["task_policy"]),
+        launch=PSIJLaunchConfig.from_dict(request["launch"]),
+        pre_launch=PreLaunchScript.from_text(request["pre_launch"]),
+        preallocated_run_id=request["run_id"],
+        preserve_cluster_paths=True,
+    )
+    print(json.dumps({
+        "status": "ok",
+        "payload": inspect_run(request["storage_path"], run.id),
+    }, sort_keys=True, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+_RUN_CONTROLLER_SCRIPT = r'''from __future__ import annotations
+import json
+import sys
+from pathlib import Path
+
+
+def main():
+    request = json.loads(Path(sys.argv[1]).read_bytes())
+    from bioimageflow.launcher.cluster_protocol import ClusterProtocolFailure
+    from bioimageflow.launcher.remote_control import (
+        cancel_run, inspect_run, plan_run_retry, read_progress_page,
+        refresh_run, start_run_retry,
+    )
+    from bioimageflow.launcher.result_bundle import prepare_result
+    operation = request["operation"]
+    arguments = request["arguments"]
+    storage = request["storage_path"]
+    run_id = request["run_id"]
+    try:
+        if operation == "inspect-run":
+            payload = inspect_run(storage, run_id)
+        elif operation == "refresh-run":
+            payload = refresh_run(storage, run_id)
+        elif operation == "read-progress":
+            payload = read_progress_page(
+                storage, run_id, arguments["after_sequence"], arguments["limit"]
+            )
+        elif operation == "cancel-run":
+            payload = cancel_run(
+                request["transfer_root"], storage, run_id,
+                request["request_id"], request["request_digest"],
+            )
+        elif operation == "plan-retry":
+            payload = plan_run_retry(storage, run_id, arguments["recompute"])
+        elif operation == "start-retry":
+            payload = start_run_retry(storage, arguments["plan"])
+        elif operation == "prepare-result":
+            payload = prepare_result(
+                request["transfer_root"], storage, run_id,
+                request["request_id"], request["request_digest"],
+            )
+        else:
+            raise RuntimeError("unsupported managed run operation")
+    except ClusterProtocolFailure as exc:
+        print(json.dumps({"status": "error", "category": exc.code, "message": exc.message}, sort_keys=True, separators=(",", ":")))
+        return
+    print(json.dumps({"status": "ok", "payload": payload}, sort_keys=True, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
 
 class GatewayOperationFailure(RuntimeError):
     """A sanitized operation failure suitable for a public response."""
@@ -299,7 +421,9 @@ def _atomic_private_bytes(path: Path, content: bytes, mode: int) -> None:
 def _exact_arguments(value: Mapping[str, Any], fields: set[str]) -> dict[str, Any]:
     if type(value) is not dict and not isinstance(value, Mapping):
         raise _failure("protocol-incompatible", "Operation arguments must be an object.")
-    result = dict(value)
+    result = thaw_json(value)
+    if type(result) is not dict:
+        raise _failure("protocol-incompatible", "Operation arguments must be an object.")
     if set(result) != fields:
         raise _failure(
             "protocol-incompatible", "Operation arguments have missing or unknown fields."
@@ -396,10 +520,21 @@ def _validate_deployment_archive(
             raise _failure(
                 "deployment-tampered", "The deployment manifest is malformed."
             ) from exc
+        if type(manifest) is not dict:
+            raise _failure(
+                "deployment-tampered", "The deployment manifest identity does not match."
+            )
+        identity = {
+            key: item
+            for key, item in manifest.items()
+            if key not in {"deployment_id", "manifest_digest"}
+        }
+        computed = canonical_digest(identity)
         if (
-            type(manifest) is not dict
-            or manifest.get("deployment_id") != deployment_id
-            or manifest.get("manifest_digest") != manifest_digest
+            manifest.get("deployment_id") != computed
+            or manifest.get("manifest_digest") != computed
+            or deployment_id != computed
+            or manifest_digest != computed
         ):
             raise _failure(
                 "deployment-tampered", "The deployment manifest identity does not match."
@@ -545,30 +680,55 @@ def _run_json_child(
     timeout: float,
     input_bytes: bytes = b"",
     failure_category: str = "deployment-install-failed",
+    output_limit: int = _MAX_ATTESTATION_BYTES,
 ) -> dict[str, Any]:
+    if type(output_limit) is not int or not 1 <= output_limit <= _MAX_CHILD_RESPONSE_BYTES:
+        raise ValueError("output_limit is invalid")
+    stdout_file = tempfile.TemporaryFile()
+    stderr_file = tempfile.TemporaryFile()
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             argv,
-            input=input_bytes,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            stdout=stdout_file,
+            stderr=stderr_file,
             shell=False,
-            check=False,
-            timeout=timeout,
             env=dict(environment),
+            start_new_session=True,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        try:
+            process.communicate(input=input_bytes, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            raise _failure(
+                failure_category,
+                "The external Python verification process timed out.",
+            ) from exc
+        stdout_file.seek(0)
+        encoded = stdout_file.read(output_limit + 1)
+        stderr_file.seek(0)
+        # Read and discard only a bounded diagnostic prefix. Child stderr is
+        # trusted-code output and is never returned or persisted by the gateway.
+        stderr_file.read(_MAX_ATTESTATION_BYTES + 1)
+    except OSError as exc:
         raise _failure(
             failure_category,
             "The external Python verification process could not complete.",
         ) from exc
-    if completed.returncode != 0 or len(completed.stdout) > _MAX_ATTESTATION_BYTES:
+    finally:
+        stdout_file.close()
+        stderr_file.close()
+    if process.returncode != 0 or len(encoded) > output_limit:
         raise _failure(
             failure_category,
             "The external Python verification process failed.",
         )
     try:
-        value = json.loads(completed.stdout)
+        value = json.loads(encoded)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise _failure(
             failure_category,
@@ -724,6 +884,156 @@ def _attest_existing_python(
             "The external Python lacks the exact required runtime or scheduler plugin.",
         )
     return attestation, canonical_digest(attestation)
+
+
+_RUN_RECORD_SCHEMA = "bioimageflow.cluster.managed_run_record.v1"
+_RUN_PHASES = frozenset(
+    {
+        "allocated",
+        "uploading",
+        "ready",
+        "scheduler-intent",
+        "submitted",
+        "rejected",
+        "cancelled",
+        "uncertain",
+    }
+)
+
+
+def _canonical_run_id(value: Any) -> str:
+    try:
+        parsed = uuid.UUID(value, version=4)
+    except (AttributeError, TypeError, ValueError):
+        try:
+            from bioimageflow.launcher.schemas import validate_run_id
+
+            return validate_run_id(value)
+        except (TypeError, ValueError) as exc:
+            raise _failure("protocol-incompatible", "run_id is invalid.") from exc
+    if str(parsed) != value:
+        raise _failure("protocol-incompatible", "run_id is invalid.")
+    return value
+
+
+def _canonical_attempt_id(value: Any) -> str:
+    try:
+        parsed = uuid.UUID(value, version=4)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise _failure("protocol-incompatible", "attempt_id is invalid.") from exc
+    if str(parsed) != value:
+        raise _failure("protocol-incompatible", "attempt_id is invalid.")
+    return value
+
+
+def _invocation_manifest(value: Any, *, expected_digest: str) -> dict[str, Any]:
+    try:
+        from .preparation import PreparedInvocationManifest
+
+        parsed = PreparedInvocationManifest.from_dict(value)
+    except (TypeError, ValueError) as exc:
+        raise _failure(
+            "protocol-incompatible", "The prepared invocation manifest is invalid."
+        ) from exc
+    if parsed.invocation_digest != expected_digest:
+        raise _failure(
+            "operation-conflict", "The execution plan names another invocation."
+        )
+    return parsed.to_dict()
+
+
+def _validate_invocation_archive(
+    path: Path, manifest: Mapping[str, Any], expected_object_id: str
+) -> None:
+    _validate_published_file(path, expected_object_id)
+    entries = manifest.get("entries")
+    if type(entries) is not list:
+        raise _failure("deployment-tampered", "The invocation inventory is invalid.")
+    declared = {entry.get("path"): entry for entry in entries if type(entry) is dict}
+    if len(declared) != len(entries) or "invocation.json" not in declared:
+        raise _failure("deployment-tampered", "The invocation inventory is invalid.")
+    try:
+        archive = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise _failure("deployment-tampered", "The invocation archive is invalid.") from exc
+    with archive:
+        members = archive.infolist()
+        if len(members) > _MAX_ARCHIVE_ENTRIES:
+            raise _failure("resource-limit-exceeded", "The invocation has too many entries.")
+        files: dict[str, zipfile.ZipInfo] = {}
+        total = 0
+        for member in members:
+            name = member.filename
+            relative = PurePosixPath(name)
+            unix_type = (member.external_attr >> 16) & 0o170000
+            if (
+                not name
+                or name != unicodedata.normalize("NFC", name)
+                or relative.is_absolute()
+                or "\\" in name
+                or any(part in {"", ".", ".."} for part in relative.parts)
+                or name in files
+                or member.is_dir()
+                or member.flag_bits & 0x1
+                or unix_type not in {0, stat.S_IFREG}
+            ):
+                raise _failure("deployment-tampered", "The invocation archive is unsafe.")
+            files[name] = member
+            total += member.file_size
+            if total > _MAX_ARCHIVE_EXPANDED_BYTES:
+                raise _failure("resource-limit-exceeded", "The invocation expands too large.")
+        declared_files = {
+            path: entry for path, entry in declared.items() if entry.get("kind") == "file"
+        }
+        if set(files) != set(declared_files):
+            raise _failure("deployment-tampered", "The invocation archive inventory changed.")
+        for name, member in files.items():
+            entry = declared_files[name]
+            digest = hashlib.sha256()
+            size = 0
+            with archive.open(member) as stream:
+                while chunk := stream.read(1024 * 1024):
+                    size += len(chunk)
+                    digest.update(chunk)
+            if (
+                size != entry.get("size")
+                or f"sha256:{digest.hexdigest()}" != entry.get("digest")
+            ):
+                raise _failure("deployment-tampered", "An invocation entry changed.")
+
+
+def _extract_invocation_archive(
+    path: Path, destination: Path, manifest: Mapping[str, Any]
+) -> None:
+    destination.mkdir(mode=0o700)
+    directories = [
+        item["path"]
+        for item in manifest["entries"]
+        if item.get("kind") == "directory"
+    ]
+    for name in sorted(directories, key=lambda item: len(PurePosixPath(item).parts)):
+        destination.joinpath(*PurePosixPath(name).parts).mkdir(
+            mode=0o700, parents=True, exist_ok=True
+        )
+    with zipfile.ZipFile(path) as archive:
+        for member in archive.infolist():
+            target = destination.joinpath(*PurePosixPath(member.filename).parts)
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            descriptor = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            try:
+                with archive.open(member) as source:
+                    while chunk := source.read(1024 * 1024):
+                        offset = 0
+                        while offset < len(chunk):
+                            offset += os.write(descriptor, chunk[offset:])
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    _fsync_directory(destination)
 
 
 class GatewayState:
@@ -947,6 +1257,16 @@ class GatewayState:
                 if external
                 else None
             ),
+            "run_submitter_digest": (
+                f"sha256:{hashlib.sha256(_RUN_SUBMITTER_SCRIPT.encode()).hexdigest()}"
+                if external
+                else None
+            ),
+            "run_controller_digest": (
+                f"sha256:{hashlib.sha256(_RUN_CONTROLLER_SCRIPT.encode()).hexdigest()}"
+                if external
+                else None
+            ),
         }
         if destination.exists() or destination.is_symlink():
             _stat_private_directory(destination)
@@ -1000,6 +1320,12 @@ class GatewayState:
                     candidate / "validate_factory.py",
                     _FACTORY_VALIDATOR_SCRIPT.encode(),
                     0o600,
+                )
+                _atomic_private_bytes(
+                    candidate / "submit_run.py", _RUN_SUBMITTER_SCRIPT.encode(), 0o600
+                )
+                _atomic_private_bytes(
+                    candidate / "control_run.py", _RUN_CONTROLLER_SCRIPT.encode(), 0o600
                 )
             _atomic_private_json(candidate / "publication.json", publication)
             _fsync_directory(candidate)
@@ -1245,7 +1571,490 @@ class GatewayState:
         payload["validation_digest"] = canonical_digest(
             {key: item for key, item in payload.items() if key != "validation_digest"}
         )
+        validation_root = self._private_subdirectory(destination, "validations")
+        validation_path = validation_root / f"{payload['validation_digest'][7:]}.json"
+        if validation_path.exists():
+            try:
+                existing = json.loads(validation_path.read_bytes())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise _failure(
+                    "deployment-tampered", "The retained validation report is malformed."
+                ) from exc
+            if existing != payload:
+                raise _failure(
+                    "deployment-tampered", "The retained validation identity conflicts."
+                )
+        else:
+            _atomic_private_json(validation_path, payload)
         return payload
+
+    def _run_directory(self, run_id: Any) -> Path:
+        return self.root / "runs" / _canonical_run_id(run_id)
+
+    def _read_run_record(self, run_id: Any) -> dict[str, Any]:
+        canonical = _canonical_run_id(run_id)
+        path = self._run_directory(canonical) / "record.json"
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except FileNotFoundError as exc:
+            raise _failure(
+                "run-not-found", "The requested managed run does not exist.",
+                phase="run-observation", retry_safety="not-applicable",
+                next_action="check-run-id", identities={"run_id": canonical},
+            ) from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_REQUEST_BYTES
+            ):
+                raise _failure("operation-record-tampered", "The run index is unsafe.")
+            encoded = b""
+            while chunk := os.read(descriptor, 64 * 1024):
+                encoded += chunk
+        finally:
+            os.close(descriptor)
+        try:
+            value = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _failure("operation-record-tampered", "The run index is malformed.") from exc
+        fields = {
+            "schema", "run_id", "attempt_id", "request_digest", "plan_digest",
+            "deployment_id", "invocation_digest", "validation_digest", "object_id",
+            "object_size", "storage_path", "phase", "launcher_bound", "plan",
+            "invocation_manifest", "revision", "updated_at",
+        }
+        if (
+            type(value) is not dict
+            or set(value) != fields
+            or value["schema"] != _RUN_RECORD_SCHEMA
+            or value["run_id"] != canonical
+            or value["phase"] not in _RUN_PHASES
+            or type(value["launcher_bound"]) is not bool
+            or type(value["revision"]) is not int
+            or value["revision"] < 0
+            or any(
+                type(value[name]) is not str or DIGEST_RE.fullmatch(value[name]) is None
+                for name in (
+                    "request_digest", "plan_digest", "deployment_id",
+                    "invocation_digest", "validation_digest", "object_id",
+                )
+            )
+            or type(value["object_size"]) is not int
+            or not 0 <= value["object_size"] <= _MAX_UPLOAD_BYTES
+        ):
+            raise _failure("operation-record-tampered", "The run index is malformed.")
+        _canonical_attempt_id(value["attempt_id"])
+        if canonical_digest({key: item for key, item in value["plan"].items() if key != "plan_digest"}) != value["plan_digest"]:
+            raise _failure("operation-record-tampered", "The retained plan digest is invalid.")
+        return value
+
+    def _write_run_record(self, record: Mapping[str, Any]) -> None:
+        run_id = _canonical_run_id(record.get("run_id"))
+        path = self._run_directory(run_id) / "record.json"
+        _atomic_private_json(path, record)
+        if self._read_run_record(run_id) != dict(record):
+            raise _failure("operation-record-tampered", "The run index was not durable.")
+
+    @staticmethod
+    def _allocated_observation(record: Mapping[str, Any]) -> dict[str, Any]:
+        state = "cancelled" if record["phase"] == "cancelled" else "prepared"
+        return {
+            "schema": "bioimageflow.launcher.run-observation.v1",
+            "error": None,
+            "retry_plan": None,
+            "run_id": record["run_id"],
+            "state": state,
+            "status_revision": record["revision"],
+            "storage_path": record["storage_path"],
+            "terminal": state == "cancelled",
+            "updated_at": record["updated_at"],
+        }
+
+    def _deployment_runtime(
+        self, record: Mapping[str, Any], *, require_validation: bool = False
+    ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+        deployment_id = record["deployment_id"]
+        destination = self.root / "deployments" / deployment_id[7:]
+        _stat_private_directory(destination)
+        try:
+            publication = json.loads((destination / "publication.json").read_bytes())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _failure("deployment-tampered", "The deployment publication is malformed.") from exc
+        if (
+            publication.get("deployment_id") != deployment_id
+            or publication.get("environment_installed") is not True
+        ):
+            raise _failure("deployment-tampered", "The retained deployment is unavailable.")
+        artifact = destination / "artifact.zip"
+        _validate_published_file(artifact, publication["object_id"])
+        manifest = _validate_deployment_archive(
+            artifact,
+            publication["prepared_deployment_id"],
+            publication["manifest_digest"],
+        )
+        _verify_extracted_deployment(destination / "content", manifest)
+        for name, field in (
+            ("activation.sh", "activation_digest"),
+            ("submit_run.py", "run_submitter_digest"),
+            ("control_run.py", "run_controller_digest"),
+        ):
+            _validate_published_file(destination / name, publication[field])
+        attestation, digest = _attest_existing_python(
+            manifest, failure_category="external-environment-changed"
+        )
+        if digest != publication.get("external_attestation_digest"):
+            raise _failure(
+                "external-environment-changed",
+                "The external Python changed after deployment confirmation.",
+                phase="submission", retry_safety="safe",
+                next_action="deploy-and-confirm-again",
+                identities={"deployment_id": deployment_id},
+            )
+        validation: dict[str, Any] | None = None
+        if require_validation:
+            validation_path = destination / "validations" / f"{record['validation_digest'][7:]}.json"
+            try:
+                loaded_validation = json.loads(validation_path.read_bytes())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise _failure("validation-expired", "The retained validation is unavailable.") from exc
+            if type(loaded_validation) is not dict:
+                raise _failure("deployment-tampered", "The retained validation changed.")
+            validation = loaded_validation
+            if (
+                validation.get("validation_digest") != record["validation_digest"]
+                or validation.get("deployment_id") != deployment_id
+                or validation.get("valid") is not True
+                or canonical_digest({key: item for key, item in validation.items() if key != "validation_digest"}) != record["validation_digest"]
+            ):
+                raise _failure("deployment-tampered", "The retained validation changed.")
+            try:
+                expires = datetime.fromisoformat(validation["expires_at"].replace("Z", "+00:00"))
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise _failure("deployment-tampered", "The retained validation expiry is invalid.") from exc
+            if datetime.now(timezone.utc) >= expires:
+                raise _failure(
+                    "validation-expired", "The retained validation report expired.",
+                    phase="submission", retry_safety="safe",
+                    next_action="validate-and-plan-again",
+                )
+        return destination, manifest, attestation, validation
+
+    def _run_controller(
+        self,
+        record: Mapping[str, Any],
+        operation: str,
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        deployment, _manifest, attestation, _validation = self._deployment_runtime(record)
+        requests = self._private_subdirectory(self.root / "temporary", "run-requests")
+        private = requests / uuid.uuid4().hex
+        private.mkdir(mode=0o700)
+        try:
+            request = {
+                "operation": operation,
+                "arguments": dict(arguments),
+                "storage_path": record["storage_path"],
+                "run_id": record["run_id"],
+                "transfer_root": str(self._private_subdirectory(self.root / "transfers", "runtime")),
+                "request_id": str(uuid.uuid4()),
+                "request_digest": canonical_digest({"operation": operation, "arguments": dict(arguments)}),
+            }
+            path = private / "request.json"
+            _atomic_private_json(path, request)
+            response = _run_json_child(
+                [attestation["requested_executable"], "-I", "-B", str(deployment / "control_run.py"), str(path)],
+                environment=_child_environment(),
+                timeout=60.0,
+                output_limit=MAX_REQUEST_BYTES,
+                failure_category="remote-operation-failed",
+            )
+        finally:
+            shutil.rmtree(private, ignore_errors=True)
+        if response.get("status") == "error":
+            raise _failure(
+                str(response.get("category", "remote-operation-failed")),
+                str(response.get("message", "The managed run operation failed.")),
+                phase=operation, retry_safety="safe", next_action="inspect-run",
+                identities={"run_id": record["run_id"]},
+            )
+        if set(response) != {"status", "payload"} or response["status"] != "ok" or type(response["payload"]) is not dict:
+            raise _failure("remote-operation-failed", "The managed run response is malformed.")
+        return response["payload"]
+
+    def submit_plan_request(self, request: GatewayRequest) -> dict[str, Any]:
+        if request.operation_id is None or request.payload_digest is None:
+            raise _failure("protocol-incompatible", "submit-plan requires stable attempt and payload identities.")
+        value = _exact_arguments(
+            request.arguments, {"plan", "invocation_manifest", "object_id", "object_size"}
+        )
+        try:
+            from .plan import RemoteExecutionPlan
+
+            plan = RemoteExecutionPlan.from_dict(value["plan"])
+        except (TypeError, ValueError) as exc:
+            raise _failure("protocol-incompatible", "The remote execution plan is invalid.") from exc
+        if (
+            plan.attempt_id != request.operation_id
+            or plan.cluster_root != str(self.root)
+            or value["object_id"] != request.payload_digest
+            or type(value["object_size"]) is not int
+            or not 0 <= value["object_size"] <= _MAX_UPLOAD_BYTES
+            or type(value["object_id"]) is not str
+            or DIGEST_RE.fullmatch(value["object_id"]) is None
+        ):
+            raise _failure("operation-conflict", "The submit attempt bindings do not match.")
+        invocation = _invocation_manifest(
+            value["invocation_manifest"], expected_digest=plan.invocation_digest
+        )
+        run_dir = self._run_directory(plan.run_id)
+        if not run_dir.exists():
+            try:
+                run_dir.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+        _stat_private_directory(run_dir)
+        record_path = run_dir / "record.json"
+        if record_path.exists():
+            record = self._read_run_record(plan.run_id)
+            if record["request_digest"] != request.operation_digest:
+                raise _failure("operation-conflict", "The run ID is bound to another plan.")
+        else:
+            record = {
+                "schema": _RUN_RECORD_SCHEMA,
+                "run_id": plan.run_id,
+                "attempt_id": plan.attempt_id,
+                "request_digest": request.operation_digest,
+                "plan_digest": plan.plan_digest,
+                "deployment_id": plan.deployment_id,
+                "invocation_digest": plan.invocation_digest,
+                "validation_digest": plan.validation_digest,
+                "object_id": value["object_id"],
+                "object_size": value["object_size"],
+                "storage_path": plan.storage_path,
+                "phase": "allocated",
+                "launcher_bound": False,
+                "plan": plan.to_dict(),
+                "invocation_manifest": invocation,
+                "revision": 0,
+                "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            }
+            self._write_run_record(record)
+        if record["phase"] in {"submitted", "cancelled"}:
+            observation = (
+                self._run_controller(record, "inspect-run", {})
+                if record["launcher_bound"]
+                else self._allocated_observation(record)
+            )
+            return {"run_id": plan.run_id, "observation": observation, "upload_required": False}
+        if record["phase"] in {"scheduler-intent", "uncertain"}:
+            raise _failure(
+                "submission-uncertain", "Scheduler acceptance cannot be disproved; the attempt was not resubmitted.",
+                phase="submission", allocation_state="unknown", retry_safety="same-attempt-only",
+                next_action="attach-run", identities={"run_id": plan.run_id, "attempt_id": plan.attempt_id},
+            )
+        object_path = self.root / "objects" / f"{record['object_id'][7:]}.object"
+        if not object_path.exists():
+            if record["phase"] != "uploading":
+                record = {**record, "phase": "uploading", "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+                self._write_run_record(record)
+            return {"run_id": plan.run_id, "observation": self._allocated_observation(record), "upload_required": True}
+        _validate_invocation_archive(object_path, invocation, record["object_id"])
+        invocation_root = run_dir / "invocation"
+        if not invocation_root.exists():
+            _extract_invocation_archive(object_path, invocation_root, invocation)
+        if record["phase"] != "ready":
+            record = {**record, "phase": "ready", "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+            self._write_run_record(record)
+        deployment, manifest, attestation, validation = self._deployment_runtime(record, require_validation=True)
+        assert validation is not None
+        plan_value = plan.to_dict()
+        if (
+            plan.validation_expires_at != validation["expires_at"]
+            or plan_value["validation_evidence"] != validation["evidence"]
+            or plan_value["executor_claims"] != validation["executor_bindings"]
+        ):
+            raise _failure(
+                "parsl-configuration-changed",
+                "The retained validation claims no longer match the execution plan.",
+                phase="submission", retry_safety="safe",
+                next_action="validate-and-plan-again",
+            )
+        scheduler = plan.scheduler_job
+        if scheduler.gpu or scheduler.memory is not None or scheduler.attributes:
+            raise _failure(
+                "unsupported-scheduler-adapter", "The current PSI/J bridge cannot represent GPU, memory, or custom scheduler attributes.",
+                phase="submission", retry_safety="safe", next_action="simplify-orchestrator-job",
+            )
+        parsl = manifest["parsl"]
+        factory = (
+            f"factory:{parsl['factory']}"
+            if parsl["source_kind"] == "file"
+            else parsl["source"]
+        )
+        handoff = run_dir / "secret-handoff.sh"
+        secret_lines = ["set -eu"]
+        total = 0
+        for reference in parsl["secret_refs"].values():
+            if reference not in os.environ:
+                raise _failure(
+                    "secret-reference-missing", f"Required secret reference {reference!r} is unavailable.",
+                    phase="submission", retry_safety="safe", next_action="provide-secret-reference",
+                    identities={"run_id": plan.run_id},
+                )
+            secret = os.environ[reference]
+            size = len(secret.encode("utf-8"))
+            total += size
+            if "\0" in secret or size > 64 * 1024 or total > 256 * 1024:
+                raise _failure("resource-limit-exceeded", "Resolved submission secrets exceed their handoff limit.")
+            secret_lines.append(f"export {reference}={shlex.quote(secret)}")
+        if len(secret_lines) > 1 and not handoff.exists():
+            _atomic_private_bytes(handoff, ("\n".join(secret_lines) + "\n").encode(), 0o600)
+        python_paths = [str(deployment / "content" / "parsl")]
+        include = deployment / "content" / "parsl" / "include"
+        if include.is_dir():
+            python_paths.extend(str(child) for child in sorted(include.iterdir()) if child.is_dir())
+        pre_launch = [
+            "set -eu",
+            f". {shlex.quote(str(deployment / 'activation.sh'))}",
+            f"export PYTHONPATH={shlex.quote(':'.join(python_paths))}${{PYTHONPATH:+:$PYTHONPATH}}",
+        ]
+        setup = deployment / "content" / "setup" / "setup.sh"
+        if setup.is_file():
+            pre_launch.append(f". {shlex.quote(str(setup))}")
+        if len(secret_lines) > 1:
+            pre_launch.extend([f". {shlex.quote(str(handoff))}", f"rm -f -- {shlex.quote(str(handoff))}"])
+        node_routes = {
+            item["node"]: item["selected_executor"]
+            for item in plan_value["nodes"]
+            if item["kind"] == "processing" and item["will_dispatch"]
+        }
+        runtime_root = run_dir / "runtime"
+        runtime_root.mkdir(mode=0o700, exist_ok=True)
+        child_request = {
+            "run_id": plan.run_id,
+            "storage_path": plan.storage_path,
+            "invocation_root": str(invocation_root),
+            "deployment_content": str(deployment / "content"),
+            "shared_runtime_root": str(runtime_root),
+            "parsl_config": {"factory": factory, "kwargs": parsl["kwargs"], "secret_refs": parsl["secret_refs"]},
+            "executor_bindings": validation["executor_bindings"],
+            "node_routes": node_routes,
+            "launch": {
+                "backend": "psij", "executor": scheduler.scheduler,
+                "walltime_seconds": scheduler.walltime_seconds,
+                "queue": scheduler.queue, "project": scheduler.project,
+                "cpu_cores": scheduler.cpu, "work_dir": str(run_dir),
+                "hard_cancel_after": scheduler.hard_cancel_after,
+            },
+            "pre_launch": "\n".join(pre_launch) + "\n",
+        }
+        record = {**record, "phase": "scheduler-intent", "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+        self._write_run_record(record)
+        requests = self._private_subdirectory(self.root / "temporary", "run-requests")
+        private = requests / uuid.uuid4().hex
+        private.mkdir(mode=0o700)
+        try:
+            child_path = private / "request.json"
+            _atomic_private_json(child_path, child_request)
+            try:
+                response = _run_json_child(
+                    [attestation["requested_executable"], "-I", "-B", str(deployment / "submit_run.py"), str(child_path)],
+                    environment=_child_environment(), timeout=120.0,
+                    output_limit=MAX_REQUEST_BYTES,
+                    failure_category="remote-operation-failed",
+                )
+            except GatewayOperationFailure:
+                record = {**record, "phase": "uncertain", "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+                self._write_run_record(record)
+                raise _failure(
+                    "submission-uncertain", "Scheduler submission may have occurred; the attempt was not resubmitted.",
+                    phase="submission", allocation_state="unknown", retry_safety="same-attempt-only",
+                    next_action="attach-run", identities={"run_id": plan.run_id, "attempt_id": plan.attempt_id},
+                )
+        finally:
+            shutil.rmtree(private, ignore_errors=True)
+        if response.get("status") != "ok" or type(response.get("payload")) is not dict:
+            raise _failure("remote-operation-failed", "The submitter response is malformed.")
+        record = {**record, "phase": "submitted", "launcher_bound": True, "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+        self._write_run_record(record)
+        return {"run_id": plan.run_id, "observation": response["payload"], "upload_required": False}
+
+    def inspect_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id"})
+        record = self._read_run_record(value["run_id"])
+        return self._run_controller(record, "inspect-run", {}) if record["launcher_bound"] else self._allocated_observation(record)
+
+    def refresh_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id"})
+        record = self._read_run_record(value["run_id"])
+        return self._run_controller(record, "refresh-run", {}) if record["launcher_bound"] else self._allocated_observation(record)
+
+    def read_progress(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id", "after_sequence", "limit"})
+        record = self._read_run_record(value["run_id"])
+        if not record["launcher_bound"]:
+            return {**self._allocated_observation(record), "events": [], "has_more": False, "next_sequence": value["after_sequence"]}
+        return self._run_controller(record, "read-progress", {"after_sequence": value["after_sequence"], "limit": value["limit"]})
+
+    def cancel_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id"})
+        record = self._read_run_record(value["run_id"])
+        if not record["launcher_bound"] and record["phase"] not in {"scheduler-intent", "uncertain"}:
+            if record["phase"] != "cancelled":
+                record = {**record, "phase": "cancelled", "revision": record["revision"] + 1, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+                self._write_run_record(record)
+            return self._allocated_observation(record)
+        if not record["launcher_bound"]:
+            raise _failure("submission-uncertain", "Cancellation cannot safely identify an uncertain scheduler job.", phase="cancellation", allocation_state="unknown", retry_safety="unsafe", next_action="inspect-scheduler", identities={"run_id": record["run_id"]})
+        return self._run_controller(record, "cancel-run", {})
+
+    def plan_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id", "recompute"})
+        record = self._read_run_record(value["run_id"])
+        if not record["launcher_bound"]:
+            raise _failure("retry-conflict", "Only a submitted terminal run can be retried.")
+        return self._run_controller(record, "plan-retry", {"recompute": value["recompute"]})
+
+    def start_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"plan"})
+        try:
+            from bioimageflow.launcher.retry import RunRetryPlan
+
+            retry = RunRetryPlan.from_dict(value["plan"])
+        except (TypeError, ValueError) as exc:
+            raise _failure("invalid-retry", "The retained retry plan is invalid.") from exc
+        parent = self._read_run_record(retry.parent_run_id)
+        observation = self._run_controller(parent, "start-retry", {"plan": retry.to_dict()})
+        run_id = observation.get("run_id")
+        if run_id != retry.retry_run_id:
+            raise _failure("operation-record-tampered", "The retry changed its run binding.")
+        run_dir = self._run_directory(run_id)
+        if not run_dir.exists():
+            run_dir.mkdir(mode=0o700)
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            cloned = {
+                **parent,
+                "run_id": run_id,
+                "attempt_id": str(uuid.uuid4()),
+                "request_digest": canonical_digest({"retry_plan": retry.to_dict()}),
+                "phase": "submitted",
+                "launcher_bound": True,
+                "revision": 0,
+                "updated_at": now,
+            }
+            self._write_run_record(cloned)
+        return observation
+
+    def prepare_result(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        value = _exact_arguments(arguments, {"run_id"})
+        record = self._read_run_record(value["run_id"])
+        if not record["launcher_bound"]:
+            raise _failure("result-integrity-failed", "The allocated run has no result.")
+        return self._run_controller(record, "prepare-result", {})
 
     def _receipt_path(self, operation_id: str) -> Path:
         if (
@@ -1495,9 +2304,28 @@ def capabilities() -> dict[str, Any]:
             "allocate_upload",
             "capabilities",
             "commit_upload",
+            "cancel-run",
+            "inspect-run",
+            "plan-retry",
+            "prepare-result",
             "publish_deployment",
+            "read-progress",
+            "refresh-run",
+            "start-retry",
+            "submit-plan",
             "validate-deployment",
         ],
+        "limits": {
+            "max_request_bytes": MAX_REQUEST_BYTES,
+            "max_response_bytes": MAX_REQUEST_BYTES,
+            "max_upload_bytes": _MAX_UPLOAD_BYTES,
+            "max_archive_entries": _MAX_ARCHIVE_ENTRIES,
+            "max_archive_expanded_bytes": _MAX_ARCHIVE_EXPANDED_BYTES,
+            "max_child_response_bytes": _MAX_CHILD_RESPONSE_BYTES,
+            "max_progress_page": 500,
+            "max_secret_value_bytes": 64 * 1024,
+            "max_secret_total_bytes": 256 * 1024,
+        },
         "environment_installation_supported": False,
         "existing_python_attestation_supported": True,
         "environment_adapter_versions": {"existing_python": 1},
@@ -1511,6 +2339,13 @@ def _default_handlers(
         "allocate_upload": state.allocate_upload,
         "commit_upload": state.commit_upload,
         "publish_deployment": state.publish_deployment,
+        "inspect-run": state.inspect_run,
+        "refresh-run": state.refresh_run,
+        "read-progress": state.read_progress,
+        "cancel-run": state.cancel_run,
+        "plan-retry": state.plan_retry,
+        "start-retry": state.start_retry,
+        "prepare-result": state.prepare_result,
         "validate-deployment": state.validate_deployment,
     }
 
@@ -1531,6 +2366,8 @@ def handle_request(
                     "protocol-incompatible", "capabilities accepts no arguments."
                 )
             result = capabilities()
+        elif request.operation == "submit-plan":
+            result = state.submit_plan_request(request)
         else:
             try:
                 handler = active_handlers[request.operation]

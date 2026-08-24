@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import subprocess
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -70,3 +73,68 @@ def test_connection_reports_fresh_root_without_bootstrapping(
 def test_transport_rejects_unsafe_destination(host: str) -> None:
     with pytest.raises(ValueError):
         GatewayClientTransport(host, "/cluster/alice/bif")
+
+
+def test_submit_plan_snapshots_before_network_and_resumes_one_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invocation = tmp_path / "invocation"
+    invocation.mkdir()
+    (invocation / "invocation.json").write_text("{}")
+
+    class Prepared:
+        root = invocation
+        invocation_digest = "sha256:" + "1" * 64
+        verify_count = 0
+
+        def _verify(self) -> None:
+            self.verify_count += 1
+
+        def to_dict(self) -> dict[str, Any]:
+            return {"schema": "test.invocation.v1"}
+
+    prepared = Prepared()
+    plan = SimpleNamespace(
+        attempt_id=str(uuid.uuid4()),
+        invocation_digest=prepared.invocation_digest,
+        _verify_digest=lambda: None,
+        to_dict=lambda: {"schema": "test.plan.v1"},
+    )
+    transport = GatewayClientTransport("hpc", "/cluster/alice/bif")
+    requests: list[tuple[str, str | None]] = []
+
+    def request(
+        operation: str,
+        arguments: dict[str, Any],
+        operation_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        assert prepared.verify_count >= 2
+        requests.append((operation, operation_id))
+        if operation == "submit-plan":
+            completed = sum(name == "submit-plan" for name, _item in requests) > 1
+            return {
+                "run_id": "run",
+                "observation": {"state": "starting"},
+                "upload_required": not completed,
+            }
+        if operation == "allocate_upload":
+            return {"upload_path": "/cluster/alice/bif/temporary/upload", "upload_token": "a" * 32}
+        return {"object_id": arguments["digest"]}
+
+    uploaded: list[Path] = []
+    monkeypatch.setattr(transport, "request", request)
+    monkeypatch.setattr(
+        transport, "upload_file", lambda source, _remote: uploaded.append(Path(source))
+    )
+
+    result = transport.submit_plan(plan, prepared)
+
+    assert result["upload_required"] is False
+    assert uploaded and uploaded[0].is_file() is False  # private snapshot was released
+    assert requests == [
+        ("submit-plan", plan.attempt_id),
+        ("allocate_upload", f"{plan.attempt_id}:allocate"),
+        ("commit_upload", f"{plan.attempt_id}:commit"),
+        ("submit-plan", plan.attempt_id),
+    ]

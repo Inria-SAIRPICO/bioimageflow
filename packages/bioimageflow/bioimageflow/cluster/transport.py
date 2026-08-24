@@ -506,5 +506,107 @@ class GatewayClientTransport:
                 if key in publication
             }
 
+    def submit_plan(self, plan: Any, prepared: Any) -> dict[str, Any]:
+        """Allocate, upload, and submit one immutable preplanned invocation."""
+        plan._verify_digest()
+        prepared._verify()
+        if plan.invocation_digest != prepared.invocation_digest:
+            raise ValueError("The execution plan belongs to another invocation.")
+        with tempfile.TemporaryDirectory(prefix="bif-invocation-upload-") as directory:
+            archive = Path(directory) / "invocation.zip"
+            with zipfile.ZipFile(
+                archive, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+            ) as output:
+                for source in sorted(prepared.root.rglob("*")):
+                    if not source.is_file():
+                        continue
+                    info = zipfile.ZipInfo(
+                        source.relative_to(prepared.root).as_posix(),
+                        date_time=(1980, 1, 1, 0, 0, 0),
+                    )
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.external_attr = (0o100600 & 0xFFFF) << 16
+                    with source.open("rb") as stream:
+                        output.writestr(info, stream.read())
+            prepared._verify()
+            size = archive.stat().st_size
+            digest_value = hashlib.sha256()
+            with archive.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest_value.update(chunk)
+            digest = f"sha256:{digest_value.hexdigest()}"
+            arguments = {
+                "plan": plan.to_dict(),
+                "invocation_manifest": prepared.to_dict(),
+                "object_id": digest,
+                "object_size": size,
+            }
+            # The exact archive exists and has been reverified before this first
+            # request is allowed to negotiate or contact the cluster.
+            result = self.request(
+                "submit-plan",
+                arguments,
+                plan.attempt_id,
+                payload_digest=digest,
+                timeout=max(self.connect_timeout, 120.0),
+            )
+            if result.get("upload_required") is True:
+                allocation = self.request(
+                    "allocate_upload",
+                    {"size": size, "digest": digest, "kind": "invocation"},
+                    f"{plan.attempt_id}:allocate",
+                    payload_digest=digest,
+                )
+                path = allocation.get("upload_path")
+                token = allocation.get("upload_token")
+                if type(path) is not str or type(token) is not str:
+                    raise GatewayTransportError(
+                        "protocol-incompatible", "Gateway upload allocation is invalid."
+                    )
+                self.upload_file(archive, path)
+                committed = self.request(
+                    "commit_upload",
+                    {"upload_token": token, "size": size, "digest": digest},
+                    f"{plan.attempt_id}:commit",
+                    payload_digest=digest,
+                )
+                if committed.get("object_id") != digest:
+                    raise GatewayTransportError(
+                        "protocol-incompatible", "Gateway invocation identity changed."
+                    )
+                result = self.request(
+                    "submit-plan",
+                    arguments,
+                    plan.attempt_id,
+                    payload_digest=digest,
+                    timeout=max(self.connect_timeout, 180.0),
+                )
+            if result.get("upload_required") is not False:
+                raise GatewayTransportError(
+                    "submission-uncertain",
+                    "The gateway did not durably complete the planned submission.",
+                    ambiguous=True,
+                )
+            return result
+
+    def download_result(self, run_id: str, destination: Path) -> Any:
+        """Prepare and atomically materialize one verified portable result."""
+        response = self.request(
+            "prepare-result",
+            {"run_id": run_id},
+            str(uuid.uuid4()),
+            timeout=max(self.connect_timeout, 120.0),
+        )
+        from bioimageflow.launcher.result_download import download_result
+        from bioimageflow.launcher.types import SSHSubmissionTransport
+
+        legacy_transport = SSHSubmissionTransport(
+            host=self.host,
+            staging_root=self.root / "transfers" / "runtime",
+            remote_executable=self.gateway_entry,
+            connect_timeout=self.connect_timeout,
+        )
+        return download_result(legacy_transport, response, Path(destination))
+
 
 __all__ = ["GatewayClientTransport", "GatewayTransportError"]

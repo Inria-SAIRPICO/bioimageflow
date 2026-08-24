@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from bioimageflow.cluster._common import canonical_digest
 from bioimageflow.cluster.gateway import (
     ROOT_NAMESPACES,
     GatewayOperationFailure,
@@ -106,16 +107,18 @@ def test_gateway_commits_object_and_publishes_uninstalled_deployment(
     tmp_path: Path,
 ) -> None:
     state = GatewayState.initialize(tmp_path / "cluster-root")
-    deployment_id = "sha256:" + "1" * 64
-    manifest_digest = "sha256:" + "2" * 64
+    identity = {"schema": "test.deployment.v1", "environment": {"kind": "uv"}}
+    deployment_id = canonical_digest(identity)
+    manifest_digest = deployment_id
     archive = tmp_path / "deployment.zip"
     with zipfile.ZipFile(archive, "x") as output:
         output.writestr(
             "deployment-manifest.json",
             json.dumps(
-                {
-                    "deployment_id": deployment_id,
-                    "manifest_digest": manifest_digest,
+                    {
+                        **identity,
+                        "deployment_id": deployment_id,
+                        "manifest_digest": manifest_digest,
                 }
             ),
         )

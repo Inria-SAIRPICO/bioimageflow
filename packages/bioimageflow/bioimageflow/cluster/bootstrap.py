@@ -54,6 +54,11 @@ IFS= read -r artifact_digest
 [[ "$setup_size" =~ ^[0-9]+$ && "$artifact_size" =~ ^[0-9]+$ ]]
 [[ "$setup_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
 [[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+computed_request_digest="sha256:$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+    "$magic" "$stage" "$cluster_root" "$operation_id" \
+    request-digest-placeholder "$setup_size" "$setup_digest" \
+    "$artifact_size" "$artifact_digest" | sha256sum | cut -d ' ' -f 1)"
+[[ "$computed_request_digest" == "$request_digest" ]]
 if [[ "$stage" == "probe" ]]; then
     if [[ -x "$cluster_root/gateway/entry" ]]; then
         printf '%s\n' '{"schema":"bioimageflow.cluster.bootstrap.v1","status":"gateway-ready","upload_path":null}'
@@ -86,6 +91,17 @@ if [[ -e "$receipt" ]]; then
     [[ -f "$receipt" && ! -L "$receipt" && -O "$receipt" && "$(stat -c %h -- "$receipt")" -eq 1 ]]
     { IFS= read -r recorded_digest; IFS= read -r recorded_phase; } < "$receipt"
     [[ "$recorded_digest" == "$request_digest" && ( "$recorded_phase" == "intent" || "$recorded_phase" == "completed" ) ]]
+    if [[ "$recorded_phase" == "completed" ]]; then
+        if [[ "$stage" == "allocate" ]]; then
+            private_directory "$candidate"
+            [[ -f "$setup_path" && ! -L "$setup_path" && -O "$setup_path" ]]
+            printf '{"schema":"bioimageflow.cluster.bootstrap.v1","status":"upload-authorized","upload_path":"%s"}\n' "$artifact_path"
+        else
+            [[ -x "$cluster_root/gateway/entry" && ! -L "$cluster_root/gateway/entry" ]]
+            printf '%s\n' '{"schema":"bioimageflow.cluster.bootstrap.v1","status":"gateway-ready","upload_path":null}'
+        fi
+        exit 0
+    fi
 else
     if [[ "$stage" == "allocate" && -e "$candidate" ]]; then exit 73; fi
     receipt_candidate="$cluster_root/operations/.bootstrap-$operation_id-$stage.partial"
