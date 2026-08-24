@@ -71,16 +71,17 @@ The plan is strict JSON-safe data and can cross a service restart:
 ``start_retry()`` is idempotent for the child ID and complete plan.
 If scheduler submission has an uncertain outcome, keep its planned run ID and reconnect to that ID; never submit it again automatically.
 
-Retry a remote run
-------------------
+Retry a managed remote run
+--------------------------
 
 The same calls work through a :class:`~bioimageflow.RemoteWorkflowRun`:
 
 .. code-block:: python
 
-   from bioimageflow import RemoteWorkflowRun
+   from bioimageflow.cluster import RemoteCluster
 
-   previous = RemoteWorkflowRun.open(transport, cluster_storage, saved_run_id)
+   cluster = RemoteCluster(host=saved_host, root=saved_root)
+   previous = cluster.attach(saved_run_id)
    plan = previous.plan_retry(
        RecomputeRequest(("segmentation/model",), cascade=True)
    )
@@ -88,4 +89,4 @@ The same calls work through a :class:`~bioimageflow.RemoteWorkflowRun`:
 
 The cluster performs the preview, revision checks, journaled invalidation, retained invocation cloning, run-owned byte copying, content-addressed upload reuse, and launch.
 The caller does not inspect remote launcher files or issue SSH filesystem commands.
-``RemoteWorkflowRun.open()`` restores both ``parent_id`` and ``retry_plan`` for a retained child.
+``cluster.attach()`` restores both ``parent_id`` and ``retry_plan`` for a retained child.

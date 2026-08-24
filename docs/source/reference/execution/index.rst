@@ -55,12 +55,9 @@ Choose an execution mode
    * - Submitted local
      - A reconnectable run in a separate process on the same machine
      - Pass a trusted :class:`~bioimageflow.ParslConfigRef` and local launch configuration
-   * - Submitted cluster-local
-     - Code already running on a cluster login node
-     - Pass a PSI/J launch configuration directly
-   * - Submitted remote
+   * - Managed remote cluster
      - A laptop or service submitting to a cluster through SSH
-     - Add :class:`~bioimageflow.SSHSubmissionTransport` and use explicit uploads
+     - Configure :class:`~bioimageflow.cluster.RemoteCluster` with one root, a locked environment, Parsl factory, and orchestrator job
 
 Start with :doc:`/how-to/run_in_parallel` for ordinary local work or :doc:`/how-to/remote_cluster` for a first remote submission.
 
@@ -71,7 +68,7 @@ It helps to distinguish three layers:
 
 1. The **BioImageFlow orchestrator** compiles the graph, runs DataFrame tools, selects cache records, and publishes results.
 2. An **execution engine** runs ProcessingTool work locally or submits it to Parsl executors.
-3. In submitted cluster mode, a **launcher** starts one reconnectable orchestrator process; Parsl providers then obtain worker resources.
+3. In managed cluster mode, PSI/J starts one reconnectable orchestrator process; Parsl providers then obtain worker resources.
 
 PSI/J does not replace Parsl and Parsl does not replace the BioImageFlow orchestrator.
 The launcher starts the orchestrator, while Parsl executes processing tasks selected by that orchestrator.

@@ -21,9 +21,9 @@ The package `__init__.py` modules define the public import surface.
 Callers import public names from `bioimageflow`, `bioimageflow.engine`, `bioimageflow.workflow`, `bioimageflow.storage`, `bioimageflow.cache`, and `bioimageflow.validation`.
 New internal code should import from the focused owner module when doing so does not introduce a dependency cycle.
 
-The launcher package owns submitted execution and laptop-to-cluster transport.
-Its ``cluster_protocol`` module owns the bounded JSON envelope, ``cluster_bundle`` owns laptop packaging, ``cluster_upload`` and ``cluster_submit`` own one-shot server mutations, ``ssh`` owns shell-free system OpenSSH/SFTP invocation, and ``remote_run`` and the result modules own remote observation and atomic local materialization.
-The installed ``bioimageflow-cluster-agent`` command is a thin standard-input/standard-output adapter over those modules.
+The launcher package owns submitted-local execution.
+The ``cluster`` package owns managed laptop-to-cluster values, immutable deployment and invocation preparation, shell-free OpenSSH/SFTP transport, stable one-shot gateway protocol, planning, and durable run handles.
+The ``parsl`` package owns the attached execution backend and the managed factory runtime shared with cluster validation and orchestration.
 
 The enforced dependency direction is storage → cache → engine → workflow.
 Storage must not import cache, engine, backends, or workflow; cache must not import engine, backends, or workflow; engine must not import workflow.

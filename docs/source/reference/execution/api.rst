@@ -25,14 +25,6 @@ Capabilities and validation
 .. autoclass:: IntegrationDiagnostic
    :members:
 
-.. autofunction:: validate_remote_execution_profile
-
-.. autoclass:: RemoteProfileValidationReport
-   :members:
-
-.. autoclass:: RemoteProfileDiagnostic
-   :members:
-
 Planning and resources
 ----------------------
 
@@ -79,19 +71,16 @@ Attached execution context and results
    :members:
    :no-index:
 
-Submitted execution
--------------------
+Submitted local execution
+-------------------------
+
+These advanced values launch a reconnectable orchestrator on the same machine or through an application-owned process service.
+Managed SSH cluster execution uses :class:`bioimageflow.cluster.RemoteCluster` instead.
 
 .. autoclass:: ParslConfigRef
    :members:
 
 .. autoclass:: OrchestratorLaunchConfig
-   :members:
-
-.. autoclass:: PSIJLaunchConfig
-   :members:
-
-.. autoclass:: PreLaunchScript
    :members:
 
 .. autofunction:: submit_workflow
@@ -108,14 +97,91 @@ Submitted execution
 .. autoclass:: RetryInvalidation
    :members:
 
-Remote transport and immutable preparation
-------------------------------------------
+Managed remote clusters
+-----------------------
 
-.. autoclass:: SSHSubmissionTransport
+The canonical managed-cluster API is the :mod:`bioimageflow.cluster` module.
+
+.. currentmodule:: bioimageflow.cluster
+
+.. autoclass:: RemoteCluster
+   :members:
+
+.. autoclass:: ClusterEnvironment
+   :members:
+
+.. autoclass:: SetupScript
+   :members:
+
+.. autoclass:: SchedulerJob
+   :members:
+
+.. autoclass:: ParslConfiguration
    :members:
 
 .. autoclass:: LocalUpload
    :members:
+
+.. autoclass:: ClusterDeployment
+   :members:
+
+.. autoclass:: PreparedClusterInvocation
+   :members:
+
+.. autoclass:: PreparedInvocationManifest
+   :members:
+
+.. autoclass:: PreparedInvocationEntry
+   :members:
+
+.. autoclass:: ClusterConnectionReport
+   :members:
+
+.. autoclass:: ClusterValidationReport
+   :members:
+
+.. autoclass:: RemoteExecutionPlan
+   :members:
+
+.. autoclass:: RemoteNodePlan
+   :members:
+
+.. autoclass:: RemoteWorkflowRun
+   :members:
+
+.. autoclass:: ClusterCleanupPlan
+   :members:
+
+.. autoclass:: ClusterCleanupCandidate
+   :members:
+
+.. autoclass:: ClusterCleanupReport
+   :members:
+
+.. autoclass:: ClusterDiagnostic
+   :members:
+
+.. autoclass:: ClusterOperationError
+   :members:
+
+Managed Parsl factories
+-----------------------
+
+.. currentmodule:: bioimageflow.parsl
+
+.. autoclass:: WorkerSlot
+   :members:
+
+.. autoclass:: ParslFactoryResult
+   :members:
+
+.. autoclass:: ParslFactoryRuntime
+   :members:
+
+Remote input inspection
+-----------------------
+
+.. currentmodule:: bioimageflow
 
 .. autofunction:: inspect_remote_node_paths
 
@@ -125,25 +191,10 @@ Remote transport and immutable preparation
 .. autoclass:: RemoteNodePathInput
    :members:
 
-.. autofunction:: prepare_remote_submission
-
-.. autoclass:: PreparedRemoteSubmission
-   :members:
-
-.. autoclass:: PreparedSubmissionManifest
-   :members:
-
-.. autoclass:: PreparedSubmissionEntry
-   :members:
-
-.. autoclass:: PreparedSubmissionExternalSource
-   :members:
-
-.. autoclass:: RemoteWorkflowRun
-   :members:
-
 Failures
 --------
+
+.. currentmodule:: bioimageflow
 
 .. autoclass:: NodeFailureDiagnostic
    :members:
@@ -152,8 +203,6 @@ Failures
    :members:
 
 .. autoclass:: BackendNotSupportedError
-
-.. autoclass:: PSIJSubmissionUncertainError
 
 .. autoclass:: WorkflowRunFailedError
 
@@ -176,5 +225,3 @@ Failures
 .. autoclass:: LauncherProtocolError
 
 .. autoclass:: LauncherStateConflictError
-
-.. autoclass:: SSHTransportError

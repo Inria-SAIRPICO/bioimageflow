@@ -85,8 +85,8 @@ The plan is JSON-safe and is the only confirmation object:
    parent = WorkflowRun.open(plan.storage_path, plan.parent_run_id)
    child = parent.start_retry(plan)
 
-Remote code uses ``RemoteWorkflowRun.open(...)`` and the same ``start_retry(plan)`` method.
-Remote preview and mutation are bounded public cluster-agent operations; callers never inspect launcher storage or issue arbitrary filesystem commands.
+Managed remote code uses ``RemoteCluster(host=..., root=...).attach(run_id)`` and the same ``start_retry(plan)`` method.
+Remote preview and mutation are bounded public gateway operations; callers never inspect managed storage or issue arbitrary filesystem commands.
 
 Submission uncertainty
 ----------------------

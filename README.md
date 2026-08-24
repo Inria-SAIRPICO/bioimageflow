@@ -27,16 +27,16 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 pip install bioimageflow
 ```
 
-Install the optional Parsl runtime for distributed processing:
+Install the optional Parsl runtime for attached or submitted-local distributed processing:
 
 ```bash
 pip install "bioimageflow[parsl]"
 ```
 
-Install Parsl together with the PSI/J cluster orchestrator launcher:
+Install managed laptop-to-cluster execution support:
 
 ```bash
-pip install "bioimageflow[parsl,psij]"
+pip install "bioimageflow[cluster]"
 ```
 
 For development:
@@ -152,6 +152,54 @@ workflow = Workflow.import_archive(
     storage_path=workflow_directory / "results",
 )
 ```
+
+## Remote Cluster Execution
+
+`RemoteCluster` deploys a locked environment beneath one cluster root, submits the BioImageFlow orchestrator through PSI/J, and uses Parsl for processing workers.
+The laptop needs ordinary OpenSSH access; BioImageFlow installs or reuses its unprivileged cluster runtime automatically.
+
+```python
+from datetime import timedelta
+from pathlib import Path
+
+from bioimageflow.cluster import (
+    ClusterEnvironment,
+    LocalUpload,
+    ParslConfiguration,
+    RemoteCluster,
+    SchedulerJob,
+)
+
+cluster = RemoteCluster(
+    host="my-hpc",
+    root="/cluster/project/alice/bioimageflow",
+    environment=ClusterEnvironment.from_uv_project("."),
+    parsl=ParslConfiguration.from_file(
+        "cluster/parsl.py",
+        kwargs={"account": "BIOIMAGE"},
+    ),
+    orchestrator=SchedulerJob(
+        scheduler="slurm",
+        queue="compute",
+        project="BIOIMAGE",
+        walltime=timedelta(hours=4),
+        cpu=4,
+    ),
+)
+
+run = cluster.submit(
+    build_workflow(),
+    inputs={"images": LocalUpload(Path("images"))},
+)
+print(run.id)
+run.wait()
+if run.result_available:
+    result = run.download_result(Path("results"))
+```
+
+Save `run.id` immediately.
+A later process can reconnect with only `RemoteCluster(host=..., root=...).attach(run_id)`; it does not need the original project files.
+See the [remote cluster guide](https://bioimageflow.readthedocs.io/latest/how-to/remote_cluster.html) for the Parsl factory, setup scripts, explicit deploy/validate/plan lifecycle, cancellation, and cleanup.
 
 ## Architecture
 

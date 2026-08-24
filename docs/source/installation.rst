@@ -37,17 +37,17 @@ Install the Parsl runtime for attached or separate-process execution:
 
 Laptop-to-cluster execution additionally requires the system ``ssh`` and ``sftp`` clients from OpenSSH on the laptop.
 Authentication, host aliases, users, ports, keys, agents, ``ProxyJump``, and host-key policy belong in the user's normal OpenSSH configuration.
-BioImageFlow does not accept passwords, private-key contents, arbitrary SSH options, remote shell setup, or installation commands.
+BioImageFlow does not accept passwords, private-key contents, arbitrary SSH options, or host-key bypass values.
 
-Prepare the cluster environment independently:
+Install managed cluster support on the laptop:
 
 .. code-block:: bash
 
-   pip install "bioimageflow[parsl,psij]"
+   pip install "bioimageflow[cluster]"
 
-Install the PSI/J executor plugin supplied for the site's Slurm, PBS, or LSF scheduler in that same environment.
-The selected executor descriptor and scheduler client commands must be available on the login node.
-Workflow configuration factories and worker tool environments must also be installed or available through their declared shared source paths.
+The cluster extra supplies bootstrap and environment-preparation support without starting a laptop-side Parsl DataFlowKernel or requiring a laptop-side PSI/J scheduler plugin.
+BioImageFlow installs or verifies Parsl, PSI/J, the selected scheduler adapter, the workflow project, and tool packages inside the selected managed deployment.
+The cluster must still provide a compatible Python, scheduler client, shared writable root, required drivers and privileged system libraries, and permission for the orchestrator allocation to submit worker jobs.
 No hostname, account, queue, credential, home directory, or scheduler command has a library default.
 
 Start with :doc:`/how-to/remote_cluster` for a first submission.

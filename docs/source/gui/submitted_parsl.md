@@ -1,32 +1,26 @@
 # BioImageFlow Execution UI Integration
 
-This guide describes the public APIs for building a BioImageFlow execution UI.
-A GUI application should configure public values, call public validation and planning operations, start or reconnect to executions, and consume callbacks or reconnectable run handles.
-It should not reproduce routing logic, inspect launcher storage, parse logs for node errors, or invoke cluster-agent operations directly.
+This guide describes the public APIs for an execution UI that supports attached Parsl, submitted-local execution, and managed remote clusters.
+A GUI should call the public validation, planning, lifecycle, and run-handle operations instead of reproducing routing logic, inspecting launcher storage, parsing logs for failures, or invoking gateway commands itself.
 
 ## Capability discovery
 
-Capability discovery is safe in an ordinary local installation and does not import Parsl or PSI/J:
+Capability discovery is safe in an ordinary local installation and does not import Parsl, PSI/J, uv, Pixi, scheduler plugins, or SSH libraries eagerly:
 
 ```python
 from bioimageflow import get_execution_capabilities
 
 capabilities = get_execution_capabilities()
 payload = capabilities.to_dict()
-if not capabilities.capabilities["submitted_remote_parsl"].supported:
-    disabled_reason = capabilities.capabilities["submitted_remote_parsl"].reason
 ```
 
-The report covers Direct, Wetlands, attached Parsl, submitted-local Parsl, submitted-remote Parsl, PSI/J launch and pre-launch upload, remote node path overrides, remote profile validation, portable resource overrides, non-allocating planning, structured node failures, immutable upload preparation, retained-run retry and recomputation, and submitted or attached result export.
-
-For these workflows, inspect the exact `submitted_run_retry`, `submitted_recompute`, `submitted_result_export`, and `attached_result_export` capability entries.
-Direct, Wetlands, planning, public value validation, remote-profile protocol support, resource overrides, diagnostics, and local preparation are built in.
-Attached and submitted-local execution require the `parsl` extra.
-Cluster submission requires `parsl`, `psij`, the selected PSI/J executor plugin, and the cluster agent in the remote installation.
+The report distinguishes laptop client availability from cluster validation.
+Only `ClusterValidationReport` can say that a requested scheduler, PSI/J plugin, Parsl executor, and provider-adapter combination was validated for one exact deployment.
+Queue availability, nested submission policy, compute-node storage visibility, worker networking, and hardware remain unverified until an operation can observe them.
 
 ## Portable node resources
 
-Resource overrides belong to one `ProcessingTool` node and survive recursive graph and archive round-trips:
+Resource overrides belong to one `ProcessingTool` node and survive recursive graph and archive round trips:
 
 ```python
 from bioimageflow import NodeResourceOverrides
@@ -44,15 +38,11 @@ effective = segment_node.effective_resources
 ```
 
 Missing fields inherit the tool's `ResourceSpec`.
-CPU, GPU, memory, and GPU-memory values cannot be below the declaration.
-`max_concurrent` is a cap: it may lower but cannot raise a finite declared cap, and zero means unlimited only when the declaration permits it.
-`DataFrameTool` and workflow-boundary nodes do not accept overrides.
-Wetlands row dispatch and Parsl worker requirements consume the effective value.
-Placement changes do not change result or cache keys, so an explicit recompute is required to rerun an already cached node with new placement.
+Placement values do not change result or cache keys, so an explicit recompute is required to rerun an already cached node with different placement.
 
-## Local profile validation
+## Attached and submitted-local Parsl
 
-Use `validate_parsl_config_ref()` for attached and submitted-local profile testing:
+`validate_parsl_config_ref()` remains the advanced trusted-factory boundary for attached and submitted-local configurations:
 
 ```python
 from bioimageflow import validate_parsl_config_ref
@@ -62,121 +52,81 @@ validation = validate_parsl_config_ref(
     executor_bindings=profile.executor_bindings,
     trusted_factories=administrator_factory_allowlist,
 )
-if not validation.valid:
-    show_diagnostics(validation.diagnostics)
 ```
 
-The operation accepts only the existing finite JSON-safe `ParslConfigRef` arguments and environment-variable secret references.
-The explicit `trusted_factories` allowlist is mandatory; configuration resolution never defaults to trusting every importable callable.
-It resolves the factory in an isolated spawned process, verifies `Config.retries == 0`, compares actual executor labels with bindings, returns structured sanitized diagnostics, and terminates the validation process.
-It does not create a DataFlowKernel, workflow run, provider allocation, or scheduler job.
-The operation reports the missing environment-variable reference, never its value.
+It resolves the factory in an isolated child process, verifies `Config.retries == 0`, compares executor labels with bindings, and returns sanitized diagnostics without starting a DataFlowKernel, provider allocation, workflow run, or scheduler job.
+`plan_distributed_execution()` provides the corresponding non-allocating cache, resource, compatibility, and route preview.
 
-After successful validation, attached execution may use the same trusted boundary:
+Submitted-local execution uses `submit_workflow(..., launch=OrchestratorLaunchConfig(backend="local"))` and returns a local `WorkflowRun`.
+The managed remote path described below uses `RemoteCluster`; it does not accept the submitted-local launch or transport values.
 
-```python
-from bioimageflow import ParslEngine
+## Store a managed cluster profile
 
-with ParslEngine.from_config_ref(
-    profile.parsl_config,
-    executor_bindings=profile.executor_bindings,
-    trusted_factories=administrator_factory_allowlist,
-    environment_routes=profile.environment_routes,
-    task_policy=profile.task_policy,
-) as engine:
-    result = workflow.compute(engine=engine)
-```
+A named GUI profile should serialize `RemoteCluster.to_dict()`.
+A fully configured profile contains:
 
-Construction resolves the configuration but does not start a DataFlowKernel.
-The first uncached processing execution may acquire the DFK and provider workers after the run has been accepted.
-
-## Static distributed planning
-
-Use the public planner for command-time preflight:
+- an OpenSSH host or alias;
+- one absolute dedicated cluster root;
+- a locked `ClusterEnvironment` or an explicitly external existing Python;
+- a `ParslConfiguration` source and JSON-safe arguments;
+- a `SchedulerJob` for the orchestrator allocation;
+- an optional `SetupScript`; and
+- an optional results root.
 
 ```python
-from bioimageflow import plan_distributed_execution
+from datetime import timedelta
 
-plan = plan_distributed_execution(
-    workflow,
-    targets=requested_nodes,
-    executor_bindings=profile.executor_bindings,
-    node_routes=run_local_node_routes,
-    environment_routes=profile.environment_routes,
-    shared_runtime_root=profile.shared_runtime_root,
-    storage_mode="shared_fs",
-    task_policy=profile.task_policy,
+from bioimageflow.cluster import (
+    ClusterEnvironment,
+    ParslConfiguration,
+    RemoteCluster,
+    SchedulerJob,
+    SetupScript,
+)
+
+cluster = RemoteCluster(
+    host="my-hpc",
+    root="/cluster/project/alice/bioimageflow",
+    setup=SetupScript.from_file("cluster/setup.sh"),
+    environment=ClusterEnvironment.from_uv_project("."),
+    parsl=ParslConfiguration.from_file(
+        "cluster/parsl.py",
+        kwargs={"account": "BIOIMAGE"},
+        secret_refs={"registry_token": "REGISTRY_TOKEN"},
+    ),
+    orchestrator=SchedulerJob(
+        scheduler="slurm",
+        queue="compute",
+        project="BIOIMAGE",
+        walltime=timedelta(hours=4),
+        cpu=4,
+    ),
 )
 ```
 
-Each `DistributedNodePlan` contains the scoped path, cache-derived execution status, whether the node will dispatch, normalized effective CPU/GPU/memory/GPU-memory/concurrency requirement, compatible executor labels, selected route and route reason when unambiguous, tool-origin mode, environment name and canonical identity, storage mode, per-executor incompatibility reasons, and structured diagnostics.
-The enclosing plan records the validated `ParslTaskPolicy` that will bound row chunking and unfinished futures at runtime.
-The planner shares requirement derivation, binding compatibility, and route resolution with runtime startup.
-Cached and skipped processing nodes remain visible in the plan but do not require or resolve a worker route because runtime will not dispatch them.
-It compiles the requested recursive scope but does not create storage runs, materialize archives, provision Wetlands, import Parsl, start a DFK, probe workers, allocate provider blocks, or submit scheduler jobs.
-Runtime executor probing remains a post-acceptance operation before the first processing task.
+OpenSSH configuration owns users, ports, keys, agents, jump hosts, and host-key policy.
+Do not store private-key contents, passwords, literal secret values, arbitrary SSH options, shell scheduler directives, or host-key bypass values.
 
-Plans cross a process boundary with `plan.to_dict()` and `DistributedExecutionPlan.from_dict(payload)`.
+`SetupScript` is trusted non-interactive Bash selected explicitly by the user or administrator.
+Its verified copy runs before bootstrap discovery, deployment, validation, the orchestrator, and every managed worker; it is not a package installation hook.
+A cluster-resident script requires an expected SHA-256 digest.
 
-## Remote profile validation
+`ParslConfiguration.from_file()` snapshots one source file plus only explicitly listed includes.
+The factory receives a live `ParslFactoryRuntime`, applies `runtime.worker_init` to every managed provider, and returns exactly `ParslFactoryResult` with one binding per executor label.
 
-Use the public operation rather than invoking a private agent command:
+## Input controls
 
-```python
-from bioimageflow import validate_remote_execution_profile
+For every path-shaped value, present an explicit source choice:
 
-validation = validate_remote_execution_profile(
-    transport=profile.transport,
-    parsl_config=profile.parsl_config,
-    executor_bindings=profile.executor_bindings,
-    launch=profile.launch,
-    storage_path=cluster_workflow_storage,
-)
-```
+- **Upload from this computer** creates `LocalUpload(Path(...))` only after a user selects a file or directory.
+- **Already on the cluster** creates an ordinary normalized absolute `Path`.
+- An unresolved relative path blocks remote confirmation.
+- A string remains a string even if it looks like a path.
 
-The normal SSH command path validates connection and transport configuration.
-The cluster operation imports and invokes the factory under the trusted submitted-profile rules, resolves secret environment references on that host, verifies `retries=0`, checks actual executor labels, validates absolute storage and staging paths and PSI/J work-directory semantics, and confirms that the requested PSI/J executor plugin is available.
-It creates neither launcher run nor scheduler job and reports `allocation_created=False` and `workflow_run_created=False`.
-It cannot prove future worker-node shared-filesystem accessibility; runtime executor preflight performs that check after run acceptance.
+Use `inspect_remote_node_paths(workflow)` to discover unconnected path-shaped node constants and defaults recursively.
+Do not special-case a particular tool or mutate private nodes.
 
-## Immutable LocalUpload preparation
-
-Prepare explicit laptop uploads before showing final confirmation:
-
-```python
-from bioimageflow import LocalUpload, prepare_remote_submission
-
-prepared = prepare_remote_submission(
-    workflow,
-    inputs={"images": LocalUpload(selected_path)},
-    targets=None,
-    parsl_config=profile.parsl_config,
-    executor_bindings=profile.executor_bindings,
-    environment_routes=profile.environment_routes,
-    task_policy=profile.task_policy,
-    launch=profile.launch,
-    lifetime=900,
-)
-manifest_payload = prepared.manifest.to_dict()
-```
-
-Preparation copies the exact file or directory bytes, workflow graph, invocation, and launcher values into a private owned bundle.
-The manifest contains stable entry digests, typed external sources, and an overall bundle digest and contains no resolved secrets.
-Changing or deleting the original `LocalUpload` path after preparation cannot change the staged invocation.
-
-## Remote workflow data sources
-
-Use `inspect_remote_node_paths(workflow)` to discover path-shaped constants and defaults recursively.
-Do not special-case `Files`: model files, reference directories, configuration paths, and future tools use the same public contract.
-The operation is deterministic, reads no files, contacts no cluster, and returns scoped node paths consistent with planning and diagnostics.
-
-For every reported input, present an explicit source choice:
-
-- **Upload from this computer** creates `LocalUpload(Path(...))` only after a file or directory selection;
-- **Already on the cluster** creates an ordinary normalized absolute `Path`;
-- an unresolved relative value blocks remote confirmation until the user makes a choice.
-
-Build invocation-only values as a nested mapping:
+Invocation-only overrides use scoped paths consistent with planning and diagnostics:
 
 ```python
 node_input_overrides = {
@@ -189,327 +139,169 @@ node_input_overrides = {
 }
 ```
 
-Pass the same mapping to `prepare_remote_submission()` and the shorter `submit_workflow(..., transport=...)` path.
-Do not mutate private nodes, patch serialized graphs, convert node fields into hidden root inputs, infer local meaning from path existence, or persist `LocalUpload` inside workflow JSON.
-Upload authority belongs to the confirmed invocation, so loading an untrusted workflow never authorizes laptop reads.
+`LocalUpload` is never stored in a reusable workflow definition.
+Preparation assigns collision-safe names, preserves list ordering, and freezes every explicitly authorized laptop byte.
 
-The prepared manifest binds the override request and every staged byte through relative entries and the overall bundle digest without exposing original laptop paths.
-After submission, the durable effective graph contains only verified content-addressed cluster paths.
-The original in-memory workflow remains unchanged.
+## Prepare, validate, plan, and confirm
 
-For explicit path lists, preserve ordering and create one `LocalUpload` leaf per selected local file.
-The library assigns collision-safe staging slots even when files share a basename.
-Root path lists use the same recursive leaf semantics.
-Root DataFrames still reject embedded `LocalUpload` values.
-
-## Orchestrator pre-launch scripts
-
-A GUI may attach one explicit `PreLaunchScript` to a PSI/J submission:
+Use the explicit lifecycle for a confirmation UI:
 
 ```python
-from bioimageflow import PreLaunchScript
-
-uploaded = PreLaunchScript.from_local_file(selected_local_script)
-pinned_cluster = PreLaunchScript.from_cluster_file(
-    "/shared/bioimageflow/site-init.sh",
-    expected_digest=known_sha256,
+connection = cluster.check_connection()
+deployment = cluster.deploy(progress=show_deployment_progress)
+prepared = cluster.prepare(
+    workflow,
+    inputs={"images": LocalUpload(selected_directory)},
+    node_input_overrides=node_input_overrides,
+    lifetime=900,
 )
-unpinned_cluster = PreLaunchScript.from_cluster_file(
-    "/shared/bioimageflow/site-init.sh"
+validation = cluster.validate(deployment=deployment)
+plan = cluster.plan(
+    prepared,
+    deployment=deployment,
+    validation=validation,
+    lifetime=900,
 )
+
+show_confirmation(
+    connection=connection,
+    deployment=deployment,
+    manifest=prepared.manifest,
+    validation=validation,
+    plan=plan,
+)
+
+if validation.valid and user_confirmed():
+    run = plan.submit()
+    save_run_id(run.id)
 ```
 
-`from_text()` and `from_local_file()` enter the immutable prepared bundle and appear as digest-bound manifest entries.
-`from_cluster_file()` appears in `manifest.external_sources` with its cluster path and optional expected digest because local preparation cannot observe its bytes.
-Present an unpinned cluster source clearly: confirmation binds its path, while the cluster agent snapshots and records the bytes observed at submission.
-With an expected digest, a mismatch fails before launcher allocation and scheduler submission.
+The confirmation should show:
 
-Pass the value to both direct and prepared submission paths through `pre_launch=`.
-BioImageFlow installs every source as one read-only run-owned artifact and gives PSI/J that path, never the original mutable cluster path.
-The script is sourced once on the scheduler job's service node before the orchestrator starts; it is not Parsl worker initialization and its output is not a structured node diagnostic.
-The GUI must not present non-allocating profile validation as proof that the future service node can see the path or execute module, Spack, Conda, or other site commands.
-Do not accept scripts implicitly from workflow archives, and warn against literal secrets because the script artifacts contain plaintext and scheduler logs may contain anything the script prints.
+- host and cluster root;
+- environment kind, ownership boundary, deployment ID, and whether it was reused;
+- setup, environment, project, Parsl, workflow, and upload source sizes and digests;
+- scheduler, queue, project, walltime, CPUs, memory, GPUs, and hard-cancellation grace;
+- validation evidence, declarations, unverified runtime facts, and diagnostics; and
+- the invocation digest, plan digest, preallocated run ID, node cache statuses, effective resources, compatible executors, and selected routes.
 
-After confirmation, consume the same object exactly once:
+Do not display or persist resolved secret values or original private source paths omitted by public manifests.
 
-```python
-try:
-    run = prepared.submit(profile.transport)
-finally:
-    prepared.close()
-```
+`prepare()` is entirely local.
+`validate()` and `plan()` do not submit a scheduler job, create a workflow run, or allocate a worker.
+`deploy()` writes remote state only when the content-addressed deployment is absent.
 
-`submit()` re-verifies the staged manifest, uploads those bytes, binds the content-addressed committed object to submission, never rereads the originals, and closes local staging after success.
-Expired, abandoned, or failed preparations are cleaned with `close()` or context-manager exit.
-An expired, closed, modified, or already submitted preparation is rejected.
-The object is intentionally live and process-local; persist only its serializable manifest and keep ownership of the live object in the preflight-token service.
+`PreparedClusterInvocation` and `RemoteExecutionPlan` are process-local owners with `close()` and context-manager support.
+Keep them alive through confirmation, and close them when abandoned.
+Their strict serialized forms are detached summaries suitable for display and persistence, not substitutes for omitted upload bytes.
 
-Use `submit_workflow(..., transport=SSHSubmissionTransport(...), launch=PSIJLaunchConfig(...))` for a workflow launched from a laptop on a Slurm, PBS, or LSF cluster.
-The call returns a `RemoteWorkflowRun`.
-The launcher submits one PSI/J orchestrator job; the Parsl configuration used by that orchestrator owns all provider and worker allocation.
+One plan represents one logical submission attempt.
+Repeated `plan.submit()` after durable acceptance returns the same run rather than creating a duplicate.
+If acknowledgement is uncertain, preserve the attempt and preallocated `plan.run_id`; do not create a new plan.
 
-## Configuration fields
+## Direct submission
 
-A named GUI cluster profile should contain:
-
-- an OpenSSH host or host alias;
-- an absolute transport staging root visible on the cluster login node;
-- the absolute cluster path to `bioimageflow-cluster-agent`;
-- the workflow's absolute cluster storage path;
-- the PSI/J executor name: `slurm`, `pbs`, or `lsf`;
-- optional queue and project/account;
-- positive walltime and orchestrator CPU core count;
-- an optional hard-cancel grace period.
-- an optional explicit pre-launch source: inline text, local file, or cluster file with an optional expected digest.
-
-OpenSSH configuration owns the user, port, keys, agent, `ProxyJump`, and host-key policy.
-Do not put credentials, private-key contents, literal secret values, arbitrary SSH options, or scheduler directives in a cluster profile.
-Represent orchestrator initialization only through the typed `PreLaunchScript` field rather than a generic SSH command or scheduler fragment.
-The cluster environment must already contain `bioimageflow[parsl,psij]`, the selected PSI/J executor plugin, the workflow's configuration factory, and the tool environments used by workers.
-
-## Input controls
-
-A laptop file or directory chooser creates a `LocalUpload(Path(...))` only after the user explicitly chooses upload semantics.
-Every ordinary `Path` value is a cluster path and must never be probed, resolved, or uploaded by the GUI.
-A string stays a string even when it looks like a path.
-Root DataFrames cross as verified Parquet values; typed `Path` cells must already be normalized absolute cluster paths, while string cells remain strings.
-
-Show the transport staging root separately from workflow storage.
-Transport staging contains submission bundles, explicit upload objects, operation receipts, and prepared result downloads.
-Workflow launcher state, cache records, run views, output views, diagnostics, and returns remain under the workflow storage path and are never mirrored into transport staging.
-
-## Run persistence and presentation
-
-Persist only the cluster profile name, workflow storage path, run ID, and the last consumed progress sequence.
-Do not persist credentials or resolved secret values.
-A later process reconnects with:
+When a separate confirmation boundary is unnecessary, use the convenient composition:
 
 ```python
-run = RemoteWorkflowRun.open(transport, storage_path, run_id)
-```
-
-Render the authoritative launcher states `prepared`, `starting`, `running`, `cancel_requested`, `finalizing`, `succeeded`, `failed`, `cancelled`, and `lost`.
-Scheduler state and the native job ID are secondary backend metadata from progress events.
-A queued scheduler job normally remains launcher `prepared` until the orchestrator claims the run.
-
-Resume public and backend progress from the last global sequence.
-`run.logs()` reads bounded stdout/stderr snapshots by byte offset internally, assembles bytes before decoding text, and returns the complete currently available combined text.
-Replace the displayed log snapshot after each call rather than persisting an internal byte cursor that the public API does not expose.
-Connection loss is an unknown observation, not a failed run, and the cluster run continues without a connected GUI.
-
-Allow cancellation in `prepared`, `starting`, and `running`.
-Explain that `prepared` cancellation stops a queued job, active cancellation first requests graceful workflow and Parsl cleanup, and an optional hard cancellation after the grace period becomes `lost`.
-Disable cancellation in `finalizing` and terminal states because finalization or a terminal outcome has already won the durable race.
-
-Submitted-local execution uses `submit_workflow(..., launch=OrchestratorLaunchConfig(backend="local"))` and returns `WorkflowRun`.
-Remote execution may use `submit_workflow(..., transport=transport, launch=PSIJLaunchConfig(...))` directly when no confirmation token is needed, or the prepared boundary above when uploads must be confirmation-bound.
-
-```python
-run = submit_workflow(
+run = cluster.submit(
     workflow,
     inputs=inputs,
-    parsl_config=profile.parsl_config,
-    executor_bindings=profile.executor_bindings,
-    environment_routes=profile.environment_routes,
-    task_policy=profile.task_policy,
-    launch=profile.launch,
+    node_input_overrides=node_input_overrides,
+    progress=show_deployment_progress,
 )
-
-same_run = WorkflowRun.open(workflow.storage_path, run.id)
-same_run.refresh()
-events = same_run.progress(after_sequence=last_sequence)
-same_run.cancel()
+save_run_id(run.id)
 ```
 
-Remote reconnection and cancellation use:
+The call snapshots all local deployment and invocation sources before its first network mutation, creates or reuses the deployment, validates, plans, transfers, submits one orchestrator job through PSI/J, and returns after the run ID is durable.
+Parsl providers may request worker allocations after the orchestrator begins.
+
+## Reconnect and present the run
+
+Persist the cluster host, cluster root, run ID, and last consumed progress sequence.
+A later process does not need the original environment project, setup script, Parsl file, workflow, or laptop uploads:
 
 ```python
-run = RemoteWorkflowRun.open(transport, storage_path, run_id)
-run.refresh()
-events = run.progress(after_sequence=last_sequence)
-run.cancel()
+from bioimageflow.cluster import RemoteCluster
+
+cluster = RemoteCluster(host=saved_host, root=saved_root)
+run = cluster.attach(saved_run_id)
 ```
 
-Persist only the transport profile reference, cluster storage path, run ID, and last consumed sequence.
+Render the authoritative states `prepared`, `starting`, `running`, `cancel_requested`, `finalizing`, `succeeded`, `failed`, `cancelled`, and `lost`.
+Connection loss is an unknown observation, not a failed run.
+
+Consume `run.progress(after_sequence=...)` and render `run.diagnostics()` as independent structured node failures.
+Do not parse logs or exception strings to identify failed nodes.
+
+Offer cancellation only when `run.can_cancel` is true:
+
+```python
+if cancel_clicked() and run.can_cancel:
+    run.cancel()
+```
+
+Cancellation is idempotent, first requests cooperative cleanup, and uses scheduler cancellation only according to the configured grace policy.
+
+Offer result download only when `run.result_available` is true:
+
+```python
+if download_clicked() and run.result_available:
+    result = run.download_result(selected_destination)
+```
+
+Download verifies the portable bundle and every content digest before publishing atomically.
+Interrupted transfers can be retried safely, and unrelated destination content is never silently replaced.
 
 ## Retry and recompute confirmation
 
-Only terminal runs—`succeeded`, `failed`, `cancelled`, or `lost`—can create a child run.
-An ordinary retry reuses every valid current cache selection, including successful work published before a failure, cancellation, or lost orchestrator.
-
-Plan first and display the immutable confirmation object:
+Terminal managed runs retain the same retry contract as submitted-local runs:
 
 ```python
 from bioimageflow import RecomputeRequest
 
-recompute = RecomputeRequest(
-    ("analysis/segment",),
-    cascade=True,
+retry_plan = run.plan_retry(
+    RecomputeRequest(("analysis/segment",), cascade=True)
 )
-plan = run.plan_retry(recompute)
-plan_payload = plan.to_dict()
-
-show_new_run_id(plan.retry_run_id)
-show_selected_cache_pointers(plan.invalidations)
-show_conflicts(plan.conflicting_run_ids)
+show_retry_confirmation(retry_plan)
+retry = run.start_retry(retry_plan)
 ```
 
-Planning is non-mutating and non-allocating.
-The plan binds the parent state revision, cluster or local storage path, retained submission digest, retained staged-material digest, complete cache-selection revision, scoped invalidations, child run ID, and its own canonical digest.
-Do not enable confirmation while `plan.conflicting_run_ids` is non-empty.
+The gateway performs the preview, revision checks, exact current-pointer invalidation, retained invocation cloning, and verified content-addressed upload reuse.
+It never rereads laptop paths.
+Starting the same exact plan is idempotent; if submission becomes uncertain, attach to its planned child run ID rather than creating another retry.
 
-For a process or service restart, persist only `plan.to_dict()` alongside the normal run binding, reconstruct it with `RunRetryPlan.from_dict()`, reopen the parent, and call `parent.start_retry(plan)`.
-The complete plan is also retained with the child submission and is available as `child.retry_plan`; `child.parent_id` survives local and remote reconnect.
+## Cleanup confirmation
 
-Submission rechecks the retained-material digests and parent revision under the storage allocation guard; recomputation additionally rechecks the cache-selection revision and exact invalidation preview.
-It refuses any active attached or submitted execution, durably journals removal of only the selected mutable current pointers, allocates one child run, and then starts the original retained launch configuration.
-The graph, invocation, targets, node-input overrides, custom sources, and pre-launch artifact are cloned from retained bytes rather than caller objects or original laptop paths.
-Run-owned input and bootstrap trees are copied, while verified content-addressed uploads are retained and reused by installed path.
-
-Treat stale material, stale cache selections, or new active executions as a new-confirmation condition: discard the plan and create another preview.
-Starting the same exact plan is idempotent.
-If transport or scheduler submission is uncertain, save `plan.retry_run_id` and reconnect to that exact ID; never create or submit another plan automatically.
-
-## Structured node failures
-
-Attached execution emits `ProgressEvent(status="failed", diagnostic=NodeFailureDiagnostic(...))`.
-Submitted execution persists the same diagnostic as an independent `kind="diagnostic"` progress event, and reconnectable handles decode it:
+Managed state is never automatically evicted.
+Expose cleanup as its own destructive confirmation:
 
 ```python
-for diagnostic in run.diagnostics():
-    render_node_failure(
-        path=diagnostic.scoped_node_path,
-        category=diagnostic.category,
-        exception_type=diagnostic.exception_type,
-        message=diagnostic.message,
-        traceback=diagnostic.traceback,
-        attempt_id=diagnostic.attempt_id,
-        terminal=diagnostic.terminal,
-        retry_status=diagnostic.retry_status,
-    )
+cleanup = cluster.plan_cleanup(**selected_filters)
+show_cleanup_candidates(cleanup.candidates)
+
+if user_confirmed():
+    report = cluster.apply_cleanup(cleanup)
 ```
 
-Concurrent node failures are separate values keyed by scoped path and are not collapsed into the one primary exception raised by `compute()`.
-Messages and tracebacks are sanitized before serialization.
-Do not parse exception strings, logs, or task artifact paths.
+The plan lists exact candidates, sizes, reference reasons, and destructive consequences without mutating state.
+Application revalidates every identity and reference revision and skips changed candidates instead of broadening deletion.
+Active runs, retained retries, transfer leases, required gateway publications, and receipts needed for safe submission recovery remain protected.
 
-## Allocation and lifecycle summary
+## Lifecycle effects
 
-| Public operation | Imports optional runtime | Creates run | DFK/workers | Scheduler job | Required cleanup |
-|---|---:|---:|---:|---:|---|
-| `get_execution_capabilities()` | No | No | No | No | None |
-| `validate_parsl_config_ref()` | Parsl only in child factory process | No | No | No | Automatic child-process cleanup |
-| `plan_distributed_execution()` | No | No | No | No | None |
-| `validate_remote_execution_profile()` | On remote validation host | No | No | No | One-shot command exits |
-| `prepare_remote_submission()` | No | No | No | No | `close()` if not submitted |
-| `run.plan_retry()` | No | No | No | No | Retain or discard its JSON-safe plan |
-| `ParslEngine.from_config_ref()` | Yes | No | Not during construction | No | Close engine after execution |
-| `workflow.compute(engine=engine)` | According to engine | Yes | May allocate | Provider-dependent | Engine/resource-lifetime contract |
-| `context.export_result()` | No | No | No | No | None after atomic installation |
-| `run.export_result(destination)` | No | No | No | No | None after atomic installation |
-| `parent.start_retry(plan)` | On execution host | Yes | May allocate after orchestrator starts | Retained PSI/J launch may create one orchestrator job | Reconnect/cancel through child run handle |
-| `submit_workflow()` or `prepared.submit()` | On execution host | Yes | May allocate after orchestrator starts | PSI/J launch creates one orchestrator job | Reconnect/cancel through run handle |
+| Operation | Cluster contact | Remote mutation | Run | Scheduler allocation |
+|---|---:|---:|---:|---:|
+| `check_connection()` | Yes | No | No | No |
+| `deploy()` | Yes | If absent | No | No |
+| `prepare()` | No | No | No | No |
+| `validate()` | Yes | Temporary bounded state only | No | No |
+| `plan()` | Maybe | Temporary only if validation refreshes | No | No |
+| `plan.submit()` / `cluster.submit()` | Yes | Yes | Yes | One orchestrator; workers later through Parsl |
+| `attach()` / inspection | Yes | No | No new run | No new allocation |
+| `cancel()` | Yes | Run state | No new run | May cancel retained jobs |
+| `download_result()` | Yes | Bounded transfer state | No | No |
+| `plan_cleanup()` | Yes | No | No | No |
+| `apply_cleanup()` | Yes | Deletes confirmed state | No | No |
 
-## Wire-format examples
-
-Capability, validation, plan, diagnostic, and preparation-manifest values are JSON-safe:
-
-```json
-{
-  "schema": "bioimageflow.parsl_config_validation.v1",
-  "valid": true,
-  "executor_labels": ["gpu"],
-  "retries": 0,
-  "diagnostics": []
-}
-```
-
-```json
-{
-  "schema": "bioimageflow.node_failure.v1",
-  "scoped_node_path": "analysis/segment",
-  "category": "execution",
-  "exception_type": "RuntimeError",
-  "message": "worker failed",
-  "traceback": "sanitized traceback",
-  "attempt_id": "task-7",
-  "retry_status": "terminal",
-  "terminal": true
-}
-```
-
-Consumers must use each public `from_dict()` method instead of accepting unknown keys or guessing future schema versions.
-
-A retry preview uses `bioimageflow.run_retry_plan.v1` and contains only JSON-safe paths, revisions, digests, selected record identities, and run IDs.
-It contains no secret value or resolved credential.
-The nested `bioimageflow.recompute_request.v1` records scoped node paths and the downstream-cascade choice.
-
-```json
-{
-  "schema": "bioimageflow.run_retry_plan.v1",
-  "parent_run_id": "run_1234567812344abc923456789abcdef0",
-  "retry_run_id": "run_2234567812344abc923456789abcdef0",
-  "parent_status": "failed",
-  "parent_status_revision": 7,
-  "storage_path": "/cluster/project/results",
-  "retained_submission_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-  "retained_material_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-  "retained_material_entries": 12,
-  "cache_selection_revision": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-  "recompute": {
-    "schema": "bioimageflow.recompute_request.v1",
-    "node_paths": ["analysis/segment"],
-    "cascade": true
-  },
-  "invalidations": [
-    {
-      "node_path": "analysis/segment",
-      "result_key": "6666666666666666666666666666666666666666666666666666666666666666",
-      "record_id": "7777777777777777777777777777777777777777777777777777777777777777",
-      "selection_status": "selected"
-    }
-  ],
-  "conflicting_run_ids": [],
-  "digest": "sha256:0c53401c0a535d9a85ba56ed9da5aee2a968d03b1801899f654ae4a482db005a"
-}
-```
-
-## Stable execution behavior
-
-Direct and Wetlands execution use the same `Workflow.compute()` entry point and progress model.
-The attached `diagnostic` field is optional because only failed events carry it, while submitted diagnostics use a dedicated event kind.
-Nodes without `resource_overrides` inherit their tool declaration.
-Resource placement does not invalidate cache identity.
-
-## Results
-
-Require the user to choose an explicit local destination.
-Both local and remote submitted handles use `run.export_result(destination)` to create the same immutable bundle in a private sibling, verify it completely, and atomically install the destination.
-A destination may be reused only when it is the exact verified bundle for the same run.
-Record-owned and return-owned assets become local paths beneath the destination, including downloaded `SharedArray` backing data.
-Declared external cluster paths remain cluster `Path` values and should be labelled as unavailable locally rather than guessed from their spelling.
-
-For Direct, Wetlands, or attached Parsl, create a `WorkflowExecutionContext`, pass it to `workflow.compute(..., run_context=context)`, and call `context.export_result(result, destination=...)` after success.
-This is a process-local snapshot at export time, so the GUI must call it before mutating the returned DataFrame or deleting transient files.
-Repeating the call for the same installed destination is idempotent.
-
-## Stable error actions
-
-| Category or code | GUI action |
-|---|---|
-| `ssh-unavailable`, `ssh-connection`, `ssh-timeout`, `ssh-command-failed` | Keep the run identity, show transport unavailable, and offer reconnect or retry. |
-| `ssh-authentication`, `ssh-host-key` | Ask the user to repair normal OpenSSH configuration outside the application. |
-| `sftp-*`, `unsafe-upload-target` | Keep partial content hidden and ask for a safe path or retry. |
-| `remote-protocol`, `remote-invalid-*` | Stop automatic retries unless the error says the operation is retryable; report a client/cluster installation mismatch or invalid request. |
-| `PSIJSubmissionUncertainError` | Retain the prepared run and run ID, warn that submission may have happened, and never offer automatic resubmission. |
-| PSI/J executor unavailable or scheduler rejection | Ask the user to select an installed site executor or correct queue, project, walltime, and resource fields. |
-| `WorkflowRunNotReadyError` | Continue observation; no result is available yet. |
-| `WorkflowRunFailedError` | Show the persisted structured workflow error and logs. |
-| `WorkflowCancelledError` | Show normal cancellation. |
-| `WorkflowRunLostError` | Explain that backend termination was confirmed without proof of normal cleanup. |
-| `WorkflowRunResultUnavailableError`, `WorkflowResultIntegrityError` | Keep the destination uninstalled and report pruned, missing, corrupt, interrupted, or tampered immutable result data. |
-| `WorkflowResultDestinationError` | Ask for a safe empty destination or reuse the exact verified bundle for that run. |
-| `WorkflowRunRetryError`, `remote-retry-conflict` | Keep the parent unchanged; show active-run, stale-revision, or changed-material details and require a new preview. |
-| `remote-retry-submission-uncertain` | Retain the planned child run ID and reconnect; never submit another retry automatically. |
-
-The complete API and operational contract are documented in [Execution Reference](../reference/execution/index) and [Output Cache and Storage Contract](../reference/output_cache_storage).
+Never label validation or planning as a test job: neither operation allocates a worker, so neither can prove compute-node mounts, worker-to-orchestrator networking, queue availability, nested scheduler submission policy, or worker hardware.

@@ -1,259 +1,62 @@
 Remote Cluster Execution
 ========================
 
-This page explains how BioImageFlow runs a workflow on a Slurm, PBS, or LSF cluster when the submission starts from another computer, such as a laptop.
-
-Most workflow users should not need to construct every value on this page.
-A cluster administrator or the application that provides BioImageFlow should normally prepare a reusable cluster configuration.
-Users then select that configuration, choose their inputs, confirm the run, and monitor it.
-
-The complete journey of a remote run
-------------------------------------
-
-A remote run proceeds in these steps:
-
-1. BioImageFlow connects to the cluster login node with the computer's normal OpenSSH configuration.
-2. It uploads the workflow description and any inputs explicitly marked :class:`~bioimageflow.LocalUpload`.
-3. A small BioImageFlow command on the login node validates the request.
-4. BioImageFlow uses PSI/J to ask the cluster scheduler for one job that runs the orchestrator.
-5. The orchestrator reads the workflow and uses Parsl to send ProcessingTool tasks to worker jobs.
-6. Progress, diagnostics, and results are written to durable workflow storage on the cluster.
-7. The laptop may disconnect and reconnect later using the cluster configuration, storage path, and run ID.
-
-The laptop is not responsible for keeping the workflow alive after submission.
-
-Why both PSI/J and Parsl are used
----------------------------------
-
-Clusters usually have a scheduler such as Slurm, PBS, or LSF.
-Users do not start processes directly on compute nodes; they submit jobs to the scheduler, which decides when and where those jobs run.
-
-**PSI/J (Portable Submission Interface for Jobs) starts the BioImageFlow orchestrator.**
-PSI/J gives BioImageFlow one Python API for submitting, observing, and cancelling that orchestrator job across the supported schedulers.
-Without PSI/J, BioImageFlow would need separate launcher code for Slurm, PBS, and LSF.
-
-**Parsl runs the workflow's processing tasks.**
-Once the orchestrator is running, Parsl supplies tasks to one or more worker pools.
-Its providers can ask the scheduler for CPU or GPU worker jobs and grow or shrink those pools according to the site's Parsl configuration.
-
-BioImageFlow remains the workflow engine.
-It decides which nodes need to run, resolves inputs, manages caching and provenance, and publishes results.
-PSI/J and Parsl provide launch and task-execution services; they do not interpret the BioImageFlow graph.
+BioImageFlow can deploy and run a workflow on a Slurm, PBS, or LSF cluster from a laptop with SSH access.
+The managed interface has one common path:
 
 .. code-block:: text
 
-   laptop
-      │  SSH: upload and one-shot commands
-      ▼
-   cluster login node
-      │  PSI/J: submit one orchestrator job
-      ▼
-   BioImageFlow orchestrator
-      │  Parsl: submit processing tasks
-      ▼
-   CPU and GPU worker pools
+   describe cluster -> build workflow -> submit -> save run ID -> reconnect -> download result
 
-What “profile” means in these docs
-----------------------------------
+:class:`~bioimageflow.cluster.RemoteCluster` owns deployment, validation, planning, submission, reconnection, and transfer paths beneath one cluster ``root``.
+Users do not install a cluster agent, assemble staging paths, or make the Parsl configuration importable on the cluster themselves.
 
-An **execution profile** or **cluster profile** is simply a saved group of public configuration values.
-It is not a BioImageFlow class and there is no required profile file format.
+PSI/J submits the small scheduler job that runs the BioImageFlow orchestrator.
+The orchestrator then uses the existing Parsl backend to send processing tasks to worker jobs.
+BioImageFlow remains responsible for graph semantics, caching, routing, provenance, progress, retries, diagnostics, and results.
 
-A script might keep the values in a Python module.
-A GUI might store them in its settings database under a name such as ``institute-slurm``.
-The group commonly contains:
+Prerequisites
+-------------
 
-- an :class:`~bioimageflow.SSHSubmissionTransport` describing how to reach BioImageFlow on the cluster;
-- a :class:`~bioimageflow.ParslConfigRef` naming the trusted function that builds the site's Parsl configuration;
-- executor bindings and optional routes describing the worker pools;
-- a :class:`~bioimageflow.PSIJLaunchConfig` describing the orchestrator job;
-- an optional shared runtime path and task policy.
+The laptop needs BioImageFlow's cluster support and the system ``ssh`` and ``sftp`` clients:
 
-The word “profile” is only shorthand for passing these related values together.
-See :doc:`submitted` for the Parsl function reference and :doc:`routing` for executor bindings.
+.. code-block:: bash
 
-Who normally configures what
-----------------------------
+   pip install "bioimageflow[cluster]"
 
-.. list-table::
-   :header-rows: 1
-   :widths: 25 75
+The cluster account must provide:
 
-   * - Person
-     - Typical responsibilities
-   * - Workflow user
-     - Select a cluster configuration, select local or cluster inputs, choose the workflow storage location when appropriate, submit, monitor, cancel, and retrieve results.
-   * - Application or GUI developer
-     - Store the named configuration, call BioImageFlow's public validation and planning operations, present diagnostics, and retain run IDs.
-   * - Cluster administrator or advanced profile author
-     - Install the remote command, choose shared directories, define the trusted Parsl factory, configure worker initialization, describe executor capacities, and choose PSI/J scheduler settings.
+- non-interactive OpenSSH access under the user's normal SSH configuration;
+- a dedicated writable directory visible at the same absolute path from the login node, orchestrator, and workers;
+- permission for the orchestrator allocation to submit Parsl worker jobs;
+- a compatible Python interpreter, either directly or after the setup script runs;
+- the site's scheduler client and required drivers or system libraries; and
+- access to the selected package sources, unless an offline wheelhouse supplies every artifact.
 
-Configure the SSH transport
----------------------------
+BioImageFlow installs or reuses its runtime beneath the selected cluster root.
+It does not install scheduler services, drivers, privileged libraries, or change cluster policy.
 
-:class:`~bioimageflow.SSHSubmissionTransport` tells BioImageFlow how to invoke its remote command and where temporary transfers belong:
+Golden path: a locked uv project
+--------------------------------
 
-.. code-block:: python
+A typical project contains its workflow, a locked uv environment, and one Parsl factory:
 
-   from pathlib import PurePosixPath
+.. code-block:: text
 
-   from bioimageflow import SSHSubmissionTransport
+   cell-study/
+   |-- images/
+   |-- pyproject.toml
+   |-- uv.lock
+   |-- workflow.py
+   |-- run_cluster.py
+   `-- cluster/
+       `-- parsl.py
 
-   transport = SSHSubmissionTransport(
-       host="my-hpc",
-       staging_root=PurePosixPath(
-           "/cluster/project/my-workflow/transport"
-       ),
-       remote_executable=PurePosixPath(
-           "/cluster/apps/bioimageflow/bin/bioimageflow-cluster-agent"
-       ),
-   )
+The workflow should describe reusable computation, without a laptop input path or cluster result directory.
+Remote runtime storage defaults to ``<cluster.root>/results/<workflow-id>``.
 
-``host``
-   The OpenSSH destination.
-   It may be an alias such as ``my-hpc`` from ``~/.ssh/config`` or a value such as ``alice@login.example.org``.
-   OpenSSH remains responsible for keys, agents, ports, jump hosts, and host-key checks.
-
-``staging_root``
-   A writable directory on the cluster used as a transfer area.
-   BioImageFlow puts incoming workflow bundles, uploaded input objects, operation receipts, and prepared result downloads there.
-   Think of it as the remote inbox and transfer cache, not the workflow's results directory.
-   It must be separate from workflow storage.
-   Uploaded objects retained there must be visible to the orchestrator and workers that use them.
-
-``remote_executable``
-   The absolute cluster path to the ``bioimageflow-cluster-agent`` command installed with BioImageFlow.
-   Despite its name, it is not a continuously running server.
-   SSH starts it for one short request, such as validating a configuration, submitting a run, reading progress, or preparing a result download; it then exits.
-   The path must already be executable on the login node without interactive shell setup.
-   If even this command requires Modules or Spack initialization, an administrator may provide a stable executable wrapper at this path that performs the trusted setup and then executes ``bioimageflow-cluster-agent``.
-   ``PreLaunchScript`` cannot perform this initial setup because it is handled later, after the remote command has validated the submission.
-
-BioImageFlow invokes OpenSSH in batch mode.
-It deliberately does not accept passwords, private-key contents, disabled host-key checking, or arbitrary SSH options as library values.
-
-Understand the cluster paths
-----------------------------
-
-Several paths appear because they have different lifetimes and users:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 27 35 38
-
-   * - Value
-     - Purpose
-     - Who must see it
-   * - ``transport.staging_root``
-     - Transfer inbox and content-addressed uploaded inputs
-     - Login node, orchestrator, and workers that consume uploaded inputs
-   * - ``workflow.storage_path``
-     - Durable cache, progress, run state, diagnostics, and results
-     - Orchestrator and all selected workers
-   * - ``shared_runtime_root``
-     - Verified runtime copies of tool code from archives when needed
-     - Orchestrator and all workers using that code
-   * - ``launch.work_dir``
-     - Working directory in which PSI/J starts the orchestrator job
-     - The scheduler service node for that job
-   * - ``remote_executable``
-     - Installed one-shot BioImageFlow command
-     - Login node
-
-All cluster paths are normalized absolute POSIX paths, for example ``/cluster/project/workflow/results``.
-They refer to the cluster filesystem even when the Python code constructing them runs on a laptop.
-
-Configure the orchestrator job
-------------------------------
-
-:class:`~bioimageflow.PSIJLaunchConfig` describes the one scheduler job that will run the orchestrator:
-
-.. code-block:: python
-
-   from datetime import timedelta
-   from pathlib import PurePosixPath
-
-   from bioimageflow import PSIJLaunchConfig
-
-   launch = PSIJLaunchConfig(
-       executor="slurm",
-       walltime=timedelta(hours=2),
-       queue="cpu",
-       project="BIOIMAGE",
-       cpu_cores=4,
-       work_dir=PurePosixPath("/cluster/project/orchestrator"),
-       hard_cancel_after=300,
-   )
-
-``executor`` selects the installed PSI/J plugin for ``slurm``, ``pbs``, or ``lsf``.
-``queue`` is the scheduler partition or queue, and ``project`` is the scheduler account.
-``walltime`` and ``cpu_cores`` apply to the orchestrator job only.
-The Parsl configuration separately controls the potentially much larger worker jobs.
-
-``hard_cancel_after`` is optional.
-It permits forced scheduler cancellation if the orchestrator does not respond after a normal cancellation request and the grace period expires.
-
-Test the configuration without submitting a job
------------------------------------------------
-
-Use :func:`~bioimageflow.validate_remote_execution_profile` for a “Test cluster configuration” action:
-
-.. code-block:: python
-
-   from bioimageflow import validate_remote_execution_profile
-
-   report = validate_remote_execution_profile(
-       transport=transport,
-       parsl_config=parsl_config,
-       executor_bindings=bindings,
-       launch=launch,
-       storage_path="/cluster/project/my-workflow/results",
-   )
-
-The operation connects to the login node and checks that:
-
-- the remote command can run;
-- the trusted Parsl factory can be imported and called there;
-- required secret environment-variable names are available;
-- the Config has ``retries=0`` and the expected executor labels;
-- the PSI/J scheduler plugin is installed;
-- the relevant path values and optional work directory are valid.
-
-It does not create a workflow run, start workers, or submit a scheduler job.
-It also cannot promise that a future queue will be available or that future worker nodes are correctly installed.
-Runtime preflight verifies actual workers after allocation.
-
-Initialize the orchestrator and workers
----------------------------------------
-
-Cluster software often becomes available only after loading Environment Modules, Spack, Conda, or another site environment.
-The orchestrator and workers are separate jobs, so they have separate initialization points.
-
-**Orchestrator initialization** uses :class:`~bioimageflow.PreLaunchScript`:
-
-.. code-block:: python
-
-   from pathlib import Path
-
-   from bioimageflow import PreLaunchScript
-
-   pre_launch = PreLaunchScript.from_text(
-       """\
-       source /etc/profile.d/modules.sh
-       module load python/3.12
-       source /shared/spack/share/spack/setup-env.sh
-       spack load py-bioimageflow
-       """
-   )
-
-Use ``from_local_file(Path("cluster-init.sh"))`` when the script is on the submitting computer.
-Use ``from_cluster_file("/shared/site/bioimageflow-init.sh")`` when the site already provides it on the cluster.
-The cluster-file form may include ``expected_digest="sha256:..."`` to pin the expected content.
-
-BioImageFlow verifies the script and gives PSI/J a read-only copy owned by the run.
-It is sourced once before the orchestrator starts, so exported variables and directory changes persist in that process.
-
-**Worker initialization** belongs in the trusted Parsl provider configuration:
+The Parsl factory remains ordinary programmable Python.
+It returns the live Parsl configuration and BioImageFlow executor bindings together:
 
 .. code-block:: python
 
@@ -261,194 +64,447 @@ It is sourced once before the orchestrator starts, so exported variables and dir
    from parsl.executors import HighThroughputExecutor
    from parsl.providers import SlurmProvider
 
-   def build_parsl_config(*, partition: str) -> Config:
-       return Config(
-           executors=[
-               HighThroughputExecutor(
-                   label="gpu-workers",
-                   provider=SlurmProvider(
-                       partition=partition,
-                       worker_init="""\
-                       source /etc/profile.d/modules.sh
-                       module load cuda/12
-                       source /shared/spack/share/spack/setup-env.sh
-                       spack load py-bioimageflow-core
-                       """,
-                       walltime="02:00:00",
-                   ),
+   from bioimageflow.parsl import ParslFactoryResult, WorkerSlot
+
+
+   def build(runtime, *, account: str) -> ParslFactoryResult:
+       executor = HighThroughputExecutor(
+           label="cpu-workers",
+           cores_per_worker=1,
+           max_workers_per_node=32,
+           provider=SlurmProvider(
+               account=account,
+               partition="compute",
+               nodes_per_block=1,
+               cores_per_node=32,
+               init_blocks=0,
+               min_blocks=0,
+               max_blocks=4,
+               walltime="02:00:00",
+               worker_init=runtime.worker_init,
+           ),
+       )
+       return ParslFactoryResult(
+           config=Config(executors=[executor], retries=0),
+           executor_bindings={
+               "cpu-workers": runtime.executor_binding(
+                   slot=WorkerSlot(cpu=1, memory="4 GB"),
                )
-           ],
-           retries=0,
+           },
        )
 
-``worker_init`` runs for worker jobs, not the orchestrator.
-It is trusted site configuration inside the importable factory, not an arbitrary string accepted from a remote workflow request.
-BioImageFlow supports the site's initialization mechanism rather than giving special meaning to Spack or any other package manager.
+``runtime.worker_init`` applies the selected setup script and activates the exact deployment in every managed worker.
+Every provider that starts a worker shell must use it.
+:class:`~bioimageflow.parsl.WorkerSlot` describes the resources guaranteed to one concurrent BioImageFlow task, not the whole scheduler node.
 
-Do not put credentials directly in either script.
-Script files necessarily contain plaintext, and anything they print may enter scheduler-controlled logs.
+The complete laptop-side submission is:
 
-Choose which paths are local and which are remote
--------------------------------------------------
+.. code-block:: python
 
-BioImageFlow never guesses from the spelling of a value:
+   from datetime import timedelta
+   from pathlib import Path
 
-- ``LocalUpload(Path("./images"))`` means “read this laptop file or directory, copy it into the immutable submission, and install it on the cluster”;
-- ``Path("/cluster/reference/atlas.tif")`` means “this path already exists on the cluster”;
-- ``"/text/that/looks/like/a/path"`` remains an ordinary string.
+   from bioimageflow.cluster import (
+       ClusterEnvironment,
+       LocalUpload,
+       ParslConfiguration,
+       RemoteCluster,
+       SchedulerJob,
+   )
 
-``LocalUpload`` may be a path-like root input, a path-shaped item inside a root list or tuple, or an invocation-only node-input override.
+   from workflow import build_workflow
+
+
+   cluster = RemoteCluster(
+       host="my-hpc",
+       root="/cluster/project/alice/bioimageflow",
+       environment=ClusterEnvironment.from_uv_project("."),
+       parsl=ParslConfiguration.from_file(
+           "cluster/parsl.py",
+           factory="build",
+           kwargs={"account": "BIOIMAGE"},
+       ),
+       orchestrator=SchedulerJob(
+           scheduler="slurm",
+           queue="compute",
+           project="BIOIMAGE",
+           walltime=timedelta(hours=4),
+           cpu=4,
+       ),
+   )
+
+   run = cluster.submit(
+       build_workflow(),
+       inputs={"images": LocalUpload(Path("images"))},
+   )
+   Path("run-id.txt").write_text(f"{run.id}\n", encoding="utf-8")
+
+   run.wait()
+   if run.status == "succeeded":
+       result = run.download_result(Path("results"))
+   else:
+       for diagnostic in run.diagnostics():
+           print(diagnostic.scoped_node_path, diagnostic.message)
+
+Save ``run.id`` as soon as submission returns.
+The scheduler run continues if the laptop process exits or loses its network connection.
+
+Describe the cluster
+--------------------
+
+``RemoteCluster`` needs only ``host`` and ``root`` to attach to a retained run.
+Deployment and submission additionally require an environment, Parsl configuration, and orchestrator job.
+
+``host``
+   An OpenSSH destination such as an alias from ``~/.ssh/config`` or ``alice@login.example.org``.
+   OpenSSH owns users, keys, agents, ports, jump hosts, and host-key policy.
+
+``root``
+   A dedicated absolute cluster directory owned by BioImageFlow for gateway publications, deployments, content objects, operation receipts, run state, transfers, results, and temporary installation material.
+   Internal paths are implementation details and are never assembled by user code.
+
+``results_root``
+   An optional absolute shared path that replaces the default ``<root>/results`` base.
+
+``environment``
+   The reproducible Python environment used by the orchestrator and ordinary managed workers.
+
+``parsl``
+   The trusted source and arguments for the factory that constructs the Parsl configuration and bindings.
+
+``orchestrator``
+   The scheduler request for the BioImageFlow orchestrator only.
+   Parsl providers separately request worker resources.
+
+``setup``
+   An optional non-interactive Bash script that exposes site-managed Python, Modules, Spack packages, CUDA, compilers, or native libraries before deployment activation.
+
+Choose an environment source
+----------------------------
+
+:class:`~bioimageflow.cluster.ClusterEnvironment` accepts only environment sources whose reproducibility boundary is explicit:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Situation
+     - Constructor
+     - Required inputs
+   * - Locked uv project
+     - ``from_uv_project()``
+     - ``pyproject.toml``, ``uv.lock``, selected local sources
+   * - Locked Pixi project
+     - ``from_pixi_project()``
+     - Pixi manifest, ``pixi.lock``, environment name
+   * - Standard Python lock
+     - ``from_pylock()``
+     - ``pylock.toml`` and optional local project
+   * - Offline cluster
+     - ``from_wheelhouse()``
+     - Exact lock and every compatible wheel
+   * - Site-managed Python
+     - ``from_existing_python()``
+     - Absolute versioned interpreter path
+
 For example:
 
 .. code-block:: python
 
-   inputs = {
-       "files": [LocalUpload(first), LocalUpload(second)],
-       "atlas": Path("/cluster/reference/atlas.tif"),
-   }
+   uv_environment = ClusterEnvironment.from_uv_project(
+       ".",
+       groups=("cluster",),
+   )
+   pixi_environment = ClusterEnvironment.from_pixi_project(
+       ".",
+       environment="workflow",
+   )
+   locked_environment = ClusterEnvironment.from_pylock(
+       "pylock.toml",
+       project=".",
+   )
+   offline_environment = ClusterEnvironment.from_wheelhouse(
+       "wheelhouse",
+       lock="pylock.toml",
+   )
+   site_environment = ClusterEnvironment.from_existing_python(
+       "/shared/apps/bioimageflow/2026.08/bin/python"
+   )
 
-The explicit wrappers preserve order and avoid ambiguous path heuristics.
-Root DataFrames are transferred with Parquet and logical content digests; typed ``Path`` cells refer to normalized absolute cluster paths.
+Locked sources are installed without re-solving on the cluster.
+An existing Python environment is validated but remains an externally managed dependency, so its report is weaker than a content-owned deployment.
+A bare ``pyproject.toml`` is not an exact environment definition; create a uv or standard Python lock first.
 
-Override path inputs inside the graph
--------------------------------------
+Expose site software with a setup script
+----------------------------------------
 
-Some saved workflows contain an unconnected path directly on an internal node rather than exposing it through the workflow's root interface.
-:func:`~bioimageflow.inspect_remote_node_paths` lists those editable path inputs with stable scoped node paths without reading files or contacting the cluster.
+:class:`~bioimageflow.cluster.SetupScript` replaces remote pre-launch scripts because the same initialization must apply during bootstrap, installation, validation, the orchestrator, and workers:
 
-Pass invocation-only replacements with ``node_input_overrides``:
+.. code-block:: python
+
+   from bioimageflow.cluster import SetupScript
+
+   setup = SetupScript.from_file("cluster/setup.sh")
+
+Local text and file sources are snapshotted before contact with the cluster.
+Use ``SetupScript.from_text(...)`` for a small generated script.
+An administrator-managed cluster file must be pinned:
+
+.. code-block:: python
+
+   setup = SetupScript.from_cluster_file(
+       "/shared/site/bioimageflow-setup.sh",
+       sha256="sha256:0123456789abcdef...",
+   )
+
+The script should be safe to source repeatedly and should expose site software rather than install packages or mutate a published deployment.
+Do not put literal credentials in it.
+
+Define the Parsl configuration
+------------------------------
+
+:meth:`~bioimageflow.cluster.ParslConfiguration.from_file` snapshots one local Python file and explicitly listed supporting files or packages.
+No parent directory is uploaded implicitly.
+``kwargs`` contains finite JSON-safe values, while ``secret_refs`` maps factory argument names to cluster environment-variable names:
+
+.. code-block:: python
+
+   parsl = ParslConfiguration.from_file(
+       "cluster/parsl.py",
+       kwargs={"account": "BIOIMAGE"},
+       secret_refs={"registry_token": "REGISTRY_TOKEN"},
+       include=("cluster/helpers.py",),
+   )
+
+Secret values are resolved only on the cluster and are never part of serialized manifests or structured diagnostics.
+The factory must return exactly :class:`~bioimageflow.parsl.ParslFactoryResult`, use ``runtime.worker_init`` for managed providers, declare one binding per executor label, and set Parsl ``retries=0``.
+It may construct Parsl executors and providers but must not load a DataFlowKernel or submit jobs.
+
+An advanced ``ParslConfiguration.from_module("module:function", ...)`` refers to factory code already installed in an externally managed environment.
+
+Choose local uploads and cluster paths explicitly
+-------------------------------------------------
+
+BioImageFlow never guesses path meaning from spelling or existence:
+
+- ``LocalUpload(Path("images"))`` snapshots a laptop file or directory for transfer;
+- ``Path("/cluster/reference/atlas.tif")`` refers to an existing absolute cluster path; and
+- a string remains ordinary text even when it resembles a path.
+
+``LocalUpload`` can appear in root path inputs, lists or tuples of path inputs, and ``node_input_overrides``.
+Use :func:`~bioimageflow.inspect_remote_node_paths` to discover unconnected path-shaped values inside a workflow, then replace them for one invocation:
 
 .. code-block:: python
 
    node_input_overrides = {
-       "files": {
-           "path": LocalUpload(Path("./images")),
-       },
-       "nested/masks": {
+       "files": {"path": LocalUpload(Path("images"))},
+       "preprocessing/masks": {
            "files": [LocalUpload(path) for path in selected_masks],
        },
    }
 
-The outer key is the scoped workflow-node path and the inner key is the tool input name.
-Only unconnected path-shaped constants or defaults may be replaced.
-Connected inputs, workflow boundaries, unknown fields, and non-path parameters are rejected.
+Overrides use the same scoped node paths as planning and diagnostics.
+They never mutate the reusable workflow.
 
-The replacement applies only to this invocation and does not mutate the caller's workflow.
-BioImageFlow validates it on the laptop, copies explicit uploads, validates it again on the cluster, and applies installed cluster paths to the reconstructed graph.
+Use the explicit lifecycle for confirmation
+-------------------------------------------
 
-Prepare exact bytes before user confirmation
---------------------------------------------
-
-A GUI may need to validate inputs, show a summary, and ask the user to confirm before anything is sent to the cluster.
-:func:`~bioimageflow.prepare_remote_submission` freezes the exact local bytes for that boundary:
+``cluster.submit()`` composes deployment, immutable preparation, validation, planning, upload, and scheduler submission.
+A GUI or service can expose each consequential boundary:
 
 .. code-block:: python
 
-   from bioimageflow import prepare_remote_submission
-
-   with prepare_remote_submission(
+   deployment = cluster.deploy()
+   prepared = cluster.prepare(
        workflow,
-       inputs={"images": LocalUpload(Path("./images"))},
-       targets=None,
-       parsl_config=parsl_config,
-       executor_bindings=bindings,
-       launch=launch,
-       pre_launch=PreLaunchScript.from_local_file(
-           Path("cluster-init.sh")
-       ),
-       lifetime=1800,
-   ) as prepared:
-       show_confirmation(prepared.manifest.to_dict())
-       run = prepared.submit(transport)
-
-Preparation is local only.
-It does not contact the cluster, create a workflow run, allocate workers, or submit a scheduler job.
-
-The manifest lists relative paths, file sizes, and SHA-256 digests without exposing original laptop paths or secret values.
-Submission consumes the prepared copies and never rereads the original local inputs or local pre-launch file.
-The preparation may be submitted once; closing it, abandoning its context, or letting it expire cleans its temporary local state.
-
-Cluster-resident pre-launch files are different because their bytes exist only on the cluster.
-The manifest lists their cluster path and optional expected digest as an external source, and the remote command verifies and snapshots them before PSI/J submission.
-
-Submit directly
----------------
-
-When no separate confirmation screen is needed, :func:`~bioimageflow.submit_workflow` performs preparation and submission together:
-
-.. code-block:: python
-
-   from bioimageflow import LocalUpload, submit_workflow
-
-   run = submit_workflow(
-       workflow,
-       inputs={"images": LocalUpload(Path("./images"))},
-       parsl_config=parsl_config,
-       executor_bindings=bindings,
-       shared_runtime_root="/cluster/project/shared-runtime",
-       launch=launch,
-       pre_launch=pre_launch,
-       transport=transport,
+       inputs={"images": LocalUpload(selected_directory)},
+   )
+   validation = cluster.validate(deployment=deployment)
+   plan = cluster.plan(
+       prepared,
+       deployment=deployment,
+       validation=validation,
    )
 
-Save ``run.id`` immediately.
-The run continues independently of the laptop connection.
+   show_confirmation(
+       deployment,
+       prepared.manifest,
+       validation,
+       plan,
+   )
+   if validation.valid and user_confirmed():
+       run = plan.submit()
 
-Reconnect, monitor, and retrieve results
+``prepare()`` is local and freezes the workflow, invocation, and every explicit laptop upload.
+``deploy()`` freezes local environment, setup, Parsl, project, and BioImageFlow bootstrap inputs before its first network operation.
+Changing an original path after its corresponding snapshot cannot alter the confirmed submission.
+
+``validate()`` runs the deployed factory and verifies the environment, bindings, scheduler adapter, paths, secrets, and retry policy without submitting a scheduler job.
+Its report distinguishes verified login-node facts, declarations, and facts that require a real worker allocation.
+
+``plan()`` uses the same cache, resource, compatibility, and route logic as execution.
+It creates no workflow run or workers and binds the exact deployment, prepared invocation, validation evidence, scheduler request, node routes, and preallocated run ID.
+``plan.submit()`` is the plan's only mutation and is idempotent for that logical attempt.
+
+:class:`~bioimageflow.cluster.PreparedClusterInvocation` and :class:`~bioimageflow.cluster.RemoteExecutionPlan` own local resources, support context management, expire, and should be closed when abandoned.
+A serialized copy is a detached summary: it remains useful for display and persistence but cannot recreate omitted local bytes.
+After remote mutation begins, recover through ``cluster.attach(plan.run_id)`` instead of creating a second attempt.
+
+Reconnect, observe, cancel, and download
 ----------------------------------------
 
-A later process reconstructs the handle from three durable values:
+A later process needs only the SSH destination, cluster root, and run ID:
 
 .. code-block:: python
 
-   from bioimageflow import RemoteWorkflowRun
+   from pathlib import Path
 
-   run = RemoteWorkflowRun.open(
-       transport,
-       "/cluster/project/my-workflow/results",
-       saved_run_id,
+   from bioimageflow.cluster import RemoteCluster
+
+   cluster = RemoteCluster(
+       host="my-hpc",
+       root="/cluster/project/alice/bioimageflow",
    )
+   run_id = Path("run-id.txt").read_text(encoding="utf-8").strip()
+   run = cluster.attach(run_id)
 
-``progress()`` returns structured sequenced events.
-``diagnostics()`` returns structured node failures.
-``logs()`` returns human-readable orchestrator logs.
-``wait()`` polls until a terminal state, and ``cancel()`` requests durable cancellation.
+   print(run.status)
+   for event in run.progress():
+       print(event)
 
-``export_result(destination)`` downloads a result bundle, verifies its manifest and every content digest, and installs the destination atomically.
-Assets owned by the run become laptop-local paths, while declared external cluster paths remain cluster paths in the returned data.
+   if run.can_cancel:
+       run.cancel()
 
-Retry or recompute a retained run
----------------------------------
+   run.wait()
+   if run.result_available:
+       result = run.download_result(Path("results"))
 
-``run.plan_retry()`` previews a retry without changing the retained run:
+``progress()`` returns structured sequenced events, and ``diagnostics()`` returns independent structured node failures.
+Cancellation is idempotent and first requests cooperative cleanup; a configured hard-cancellation grace may later cancel retained scheduler jobs.
+Result download verifies the portable bundle and every content digest before publishing the destination atomically.
+Run-owned assets become local paths, while declared external cluster paths remain external values.
 
-.. code-block:: python
-
-   plan = run.plan_retry()
-   retry = run.start_retry(plan)
-
-Selected recomputation uses ``RecomputeRequest`` and reports the cache entries that will be invalidated before confirmation; see :doc:`retries`.
-
-The cluster creates the new run from retained workflow and input snapshots.
-It does not reread laptop inputs.
-If submission becomes uncertain, keep ``plan.retry_run_id`` and reconnect to that exact run instead of creating another retry.
-
-Submission integrity
+Retry a retained run
 --------------------
 
-Before asking PSI/J to submit externally, BioImageFlow writes an immutable intent describing the exact orchestrator job.
-Immediately after PSI/J returns the scheduler's native job ID, BioImageFlow writes an immutable receipt.
-Reconnection uses that receipt to observe or cancel the same job.
+Remote retries preserve the existing confirmation contract:
 
-If the scheduler may have accepted a job but BioImageFlow could not save its receipt, the run remains ``prepared`` and raises :class:`~bioimageflow.PSIJSubmissionUncertainError`.
-BioImageFlow does not automatically submit it again, because doing so might create a duplicate job.
+.. code-block:: python
 
-Retention
----------
+   retry_plan = run.plan_retry()
+   retry = run.start_retry(retry_plan)
 
-The workflow storage path is the source of truth for run state, cache records, diagnostics, and results.
-The transport staging root is a supporting transfer area.
+The cluster clones the retained invocation and reuses verified content-addressed uploads without rereading laptop paths.
+Selected recomputation uses :class:`~bioimageflow.RecomputeRequest`; see :doc:`retries`.
 
-Operators may delete abandoned partial transfers, expired prepared result bundles, and uploaded objects no longer referenced by any retained run.
-They must not remove an upload object while a retained run still needs it.
-See :doc:`/reference/output_cache_storage` for the complete storage and retention contract.
+Cleanup retained state explicitly
+---------------------------------
+
+Deployments, uploaded objects, run state, transfers, and results are never silently evicted.
+Preview exact cleanup candidates and consequences before applying them:
+
+.. code-block:: python
+
+   cleanup = cluster.plan_cleanup()
+   show_cleanup_confirmation(cleanup)
+   report = cluster.apply_cleanup(cleanup)
+
+Cleanup revalidates identities and references before deletion.
+It refuses to remove state needed by an active run, retry, transfer lease, or retained gateway operation.
+Deleting a terminal run explicitly gives up attachment, diagnostics, retry, and results owned only by that record.
+
+Operation effects
+-----------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 27 15 17 14 13 14
+
+   * - Operation
+     - Contacts cluster
+     - Writes remote state
+     - Scheduler job
+     - Creates run
+     - Workers
+   * - ``check_connection()``
+     - Yes
+     - No
+     - No
+     - No
+     - No
+   * - ``deploy()``
+     - Yes
+     - If absent
+     - No
+     - No
+     - No
+   * - ``prepare()``
+     - No
+     - No
+     - No
+     - No
+     - No
+   * - ``validate()``
+     - Yes
+     - Temporary only
+     - No
+     - No
+     - No
+   * - ``plan()``
+     - Maybe
+     - Temporary only if validation refreshes
+     - No
+     - No
+     - No
+   * - ``plan.submit()`` or ``cluster.submit()``
+     - Yes
+     - Yes
+     - One orchestrator
+     - Yes
+     - Later through Parsl
+   * - ``attach()`` and inspection
+     - Yes
+     - No
+     - No new job
+     - No new run
+     - No new workers
+   * - ``cancel()``
+     - Yes
+     - Run state
+     - May cancel retained jobs
+     - No new run
+     - No new workers
+   * - ``download_result()``
+     - Yes
+     - Bounded transfer
+     - No
+     - No
+     - No
+   * - ``plan_cleanup()``
+     - Yes
+     - No
+     - No
+     - No
+     - No
+   * - ``apply_cleanup()``
+     - Yes
+     - Deletes selected state
+     - No
+     - No
+     - No
+
+Validation and planning never allocate a test worker or submit a scheduler job implicitly.
+Submitting the orchestrator may begin consuming the user's allocation immediately, and Parsl providers may request additional worker allocations later.
+
+Security and recovery boundaries
+--------------------------------
+
+Setup scripts and Parsl factories are trusted executable code selected by the user.
+BioImageFlow snapshots their bytes, reports their digests, rejects unsafe path forms, and redacts secret values, but it cannot prevent trusted code or cluster administrators from reading accessible secrets or causing undeclared effects.
+
+Published deployments and content objects are content-addressed and checked before reuse.
+The gateway uses bounded one-shot SSH requests rather than a daemon, and attachment never upgrades it implicitly.
+Every public failure reports a stable category, operation phase, allocation state, retry safety, safe next action, and sanitized diagnostic.
+
+An uncertain submission must be recovered using the original plan and preallocated run ID.
+Do not create a new plan merely because an acknowledgement was lost: the scheduler may already have accepted the orchestrator job.
