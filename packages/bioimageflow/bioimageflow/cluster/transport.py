@@ -106,6 +106,7 @@ class GatewayClientTransport:
             raise ValueError("connect_timeout must be between 0 and 600 seconds.")
         self._issued_upload_paths: set[str] = set()
         self._gateway_trusted = False
+        self._expected_gateway_artifact_digest: str | None = None
 
     @property
     def gateway_entry(self) -> PurePosixPath:
@@ -248,6 +249,11 @@ class GatewayClientTransport:
         A missing stable entry is reported as bootstrap-required.  This method does
         not run setup discovery or write any remote state.
         """
+        if self._expected_gateway_artifact_digest is None:
+            from .gateway_artifact import build_gateway_artifact
+
+            with build_gateway_artifact() as expected:
+                self._expected_gateway_artifact_digest = expected.digest
         try:
             payload = self.request("capabilities", {})
         except GatewayTransportError as exc:
@@ -296,14 +302,13 @@ class GatewayClientTransport:
             raise GatewayTransportError(
                 "gateway-untrusted", "The installed gateway has no trusted artifact identity."
             )
-        from .gateway_artifact import build_gateway_artifact
-
-        with build_gateway_artifact() as expected:
-            if artifact_digest != expected.digest:
-                raise GatewayTransportError(
-                    "gateway-untrusted",
-                    "The installed gateway artifact is not in the local compatibility catalog.",
-                )
+        expected_digest = self._expected_gateway_artifact_digest
+        assert expected_digest is not None
+        if artifact_digest != expected_digest:
+            raise GatewayTransportError(
+                "gateway-untrusted",
+                "The installed gateway artifact is not in the local compatibility catalog.",
+            )
         self._gateway_trusted = True
         return {
             "schema": "bioimageflow.cluster_connection_report.v1",
@@ -378,20 +383,28 @@ class GatewayClientTransport:
         publication so the gateway can resume after a lost acknowledgement.
         """
         prepared.verify()
-        report = self.check_connection()
-        if report["bootstrap_required"]:
-            setup_manifest = prepared.manifest.get("setup")
-            if setup_manifest is not None and setup_manifest.get("source_kind") == "cluster_file":
-                raise GatewayTransportError(
-                    "setup-digest-mismatch",
-                    "Pinned cluster-resident setup bootstrap is not available in this client.",
-                )
-            setup_path = prepared.root / "setup" / "setup.sh"
-            setup = setup_path.read_bytes() if setup_path.is_file() else b"true\n"
-            from .bootstrap import BootstrapClient
-            from .gateway_artifact import build_gateway_artifact
+        from .gateway_artifact import build_gateway_artifact
 
-            with build_gateway_artifact() as artifact:
+        artifact = build_gateway_artifact()
+        self._expected_gateway_artifact_digest = artifact.digest
+        try:
+            artifact.verify()
+            report = self.check_connection()
+            if report["bootstrap_required"]:
+                setup_manifest = prepared.manifest.get("setup")
+                if (
+                    setup_manifest is not None
+                    and setup_manifest.get("source_kind") == "cluster_file"
+                ):
+                    raise GatewayTransportError(
+                        "setup-digest-mismatch",
+                        "Pinned cluster-resident setup bootstrap is not available in this client.",
+                    )
+                setup_path = prepared.root / "setup" / "setup.sh"
+                setup = setup_path.read_bytes() if setup_path.is_file() else b"true\n"
+                from .bootstrap import BootstrapClient
+
+                artifact.verify()
                 BootstrapClient(
                     self.host, self.root, self.connect_timeout
                 ).install(artifact.path, setup=setup)
@@ -401,10 +414,12 @@ class GatewayClientTransport:
                     raise GatewayTransportError(
                         "gateway-untrusted", "The bootstrapped gateway is unavailable."
                     )
-        elif not report["gateway_available"]:
-            raise GatewayTransportError(
-                "ssh-unavailable", "The cluster is not reachable for deployment."
-            )
+            elif not report["gateway_available"]:
+                raise GatewayTransportError(
+                    "ssh-unavailable", "The cluster is not reachable for deployment."
+                )
+        finally:
+            artifact.close()
         operation_ids = [str(uuid.uuid4()) for _ in range(3)]
         if progress is not None:
             progress({"phase": "deployment-upload", "state": "preparing"})
