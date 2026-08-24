@@ -63,7 +63,7 @@ class FileLoader(DataFrameTool):
     display_name = "File Loader"
 
     class Inputs:
-        folder: str
+        folder: Path
 
     def transform(self, df, arguments):
         import pandas as pd
@@ -115,7 +115,7 @@ def build_workflow(
         storage_path=storage_path,
     )
     with workflow:
-        folder = workflow.input("folder", str, id="input-folder")
+        folder = workflow.input("folder", Path, id="input-folder")
         cutoff = workflow.input(
             "cutoff", float, default=100.0, id="input-cutoff"
         )
@@ -127,7 +127,7 @@ def build_workflow(
     return workflow
 
 workflow = build_workflow()
-result = workflow.compute(inputs={"folder": "/data/images"})
+result = workflow.compute(inputs={"folder": Path("/data/images")})
 print(result)  # DataFrame with a 'mask' column of output paths
 ```
 
@@ -155,8 +155,9 @@ workflow = Workflow.import_archive(
 
 ## Remote Cluster Execution
 
-`RemoteCluster` deploys a locked environment beneath one cluster root, submits the BioImageFlow orchestrator through PSI/J, and uses Parsl for processing workers.
-The laptop needs ordinary OpenSSH access; BioImageFlow installs or reuses its unprivileged cluster runtime automatically.
+`RemoteCluster` submits a reconnectable BioImageFlow orchestrator through PSI/J and uses the existing Parsl backend for processing workers.
+The currently runnable managed path uses a pre-provisioned cluster Python; locked uv, Pixi, pylock, and wheelhouse target installation are not implemented yet.
+That Python must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and the workflow's tool packages.
 
 ```python
 from datetime import timedelta
@@ -173,7 +174,9 @@ from bioimageflow.cluster import (
 cluster = RemoteCluster(
     host="my-hpc",
     root="/cluster/project/alice/bioimageflow",
-    environment=ClusterEnvironment.from_uv_project("."),
+    environment=ClusterEnvironment.from_existing_python(
+        "/shared/apps/bioimageflow/2026.08/bin/python"
+    ),
     parsl=ParslConfiguration.from_file(
         "cluster/parsl.py",
         kwargs={"account": "BIOIMAGE"},
@@ -189,7 +192,7 @@ cluster = RemoteCluster(
 
 run = cluster.submit(
     build_workflow(),
-    inputs={"images": LocalUpload(Path("images"))},
+    inputs={"folder": LocalUpload(Path("images"))},
 )
 print(run.id)
 run.wait()
@@ -199,7 +202,7 @@ if run.result_available:
 
 Save `run.id` immediately.
 A later process can reconnect with only `RemoteCluster(host=..., root=...).attach(run_id)`; it does not need the original project files.
-See the [remote cluster guide](https://bioimageflow.readthedocs.io/latest/how-to/remote_cluster.html) for the Parsl factory, setup scripts, explicit deploy/validate/plan lifecycle, cancellation, and cleanup.
+See the [remote cluster guide](https://bioimageflow.readthedocs.io/latest/how-to/remote_cluster.html) for cluster-side environment preparation, the Parsl factory, setup scripts, explicit deploy/validate/plan lifecycle, cancellation, and cleanup.
 
 ## Architecture
 

@@ -57,7 +57,7 @@ Choose an execution mode
      - Pass a trusted :class:`~bioimageflow.ParslConfigRef` and local launch configuration
    * - Managed remote cluster
      - A laptop or service submitting to a cluster through SSH
-     - Configure :class:`~bioimageflow.cluster.RemoteCluster` with one root, a locked environment, Parsl factory, and orchestrator job
+     - Configure :class:`~bioimageflow.cluster.RemoteCluster` with one root, a pre-provisioned cluster Python, Parsl factory, and orchestrator job
 
 Start with :doc:`/how-to/run_in_parallel` for ordinary local work or :doc:`/how-to/remote_cluster` for a first remote submission.
 
@@ -105,7 +105,7 @@ Optional dependencies
 
 Local execution is installed with ``bioimageflow`` and does not require Parsl or PSI/J.
 Attached and submitted-local Parsl execution require ``bioimageflow[parsl]``.
-PSI/J cluster launch additionally requires ``bioimageflow[psij]`` and the site scheduler's PSI/J executor plugin in the launch environment.
+PSI/J cluster launch additionally requires ``bioimageflow[psij]`` and the site scheduler's PSI/J executor plugin in the pre-provisioned cluster environment.
 Remote submission uses the system OpenSSH ``ssh`` and ``sftp`` clients.
 
 :func:`~bioimageflow.get_execution_capabilities` reports which modes and public integration contracts are available without eagerly importing optional Parsl or PSI/J dependencies.

@@ -67,7 +67,7 @@ A fully configured profile contains:
 
 - an OpenSSH host or alias;
 - one absolute dedicated cluster root;
-- a locked `ClusterEnvironment` or an explicitly external existing Python;
+- an explicitly external, pre-provisioned cluster Python;
 - a `ParslConfiguration` source and JSON-safe arguments;
 - a `SchedulerJob` for the orchestrator allocation;
 - an optional `SetupScript`; and
@@ -88,7 +88,9 @@ cluster = RemoteCluster(
     host="my-hpc",
     root="/cluster/project/alice/bioimageflow",
     setup=SetupScript.from_file("cluster/setup.sh"),
-    environment=ClusterEnvironment.from_uv_project("."),
+    environment=ClusterEnvironment.from_existing_python(
+        "/shared/apps/bioimageflow/2026.08/bin/python"
+    ),
     parsl=ParslConfiguration.from_file(
         "cluster/parsl.py",
         kwargs={"account": "BIOIMAGE"},
@@ -106,6 +108,12 @@ cluster = RemoteCluster(
 
 OpenSSH configuration owns users, ports, keys, agents, jump hosts, and host-key policy.
 Do not store private-key contents, passwords, literal secret values, arbitrary SSH options, shell scheduler directives, or host-key bypass values.
+
+The selected cluster Python must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages.
+The managed client attests it but does not install or update it.
+Keep locked uv, Pixi, pylock, and wheelhouse choices disabled in a production UI for now: uv capture and lock checks are local-only, and none of those adapters currently realizes the target environment.
+For the orchestrator scheduler job, expose scheduler, queue, project, walltime, and CPU count.
+Keep memory, GPU, and custom attributes disabled until the managed PSI/J bridge can represent them; worker resource settings belong to the Parsl providers and executor bindings instead.
 
 `SetupScript` is trusted non-interactive Bash selected explicitly by the user or administrator.
 Its verified copy runs before bootstrap discovery, deployment, validation, the orchestrator, and every managed worker; it is not a package installation hook.
@@ -181,7 +189,7 @@ The confirmation should show:
 - host and cluster root;
 - environment kind, ownership boundary, deployment ID, and whether it was reused;
 - setup, environment, project, Parsl, workflow, and upload source sizes and digests;
-- scheduler, queue, project, walltime, CPUs, memory, GPUs, and hard-cancellation grace;
+- scheduler, queue, project, walltime, CPU count, and hard-cancellation grace, with unsupported orchestrator memory, GPU, and custom attributes identified before confirmation;
 - validation evidence, declarations, unverified runtime facts, and diagnostics; and
 - the invocation digest, plan digest, preallocated run ID, node cache statuses, effective resources, compatible executors, and selected routes.
 
@@ -198,6 +206,7 @@ Their strict serialized forms are detached summaries suitable for display and pe
 One plan represents one logical submission attempt.
 Repeated `plan.submit()` after durable acceptance returns the same run rather than creating a duplicate.
 If acknowledgement is uncertain, preserve the attempt and preallocated `plan.run_id`; do not create a new plan.
+Attachment may report `prepared` while launcher allocation is not yet observable, so do not interpret that state as permission to resubmit.
 
 ## Direct submission
 
@@ -284,9 +293,12 @@ if user_confirmed():
     report = cluster.apply_cleanup(cleanup)
 ```
 
-The plan lists exact candidates, sizes, reference reasons, and destructive consequences without mutating state.
-Application revalidates every identity and reference revision and skips changed candidates instead of broadening deletion.
-Active runs, retained retries, transfer leases, required gateway publications, and receipts needed for safe submission recovery remain protected.
+Supported filters are `namespace`, unique terminal `run_ids`, and `older_than_seconds` from one day through one year for temporary material.
+A terminal run record is never selected unless its ID is explicit.
+The gateway signs the exact candidates, sizes, reference reasons, and destructive consequences without persisting or mutating state during planning.
+Applying the plan revalidates the gateway publication, every candidate identity, and retained-run and transfer references, then skips changed candidates instead of broadening deletion.
+Active runs and objects or deployments referenced by retained runs remain protected.
+Transfer deletion and workflow result-tree cleanup are not implemented, including cleanup beneath an independent `results_root`; live upload slots are not inventoried, so present all of that state as retained rather than reclaimable space.
 
 ## Lifecycle effects
 

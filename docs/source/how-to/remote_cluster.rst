@@ -10,7 +10,7 @@ Before you begin
 You need:
 
 - a Python workflow with a public ``images`` input;
-- a locked uv project containing the workflow and its tool packages;
+- an absolute, versioned cluster Python environment containing compatible BioImageFlow, Parsl, PSI/J, the site's scheduler adapter, and the workflow's tool packages;
 - an OpenSSH host alias for the cluster;
 - a dedicated writable cluster directory visible at the same absolute path on login, orchestrator, and worker nodes; and
 - the site's Slurm account, partition, worker node size, and scheduler limits.
@@ -21,20 +21,29 @@ Install managed cluster support on the laptop:
 
    pip install "bioimageflow[cluster]"
 
-The laptop also needs the system ``ssh`` and ``sftp`` commands.
+The laptop also needs the system ``ssh`` and ``sftp`` commands and the workflow's Python packages so it can build and prepare the workflow.
 BioImageFlow uses the user's ordinary OpenSSH configuration for keys, agents, ports, jump hosts, and host-key checks.
 
-Lock the project environment
-----------------------------
+Prepare the cluster Python
+--------------------------
 
-Declare BioImageFlow cluster support and every workflow or tool package in ``pyproject.toml``, then create the lock on the laptop:
+Create or ask the site administrator for a versioned virtual environment on the shared filesystem.
+For example, prepare it on the cluster with the site's supported Python and package installer:
 
 .. code-block:: bash
 
-   uv lock
+   python3 -m venv /shared/apps/bioimageflow/2026.08
+   /shared/apps/bioimageflow/2026.08/bin/python -m pip install \
+       "bioimageflow[parsl,psij]" \
+       bioimageflow-common-tools \
+       my-analysis-tools
 
-The project should contain ``pyproject.toml``, ``uv.lock``, the workflow source, and the Parsl configuration introduced below.
-BioImageFlow fails if the expected lock is absent instead of resolving changing dependency versions on the cluster.
+Also install the PSI/J scheduler adapter required by the site if it is distributed separately.
+Use an immutable or administratively controlled path and record how it was created; BioImageFlow attests the interpreter and installed distributions, but it does not own or update this environment.
+
+The public API also accepts locked uv, Pixi, pylock, and wheelhouse descriptions.
+Locked uv projects are captured and checked on the laptop, but target installation is not implemented yet; Pixi, pylock, and wheelhouse target realization are also not implemented.
+Use ``from_existing_python()`` for an end-to-end managed run in this release.
 
 Build a storage-independent workflow
 ------------------------------------
@@ -81,7 +90,14 @@ The factory receives a managed runtime, uses its generated worker initialization
    from parsl.executors import HighThroughputExecutor
    from parsl.providers import SlurmProvider
 
-   from bioimageflow.parsl import ParslFactoryResult, WorkerSlot
+   from bioimageflow.cache import compute_env_hash
+   from bioimageflow.parsl import (
+       ExecutorBinding,
+       ParslFactoryResult,
+       WorkerEnvironmentAttestation,
+       WorkerSlot,
+   )
+   from my_analysis_tools import MeasureImage
 
 
    def build(runtime, *, account: str) -> ParslFactoryResult:
@@ -101,17 +117,34 @@ The factory receives a managed runtime, uses its generated worker initialization
                worker_init=runtime.worker_init,
            ),
        )
+       managed = runtime.executor_binding(
+           slot=WorkerSlot(cpu=1, memory="4 GB"),
+       )
+       tool_environment = MeasureImage.environment
+       binding = ExecutorBinding(
+           label="cpu-workers",
+           environments=managed.environments + (
+               WorkerEnvironmentAttestation(
+                   name=tool_environment.name,
+                   dependency_hash=compute_env_hash(
+                       tool_environment.dependencies
+                   ),
+                   allow_flexible_versions=(
+                       tool_environment.allow_flexible_versions
+                   ),
+                   core_requirement=runtime.core_requirement,
+               ),
+           ),
+           capabilities=managed.capabilities,
+       )
        return ParslFactoryResult(
            config=Config(executors=[executor], retries=0),
-           executor_bindings={
-               "cpu-workers": runtime.executor_binding(
-                   slot=WorkerSlot(cpu=1, memory="4 GB"),
-               )
-           },
+           executor_bindings={"cpu-workers": binding},
        )
 
 Adjust the provider to the site's real node size, partition, account, limits, and network requirements.
 ``WorkerSlot`` states the resources guaranteed to one concurrent BioImageFlow task.
+The additional environment attestation is the site's explicit claim that the selected Python already contains ``MeasureImage.environment``; add each distinct processing-tool environment offered by that executor.
 The factory must use ``runtime.worker_init`` for every managed provider, return one matching binding for every executor label, leave ``retries=0``, and only construct configuration.
 
 Describe and submit to the cluster
@@ -138,7 +171,9 @@ Create the cluster and submit the workflow from a laptop script:
    cluster = RemoteCluster(
        host="my-hpc",
        root="/cluster/project/alice/bioimageflow",
-       environment=ClusterEnvironment.from_uv_project("."),
+       environment=ClusterEnvironment.from_existing_python(
+           "/shared/apps/bioimageflow/2026.08/bin/python"
+       ),
        parsl=ParslConfiguration.from_file(
            "cluster/parsl.py",
            kwargs={"account": "BIOIMAGE"},
@@ -157,6 +192,10 @@ Create the cluster and submit the workflow from a laptop script:
        inputs={"images": LocalUpload(Path("images"))},
    )
    Path("run-id.txt").write_text(f"{run.id}\n", encoding="utf-8")
+
+The managed PSI/J bridge currently accepts the scheduler, queue, project, walltime, and CPU count for the orchestrator job.
+Leave ``SchedulerJob.memory``, ``SchedulerJob.gpu``, and ``SchedulerJob.attributes`` unset; those fields are rejected until the bridge can represent them without loss.
+Parsl provider settings for worker allocations remain separate and may use the site's GPU or memory options.
 
 ``LocalUpload`` explicitly authorizes BioImageFlow to snapshot and transfer the laptop directory.
 An ordinary absolute ``Path`` instead refers to data already available on the cluster, and a string always remains text.
@@ -187,7 +226,9 @@ If Python, CUDA, compilers, or native libraries require Modules or Spack, add a 
        host="my-hpc",
        root="/cluster/project/alice/bioimageflow",
        setup=SetupScript.from_file("cluster/setup.sh"),
-       environment=ClusterEnvironment.from_uv_project("."),
+       environment=ClusterEnvironment.from_existing_python(
+           "/shared/apps/bioimageflow/2026.08/bin/python"
+       ),
        parsl=parsl_configuration,
        orchestrator=orchestrator_job,
    )
@@ -231,6 +272,7 @@ Validation distinguishes login-node evidence from facts such as worker mount vis
 
 Close an abandoned prepared invocation or plan, or use it as a context manager, to release its laptop-side snapshots.
 Do not create a second plan after an uncertain submission acknowledgement; recover the original preallocated ``plan.run_id``.
+An attached run may remain ``prepared`` while launcher allocation is not yet observable; this does not authorize a second submission attempt.
 
 Override a path stored in a node
 --------------------------------
@@ -296,7 +338,7 @@ Cancellation is idempotent and first requests cooperative workflow and Parsl cle
    if run.can_cancel:
        run.cancel()
 
-Deployments, uploads, run state, and results remain until explicit cleanup.
+Managed deployments, uploads, run records, and temporary material remain until explicit cleanup.
 Preview exact candidates and consequences before deletion:
 
 .. code-block:: python
@@ -305,7 +347,10 @@ Preview exact candidates and consequences before deletion:
    show_cleanup_confirmation(cleanup)
    report = cluster.apply_cleanup(cleanup)
 
-Cleanup refuses to remove state referenced by an active run, retry, or transfer lease.
+The default plan inventories abandoned temporary material at least one day old plus unreferenced deployment and upload objects.
+To remove a retained run record, select terminal IDs explicitly with ``cluster.plan_cleanup(namespace="runs", run_ids=[run.id])``.
+Cleanup refuses active runs, rechecks candidate identities and references, and reports changed candidates as skipped.
+Transfer records are conservatively retained, live upload slots are not cleanup candidates, and cleanup of the workflow results tree, including an independent ``results_root``, is not implemented yet.
 
 Next steps
 ----------

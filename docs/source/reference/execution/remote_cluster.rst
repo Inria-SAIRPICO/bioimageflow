@@ -29,24 +29,22 @@ The cluster account must provide:
 - non-interactive OpenSSH access under the user's normal SSH configuration;
 - a dedicated writable directory visible at the same absolute path from the login node, orchestrator, and workers;
 - permission for the orchestrator allocation to submit Parsl worker jobs;
-- a compatible Python interpreter, either directly or after the setup script runs;
-- the site's scheduler client and required drivers or system libraries; and
-- access to the selected package sources, unless an offline wheelhouse supplies every artifact.
+- an absolute, versioned Python interpreter containing compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages;
+- the site's scheduler client and required drivers or system libraries.
 
-BioImageFlow installs or reuses its runtime beneath the selected cluster root.
+BioImageFlow publishes or reuses its gateway and run material beneath the selected cluster root and attests the selected external Python before use.
+It does not currently install a managed Python environment on the cluster.
 It does not install scheduler services, drivers, privileged libraries, or change cluster policy.
 
-Golden path: a locked uv project
---------------------------------
+Golden path: a pre-provisioned Python
+-------------------------------------
 
-A typical project contains its workflow, a locked uv environment, and one Parsl factory:
+A typical laptop project contains its workflow and one Parsl factory, while the cluster has a versioned environment managed by the user or site:
 
 .. code-block:: text
 
    cell-study/
    |-- images/
-   |-- pyproject.toml
-   |-- uv.lock
    |-- workflow.py
    |-- run_cluster.py
    `-- cluster/
@@ -64,7 +62,14 @@ It returns the live Parsl configuration and BioImageFlow executor bindings toget
    from parsl.executors import HighThroughputExecutor
    from parsl.providers import SlurmProvider
 
-   from bioimageflow.parsl import ParslFactoryResult, WorkerSlot
+   from bioimageflow.cache import compute_env_hash
+   from bioimageflow.parsl import (
+       ExecutorBinding,
+       ParslFactoryResult,
+       WorkerEnvironmentAttestation,
+       WorkerSlot,
+   )
+   from my_analysis_tools import MeasureImage
 
 
    def build(runtime, *, account: str) -> ParslFactoryResult:
@@ -84,18 +89,36 @@ It returns the live Parsl configuration and BioImageFlow executor bindings toget
                worker_init=runtime.worker_init,
            ),
        )
+       managed = runtime.executor_binding(
+           slot=WorkerSlot(cpu=1, memory="4 GB"),
+       )
+       tool_environment = MeasureImage.environment
+       binding = ExecutorBinding(
+           label="cpu-workers",
+           environments=managed.environments + (
+               WorkerEnvironmentAttestation(
+                   name=tool_environment.name,
+                   dependency_hash=compute_env_hash(
+                       tool_environment.dependencies
+                   ),
+                   allow_flexible_versions=(
+                       tool_environment.allow_flexible_versions
+                   ),
+                   core_requirement=runtime.core_requirement,
+               ),
+           ),
+           capabilities=managed.capabilities,
+       )
        return ParslFactoryResult(
            config=Config(executors=[executor], retries=0),
-           executor_bindings={
-               "cpu-workers": runtime.executor_binding(
-                   slot=WorkerSlot(cpu=1, memory="4 GB"),
-               )
-           },
+           executor_bindings={"cpu-workers": binding},
        )
 
 ``runtime.worker_init`` applies the selected setup script and activates the exact deployment in every managed worker.
 Every provider that starts a worker shell must use it.
 :class:`~bioimageflow.parsl.WorkerSlot` describes the resources guaranteed to one concurrent BioImageFlow task, not the whole scheduler node.
+Each additional :class:`~bioimageflow.WorkerEnvironmentAttestation` is an explicit site claim that the pre-provisioned Python contains that processing-tool environment.
+Add every distinct tool environment offered by the executor; planning fails closed if a node has no compatible attestation.
 
 The complete laptop-side submission is:
 
@@ -118,7 +141,9 @@ The complete laptop-side submission is:
    cluster = RemoteCluster(
        host="my-hpc",
        root="/cluster/project/alice/bioimageflow",
-       environment=ClusterEnvironment.from_uv_project("."),
+       environment=ClusterEnvironment.from_existing_python(
+           "/shared/apps/bioimageflow/2026.08/bin/python"
+       ),
        parsl=ParslConfiguration.from_file(
            "cluster/parsl.py",
            factory="build",
@@ -167,7 +192,8 @@ Deployment and submission additionally require an environment, Parsl configurati
    An optional absolute shared path that replaces the default ``<root>/results`` base.
 
 ``environment``
-   The reproducible Python environment used by the orchestrator and ordinary managed workers.
+   The Python environment used by the orchestrator and ordinary managed workers.
+   End-to-end execution currently requires an externally managed absolute interpreter selected with ``from_existing_python()``.
 
 ``parsl``
    The trusted source and arguments for the factory that constructs the Parsl configuration and bindings.
@@ -175,6 +201,7 @@ Deployment and submission additionally require an environment, Parsl configurati
 ``orchestrator``
    The scheduler request for the BioImageFlow orchestrator only.
    Parsl providers separately request worker resources.
+   The current PSI/J bridge represents scheduler, queue, project, walltime, and CPU count; non-null memory, GPU, and custom attributes are rejected rather than silently dropped.
 
 ``setup``
    An optional non-interactive Bash script that exposes site-managed Python, Modules, Spack packages, CUDA, compilers, or native libraries before deployment activation.
@@ -182,30 +209,37 @@ Deployment and submission additionally require an environment, Parsl configurati
 Choose an environment source
 ----------------------------
 
-:class:`~bioimageflow.cluster.ClusterEnvironment` accepts only environment sources whose reproducibility boundary is explicit:
+:class:`~bioimageflow.cluster.ClusterEnvironment` describes environment sources with an explicit ownership boundary.
+Only ``from_existing_python()`` currently realizes a usable target deployment.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 35 35
+   :widths: 23 30 27 20
 
    * - Situation
      - Constructor
      - Required inputs
+     - Current status
    * - Locked uv project
      - ``from_uv_project()``
      - ``pyproject.toml``, ``uv.lock``, selected local sources
+     - Local capture and lock checks only; target installation is not implemented
    * - Locked Pixi project
      - ``from_pixi_project()``
      - Pixi manifest, ``pixi.lock``, environment name
+     - Target realization is not implemented
    * - Standard Python lock
      - ``from_pylock()``
      - ``pylock.toml`` and optional local project
+     - Target realization is not implemented
    * - Offline cluster
      - ``from_wheelhouse()``
      - Exact lock and every compatible wheel
+     - Target realization is not implemented
    * - Site-managed Python
      - ``from_existing_python()``
      - Absolute versioned interpreter path
+     - Supported end to end
 
 For example:
 
@@ -231,9 +265,9 @@ For example:
        "/shared/apps/bioimageflow/2026.08/bin/python"
    )
 
-Locked sources are installed without re-solving on the cluster.
-An existing Python environment is validated but remains an externally managed dependency, so its report is weaker than a content-owned deployment.
-A bare ``pyproject.toml`` is not an exact environment definition; create a uv or standard Python lock first.
+The constructors for content-owned environments are available so callers can prepare and serialize exact descriptions while their remote installers are completed.
+Attempting to deploy one currently fails with a structured environment-adapter diagnostic before scheduler submission.
+An existing Python environment is attested and validated but remains an externally managed dependency, so changing it can invalidate a deployment between operations.
 
 Expose site software with a setup script
 ----------------------------------------
@@ -349,6 +383,7 @@ It creates no workflow run or workers and binds the exact deployment, prepared i
 :class:`~bioimageflow.cluster.PreparedClusterInvocation` and :class:`~bioimageflow.cluster.RemoteExecutionPlan` own local resources, support context management, expire, and should be closed when abandoned.
 A serialized copy is a detached summary: it remains useful for display and persistence but cannot recreate omitted local bytes.
 After remote mutation begins, recover through ``cluster.attach(plan.run_id)`` instead of creating a second attempt.
+During an uncertain acknowledgement, attachment may report ``prepared`` until launcher allocation becomes observable; that state is not permission to submit a new plan.
 
 Reconnect, observe, cancel, and download
 ----------------------------------------
@@ -400,7 +435,7 @@ Selected recomputation uses :class:`~bioimageflow.RecomputeRequest`; see :doc:`r
 Cleanup retained state explicitly
 ---------------------------------
 
-Deployments, uploaded objects, run state, transfers, and results are never silently evicted.
+Managed deployments, uploaded objects, run records, transfers, and results are never silently evicted.
 Preview exact cleanup candidates and consequences before applying them:
 
 .. code-block:: python
@@ -409,9 +444,14 @@ Preview exact cleanup candidates and consequences before applying them:
    show_cleanup_confirmation(cleanup)
    report = cluster.apply_cleanup(cleanup)
 
-Cleanup revalidates identities and references before deletion.
-It refuses to remove state needed by an active run, retry, transfer lease, or retained gateway operation.
-Deleting a terminal run explicitly gives up attachment, diagnostics, retry, and results owned only by that record.
+With no filter, the plan inventories abandoned temporary material at least one day old and unreferenced deployment and upload objects.
+Use ``namespace="temporary"`` with ``older_than_seconds`` from one day through one year to narrow temporary cleanup.
+Run records are candidates only when their terminal IDs are passed explicitly with ``namespace="runs", run_ids=[...]``.
+
+The gateway signs the exact inventory and binds it to the root, gateway publication, candidate identities, and retained-run and transfer reference revision.
+Applying the plan revalidates those facts, skips changed candidates, and refuses active runs or state referenced by retained runs.
+Deleting a terminal run record explicitly gives up attachment, diagnostics, and retry history, but does not delete the workflow results tree.
+Transfer deletion and independent ``results_root`` cleanup are not implemented; transfer records are conservatively retained, live upload slots are not inventoried, and result storage must be managed separately.
 
 Operation effects
 -----------------
@@ -495,6 +535,7 @@ Operation effects
 
 Validation and planning never allocate a test worker or submit a scheduler job implicitly.
 Submitting the orchestrator may begin consuming the user's allocation immediately, and Parsl providers may request additional worker allocations later.
+A successful login-node validation is not a site acceptance test; run a small representative workflow before relying on a new scheduler, queue, mount, or worker-network configuration for production data.
 
 Security and recovery boundaries
 --------------------------------
@@ -504,7 +545,8 @@ BioImageFlow snapshots their bytes, reports their digests, rejects unsafe path f
 
 Published deployments and content objects are content-addressed and checked before reuse.
 The gateway uses bounded one-shot SSH requests rather than a daemon, and attachment never upgrades it implicitly.
-Every public failure reports a stable category, operation phase, allocation state, retry safety, safe next action, and sanitized diagnostic.
+Gateway-classified operation failures report a stable category, operation phase, allocation state, retry safety, safe next action, and sanitized diagnostic.
+Unexpected dependency and child-process failures can still surface through a bounded generic diagnostic, so applications must also handle an unclassified operation failure.
 
 An uncertain submission must be recovered using the original plan and preallocated run ID.
 Do not create a new plan merely because an acknowledgement was lost: the scheduler may already have accepted the orchestrator job.
