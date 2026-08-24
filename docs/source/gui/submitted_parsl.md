@@ -67,7 +67,7 @@ A fully configured profile contains:
 
 - an OpenSSH host or alias;
 - one absolute dedicated cluster root;
-- an explicitly external, pre-provisioned cluster Python;
+- a locked uv project or an explicitly external, pre-provisioned cluster Python;
 - a `ParslConfiguration` source and JSON-safe arguments;
 - a `SchedulerJob` for the orchestrator allocation;
 - an optional `SetupScript`; and
@@ -88,13 +88,10 @@ cluster = RemoteCluster(
     host="my-hpc",
     root="/cluster/project/alice/bioimageflow",
     setup=SetupScript.from_file("cluster/setup.sh"),
-    environment=ClusterEnvironment.from_existing_python(
-        "/shared/apps/bioimageflow/2026.08/bin/python"
-    ),
+    environment=ClusterEnvironment.from_uv_project("."),
     parsl=ParslConfiguration.from_file(
         "cluster/parsl.py",
         kwargs={"account": "BIOIMAGE"},
-        secret_refs={"registry_token": "REGISTRY_TOKEN"},
     ),
     orchestrator=SchedulerJob(
         scheduler="slurm",
@@ -109,9 +106,12 @@ cluster = RemoteCluster(
 OpenSSH configuration owns users, ports, keys, agents, jump hosts, and host-key policy.
 Do not store private-key contents, passwords, literal secret values, arbitrary SSH options, shell scheduler directives, or host-key bypass values.
 
-The selected cluster Python must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages.
-The managed client attests it but does not install or update it.
-Keep locked uv, Pixi, pylock, and wheelhouse choices disabled in a production UI for now: uv capture and lock checks are local-only, and none of those adapters currently realizes the target environment.
+Offer locked uv and existing Python as the two runnable environment choices.
+Managed uv requires a pre-existing compatible cluster Python, captures a wheel-complete closure on the laptop, and installs only those verified wheels offline.
+Reject locks without a compatible wheel for every selected package, and reject local projects that do not build a universal wheel; no sdist build occurs on the target.
+Explain before deployment that capturing the pinned uv installer currently contacts public PyPI and that environment `auth_refs` are not used for private registry downloads.
+For existing Python, require an absolute path whose environment already contains compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages; the client attests but does not update it.
+Keep Pixi, pylock, and standalone wheelhouse choices disabled because their target realization is not implemented.
 For the orchestrator scheduler job, expose scheduler, queue, project, walltime, and CPU count.
 Keep memory, GPU, and custom attributes disabled until the managed PSI/J bridge can represent them; worker resource settings belong to the Parsl providers and executor bindings instead.
 

@@ -156,8 +156,10 @@ workflow = Workflow.import_archive(
 ## Remote Cluster Execution
 
 `RemoteCluster` submits a reconnectable BioImageFlow orchestrator through PSI/J and uses the existing Parsl backend for processing workers.
-The currently runnable managed path uses a pre-provisioned cluster Python; locked uv, Pixi, pylock, and wheelhouse target installation are not implemented yet.
-That Python must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and the workflow's tool packages.
+Runnable environments are a locked uv project or a pre-provisioned cluster Python.
+Managed uv captures a wheel-complete closure on the laptop and installs it offline around an already available compatible cluster Python; it never builds an sdist on the target, and local projects must build universal wheels on the laptop.
+Capturing the pinned uv installer currently requires public PyPI access, and private registry authentication is not used during artifact capture.
+Pixi, pylock, and standalone wheelhouse target realization are not implemented yet.
 
 ```python
 from datetime import timedelta
@@ -174,9 +176,7 @@ from bioimageflow.cluster import (
 cluster = RemoteCluster(
     host="my-hpc",
     root="/cluster/project/alice/bioimageflow",
-    environment=ClusterEnvironment.from_existing_python(
-        "/shared/apps/bioimageflow/2026.08/bin/python"
-    ),
+    environment=ClusterEnvironment.from_uv_project("."),
     parsl=ParslConfiguration.from_file(
         "cluster/parsl.py",
         kwargs={"account": "BIOIMAGE"},

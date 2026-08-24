@@ -29,11 +29,12 @@ The cluster account must provide:
 - non-interactive OpenSSH access under the user's normal SSH configuration;
 - a dedicated writable directory visible at the same absolute path from the login node, orchestrator, and workers;
 - permission for the orchestrator allocation to submit Parsl worker jobs;
-- an absolute, versioned Python interpreter containing compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages;
+- a compatible Python interpreter, directly or after the setup script runs; and
 - the site's scheduler client and required drivers or system libraries.
 
-BioImageFlow publishes or reuses its gateway and run material beneath the selected cluster root and attests the selected external Python before use.
-It does not currently install a managed Python environment on the cluster.
+For managed uv, BioImageFlow builds a verified environment around that interpreter from wheels captured on the laptop.
+For ``from_existing_python()``, the selected absolute interpreter must already contain compatible BioImageFlow, Parsl, PSI/J, the scheduler adapter, and workflow tool packages, and BioImageFlow attests it before use.
+BioImageFlow does not download or install Python itself.
 It does not install scheduler services, drivers, privileged libraries, or change cluster policy.
 
 Golden path: a pre-provisioned Python
@@ -117,7 +118,8 @@ It returns the live Parsl configuration and BioImageFlow executor bindings toget
 ``runtime.worker_init`` applies the selected setup script and activates the exact deployment in every managed worker.
 Every provider that starts a worker shell must use it.
 :class:`~bioimageflow.parsl.WorkerSlot` describes the resources guaranteed to one concurrent BioImageFlow task, not the whole scheduler node.
-Each additional :class:`~bioimageflow.WorkerEnvironmentAttestation` is an explicit site claim that the pre-provisioned Python contains that processing-tool environment.
+Each additional :class:`~bioimageflow.WorkerEnvironmentAttestation` declares that the activated worker environment contains that processing-tool environment.
+For managed uv, its packages must be part of the captured locked closure; for an existing Python, it is an explicit site claim.
 Add every distinct tool environment offered by the executor; planning fails closed if a node has no compatible attestation.
 
 The complete laptop-side submission is:
@@ -193,7 +195,7 @@ Deployment and submission additionally require an environment, Parsl configurati
 
 ``environment``
    The Python environment used by the orchestrator and ordinary managed workers.
-   End-to-end execution currently requires an externally managed absolute interpreter selected with ``from_existing_python()``.
+   Choose a content-owned locked uv project or an externally managed absolute interpreter.
 
 ``parsl``
    The trusted source and arguments for the factory that constructs the Parsl configuration and bindings.
@@ -210,7 +212,7 @@ Choose an environment source
 ----------------------------
 
 :class:`~bioimageflow.cluster.ClusterEnvironment` describes environment sources with an explicit ownership boundary.
-Only ``from_existing_python()`` currently realizes a usable target deployment.
+``from_uv_project()`` and ``from_existing_python()`` currently realize usable target deployments.
 
 .. list-table::
    :header-rows: 1
@@ -223,7 +225,7 @@ Only ``from_existing_python()`` currently realizes a usable target deployment.
    * - Locked uv project
      - ``from_uv_project()``
      - ``pyproject.toml``, ``uv.lock``, selected local sources
-     - Local capture and lock checks only; target installation is not implemented
+     - Supported with a wheel-complete closure and a pre-existing compatible target Python
    * - Locked Pixi project
      - ``from_pixi_project()``
      - Pixi manifest, ``pixi.lock``, environment name
@@ -265,8 +267,12 @@ For example:
        "/shared/apps/bioimageflow/2026.08/bin/python"
    )
 
-The constructors for content-owned environments are available so callers can prepare and serialize exact descriptions while their remote installers are completed.
-Attempting to deploy one currently fails with a structured environment-adapter diagnostic before scheduler submission.
+Managed uv verifies the frozen lock, builds local projects into universal wheels on the laptop, captures locked registry wheels and compatible pinned uv installer wheels, and performs an offline target installation.
+Every selected package must have a captured wheel compatible with the cluster; target-side sdist builds are not supported.
+Local project wheels must be platform-independent ``py3-none-any`` or ``py2.py3-none-any`` wheels.
+The cluster Python must already exist and satisfy the frozen Python requirement because the deployment never downloads Python.
+Installer capture currently reads public PyPI, and registry-wheel capture uses unauthenticated immutable HTTP(S) URLs; ``auth_refs`` are not used for private registry capture yet.
+Pixi, pylock, and standalone wheelhouse target realization remain unavailable and fail before scheduler submission.
 An existing Python environment is attested and validated but remains an externally managed dependency, so changing it can invalidate a deployment between operations.
 
 Expose site software with a setup script
