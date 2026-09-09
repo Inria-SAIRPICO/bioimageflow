@@ -218,3 +218,18 @@ class TestSerializeInputSchema:
             "dtypes": [],
             "formats": [],
         }
+
+    @pytest.mark.parametrize("connectable", list(Connectable))
+    def test_dataframe_parameters_never_offer_column_connections(self, connectable) -> None:
+        from bioimageflow.validation import get_inputs_schema
+
+        class TableTool(DataFrameTool):
+            class Inputs(IOModel):
+                implicit: int = 1
+                explicit: Annotated[int, GUIMeta(connectable=connectable)] = 2
+
+        wire_schema = serialize_input_schema(TableTool)
+        python_schema = get_inputs_schema(TableTool())
+        for field in ("implicit", "explicit"):
+            assert wire_schema[field]["connectable"] == "never"
+            assert python_schema[field]["connectable"] is Connectable.NEVER

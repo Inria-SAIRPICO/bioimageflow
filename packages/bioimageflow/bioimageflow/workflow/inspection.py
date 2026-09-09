@@ -257,6 +257,20 @@ class _InspectionMixin:
             # Step 2: type compatibility on column bindings.
             for field, col_ref in node._column_bindings.items():
                 eid = node._column_binding_edge_ids.get(field)
+                from bioimageflow.node import BindingError
+
+                try:
+                    node._check_column_binding_allowed(field)
+                except BindingError as exc:
+                    errors.append(ValidationError(
+                        kind="type_mismatch",
+                        message=str(exc),
+                        node=name,
+                        field=field,
+                        edge=(col_ref.node.name, name, field),
+                        edge_id=eid,
+                    ))
+                    continue
                 err = check_type_compat(node, field, col_ref)
                 if err is not None:
                     if eid is not None and err.edge_id is None:

@@ -40,6 +40,10 @@ class ColumnNotFoundError(Exception):
 class BindingError(Exception):
     """Raised when a required input field has no source."""
 
+    def __init__(self, message: str, *, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+
     def to_validation_error(
         self,
         node: str,
@@ -50,7 +54,7 @@ class BindingError(Exception):
             kind=kind,
             message=str(self),
             node=node,
-            field=field,
+            field=field if field is not None else self.field,
         )
 
 
@@ -207,6 +211,13 @@ class Node:
         # Register with active workflow
         wf = get_active_workflow()
         capture = _get_error_capture()
+        if capture is None:
+            # Reject prohibited bindings before positional or keyword symbolic
+            # inputs can publish targets into their owning workflow.
+            declared_inputs = self.tool.Inputs._get_all_annotations()
+            for field, value in self._kwargs.items():
+                if field in declared_inputs and isinstance(value, (ColumnRef, Node)):
+                    self._check_column_binding_allowed(field)
         if wf is not None:
             if name is not None and name in wf._nodes:
                 if capture is not None:
@@ -256,6 +267,18 @@ class Node:
                     wf._nodes.pop(self._name, None)
                 raise
 
+    def _check_column_binding_allowed(self, field: str) -> None:
+        """Reject row-valued bindings where a whole-table tool needs a constant."""
+        from bioimageflow.dataframe_tool import DataFrameTool
+
+        if isinstance(self.tool, DataFrameTool):
+            raise BindingError(
+                f"DataFrameTool '{type(self.tool).__name__}' input '{field}' "
+                "requires a constant; column references and Node shorthand are "
+                "not allowed. Pass upstream DataFrames as positional arguments.",
+                field=field,
+            )
+
     def _process_kwargs(self) -> None:
         """Validate and categorize keyword arguments.
 
@@ -283,11 +306,13 @@ class Node:
                         )
                         self._workflow_input_bindings[key] = value
                     elif isinstance(value, ColumnRef):
+                        self._check_column_binding_allowed(key)
                         self._column_bindings[key] = value
                         self._upstream_nodes.add(value.node)
                         # Type compatibility check
                         self._check_type_compat(key, value)
                     elif isinstance(value, Node):
+                        self._check_column_binding_allowed(key)
                         # Node shorthand: field=node -> field=node["field"]
                         col_ref = value[key]  # This will raise ColumnNotFoundError if missing
                         self._column_bindings[key] = col_ref

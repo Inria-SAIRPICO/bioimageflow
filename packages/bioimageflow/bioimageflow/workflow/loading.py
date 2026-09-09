@@ -300,7 +300,8 @@ class _LoadingMixin:
                         f"Workflow construction failed with {len(errors)} error(s)."
                     ) from exc
                 raise
-            errors.append(ValidationError(kind="construction_failed", message=str(exc)))
+            if not errors:
+                errors.append(ValidationError(kind="construction_failed", message=str(exc)))
             wf = cls(
                 storage_path=storage_path,
                 engine=engine or "wetlands",

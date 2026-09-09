@@ -21,6 +21,7 @@ from .common import (
     get_origin,
 )
 from .schema import (
+    _input_connectable,
     _unwrap_optional,
     extract_image_spec,
     is_path_type,
@@ -225,7 +226,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
     - ``required``: ``True`` when no class-level default is set on
       ``Inputs`` for the field. Orthogonal to ``Optional[X]``.
     - ``connectable``: one of ``"never" | "not_by_default" | "by_default"``
-      (from :class:`Connectable`).
+      (from :class:`Connectable`). DataFrameTool parameters are always ``"never"``.
     - ``default``: JSON-safe representation of the class-level default, or
       ``None`` when the field is required.
     - ``display_name``, ``description``, ``group``, ``min``, ``max``,
@@ -279,6 +280,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
                     "path_picker": None,
                 }
             )
+        entry["connectable"] = _input_connectable(tool_class, annotation).value
         schema[field_name] = entry
 
     return schema

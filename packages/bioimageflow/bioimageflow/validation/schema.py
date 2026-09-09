@@ -94,6 +94,16 @@ def serialize_image_spec(spec: ImageSpec | None) -> dict[str, list[str]] | None:
     }
 
 
+def _input_connectable(tool_class: type[BaseTool], annotation: Any) -> Connectable:
+    """Report column connectivity from the tool contract before GUI preferences."""
+    from bioimageflow.dataframe_tool import DataFrameTool
+
+    if issubclass(tool_class, DataFrameTool):
+        return Connectable.NEVER
+    gui_meta = extract_gui_meta(annotation)
+    return gui_meta.connectable if gui_meta else Connectable.NOT_BY_DEFAULT
+
+
 def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
     """Return a GUI-friendly schema for all input fields of a tool.
 
@@ -129,9 +139,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
             "type": base_type,
             "default": default,
             "required": not has_default,
-            "connectable": gui_meta.connectable
-            if gui_meta
-            else Connectable.NOT_BY_DEFAULT,
+            "connectable": _input_connectable(type(tool), annotation),
             "image_spec": image_spec,
             "image_spec_serialized": serialize_image_spec(image_spec),
         }

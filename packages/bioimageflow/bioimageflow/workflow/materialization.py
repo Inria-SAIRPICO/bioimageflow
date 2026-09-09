@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from dataclasses import replace
+
+from bioimageflow.node import BindingError
 
 from .common import (
     Any,
@@ -359,34 +362,32 @@ class _MaterializationMixin:
                     else:
                         raise ValueError("Unknown workflow interface target kind.")
 
+                nested_failure_reported = False
                 try:
                     with wf.capture_errors() as captured:
                         if node_data["type"] == "workflow":
                             child_errors: list[ValidationError] = []
-                            child = cls._materialize_graph(
-                                node_data["workflow"],
-                                custom_modules=custom_modules,
-                                source_records=source_records,
-                                auto_install=auto_install,
-                                storage_path=storage_path,
-                                partial=partial,
-                                errors=child_errors,
-                                graph_stack=graph_stack,
-                            )
-                            child._build_errors = list(child_errors)
-                            if errors is not None:
-                                errors.extend(
-                                    ValidationError(
-                                        kind=error.kind,
-                                        message=error.message,
-                                        node=error.node,
-                                        field=error.field,
-                                        edge=error.edge,
-                                        edge_id=error.edge_id,
-                                        path=(name, *error.path),
-                                    )
-                                    for error in child_errors
+                            try:
+                                child = cls._materialize_graph(
+                                    node_data["workflow"],
+                                    custom_modules=custom_modules,
+                                    source_records=source_records,
+                                    auto_install=auto_install,
+                                    storage_path=storage_path,
+                                    partial=partial,
+                                    errors=child_errors,
+                                    graph_stack=graph_stack,
                                 )
+                            except BindingError:
+                                nested_failure_reported = bool(child_errors)
+                                raise
+                            finally:
+                                if errors is not None:
+                                    errors.extend(
+                                        replace(error, path=(name, *error.path))
+                                        for error in child_errors
+                                    )
+                            child._build_errors = list(child_errors)
                             child_by_id = child._interface_inputs
                             named_bindings: dict[str, Any] = {}
                             for key, value in kwargs.items():
@@ -480,11 +481,24 @@ class _MaterializationMixin:
                             )
                             node._column_binding_edge_ids.update(column_edge_ids)
                     if errors is not None:
-                        errors.extend(captured)
+                        for error in captured if partial else captured[:1]:
+                            edge = next((
+                                item for item in incoming[name]
+                                if item.get("target_input") == error.field
+                            ), None)
+                            errors.append(replace(
+                                error,
+                                edge=(edge["source_node"], name, error.field),
+                                edge_id=edge["id"],
+                            ) if edge is not None and error.field is not None else error)
+                    if captured and not partial:
+                        raise ValueError(captured[0].message)
                     node.enabled = node_data.get("enabled", True)
                     built[name] = node
                 except Exception as exc:
-                    if not partial:
+                    if nested_failure_reported:
+                        raise
+                    if not partial and not isinstance(exc, BindingError):
                         raise
                     error = ValidationError(
                         kind="unknown_tool"
@@ -493,8 +507,22 @@ class _MaterializationMixin:
                         message=str(exc),
                         node=name,
                     )
+                    if isinstance(exc, BindingError):
+                        error = exc.to_validation_error(name, kind="type_mismatch")
+                        edge = next((
+                            item for item in incoming[name]
+                            if item.get("target_input") == error.field
+                        ), None)
+                        if edge is not None and error.field is not None:
+                            error = replace(
+                                error,
+                                edge=(edge["source_node"], name, error.field),
+                                edge_id=edge["id"],
+                            )
                     if errors is not None:
                         errors.append(error)
+                    if not partial:
+                        raise
                     wf._failed_nodes[name] = error
         finally:
             set_active_workflow(previous)

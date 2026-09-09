@@ -276,6 +276,18 @@ class _InterfacesMixin:
         if record not in port.targets:
             port.targets.append(record)
 
+    def _check_interface_column_binding(self, port_id: str) -> None:
+        """Check every nested target before mutating a fanned-out field binding."""
+        from bioimageflow.workflow_node import WorkflowNode
+
+        for target in self._interface_inputs[port_id].targets:
+            node = self._nodes[target["node"]]
+            endpoint = target["port"]
+            if isinstance(node, WorkflowNode):
+                node.workflow._check_interface_column_binding(endpoint["id"])
+            elif endpoint["kind"] == "field":
+                node._check_column_binding_allowed(endpoint["name"])
+
     def _apply_interface_binding(self, port_id: str, value: Any) -> None:
         """Substitute one boundary value at every target in this definition."""
         from bioimageflow.node import ColumnRef, Node
@@ -291,6 +303,7 @@ class _InterfacesMixin:
             if endpoint["kind"] == "field":
                 field_name = endpoint["name"]
                 if isinstance(value, ColumnRef):
+                    node._check_column_binding_allowed(field_name)
                     node._constant_bindings.pop(field_name, None)
                     node._workflow_input_fallback_constants.discard(field_name)
                     node._column_bindings[field_name] = value

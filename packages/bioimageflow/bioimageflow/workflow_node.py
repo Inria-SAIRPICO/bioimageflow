@@ -87,6 +87,12 @@ class WorkflowNode(Node):
         if self._name in parent._nodes:
             raise ValueError(f"Node name '{self._name}' is not unique in the parent Workflow.")
 
+        # A later prohibited binding must not leave targets published by an
+        # earlier symbolic input on a workflow invocation that never registers.
+        for port_id, value in (bindings or {}).items():
+            port = self.workflow._interface_inputs.get(port_id)
+            if port is not None and port.kind == "field" and isinstance(value, (Node, ColumnRef)):
+                self._check_input_column_binding(port_id)
         for port_id, value in (bindings or {}).items():
             self.bind_port(port_id, value)
 
@@ -141,6 +147,16 @@ class WorkflowNode(Node):
             | set(self._workflow_input_bindings)
         )
 
+    def _check_input_column_binding(self, port_id: str) -> None:
+        port = self.workflow._interface_inputs[port_id]
+        try:
+            self.workflow._check_interface_column_binding(port_id)
+        except BindingError as exc:
+            raise BindingError(
+                f"Workflow input '{port.name}' on node '{self.name}': {exc}",
+                field=port_id,
+            ) from exc
+
     def bind_port(self, port_id: str, value: Any) -> None:
         """Bind one stable input port and apply it to every declared target."""
         port = self.workflow._interface_inputs.get(port_id)
@@ -172,6 +188,7 @@ class WorkflowNode(Node):
             if isinstance(value, Node) and not isinstance(value, ColumnRef):
                 value = value[port.name]
             if isinstance(value, ColumnRef):
+                self._check_input_column_binding(port_id)
                 self._input_column_bindings[port_id] = value
                 self._upstream_nodes.add(value.node)
             else:

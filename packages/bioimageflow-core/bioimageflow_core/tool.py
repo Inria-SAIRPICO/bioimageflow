@@ -3,7 +3,9 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+import sys
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, get_type_hints
 
 
 class Category(str, Enum):
@@ -63,10 +65,28 @@ class IOModel:
 
     @classmethod
     def _get_all_annotations(cls) -> dict[str, Any]:
-        """Walk the MRO to collect annotations from all ancestor classes."""
+        """Resolve inherited fields in their defining module and class namespaces.
+
+        Keep Annotated metadata for both orchestrator schemas and worker-side
+        consumers. Invalid forward references must fail here rather than leak
+        strings into downstream validation or silently lose field metadata.
+        """
         annotations: dict[str, Any] = {}
         for klass in reversed(cls.__mro__):
-            annotations.update(getattr(klass, '__annotations__', {}))
+            declared = vars(klass).get("__annotations__", {})
+            if not declared:
+                continue
+            # Resolve only this declaration: inherited fields belong to their
+            # own defining namespace, and class aliases precede module aliases.
+            declaration = SimpleNamespace(__annotations__=declared)
+            annotations.update(
+                get_type_hints(
+                    declaration,
+                    globalns=vars(sys.modules[klass.__module__]),
+                    localns=dict(vars(klass)),
+                    include_extras=True,
+                )
+            )
         return annotations
 
     def __init__(self, **kwargs: Any) -> None:

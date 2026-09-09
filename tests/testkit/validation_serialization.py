@@ -140,10 +140,11 @@ def _all_common_tool_classes() -> list[type]:
     import bioimageflow_common_tools as ct
 
     classes = []
-    for name in dir(ct):
+    for name in ct.__all__:
         obj = getattr(ct, name)
         if isinstance(obj, type) and hasattr(obj, "Inputs"):
             classes.append(obj)
+    assert classes, "Common tool exports must provide schema test cases"
     return classes
 
 

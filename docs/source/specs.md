@@ -304,6 +304,8 @@ For inputs, each field entry has exactly these keys:
 The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImageFile"` and `"ImageShared"` respectively. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
+DataFrameTool keyword parameters are constant-only, so their serialized input fields always report `connectable="never"`, including when field metadata would otherwise request a pin.
+Their complete upstream DataFrames are connected through positional inputs, independently of these parameter fields.
 
 The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offers file selection, `"folder"` offers folder selection, and `"both"` offers both actions. `None` leaves the choice to the GUI's type-based inference. It does not validate whether a runtime value exists or is a file or directory.
 
@@ -745,6 +747,8 @@ Inference-only arguments should not invalidate weights.
 `DataFrameTool` is the base class for tools that transform DataFrames in the main process (no isolated environment). It provides two methods: `merge_dataframes` for combining upstream DataFrames, and `transform` for operating on the merged result. It lives in the `bioimageflow` package.
 
 DataFrameTool calls use **positional arguments** for upstream nodes (whose output DataFrames are passed to `merge_dataframes`) and **keyword arguments** for `Inputs` parameters (constants).
+Column references and node shorthand are rejected as DataFrameTool keyword values during construction and recursive workflow validation; no implicit column-to-DataFrame conversion is performed.
+Published field inputs may provide constant parameter values, but binding such an input to an upstream column must be rejected when it ultimately targets a DataFrameTool parameter.
 
 GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` — the canonical, JSON-safe representation (see §2.4). Tools that declare `class Outputs(Passthrough): pass` are serialized as the marker `{"_passthrough": True}`, signalling to the UI that the tool inherits upstream columns.
 
@@ -1082,6 +1086,10 @@ class IOModel:
 Both models use only standard-library types and `bioimageflow-core` types.
 
 **Orchestrator-side validation:** The orchestrator (`bioimageflow` package) automatically builds Pydantic models from `IOModel` declarations for full validation during column resolution. This is transparent to tool authors:
+
+`IOModel` annotation introspection resolves postponed annotations in their defining module and class namespaces, including inherited fields, and preserves `Annotated` metadata.
+Validation, GUI schema serialization, and execution use that same resolved declaration; unresolved names produce an actionable declaration error rather than silently degrading the field schema.
+The annotation resolver uses the standard library and does not add a Pydantic dependency to `bioimageflow-core`.
 
 ```python
 # bioimageflow/validation.py (orchestrator-only, has pydantic)
@@ -2139,6 +2147,8 @@ All inputs are keyword arguments. Each must be one of:
 #### DataFrameTool Binding
 
 Positional arguments are upstream nodes — their output DataFrames are passed to `merge_dataframes`. Keyword arguments are `Inputs` parameters (constants only, not column references).
+Both `ColumnRef` values and node shorthand in these keyword arguments raise `BindingError` during ordinary construction and produce structured validation errors under error capture or portable graph loading.
+Recursive interface bindings obey the same constraint at their ultimate tool target, with scoped node, input field, and edge identity retained in diagnostics when available.
 
 Construction-time validation checks that keyword arguments match the tool's `Inputs` declaration (type-checked via Pydantic).
 

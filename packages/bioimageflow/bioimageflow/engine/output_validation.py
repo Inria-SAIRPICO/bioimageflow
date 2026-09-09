@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any
 
 from pydantic import ConfigDict, PydanticUserError, TypeAdapter, ValidationError
 
@@ -12,15 +12,6 @@ from bioimageflow.validation import is_path_type
 from bioimageflow_core import IOModel
 from bioimageflow_core.types import SharedArray
 from bioimageflow_core.worker_protocol import RowResultV1
-
-
-def _resolved_annotations(output_type: type[IOModel]) -> dict[str, Any]:
-    declared = output_type._get_all_annotations()
-    try:
-        resolved = get_type_hints(output_type, include_extras=True)
-    except (NameError, TypeError):
-        resolved = declared
-    return {name: resolved.get(name, annotation) for name, annotation in declared.items()}
 
 
 def _output_values(
@@ -53,7 +44,7 @@ def validate_processing_output(
 ) -> IOModel:
     """Validate one output and restore its declared field order and runtime values."""
     values = _output_values(output, output_type)
-    annotations = _resolved_annotations(output_type)
+    annotations = output_type._get_all_annotations()
     validated: dict[str, Any] = {}
     for field, annotation in annotations.items():
         value = values[field]
