@@ -97,6 +97,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
+BioImageFlow 0.7.1 requires `bioimageflow-core>=0.3.1,<0.4` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
 
 The orchestrator package exposes its final public imports explicitly while implementation modules remain focused.
 The scheduler owns graph, cache, progress, and failure semantics; execution-specific processing dispatch is isolated behind the `ProcessingBackend` protocol so all backends use those semantics.
@@ -1057,10 +1058,23 @@ class IOModel:
     """
     @classmethod
     def _get_all_annotations(cls):
-        """Walk the MRO to collect annotations from all ancestor classes."""
+        """Resolve each declaration using available module and class namespaces."""
+        import sys
+        from types import SimpleNamespace
+        from typing import get_type_hints
+
         annotations = {}
         for klass in reversed(cls.__mro__):
-            annotations.update(getattr(klass, '__annotations__', {}))
+            declared = vars(klass).get("__annotations__", {})
+            if not declared:
+                continue
+            module = sys.modules.get(klass.__module__)
+            annotations.update(get_type_hints(
+                SimpleNamespace(__annotations__=declared),
+                globalns=vars(module) if module is not None else {},
+                localns=dict(vars(klass)),
+                include_extras=True,
+            ))
         return annotations
 
     def __init__(self, **kwargs):
@@ -1089,6 +1103,8 @@ Both models use only standard-library types and `bioimageflow-core` types.
 
 `IOModel` annotation introspection resolves postponed annotations in their defining module and class namespaces, including inherited fields, and preserves `Annotated` metadata.
 Validation, GUI schema serialization, and execution use that same resolved declaration; unresolved names produce an actionable declaration error rather than silently degrading the field schema.
+For deserialized or dynamically created classes whose defining module is not registered, resolution uses the available class namespace and builtins; already resolved annotations, including inherited `Annotated` metadata, remain usable without importing that module.
+References that require an unavailable module global raise a declaration error; introspection does not import modules or retain unresolved strings.
 The annotation resolver uses the standard library and does not add a Pydantic dependency to `bioimageflow-core`.
 
 ```python

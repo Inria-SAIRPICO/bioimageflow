@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Annotated, get_args
+from typing import Annotated, ForwardRef, get_args
 
 import pytest
 
@@ -109,3 +109,43 @@ def test_unresolved_annotations_fail_instead_of_becoming_wire_types() -> None:
         serialize_input_schema(Invalid)
     with pytest.raises(NameError, match="MissingAnnotationType"):
         validate_parameters(Invalid, {"value": 1})
+
+
+def test_self_contained_annotations_do_not_require_a_registered_module() -> None:
+    module_name = "_unregistered_annotation_tool"
+    assert module_name not in sys.modules
+    field_annotation = Annotated[Path, ImageSpec(semantics={"label"})]
+    base = type("Base", (IOModel,), {
+        "__module__": module_name,
+        "__annotations__": {"image": field_annotation, "count": float},
+    })
+    output = type("Outputs", (base,), {
+        "__module__": module_name,
+        "Alias": int,
+        "__annotations__": {"value": "Alias", "count": "int"},
+    })
+
+    assert output._get_all_annotations() == {
+        "image": field_annotation, "value": int, "count": int,
+    }
+    result = output(image=Path("mask.tif"), value=4, count=1)
+    assert result.image == Path("mask.tif")
+    assert result.value == 4
+    assert result.count == 1
+    assert module_name not in sys.modules
+
+
+@pytest.mark.parametrize("annotation", ["MissingModuleAlias", list[ForwardRef("MissingModuleAlias")]])
+def test_missing_module_globals_remain_declaration_errors(annotation) -> None:
+    module_name = "_unregistered_annotation_tool"
+    assert module_name not in sys.modules
+    output = type("Outputs", (IOModel,), {
+        "__module__": module_name,
+        "__annotations__": {"value": annotation},
+    })
+
+    with pytest.raises(NameError, match="MissingModuleAlias"):
+        output._get_all_annotations()
+    with pytest.raises(NameError, match="MissingModuleAlias"):
+        output(value=1)
+    assert module_name not in sys.modules

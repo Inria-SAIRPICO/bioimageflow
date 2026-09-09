@@ -79,10 +79,15 @@ class IOModel:
             # Resolve only this declaration: inherited fields belong to their
             # own defining namespace, and class aliases precede module aliases.
             declaration = SimpleNamespace(__annotations__=declared)
+            # Deserialized classes may carry complete annotations without their
+            # defining module being loaded. Resolve with the available namespace;
+            # references to missing module globals still fail in get_type_hints.
+            module = sys.modules.get(klass.__module__)
+            module_globals = vars(module) if module is not None else {}
             annotations.update(
                 get_type_hints(
                     declaration,
-                    globalns=vars(sys.modules[klass.__module__]),
+                    globalns=module_globals,
                     localns=dict(vars(klass)),
                     include_extras=True,
                 )
