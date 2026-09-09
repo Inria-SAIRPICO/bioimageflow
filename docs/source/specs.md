@@ -2850,8 +2850,11 @@ When a tool stores a `SharedArray` in an output DataFrame column, it carries the
 - **Row-level failure:** When a single row fails in `process_row`, the entire node execution fails. The engine does not produce partial results.
 
 Compilation assigns stable real-tool ordinals by deterministic topological order with scoped path as the ready-node tie breaker.
-After stopping new submission and draining submitted work, the scheduler chooses the public primary failure by `(compiled node ordinal, first input position, task ID)`.
-Completion timing never selects the primary error.
+After observing a failure, the scheduler stops new task submission and drains already submitted work.
+For worker task failures, it chooses the public primary failure among failures from tasks actually submitted, ordered by `(compiled node ordinal, first input position, task ID)`.
+Completion timing does not choose the primary error among those submitted failures.
+A ready node whose task was not submitted before stopping does not contribute a hypothetical failure; the scheduler does not launch additional work solely to obtain an earlier-ordered error.
+For example, if only node `second` was submitted before it failed, that failure is reported; if both `first` and `second` were submitted and failed, `first` is primary according to their compiled order regardless of which failure completed first.
 
 ---
 

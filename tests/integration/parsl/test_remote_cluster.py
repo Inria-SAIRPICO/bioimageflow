@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
+from threading import Barrier, Lock
 
 import pandas as pd
 import pytest
@@ -25,6 +26,7 @@ from bioimageflow.launcher.errors import WorkflowRunFailedError
 from bioimageflow.launcher.inputs import load_invocation
 from bioimageflow.launcher.repository import LauncherRepository
 from bioimageflow.parsl.startup import CORE_REQUIREMENT
+from bioimageflow.parsl import backend as parsl_backend
 from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 from tests.testkit.parsl_tools import PARSL_TEST_ENV, ParslFail
 from tests.testkit.remote_cluster import FakeCluster
@@ -274,6 +276,23 @@ def test_remote_cluster_exposes_structured_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This harness uses a real two-thread executor in the same process.
+    # Both workers must have started before either tool is allowed to fail;
+    # fail-fast submission may otherwise legitimately omit the earlier node.
+    workers_started = Barrier(2, timeout=10)
+    entered_nodes: list[str] = []
+    entered_lock = Lock()
+    execute_task = parsl_backend.execute_processing_task
+
+    def execute_after_both_workers_start(payload, *, task=None):
+        with entered_lock:
+            entered_nodes.append(payload["node_name"])
+        workers_started.wait()
+        return execute_task(payload, task=task)
+
+    monkeypatch.setattr(
+        parsl_backend, "execute_processing_task", execute_after_both_workers_start
+    )
     storage = tmp_path / "cluster-storage"
     staging = tmp_path / "transport"
     cluster = FakeCluster()
@@ -294,6 +313,7 @@ def test_remote_cluster_exposes_structured_failure(
     )
 
     assert cluster.run_queued_job() == "failed"
+    assert sorted(entered_nodes) == ["first", "second"]
     run.refresh()
     with pytest.raises(WorkflowRunFailedError, match="remote failure 7"):
         run.export_result(tmp_path / "unused")

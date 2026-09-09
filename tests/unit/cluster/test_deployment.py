@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
 from datetime import timedelta
@@ -30,7 +31,7 @@ def _uv_lock(
     required: tuple[str, ...] = ("bioimageflow-core", "parsl", "psij-python"),
 ) -> str:
     versions = {
-        "bioimageflow-core": "0.3.0",
+        "bioimageflow-core": importlib.metadata.version("bioimageflow-core"),
         "parsl": "2026.5.25",
         "psij-python": "0.9.11",
     }
@@ -217,7 +218,7 @@ def _project(
     (package / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
     for runtime_name in ("bioimageflow-core", "parsl", "psij-python"):
         runtime_version = {
-            "bioimageflow-core": "0.3.0",
+            "bioimageflow-core": importlib.metadata.version("bioimageflow-core"),
             "parsl": "2026.5.25",
             "psij-python": "0.9.11",
         }[runtime_name]

@@ -52,6 +52,7 @@ def test_existing_python_publication_and_factory_validation(
     factory.write_text(
         """from parsl import Config
 from parsl.executors import ThreadPoolExecutor
+from bioimageflow.parsl.startup import CORE_REQUIREMENT
 from bioimageflow.parsl import (
     ExecutorBinding,
     ExecutorCapabilities,
@@ -69,7 +70,7 @@ def build(runtime, credential):
             name="site-external",
             dependency_hash="a" * 64,
             allow_flexible_versions=False,
-            core_requirement="bioimageflow-core>=0.3.0,<0.4",
+            core_requirement=CORE_REQUIREMENT,
         ),),
         capabilities=ExecutorCapabilities(
             storage_modes=("shared_fs",),
