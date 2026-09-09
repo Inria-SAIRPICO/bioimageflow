@@ -10,7 +10,8 @@ def fail_with_credential(*, credential: str) -> None:
 
 
 def print_and_fail_with_credential(*, credential: str) -> None:
-    print(f"factory received {credential}")
+    # The integration test reads persisted logs as soon as failure is published.
+    print(f"factory received {credential}", flush=True)
     raise RuntimeError(f"rejected credential {credential}")
 
 

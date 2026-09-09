@@ -2068,6 +2068,8 @@ Launcher backends start only the orchestrator; Parsl providers allocate workers.
 
 `WorkflowRun.open(storage_path, run_id)` reconnects without process-local state.
 Its `status`, `refresh()`, `progress()`, `logs()`, `cancel()`, `plan_retry()`, `start_retry()`, `load_result()`, and `export_result()` methods read durable launcher artifacts.
+`logs()` returns the stdout and stderr bytes currently persisted in the launcher log files.
+Terminal workflow status does not imply that the detached orchestrator process has exited or flushed all buffered output; producers must flush any output required to be visible before a later status transition.
 Every submitted run uses `bioimageflow.launcher.submission.v1` with nullable `retry_plan`, and every bounded remote observation uses the single fixed `bioimageflow.launcher.run-observation.v1` shape with the same nullable provenance.
 Status uses `prepared`, `starting`, `running`, `finalizing`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `lost`.
 Every state mutation is a guarded revision and claim-epoch compare-and-swap.
