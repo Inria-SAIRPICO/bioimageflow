@@ -15,7 +15,7 @@ from tests.testkit.integration_tools import FileLoader
 
 from .wetlands_test_tools import CancellableBatchTool, CancellableRowTool
 
-pytestmark = pytest.mark.wetlands
+pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
 
 
 @pytest.fixture(autouse=True)
