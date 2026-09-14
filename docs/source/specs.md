@@ -97,7 +97,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
-BioImageFlow 0.7.1 requires `bioimageflow-core>=0.3.1,<0.4` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
+BioImageFlow 0.7.2 requires `bioimageflow-core>=0.3.1,<0.4` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
 
 The orchestrator package exposes its final public imports explicitly while implementation modules remain focused.
 The scheduler owns graph, cache, progress, and failure semantics; execution-specific processing dispatch is isolated behind the `ProcessingBackend` protocol so all backends use those semantics.
