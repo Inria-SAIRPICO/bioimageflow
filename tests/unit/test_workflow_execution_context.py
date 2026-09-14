@@ -115,7 +115,7 @@ def test_cancellation_subscribers_are_isolated(caplog) -> None:
 
     def fail() -> None:
         calls.append("failed")
-        raise RuntimeError("observer failure")
+        raise KeyboardInterrupt("observer failure")
 
     context._subscribe_cancellation(fail)
     context._subscribe_cancellation(lambda: calls.append("completed"))

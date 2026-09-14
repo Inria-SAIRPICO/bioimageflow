@@ -130,7 +130,7 @@ class WorkflowExecutionContext:
     def _notify_cancel_callback(callback: Callable[[], None]) -> None:
         try:
             callback()
-        except Exception:
+        except BaseException:
             logger.exception("Workflow cancellation observer failed")
 
     def export_result(self, value: object, *, destination: str | Path) -> object:

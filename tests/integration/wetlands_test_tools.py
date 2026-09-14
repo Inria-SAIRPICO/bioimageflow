@@ -313,6 +313,8 @@ def _hold_for_cancellation(control_port: int, task: Any, label: str) -> None:
                 continue
             stream.write(b'{"event": "cancellation_observed"}\n')
             stream.flush()
+            if stream.readline() != b"finish\n":
+                raise RuntimeError("Cancellation test writer was not released")
             task.cancel()
             stream.write(b'{"event": "cancellation_acknowledged"}\n')
             stream.flush()

@@ -69,12 +69,11 @@ class _WetlandsTaskTracker:
         with self._lock:
             tasks = tuple(self._tasks)
         for task in tasks:
-            if task.state.terminal:
-                continue
-            try:
-                task.wait_for()
-            except Exception:
-                pass
+            while not task.state.terminal:
+                try:
+                    task.wait_for()
+                except BaseException:
+                    continue
 
     def close(self) -> None:
         """Detach the cancellation observer after all dispatch work is settled."""
@@ -86,7 +85,7 @@ class _WetlandsTaskTracker:
             if not task.state.terminal:
                 try:
                     task.cancel()
-                except Exception:
+                except BaseException:
                     pass
 
 
@@ -339,14 +338,19 @@ class _DispatchMixin:
             for start in range(0, len(payloads), window):
                 if workflow.cancel_requested:
                     raise WorkflowCancelledError("Workflow cancelled by user")
-                active = self._env_manager.map_processing_tasks(
-                    env_spec,
-                    payloads[start : start + window],
-                    max_workers=max_workers,
-                    worker_timeout=worker_timeout,
-                )
-                tasks.extend(active)
-                tracker.register(active)
+                active: list[Any] = []
+                for payload in payloads[start : start + window]:
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    task = self._env_manager.submit_processing_task(
+                        env_spec,
+                        payload,
+                        max_workers=max_workers,
+                        worker_timeout=worker_timeout,
+                    )
+                    active.append(task)
+                    tasks.append(task)
+                    tracker.register([task])
                 for offset, task in enumerate(active):
                     row_position = start + offset
 

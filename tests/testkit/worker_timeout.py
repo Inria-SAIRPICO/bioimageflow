@@ -25,7 +25,13 @@ from bioimageflow.engine import (
 
 from bioimageflow.workflow import Workflow, WorkflowEnvironment
 
-from bioimageflow_core import EnvironmentSpec, ExecutionContext, IOModel, ProcessingTool, RowConsumption
+from bioimageflow_core import (
+    EnvironmentSpec,
+    ExecutionContext,
+    IOModel,
+    ProcessingTool,
+    RowConsumption,
+)
 
 
 def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionContext]:
@@ -87,7 +93,10 @@ class _HangingTask:
         raise TimeoutError(f"Task did not finish within {timeout}s")
 
     def cancel(self) -> None:
+        from wetlands import ExecutionState
+
         self.cancel_called = True
+        self.state = ExecutionState.CANCELED
 
     def listen(self, cb: Any) -> None:
         pass
