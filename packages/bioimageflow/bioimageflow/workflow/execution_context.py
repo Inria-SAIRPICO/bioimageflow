@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import threading
 import uuid
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 
 _RUN_ID_RE = re.compile(r"^run_[0-9a-f]{32}$")
 _INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
+logger = logging.getLogger("bioimageflow")
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,8 @@ class WorkflowExecutionContext:
         self.defer_success_finalization = defer_success_finalization
         self._cancel_event = threading.Event()
         self._lock = threading.RLock()
+        self._cancel_callbacks: dict[int, Callable[[], None]] = {}
+        self._next_cancel_callback = 0
         self._binding: object | None = None
         self._target_nodes: tuple[str, ...] = ()
         self._success_callback: Callable[[], None] | None = None
@@ -89,7 +93,45 @@ class WorkflowExecutionContext:
 
     def request_cancel(self) -> None:
         """Request cancellation without affecting any other execution."""
-        self._cancel_event.set()
+        with self._lock:
+            if self._cancel_event.is_set():
+                return
+            self._cancel_event.set()
+            callbacks = tuple(self._cancel_callbacks.values())
+            self._cancel_callbacks.clear()
+        for callback in callbacks:
+            self._notify_cancel_callback(callback)
+
+    def _subscribe_cancellation(
+        self,
+        callback: Callable[[], None],
+    ) -> Callable[[], None]:
+        """Subscribe a runtime cancellation observer and return its disposer."""
+        with self._lock:
+            if self._cancel_event.is_set():
+                callback_id = None
+            else:
+                callback_id = self._next_cancel_callback
+                self._next_cancel_callback += 1
+                self._cancel_callbacks[callback_id] = callback
+
+        if callback_id is None:
+            self._notify_cancel_callback(callback)
+
+        def unsubscribe() -> None:
+            if callback_id is None:
+                return
+            with self._lock:
+                self._cancel_callbacks.pop(callback_id, None)
+
+        return unsubscribe
+
+    @staticmethod
+    def _notify_cancel_callback(callback: Callable[[], None]) -> None:
+        try:
+            callback()
+        except Exception:
+            logger.exception("Workflow cancellation observer failed")
 
     def export_result(self, value: object, *, destination: str | Path) -> object:
         """Snapshot and export this successful attached result as a verified bundle."""

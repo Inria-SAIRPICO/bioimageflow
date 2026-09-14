@@ -9,9 +9,12 @@ They cover the Wetlands execution contract:
   5. Branch-level parallelism (TopologicalSorter + ThreadPoolExecutor)
 """
 
-import threading
+import json
+import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO
 
 import pandas as pd
 import pytest
@@ -27,6 +30,7 @@ from bioimageflow.engine import DefaultEngine, SequentialEngine, WorkflowCancell
 from tests.testkit.integration_tools import FileLoader
 from .wetlands_test_tools import (
     BatchTool,
+    CancellableBatchTool,
     CancellableRowTool,
     ErrorRowTool,
     GpuTool,
@@ -69,6 +73,7 @@ def large_workspace(tmp_path: Path) -> Path:
 # Feature 1: Intra-node row parallelism (map_tasks)
 # =====================================================================
 
+
 class TestRowParallelism:
     """Row parallelism via map_tasks — max_workers controls concurrency."""
 
@@ -78,7 +83,8 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=1,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -108,7 +114,8 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=4,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -127,7 +134,8 @@ class TestRowParallelism:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -147,7 +155,8 @@ class TestRowParallelism:
 
         with pytest.raises(Exception, match="Intentional test error"):
             with Workflow(
-                storage_path=workspace / "results", engine="wetlands",
+                storage_path=workspace / "results",
+                engine="wetlands",
                 max_workers=2,
             ) as wf:
                 raw = load(path=str(workspace / "data"))
@@ -160,7 +169,8 @@ class TestRowParallelism:
         tool = BatchTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -175,6 +185,7 @@ class TestRowParallelism:
 # Feature 2: portable resources and Wetlands 2 pools
 # =====================================================================
 
+
 class TestWetlandsResourceRequirements:
     """Resource requirements are portable rather than worker-env callbacks."""
 
@@ -184,7 +195,8 @@ class TestWetlandsResourceRequirements:
         tool = GpuTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -200,7 +212,8 @@ class TestWetlandsResourceRequirements:
         tool = SimpleRowTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=1,  # workflow default
         ) as wf:
             env = wf.get_environment(tool)
@@ -219,7 +232,8 @@ class TestWetlandsResourceRequirements:
         engine = DefaultEngine(use_wetlands=True)
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -228,9 +242,11 @@ class TestWetlandsResourceRequirements:
 
             assert len(df) == 3
 
+
 # =====================================================================
 # Feature 3: Sub-row progress reporting
 # =====================================================================
+
 
 class TestSubRowProgress:
     """Progress events from task.update() in workers."""
@@ -243,7 +259,8 @@ class TestSubRowProgress:
         tool = ProgressReportingTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             on_progress=lambda e: events.append(e),
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -268,7 +285,8 @@ class TestSubRowProgress:
 
         with pytest.raises(Exception):
             with Workflow(
-                storage_path=workspace / "results", engine="wetlands",
+                storage_path=workspace / "results",
+                engine="wetlands",
                 on_progress=lambda e: events.append(e),
             ) as wf:
                 raw = load(path=str(workspace / "data"))
@@ -286,7 +304,8 @@ class TestSubRowProgress:
         tool = BatchTool()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             on_progress=lambda e: events.append(e),
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -302,66 +321,124 @@ class TestSubRowProgress:
 # Feature 4: Workflow cancellation
 # =====================================================================
 
+
 class TestWorkflowCancellation:
     """Cancellation via workflow.cancel() during execution."""
 
-    def test_cancel_raises_workflow_cancelled_error(self, workspace):
-        """Cancelling during execution raises WorkflowCancelledError."""
-        load = FileLoader()
-        tool = CancellableRowTool()
-
-        with pytest.raises(WorkflowCancelledError):
-            with Workflow(
-                storage_path=workspace / "results", engine="wetlands",
-            ) as wf:
-                raw = load(path=str(workspace / "data"))
-                out = tool(input_path=raw["path"])
-
-                # Cancel from another thread after a short delay
-                def cancel_later():
-                    time.sleep(0.5)
-                    wf.cancel()
-
-                t = threading.Thread(target=cancel_later)
-                t.start()
-                try:
-                    wf.compute(out)
-                finally:
-                    t.join(timeout=10)
-
-    def test_cancelled_event_emitted(self, workspace):
-        """Cancelled nodes emit a 'cancelled' progress event."""
+    def test_cancel_reaches_active_rows_and_drains_submitted_window(self, workspace):
+        """Every submitted mapped task is cancelled while row waits are blocked."""
         events: list[ProgressEvent] = []
-
         load = FileLoader()
         tool = CancellableRowTool()
 
-        with pytest.raises(WorkflowCancelledError):
+        with socket.create_server(("127.0.0.1", 0)) as listener:
+            listener.settimeout(60)
+            control_port = listener.getsockname()[1]
             with Workflow(
-                storage_path=workspace / "results", engine="wetlands",
-                on_progress=lambda e: events.append(e),
+                storage_path=workspace / "results",
+                engine="wetlands",
+                max_workers=2,
+                on_progress=events.append,
             ) as wf:
                 raw = load(path=str(workspace / "data"))
-                out = tool(input_path=raw["path"])
+                out = tool(input_path=raw["path"], control_port=control_port)
+                controls: list[tuple[socket.socket, BinaryIO]] = []
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    result = executor.submit(wf.compute, out)
+                    try:
+                        for _ in range(2):
+                            try:
+                                control, _ = listener.accept()
+                            except TimeoutError:
+                                if result.done():
+                                    result.result()
+                                raise
+                            control.settimeout(10)
+                            reader = control.makefile("rb")
+                            controls.append((control, reader))
+                            assert _read_control_event(reader)["event"] == "started"
 
-                def cancel_later():
-                    time.sleep(0.5)
+                        wf.cancel()
+                        for control, reader in controls:
+                            _assert_worker_observes_cancellation(control, reader)
+
+                        with pytest.raises(WorkflowCancelledError):
+                            result.result(timeout=10)
+                    finally:
+                        for control, reader in controls:
+                            reader.close()
+                            control.close()
+
+        assert any(event.status == "cancelled" for event in events)
+        assert not list((workspace / "results").rglob("*_cancel_*.txt"))
+
+    def test_cancel_reaches_active_batch_and_drains_it(self, workspace):
+        """A blocked process_batch task receives cooperative cancellation."""
+        load = FileLoader()
+        tool = CancellableBatchTool()
+
+        with socket.create_server(("127.0.0.1", 0)) as listener:
+            listener.settimeout(60)
+            control_port = listener.getsockname()[1]
+            with Workflow(
+                storage_path=workspace / "batch_results",
+                engine="wetlands",
+            ) as wf:
+                raw = load(path=str(workspace / "data"))
+                out = tool(input_path=raw["path"], control_port=control_port)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    result = executor.submit(wf.compute, out)
+                    try:
+                        control, _ = listener.accept()
+                    except TimeoutError:
+                        if result.done():
+                            result.result()
+                        raise
+                    control.settimeout(10)
+                    reader = control.makefile("rb")
+                    assert _read_control_event(reader) == {
+                        "event": "started",
+                        "label": "batch:3",
+                    }
                     wf.cancel()
+                    _assert_worker_observes_cancellation(control, reader)
+                    with pytest.raises(WorkflowCancelledError):
+                        result.result(timeout=10)
+                    reader.close()
+                    control.close()
 
-                t = threading.Thread(target=cancel_later)
-                t.start()
-                try:
-                    wf.compute(out)
-                finally:
-                    t.join(timeout=10)
+        assert not list((workspace / "batch_results").rglob("*_cancel_batch_*.txt"))
 
-        cancelled = [e for e in events if e.status == "cancelled"]
-        assert len(cancelled) >= 1
+
+def _read_control_event(reader: BinaryIO) -> dict[str, object]:
+    data = reader.readline()
+    if not data:
+        raise AssertionError("Wetlands worker closed its control socket")
+    return json.loads(data)
+
+
+def _assert_worker_observes_cancellation(
+    control: socket.socket,
+    reader: BinaryIO,
+) -> None:
+    deadline = time.monotonic() + 10
+    while True:
+        control.sendall(b"probe\n")
+        event = _read_control_event(reader)
+        if event["event"] == "pending":
+            if time.monotonic() >= deadline:
+                control.sendall(b"abort\n")
+                raise AssertionError("Wetlands worker did not observe cancellation")
+            continue
+        assert event == {"event": "cancellation_observed"}
+        assert _read_control_event(reader) == {"event": "cancellation_acknowledged"}
+        return
 
 
 # =====================================================================
 # Feature 5: Branch-level parallelism
 # =====================================================================
+
 
 class TestBranchParallelism:
     """Independent DAG branches run concurrently."""
@@ -373,7 +450,8 @@ class TestBranchParallelism:
 
         t0 = time.monotonic()
         with Workflow(
-            storage_path=large_workspace / "results", engine="wetlands",
+            storage_path=large_workspace / "results",
+            engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(large_workspace / "data"))
@@ -393,7 +471,9 @@ class TestBranchParallelism:
             # With branch parallelism + 2 workers, it should be much faster.
             # We just check it's below the fully-sequential time.
             # Note: this is a soft check — CI variability may affect it.
-            assert elapsed < 7.0, f"Expected faster than sequential, took {elapsed:.1f}s"
+            assert elapsed < 7.0, (
+                f"Expected faster than sequential, took {elapsed:.1f}s"
+            )
 
     def test_results_identical_to_sequential(self, workspace):
         """Parallel execution produces the same results as sequential."""
@@ -404,7 +484,8 @@ class TestBranchParallelism:
         df_seq = pd.DataFrame()
         seq_engine = SequentialEngine(use_wetlands=True)
         with Workflow(
-            storage_path=workspace / "seq_results", engine="wetlands",
+            storage_path=workspace / "seq_results",
+            engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             out = tool(input_path=raw["path"])
@@ -412,7 +493,8 @@ class TestBranchParallelism:
 
         # Parallel (default engine)
         with Workflow(
-            storage_path=workspace / "par_results", engine="wetlands",
+            storage_path=workspace / "par_results",
+            engine="wetlands",
             max_workers=2,
         ) as wf:
             raw = load(path=str(workspace / "data"))
@@ -433,7 +515,8 @@ class TestBranchParallelism:
         add_col = AddColumn()
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
         ) as wf:
             raw = load(path=str(workspace / "data"))
             add_col(column_name="tag", value="test")
@@ -451,7 +534,8 @@ class TestBranchParallelism:
         engine = SequentialEngine(use_wetlands=True)
 
         with Workflow(
-            storage_path=workspace / "results", engine="wetlands",
+            storage_path=workspace / "results",
+            engine="wetlands",
             max_workers=4,  # should be ignored by SequentialEngine
         ) as wf:
             raw = load(path=str(workspace / "data"))

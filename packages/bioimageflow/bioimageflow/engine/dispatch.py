@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from bioimageflow_core import (
     ProcessingTaskV1,
     ResourceSpec,
@@ -33,6 +35,61 @@ from .common import (
 )
 
 
+class _WetlandsTaskTracker:
+    """Cancel and drain the Wetlands tasks owned by one dispatch."""
+
+    def __init__(self, workflow: Any) -> None:
+        self._lock = threading.Lock()
+        self._tasks: list[Any] = []
+        self._cancel_requested = False
+        context = getattr(workflow, "_active_run_context", None)
+        if context is None:
+            self._unsubscribe = lambda: None
+        else:
+            self._unsubscribe = context._subscribe_cancellation(self.request_cancel)
+
+    def register(self, tasks: list[Any]) -> None:
+        """Track a submitted window, cancelling it if cancellation already won."""
+        with self._lock:
+            self._tasks.extend(tasks)
+            cancel_requested = self._cancel_requested
+        if cancel_requested:
+            self._cancel_unfinished(tasks)
+
+    def request_cancel(self) -> None:
+        """Request cooperative cancellation of every unfinished task."""
+        with self._lock:
+            self._cancel_requested = True
+            tasks = tuple(self._tasks)
+        self._cancel_unfinished(tasks)
+
+    def cancel_and_drain(self) -> None:
+        """Cancel unfinished work and wait until every submitted task is terminal."""
+        self.request_cancel()
+        with self._lock:
+            tasks = tuple(self._tasks)
+        for task in tasks:
+            if task.state.terminal:
+                continue
+            try:
+                task.wait_for()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        """Detach the cancellation observer after all dispatch work is settled."""
+        self._unsubscribe()
+
+    @staticmethod
+    def _cancel_unfinished(tasks: tuple[Any, ...] | list[Any]) -> None:
+        for task in tasks:
+            if not task.state.terminal:
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+
+
 class _DispatchMixin:
     def _dispatch_tool(
         self,
@@ -54,9 +111,7 @@ class _DispatchMixin:
             if node.name == node_name
         )
         row_indexes = tuple(
-            context.row_index
-            if context.row_index is not None
-            else str(position)
+            context.row_index if context.row_index is not None else str(position)
             for position, context in enumerate(row_contexts)
         )
         run_view = getattr(workflow, "_run_view_context", None)
@@ -114,9 +169,7 @@ class _DispatchMixin:
             kwargs = {"context": context} if accepts_context else {}
             result = tool.process_row(Arguments(**args_dict), **kwargs)
             assert tool.Outputs is not None
-            raw_results.append(
-                normalize_processing_row_outputs(result, tool.Outputs)
-            )
+            raw_results.append(normalize_processing_row_outputs(result, tool.Outputs))
             self._emit_progress(
                 workflow,
                 node_name,
@@ -171,108 +224,121 @@ class _DispatchMixin:
             return []
         env_spec = tool.environment
         origin = resolve_worker_tool_origin(tool)
-        max_workers, worker_timeout = self._resolve_worker_config(
-            tool, workflow
-        )
+        max_workers, worker_timeout = self._resolve_worker_config(tool, workflow)
         engine_timeout = _compute_engine_timeout(worker_timeout)
+        tracker = _WetlandsTaskTracker(workflow)
 
-        if has_batch:
-            invocation = ProcessingTaskV1(
-                task_id="task_0000000000000000",
-                node_name=node_name,
-                invocation_id=invocation_id,
-                cache_attempt_id=cache_attempt_id,
-                task_retry=0,
-                mode="process_batch",
-                tool=origin,
-                rows=tuple(
-                    RowInvocationV1(
-                        position=position,
-                        row_index=(
-                            context.row_index
-                            if context.row_index is not None
-                            else str(position)
-                        ),
-                        arguments=arguments,
-                        context=context.to_dict(),
-                    )
-                    for position, (arguments, context) in enumerate(
-                        zip(arguments_dicts, row_contexts)
-                    )
-                ),
-                batch_context=batch_context.to_dict(),
-            )
-            task = self._env_manager.submit_processing_task(
-                env_spec,
-                encode_processing_task(invocation),
-                max_workers=max_workers,
-                worker_timeout=worker_timeout,
-            )
-            try:
-                task.wait_for(timeout=engine_timeout)
-            except TimeoutError:
-                self._emit_progress(workflow, node_name, "failed")
-                task.cancel()
-                raise WorkerTimeoutError(
-                    f"Batch task for node '{node_name}' exceeded engine-side "
-                    f"timeout ({engine_timeout:.0f}s; "
-                    f"worker_timeout={worker_timeout}s)"
-                )
-            except Exception:
-                _raise_worker_task_error(
-                    task,
-                    node_name=node_name,
-                    tool=tool,
-                    row_index=None,
-                )
-            if task.state == ExecutionState.FAILED:
-                _raise_worker_task_error(
-                    task,
-                    node_name=node_name,
-                    tool=tool,
-                    row_index=None,
-                )
-            if task.state == ExecutionState.CANCELED:
-                raise WorkflowCancelledError(
-                    "Workflow cancelled during batch execution"
-                )
-            result = decode_processing_result(task.result)
-            validate_processing_result(invocation, result)
-            assert tool.Outputs is not None
-            return validate_processing_result_rows(result.rows, tool.Outputs)
-
-        invocations = [
-            ProcessingTaskV1(
-                task_id=f"task_{position:016x}",
-                node_name=node_name,
-                invocation_id=invocation_id,
-                cache_attempt_id=cache_attempt_id,
-                task_retry=0,
-                mode="row_chunk",
-                tool=origin,
-                rows=(
-                    RowInvocationV1(
-                        position=position,
-                        row_index=(
-                            context.row_index
-                            if context.row_index is not None
-                            else str(position)
-                        ),
-                        arguments=arguments,
-                        context=context.to_dict(),
-                    ),
-                ),
-            )
-            for position, (arguments, context) in enumerate(
-                zip(arguments_dicts, row_contexts)
-            )
-        ]
-        payloads = [encode_processing_task(invocation) for invocation in invocations]
-        selected_resources = resources or getattr(tool, "resources", None) or ResourceSpec()
-        window = selected_resources.max_concurrent or len(payloads) or 1
-        tasks: list[Any] = []
         try:
+            if has_batch:
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+                invocation = ProcessingTaskV1(
+                    task_id="task_0000000000000000",
+                    node_name=node_name,
+                    invocation_id=invocation_id,
+                    cache_attempt_id=cache_attempt_id,
+                    task_retry=0,
+                    mode="process_batch",
+                    tool=origin,
+                    rows=tuple(
+                        RowInvocationV1(
+                            position=position,
+                            row_index=(
+                                context.row_index
+                                if context.row_index is not None
+                                else str(position)
+                            ),
+                            arguments=arguments,
+                            context=context.to_dict(),
+                        )
+                        for position, (arguments, context) in enumerate(
+                            zip(arguments_dicts, row_contexts)
+                        )
+                    ),
+                    batch_context=batch_context.to_dict(),
+                )
+                task = self._env_manager.submit_processing_task(
+                    env_spec,
+                    encode_processing_task(invocation),
+                    max_workers=max_workers,
+                    worker_timeout=worker_timeout,
+                )
+                tracker.register([task])
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+                try:
+                    task.wait_for(timeout=engine_timeout)
+                except TimeoutError:
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    self._emit_progress(workflow, node_name, "failed")
+                    raise WorkerTimeoutError(
+                        f"Batch task for node '{node_name}' exceeded engine-side "
+                        f"timeout ({engine_timeout:.0f}s; "
+                        f"worker_timeout={worker_timeout}s)"
+                    )
+                except Exception:
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
+                    _raise_worker_task_error(
+                        task,
+                        node_name=node_name,
+                        tool=tool,
+                        row_index=None,
+                    )
+                if workflow.cancel_requested or task.state == ExecutionState.CANCELED:
+                    raise WorkflowCancelledError(
+                        "Workflow cancelled during batch execution"
+                    )
+                if task.state == ExecutionState.FAILED:
+                    _raise_worker_task_error(
+                        task,
+                        node_name=node_name,
+                        tool=tool,
+                        row_index=None,
+                    )
+                result = decode_processing_result(task.result)
+                validate_processing_result(invocation, result)
+                assert tool.Outputs is not None
+                return validate_processing_result_rows(result.rows, tool.Outputs)
+
+            invocations = [
+                ProcessingTaskV1(
+                    task_id=f"task_{position:016x}",
+                    node_name=node_name,
+                    invocation_id=invocation_id,
+                    cache_attempt_id=cache_attempt_id,
+                    task_retry=0,
+                    mode="row_chunk",
+                    tool=origin,
+                    rows=(
+                        RowInvocationV1(
+                            position=position,
+                            row_index=(
+                                context.row_index
+                                if context.row_index is not None
+                                else str(position)
+                            ),
+                            arguments=arguments,
+                            context=context.to_dict(),
+                        ),
+                    ),
+                )
+                for position, (arguments, context) in enumerate(
+                    zip(arguments_dicts, row_contexts)
+                )
+            ]
+            payloads = [
+                encode_processing_task(invocation) for invocation in invocations
+            ]
+            selected_resources = (
+                resources or getattr(tool, "resources", None) or ResourceSpec()
+            )
+            window = selected_resources.max_concurrent or len(payloads) or 1
+            tasks: list[Any] = []
             for start in range(0, len(payloads), window):
+                if workflow.cancel_requested:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
                 active = self._env_manager.map_processing_tasks(
                     env_spec,
                     payloads[start : start + window],
@@ -280,6 +346,7 @@ class _DispatchMixin:
                     worker_timeout=worker_timeout,
                 )
                 tasks.extend(active)
+                tracker.register(active)
                 for offset, task in enumerate(active):
                     row_position = start + offset
 
@@ -303,12 +370,12 @@ class _DispatchMixin:
                 for offset, task in enumerate(active):
                     row_position = start + offset
                     if workflow.cancel_requested:
-                        raise WorkflowCancelledError(
-                            "Workflow cancelled by user"
-                        )
+                        raise WorkflowCancelledError("Workflow cancelled by user")
                     try:
                         task.wait_for(timeout=engine_timeout)
                     except TimeoutError:
+                        if workflow.cancel_requested:
+                            raise WorkflowCancelledError("Workflow cancelled by user")
                         self._emit_progress(
                             workflow,
                             node_name,
@@ -322,6 +389,8 @@ class _DispatchMixin:
                             f"worker_timeout={worker_timeout}s)"
                         )
                     except Exception:
+                        if workflow.cancel_requested:
+                            raise WorkflowCancelledError("Workflow cancelled by user")
                         _raise_worker_task_error(
                             task,
                             node_name=node_name,
@@ -335,31 +404,30 @@ class _DispatchMixin:
                             tool=tool,
                             row_index=row_contexts[row_position].row_index,
                         )
-        except (WorkflowCancelledError, Exception):
-            for task in tasks:
-                if not task.state.terminal:
-                    task.cancel()
-            for task in tasks:
-                if not task.state.terminal:
-                    try:
-                        task.wait_for(timeout=10)
-                    except Exception:
-                        pass
-            raise
+                    if workflow.cancel_requested:
+                        raise WorkflowCancelledError("Workflow cancelled by user")
 
-        # Collect results in submission order — skip cancelled tasks
-        raw_results: list[list[Any]] = []
-        assert tool.Outputs is not None
-        for i, task in enumerate(tasks):
-            if task.state == ExecutionState.CANCELED:
-                continue
-            result = decode_processing_result(task.result)
-            validate_processing_result(invocations[i], result)
-            row_result = result.rows[0]
-            raw_results.extend(
-                validate_processing_result_rows((row_result,), tool.Outputs)
-            )
-            self._emit_progress(
-                workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
-            )
-        return raw_results
+            # Collect results in submission order only while cancellation has not won.
+            raw_results: list[list[Any]] = []
+            assert tool.Outputs is not None
+            for i, task in enumerate(tasks):
+                if workflow.cancel_requested or task.state == ExecutionState.CANCELED:
+                    raise WorkflowCancelledError("Workflow cancelled by user")
+                result = decode_processing_result(task.result)
+                validate_processing_result(invocations[i], result)
+                row_result = result.rows[0]
+                raw_results.extend(
+                    validate_processing_result_rows((row_result,), tool.Outputs)
+                )
+                self._emit_progress(
+                    workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
+                )
+            return raw_results
+        except BaseException:
+            cancelled = workflow.cancel_requested
+            tracker.cancel_and_drain()
+            if cancelled:
+                raise WorkflowCancelledError("Workflow cancelled by user") from None
+            raise
+        finally:
+            tracker.close()

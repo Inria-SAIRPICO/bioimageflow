@@ -9,18 +9,20 @@ that flips a thread-safe flag the engine checks before each row.
 Requesting cancellation
 -----------------------
 
-:meth:`Workflow.cancel` sets a flag on the workflow object. The flag is
-thread-safe (backed by a ``threading.Event``), so a GUI thread can call
-it while ``compute()`` is running on a background thread:
+:meth:`Workflow.cancel` sets a flag on the active workflow execution. The
+flag is thread-safe (backed by a ``threading.Event``), so a GUI thread can
+call it while ``compute()`` is running on a background thread:
 
 .. code-block:: python
 
    wf.cancel()
 
-The engine checks ``Workflow.cancel_requested`` before each node and
-between rows. When the flag is set, the engine raises
-:class:`~bioimageflow.engine.WorkflowCancelledError` from the in-flight
-``compute()`` call.
+The engine checks ``Workflow.cancel_requested`` before each node and row
+submission window. Wetlands dispatch also observes the flag while blocked
+waiting for active row or batch tasks. When the flag is set, the engine
+requests cancellation of every unfinished submitted task, drains those tasks,
+and raises :class:`~bioimageflow.engine.WorkflowCancelledError` from the
+in-flight ``compute()`` call. Results arriving after cancellation are ignored.
 
 In-flight rows
 --------------

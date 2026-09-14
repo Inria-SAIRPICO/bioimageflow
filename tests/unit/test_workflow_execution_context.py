@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from types import SimpleNamespace
 
 import pandas as pd
@@ -75,6 +76,54 @@ def test_pre_requested_context_cancels_at_start(tmp_path) -> None:
         next((tmp_path / "views" / "runs").glob("run_*/run.json")).read_text()
     )
     assert run["status"] == "cancelled"
+
+
+def test_cancellation_subscribers_handle_late_registration_and_disposal() -> None:
+    context = WorkflowExecutionContext()
+    calls: list[str] = []
+    unsubscribe = context._subscribe_cancellation(lambda: calls.append("removed"))
+    unsubscribe()
+
+    context.request_cancel()
+    context._subscribe_cancellation(lambda: calls.append("late"))
+
+    assert calls == ["late"]
+
+
+def test_cancellation_subscriber_registration_linearizes_with_request() -> None:
+    context = WorkflowExecutionContext()
+    barrier = threading.Barrier(2)
+    calls: list[str] = []
+
+    def subscribe() -> None:
+        barrier.wait()
+        context._subscribe_cancellation(lambda: calls.append("called"))
+
+    thread = threading.Thread(target=subscribe)
+    thread.start()
+    barrier.wait()
+    context.request_cancel()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert calls == ["called"]
+
+
+def test_cancellation_subscribers_are_isolated(caplog) -> None:
+    context = WorkflowExecutionContext()
+    calls: list[str] = []
+
+    def fail() -> None:
+        calls.append("failed")
+        raise RuntimeError("observer failure")
+
+    context._subscribe_cancellation(fail)
+    context._subscribe_cancellation(lambda: calls.append("completed"))
+
+    context.request_cancel()
+
+    assert calls == ["failed", "completed"]
+    assert "Workflow cancellation observer failed" in caplog.text
 
 
 def test_deferred_success_requires_explicit_finalization(tmp_path) -> None:

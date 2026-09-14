@@ -2996,6 +2996,9 @@ thread.join()
 
 Wetlands may additionally expose cooperative worker cancellation to tool code.
 Parsl does not support worker-side cooperative cancellation.
+Wetlands dispatch registers a cancellation observer before submitting row or batch work, so `Workflow.cancel()` calls `cancel()` on every unfinished task even while the orchestrator is blocked in `task.wait_for()`.
+Registration is linearized with cancellation: a task returned by a submission that raced with cancellation is immediately cancelled and drained.
+Dispatch does not submit another row window after cancellation, does not decode results after cancellation wins, and waits for every submitted task to reach a terminal state without treating a cleanup timeout as success.
 
 ```python
 class MyTool(ProcessingTool):
