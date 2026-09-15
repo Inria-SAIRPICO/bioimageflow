@@ -756,7 +756,8 @@ Their event is one of `psij_queued`, `psij_active`, `psij_completed`, `psij_fail
 Scheduler state and native ID remain secondary metadata and never extend the launcher state set or public workflow progress statuses.
 
 `submission.workflow` contains exactly `kind`, `digest`, and `payload`.
-The payload is the recursive graph-v1 object or archive-v1 envelope.
+The payload is the canonical recursive graph-v2 object or archive-v2 envelope.
+Legacy graph-v1 and archive-v1 documents are accepted at import and normalize to graph-v2 before identity or hashing operations.
 `storage_root` is the normalized absolute runtime root assigned by the launcher and is deliberately outside the workflow payload.
 It never enters a recursive graph or portable archive, and the orchestrator supplies it explicitly when materializing the workflow.
 `canonical_view` is the confined relative path `views/runs/<run-id>`.
@@ -828,13 +829,23 @@ views/runs/<run-id>/
 
 ```json
 {
-  "schema": "bioimageflow.run.node_result.v1",
+  "schema": "bioimageflow.run.node_result.v2",
   "run_id": "run_a791366f6a8e4fc6a7428bf8e69b57c1",
   "node_key": "segmentation",
   "result_key": "rk_...",
   "record_id": "rec_...",
   "cache_hit": true,
   "canonical": "../../../../cache/v1/results/ab/cd/rk_.../records/rec_...",
+  "viewers": {
+    "mask": {
+      "napari": {
+        "required_packages": [],
+        "recommended_packages": [],
+        "napari_version": null,
+        "reader_id": null
+      }
+    }
+  },
   "provenance": {
     "kind": "processing_tool",
     "tool": {
@@ -856,6 +867,8 @@ Only `owned_asset` manifest entries create output pointer files; `external_path`
 
 Run-node validation resolves and validates the exact immutable record named by `result.json`.
 It does not require that record to remain selected by `current.json`.
+Version-2 run-node views strictly retain portable per-output viewer metadata beside provenance, and `Storage.read_run_node_result()` returns both through typed public values.
+Legacy version-1 views remain readable with an empty viewer mapping; unknown fields are never silently discarded.
 
 Example:
 

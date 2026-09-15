@@ -171,6 +171,7 @@ class ProcessingTool(BaseTool):
         *,
         name: Optional[str] = None,
         output_templates: Optional[dict[str, str]] = None,
+        viewer_additions: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Any:
         """Create a graph node. No computation occurs."""
@@ -187,6 +188,7 @@ class ProcessingTool(BaseTool):
             kwargs=kwargs,
             name=name,
             output_templates=output_templates,
+            viewer_additions=viewer_additions,
         )
 
     def process_row(self, arguments: Any, *, context: Any = None) -> Any:

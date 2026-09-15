@@ -2,7 +2,12 @@
 
 # ruff: noqa: F401
 
-from .models import CacheCorruptionError, OutputViewCapability
+from .models import (
+    CacheCorruptionError,
+    OutputViewerMetadata,
+    OutputViewCapability,
+    RunNodeResult,
+)
 from .manifests import CurrentPointer, RecordManifest
 from .exports import export_outputs
 from .identity import (
@@ -37,7 +42,9 @@ __all__ = [
     "CacheCorruptionError",
     "CurrentPointer",
     "OutputViewCapability",
+    "OutputViewerMetadata",
     "RecordManifest",
+    "RunNodeResult",
     "Storage",
     "asset_digest_and_size",
     "canonical_dataframe_digest",

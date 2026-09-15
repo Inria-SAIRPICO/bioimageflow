@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from dataclasses import replace
 
 from bioimageflow.node import BindingError
+from bioimageflow_core.viewer import ViewerSpec
 
 from .common import (
     Any,
@@ -77,8 +78,9 @@ class _MaterializationMixin:
             raise ValueError(
                 f"Workflow graph fields must be exactly {sorted(required)}; got {sorted(graph)}."
             )
-        if graph["schema_version"] != 1:
-            raise ValueError("Only workflow schema_version 1 is supported.")
+        graph_version = graph["schema_version"]
+        if graph_version not in {1, 2}:
+            raise ValueError("Only workflow schema_version 1 and 2 are supported.")
         if (
             not isinstance(graph["name"], str)
             or not graph["name"]
@@ -97,6 +99,22 @@ class _MaterializationMixin:
             raise ValueError("Workflow nodes and edges must be arrays.")
         if not all(isinstance(items, list) for items in graph["interface"].values()):
             raise ValueError("Workflow interface inputs and outputs must be arrays.")
+        for output in graph["interface"]["outputs"]:
+            if not isinstance(output, dict):
+                continue
+            serialized_schema = output.get("schema")
+            if isinstance(serialized_schema, dict) and "viewer" in serialized_schema:
+                if graph_version == 1:
+                    raise ValueError(
+                        "Workflow schema_version 1 does not support viewer metadata."
+                    )
+                ViewerSpec.from_dict(serialized_schema["viewer"])
+            if "viewer_addition" in output:
+                if graph_version == 1:
+                    raise ValueError(
+                        "Workflow schema_version 1 does not support viewer additions."
+                    )
+                ViewerSpec.from_dict(output["viewer_addition"])
         config = graph["config"]
         if not isinstance(config, dict) or not set(config) <= {
             "engine",
@@ -188,7 +206,14 @@ class _MaterializationMixin:
                 }
             )
             allowed = (
-                {"name", "type", "workflow", "bindings", "enabled"}
+                {
+                    "name",
+                    "type",
+                    "workflow",
+                    "bindings",
+                    "enabled",
+                    *(["viewer_additions"] if graph_version == 2 else []),
+                }
                 if node_data["type"] == "workflow"
                 else {
                     "name",
@@ -202,6 +227,7 @@ class _MaterializationMixin:
                     "output_templates",
                     "resource_overrides",
                     "enabled",
+                    *(["viewer_additions"] if graph_version == 2 else []),
                 }
             )
             if (
@@ -209,6 +235,16 @@ class _MaterializationMixin:
                 or not set(node_data) <= allowed
             ):
                 raise ValueError(f"Malformed or unknown fields on node '{name}'.")
+            viewer_additions = node_data.get("viewer_additions", {})
+            if not isinstance(viewer_additions, dict) or not all(
+                isinstance(output, str) and output and isinstance(viewer, dict)
+                for output, viewer in viewer_additions.items()
+            ):
+                raise ValueError(
+                    f"Node '{name}' viewer_additions must be an output-keyed object."
+                )
+            for viewer in viewer_additions.values():
+                ViewerSpec.from_dict(viewer)
             nodes_by_name[name] = node_data
 
         incoming: dict[str, list[dict[str, Any]]] = {name: [] for name in nodes_by_name}
@@ -408,7 +444,11 @@ class _MaterializationMixin:
                                         f"Workflow input port '{port_id}' has both an edge and a constant binding."
                                     )
                                 named_bindings[port.name] = deserialize_constant(value)
-                            node = child(name=name, **named_bindings)
+                            node = child(
+                                name=name,
+                                viewer_additions=node_data.get("viewer_additions"),
+                                **named_bindings,
+                            )
                             node._input_column_binding_edge_ids.update(column_edge_ids)
                             node._input_dataframe_binding_edge_ids.update(
                                 dataframe_port_edge_ids
@@ -449,6 +489,7 @@ class _MaterializationMixin:
                                     *args,
                                     name=name,
                                     output_templates=node_data.get("output_templates"),
+                                    viewer_additions=node_data.get("viewer_additions"),
                                     **kwargs,
                                 )
                                 node._arg_edge_ids = [
@@ -463,6 +504,7 @@ class _MaterializationMixin:
                                 node = instance(
                                     name=name,
                                     output_templates=node_data.get("output_templates"),
+                                    viewer_additions=node_data.get("viewer_additions"),
                                     **kwargs,
                                 )
                                 if "resource_overrides" in node_data:
@@ -529,6 +571,8 @@ class _MaterializationMixin:
 
         for item in graph["interface"]["outputs"]:
             allowed = {"id", "name", "schema", "source"}
+            if graph_version == 2:
+                allowed.add("viewer_addition")
             if (
                 not isinstance(item, dict)
                 or set(item) - allowed
@@ -542,6 +586,15 @@ class _MaterializationMixin:
                 or not item["name"]
             ):
                 raise ValueError("Invalid workflow output ID or name.")
+            serialized_schema = item.get("schema")
+            if isinstance(serialized_schema, dict) and "viewer" in serialized_schema:
+                if graph_version == 1:
+                    raise ValueError(
+                        "Workflow schema_version 1 does not support viewer metadata."
+                    )
+                ViewerSpec.from_dict(serialized_schema["viewer"])
+            if "viewer_addition" in item:
+                ViewerSpec.from_dict(item["viewer_addition"])
             source = item["source"]
             if (
                 not isinstance(source, dict)
@@ -581,6 +634,11 @@ class _MaterializationMixin:
                 schema=copy.deepcopy(item.get("schema")),
                 source_node=source["node"],
                 source_output=source["column"],
+                viewer_addition=(
+                    None
+                    if "viewer_addition" not in item
+                    else ViewerSpec.from_dict(item["viewer_addition"])
+                ),
             )
             if (
                 port.id in wf._interface_inputs

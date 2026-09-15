@@ -132,6 +132,7 @@ class WorkflowOutputPort:
     schema: dict[str, Any] | None
     source_node: str
     source_output: str
+    viewer_addition: Any = None
 
 
 def _new_port_id(prefix: str) -> str:
@@ -146,11 +147,16 @@ def _annotation_schema(annotation: Any) -> dict[str, Any] | None:
         extract_image_spec,
         serialize_image_spec,
     )
+    from bioimageflow_core.viewer import extract_viewer_spec
 
-    return {
+    result = {
         "type": _display_type_name(annotation),
         "image_spec": serialize_image_spec(extract_image_spec(annotation)),
     }
+    viewer = extract_viewer_spec(annotation)
+    if viewer is not None:
+        result["viewer"] = viewer.to_dict()
+    return result
 
 
 def _absolute_runtime_path(path: str | Path) -> Path:

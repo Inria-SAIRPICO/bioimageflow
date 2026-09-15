@@ -13,8 +13,16 @@ from bioimageflow.workflow import (
     OutputView as OutputView,
 )
 from bioimageflow.storage import (
+    OutputViewerMetadata as OutputViewerMetadata,
     OutputViewCapability as OutputViewCapability,
+    RunNodeResult as RunNodeResult,
     export_outputs as export_outputs,
+)
+from bioimageflow.viewing import (
+    ViewingRequirementEntry as ViewingRequirementEntry,
+    ViewingRequirementsManifest as ViewingRequirementsManifest,
+    derive_viewing_requirements as derive_viewing_requirements,
+    inspect_viewing_requirements as inspect_viewing_requirements,
 )
 from bioimageflow.workflow_node import WorkflowNode as WorkflowNode
 from bioimageflow.engine import (
@@ -208,6 +216,7 @@ __all__ = [
     "OrchestratorLaunchConfig",
     "OutputView",
     "OutputViewCapability",
+    "OutputViewerMetadata",
     "PSIJLaunchConfig",
     "PSIJSubmissionUncertainError",
     "ParslConfigRef",
@@ -241,6 +250,7 @@ __all__ = [
     "RemoteWorkflowRun",
     "ResourceLifetime",
     "RetryInvalidation",
+    "RunNodeResult",
     "RunRetryPlan",
     "SSHSubmissionTransport",
     "SSHTransportError",
@@ -253,6 +263,8 @@ __all__ = [
     "ToolRegistry",
     "ValidationError",
     "ValidationErrorKind",
+    "ViewingRequirementEntry",
+    "ViewingRequirementsManifest",
     "WetlandsEnvManager",
     "WorkerEnvironmentAttestation",
     "WorkerSlot",
@@ -276,6 +288,7 @@ __all__ = [
     "check_type_compat",
     "configure_logging",
     "configure_wetlands",
+    "derive_viewing_requirements",
     "deserialize_constant",
     "effective_node_resources",
     "export_outputs",
@@ -286,6 +299,7 @@ __all__ = [
     "get_tool_store_path",
     "get_wetlands_path",
     "inspect_remote_node_paths",
+    "inspect_viewing_requirements",
     "load_versioned_package",
     "plan_distributed_execution",
     "prepare_remote_submission",

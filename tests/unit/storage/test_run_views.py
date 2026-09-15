@@ -32,6 +32,7 @@ from bioimageflow.storage import (
     result_shard_parts,
     validate_relative_posix_path,
 )
+from bioimageflow_core import NapariRequirement, PackageRequirement, ViewerSpec
 
 
 from tests.testkit.storage import (
@@ -83,7 +84,7 @@ def test_run_metadata_and_node_result_view_write_selected_record(
     assert run["target_nodes"] == ["Segment_1"]
 
     result = json.loads(result_path.read_text())
-    assert result["schema"] == "bioimageflow.run.node_result.v1"
+    assert result["schema"] == "bioimageflow.run.node_result.v2"
     assert result["run_id"] == "run_001"
     assert result["node_key"] == "Segment_1"
     assert result["result_key"] == result_key
@@ -93,6 +94,7 @@ def test_run_metadata_and_node_result_view_write_selected_record(
         f"cache/v1/results/{result_key[3:5]}/{result_key[5:7]}/{result_key}/records/{record_id}"
     )
     assert result["outputs"] == [asset_output]
+    assert result["viewers"] == {}
 
     node_dir = tmp_path / "views" / "runs" / "run_001" / "nodes" / "Segment_1"
     record_link = json.loads((node_dir / "record.bioimageflow-link.json").read_text())
@@ -109,6 +111,56 @@ def test_run_metadata_and_node_result_view_write_selected_record(
     assert output_link["schema"] == "bioimageflow.link.v1"
     assert output_link["kind"] == "file"
     assert output_link["target"].endswith(f"records/{record_id}/assets/mask.tif")
+
+
+def test_run_node_result_public_lookup_preserves_typed_viewer_metadata(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "viewer"})
+    record_id = _write_record(storage, result_key)
+    viewer = ViewerSpec(
+        NapariRequirement(
+            required_packages=[PackageRequirement("Example.Reader", ">=1")],
+            reader_id="example.reader",
+        )
+    )
+    storage.write_run_node_result(
+        "run_viewer",
+        "Viewer_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=True,
+        provenance={"kind": "processing_tool"},
+        viewers={"image": viewer},
+    )
+
+    retained = storage.read_run_node_result("run_viewer", "Viewer_1")
+    assert retained.provenance == {"kind": "processing_tool"}
+    assert retained.viewers[0].output == "image"
+    assert retained.viewers[0].viewer == viewer
+
+
+def test_run_node_result_public_lookup_normalizes_legacy_v1(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path)
+    result_key = make_result_key({"node": "legacy-view"})
+    record_id = _write_record(storage, result_key)
+    result_path = storage.write_run_node_result(
+        "run_legacy",
+        "Legacy_1",
+        result_key=result_key,
+        record_id=record_id,
+        cache_hit=False,
+    )
+    payload = json.loads(result_path.read_text())
+    payload["schema"] = "bioimageflow.run.node_result.v1"
+    payload.pop("viewers")
+    result_path.write_text(json.dumps(payload))
+
+    retained = storage.read_run_node_result("run_legacy", "Legacy_1")
+    assert retained.viewers == ()
 
 
 def test_run_node_result_view_exposes_scalar_outputs_without_links(

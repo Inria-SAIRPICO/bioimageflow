@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "bioimageflow-core>=0.3.0,<0.4",
+    "bioimageflow-core>=0.3.0,<0.5",
     "numpy>=1.23.5",
     "tifffile>=2023.7.10",
 ]

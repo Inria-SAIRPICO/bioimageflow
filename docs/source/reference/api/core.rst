@@ -21,6 +21,14 @@ Environment
    :undoc-members:
    :show-inheritance:
 
+Viewer Requirements
+-------------------
+
+.. automodule:: bioimageflow_core.viewer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Tool Base Classes
 -----------------
 

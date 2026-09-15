@@ -14,7 +14,7 @@ from bioimageflow.workflow import Workflow
 from .errors import LauncherProtocolError
 
 
-_PAYLOAD_KINDS = frozenset({"graph_v1", "archive_v1"})
+_PAYLOAD_KINDS = frozenset({"graph_v1", "graph_v2", "archive_v1", "archive_v2"})
 
 
 def _digest_payload(payload: dict[str, Any]) -> str:
@@ -59,11 +59,17 @@ def serialize_workflow_payload(workflow: Workflow) -> dict[str, Any]:
         raise TypeError("workflow must be a Workflow.")
     _validate_executable_workflow(workflow)
     payload = workflow.to_dict(include_custom_tools=True)
-    kind = "archive_v1" if payload.get("archive_version") == 1 else "graph_v1"
-    if kind == "graph_v1" and payload.get("schema_version") != 1:
+    if "archive_version" in payload:
+        kind = f"archive_v{payload['archive_version']}"
+    else:
+        kind = f"graph_v{payload.get('schema_version')}"
+    if kind not in _PAYLOAD_KINDS:
         raise LauncherProtocolError("Workflow graph payload has an invalid version.")
-    if kind == "archive_v1":
-        if set(payload) != {"archive_version", "workflow", "custom_sources"}:
+    if kind.startswith("archive_"):
+        archive_fields = {"archive_version", "workflow", "custom_sources"}
+        if kind == "archive_v2":
+            archive_fields.add("viewing_requirements")
+        if set(payload) != archive_fields:
             raise LauncherProtocolError(
                 "Workflow archive payload contains invalid fields."
             )
@@ -97,7 +103,7 @@ def replace_workflow_payload_constants(
     """Replace scoped constants in a fresh payload and bind a new digest."""
     result = copy.deepcopy(value)
     payload = result["payload"]
-    graph = payload["workflow"] if result["kind"] == "archive_v1" else payload
+    graph = payload["workflow"] if result["kind"].startswith("archive_") else payload
     for scoped_node_path, input_name, replacement in replacements:
         current = graph
         parts = scoped_node_path.split("/")
@@ -149,9 +155,10 @@ def load_workflow_payload(
         raise LauncherProtocolError("Submitted workflow payload kind is invalid.")
     if _digest_payload(payload) != value["digest"]:
         raise LauncherProtocolError("Submitted workflow payload digest mismatch.")
-    if kind == "graph_v1" and payload.get("schema_version") != 1:
+    version = int(kind.rsplit("v", 1)[1])
+    if kind.startswith("graph_") and payload.get("schema_version") != version:
         raise LauncherProtocolError("Submitted graph payload version mismatch.")
-    if kind == "archive_v1" and payload.get("archive_version") != 1:
+    if kind.startswith("archive_") and payload.get("archive_version") != version:
         raise LauncherProtocolError("Submitted archive payload version mismatch.")
     try:
         workflow = Workflow.from_dict(

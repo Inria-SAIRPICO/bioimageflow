@@ -85,8 +85,8 @@ def _validate_workflow(value: object) -> str:
         fields=WORKFLOW_FIELDS,
     )
     kind = workflow["kind"]
-    if kind not in {"graph_v1", "archive_v1"}:
-        raise LauncherSchemaError("workflow.kind must be 'graph_v1' or 'archive_v1'.")
+    if kind not in {"graph_v1", "graph_v2", "archive_v1", "archive_v2"}:
+        raise LauncherSchemaError("workflow.kind has an unsupported wire version.")
     digest = workflow["digest"]
     if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
         raise LauncherSchemaError(
@@ -95,10 +95,11 @@ def _validate_workflow(value: object) -> str:
     payload = workflow["payload"]
     _require_mapping(payload, field="workflow.payload")
     assert isinstance(payload, Mapping)
-    version_field = "schema_version" if kind == "graph_v1" else "archive_version"
-    if payload.get(version_field) != 1 or type(payload.get(version_field)) is not int:
+    version_field = "schema_version" if kind.startswith("graph_") else "archive_version"
+    version = int(kind.rsplit("v", 1)[1])
+    if payload.get(version_field) != version or type(payload.get(version_field)) is not int:
         raise LauncherSchemaError(
-            f"workflow.payload.{version_field} must be integer 1."
+            f"workflow.payload.{version_field} must be integer {version}."
         )
     expected = f"sha256:{hashlib.sha256(canonical_json_bytes(payload)).hexdigest()}"
     if digest != expected:
@@ -411,7 +412,7 @@ def validate_submission_payload(payload: object) -> dict[str, Any]:
         field="shared_runtime_root",
         nullable=True,
     )
-    if workflow_kind == "archive_v1" and result["shared_runtime_root"] is None:
-        raise LauncherSchemaError("archive_v1 workflows require shared_runtime_root.")
+    if workflow_kind.startswith("archive_") and result["shared_runtime_root"] is None:
+        raise LauncherSchemaError("Archive workflows require shared_runtime_root.")
     _validate_submission_records(result)
     return result

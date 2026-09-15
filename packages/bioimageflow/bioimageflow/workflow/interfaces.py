@@ -86,6 +86,7 @@ class _InterfacesMixin:
         self._interface_inputs: dict[str, WorkflowInputPort] = {}
         self._interface_outputs: dict[str, WorkflowOutputPort] = {}
         self._captured_custom_sources: list[dict[str, Any]] | None = None
+        self._imported_viewing_requirements: Any = None
         self._accept_root_dataframes = False
 
     def input(
@@ -180,8 +181,16 @@ class _InterfacesMixin:
             None,
         )
 
-    def output(self, name: str, source: Any, *, id: str | None = None) -> None:
+    def output(
+        self,
+        name: str,
+        source: Any,
+        *,
+        id: str | None = None,
+        viewer_addition: Any | None = None,
+    ) -> None:
         """Publish an internal node column as a workflow output."""
+        from bioimageflow_core.viewer import coerce_viewer_spec
         from bioimageflow.node import ColumnRef
         from bioimageflow.workflow_node import WorkflowNode
 
@@ -231,7 +240,41 @@ class _InterfacesMixin:
             schema=schema,
             source_node=source.node.name,
             source_output=source.column,
+            viewer_addition=(
+                None
+                if viewer_addition is None
+                else coerce_viewer_spec(viewer_addition)
+            ),
         )
+
+    def get_output_viewer_spec(self, output: str) -> Any | None:
+        """Resolve inherited and boundary-added viewer metadata for an output."""
+        from bioimageflow_core.viewer import merge_viewer_specs
+
+        port = self._interface_outputs.get(output) or self._output_by_name(output)
+        if port is None:
+            raise KeyError(f"Unknown workflow output {output!r}.")
+        source = self._nodes.get(port.source_node)
+        if source is None:
+            return port.viewer_addition
+        return merge_viewer_specs(
+            source.get_output_viewer_spec(port.source_output),
+            port.viewer_addition,
+        )
+
+    def set_output_viewer_addition(
+        self,
+        output: str,
+        value: Any | None,
+    ) -> "Workflow":
+        """Set or clear an additive declaration on one public output."""
+        from bioimageflow_core.viewer import coerce_viewer_spec
+
+        port = self._interface_outputs.get(output) or self._output_by_name(output)
+        if port is None:
+            raise KeyError(f"Unknown workflow output {output!r}.")
+        port.viewer_addition = None if value is None else coerce_viewer_spec(value)
+        return self
 
     def _bind_input_target(
         self,
@@ -356,6 +399,10 @@ class _InterfacesMixin:
         snapshot._captured_custom_sources = copy.deepcopy(
             self._captured_custom_sources, memo
         )
+        snapshot._imported_viewing_requirements = copy.deepcopy(
+            self._imported_viewing_requirements,
+            memo,
+        )
         snapshot._inherit_runtime_storage(runtime_storage)
         return snapshot
 
@@ -378,7 +425,13 @@ class _InterfacesMixin:
             if isinstance(node, WorkflowNode):
                 node.workflow._inherit_runtime_storage(self.storage_path, seen)
 
-    def __call__(self, *, name: str | None = None, **bindings: Any) -> Any:
+    def __call__(
+        self,
+        *,
+        name: str | None = None,
+        viewer_additions: dict[str, Any] | None = None,
+        **bindings: Any,
+    ) -> Any:
         """Capture this definition as a WorkflowNode in the active parent."""
         from bioimageflow.workflow_node import WorkflowNode
 
@@ -395,6 +448,7 @@ class _InterfacesMixin:
             self._snapshot_definition(storage_path=runtime_storage),
             name=name,
             bindings=stable_bindings,
+            viewer_additions=viewer_additions,
         )
 
     def __enter__(self) -> "Workflow":
@@ -414,6 +468,17 @@ class _InterfacesMixin:
     @property
     def nodes(self) -> dict[str, Node]:
         return dict(self._nodes)
+
+    @property
+    def imported_viewing_requirements(self) -> Any | None:
+        """Return the archive snapshot retained at import, if one was present."""
+        return self._imported_viewing_requirements
+
+    def viewing_requirements(self) -> Any:
+        """Derive current requirements from authoritative loaded metadata."""
+        from bioimageflow.viewing import derive_viewing_requirements
+
+        return derive_viewing_requirements(self)
 
     @property
     def errors(self) -> list[ValidationError]:

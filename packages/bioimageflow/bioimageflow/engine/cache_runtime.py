@@ -73,6 +73,7 @@ class _CacheRuntimeMixin:
             record_id=pointer.record_id,
             cache_hit=cache_hit,
             provenance=provenance,
+            viewers=node.get_output_viewer_specs(),
         )
         storage.update_latest_node(node_key, run_id)
         auto_export = getattr(workflow, "_auto_export_outputs", None)

@@ -45,8 +45,8 @@ Workflow.expose_input(
     id: str | None = None,
 ) -> WorkflowInputRef
 
-Workflow.output(name: str, source: ColumnRef, *, id: str | None = None) -> None
-Workflow.__call__(*, name: str | None = None, **bindings: Any) -> WorkflowNode
+Workflow.output(name: str, source: ColumnRef, *, id: str | None = None, viewer_addition: ViewerSpec | None = None) -> None
+Workflow.__call__(*, name: str | None = None, viewer_additions: dict[str, ViewerSpec] | None = None, **bindings: Any) -> WorkflowNode
 Workflow.compute(
     *targets: Node,
     inputs: Mapping[str, Any] | None = None,
@@ -68,6 +68,8 @@ Workflow.from_python(
 ) -> Workflow
 Workflow.from_dict(data: dict[str, Any], *, storage_path: str | Path, ...) -> Workflow
 Workflow.to_dict(*, include_custom_tools: bool = False) -> dict[str, Any]
+Workflow.to_archive_dict() -> dict[str, Any]
+Workflow.inspect_viewing_requirements(value: dict[str, Any] | str | Path) -> ViewingRequirementsManifest
 Workflow.load(path: str | Path, *, storage_path: str | Path) -> Workflow
 Workflow.import_archive(
     path: str | Path,
@@ -133,7 +135,7 @@ Every graph has exactly these top-level fields:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schema_version` | integer | Must be `1`. |
+| `schema_version` | integer | Emitted as `2`; strict legacy `1` is accepted and normalized. |
 | `name` | string | Stable definition identity. |
 | `display_name` | string | Editable presentation metadata. |
 | `interface` | object | Exactly `inputs` and `outputs`. |
@@ -141,7 +143,7 @@ Every graph has exactly these top-level fields:
 | `edges` | array | Immediate column and DataFrame edges. |
 | `config` | object | Root-capable definition metadata. |
 
-Unknown fields and unversioned graphs are rejected.
+Unknown fields and unversioned graphs are rejected according to the declared version; version-1 data cannot carry version-2 viewer fields.
 
 An input record contains `id`, `name`, `kind`, optional `schema`, optional serialized `default`, and `targets`.
 Target records have `node` and `port`.
@@ -149,7 +151,7 @@ A tool field port is `{"kind": "field", "name": <field>}`.
 A positional port is `{"kind": "positional", "index": <integer>}`.
 A child workflow port is `{"kind": "workflow", "id": <stable-input-id>}`.
 
-An output record contains `id`, `name`, optional `schema`, and `source`.
+An output record contains `id`, `name`, optional `schema`, `source`, and optional version-2 `viewer_addition`.
 `source` contains `node` and `column`.
 For a tool source, `column` is the tool output column name.
 For a workflow-node source, `column` is its stable output-port ID.
@@ -167,11 +169,12 @@ A tool node has:
   "constants": {},
   "output_templates": {},
   "enabled": true,
-  "source_module": "m_optional"
+  "source_module": "m_optional",
+  "viewer_additions": {}
 }
 ```
 
-`output_templates`, `enabled`, and `source_module` are omitted when they carry their defaults or do not apply.
+`output_templates`, `enabled`, `source_module`, and version-2 `viewer_additions` are omitted when they carry their defaults or do not apply.
 Constants use `serialize_constant` envelopes.
 
 A workflow node has:
@@ -180,11 +183,12 @@ A workflow node has:
 {
   "name": "child",
   "type": "workflow",
-  "workflow": {"schema_version": 1},
+  "workflow": {"schema_version": 2},
   "bindings": {
     "input-diameter": {"__type__": "float", "value": 25.0}
   },
-  "enabled": false
+  "enabled": false,
+  "viewer_additions": {}
 }
 ```
 
@@ -223,23 +227,37 @@ The portable archive and recursive graph are separate contracts:
 
 ```json
 {
-  "archive_version": 1,
-  "workflow": {"schema_version": 1},
-  "custom_sources": []
+  "archive_version": 2,
+  "workflow": {"schema_version": 2},
+  "custom_sources": [],
+  "viewing_requirements": {
+    "schema": "bioimageflow.viewing_requirements.v1",
+    "complete": true,
+    "outputs": {}
+  }
 }
 ```
 
-The envelope has exactly these three fields.
+The version-2 envelope has exactly these four fields.
 `custom_sources` is deduplicated across the complete recursive graph.
 Each record has an explicit `id`, canonical `module`, `filename`, content hash, and either one source string or a hashed `files` bundle.
 Tool nodes refer to records through `source_module`.
 Source identity is the explicit ID plus verified content; class name alone is never an identity.
 Two source IDs can therefore export the same class name without shadowing one another.
 
-`to_dict()` returns the graph.
-`to_dict(include_custom_tools=True)` and JSON `export()` return the envelope when custom sources exist.
-ZIP export stores the same envelope as `workflow.json`.
-`from_dict()` and `load()` preserve source references recursively.
+`to_dict()` returns the editable graph, and `to_dict(include_custom_tools=True)` returns an envelope when custom sources exist.
+`to_archive_dict()` and ZIP `export()` always produce the artifact envelope, with ZIP storing it as `workflow.json`.
+JSON `export()` preserves the editable graph form when no custom sources exist and emits the artifact envelope when custom sources require one.
+The derived viewing manifest is keyed by scoped output identity, records completeness explicitly, and can be inspected before any tool package is loaded.
+It is an export snapshot; tool annotations and graph additions remain authoritative.
+Strict version-1 graphs and three-field archives load with no viewer additions and normalize to version 2.
+`from_dict()` and `load()` preserve source references and viewer additions recursively.
+
+Viewer metadata uses worker-safe `ViewerSpec`, `NapariRequirement`, and `PackageRequirement` values.
+Distribution spelling is retained while `normalized_name` supplies the PEP 503 comparison identity; optional package and napari version clauses are validated PEP 440 specifiers.
+The only napari-specific fields are required packages, recommended packages, optional `napari_version`, and opaque optional `reader_id`.
+There is no napari dependency, manifest/discovery/enabled state, local environment reference, preference, credential, or install command in the portable contract.
+Viewer additions combine additively through recursively published outputs and never enter processing dependencies or computation/cache identities.
 
 ## Trusted Python materialization
 
@@ -297,5 +315,5 @@ Nested errors use `ValidationError.path` from root workflow node to leaf scope a
 - No second workflow-definition class, workflow registry, or workflow decorator.
 - No alternate factory symbol or module-level shared workflow convention.
 - No portable dependency on Python factories after materialization.
-- No schema migration, compatibility flag, deprecated alias, or unversioned dictionary loader.
+- No compatibility flag, deprecated alias, or unversioned dictionary loader; the only legacy normalization is the specified version-1 to version-2 load path.
 - No unknown node/edge/config variants or best-effort endpoint guessing.

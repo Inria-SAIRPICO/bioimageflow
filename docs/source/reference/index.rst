@@ -19,6 +19,7 @@ Technical reference material for workflow authors and BioImageFlow GUI developer
    output_cache_storage
    agent_tool_workflow_playbook
    unified_workflow_contract
+   viewer_requirements
    api/index
 
 The exhaustive specification lives in :doc:`/specs`.

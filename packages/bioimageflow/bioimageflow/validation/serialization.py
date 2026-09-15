@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bioimageflow_core import ProcessingTool
+from bioimageflow_core.viewer import extract_viewer_spec
 
 from .common import (
     Annotated,
@@ -424,6 +425,7 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
     for field_name, annotation in annotations.items():
         image_spec = extract_image_spec(annotation)
         gui_meta = extract_gui_meta(annotation)
+        viewer_spec = extract_viewer_spec(annotation)
         has_default = hasattr(outputs_cls, field_name)
         raw_default = getattr(outputs_cls, field_name, None) if has_default else None
         template = raw_default.pattern if isinstance(raw_default, Template) else None
@@ -437,6 +439,8 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
             _add_gui_meta_fields(entry, gui_meta)
         if template is not None:
             entry["template"] = template
+        if viewer_spec is not None:
+            entry["viewer"] = viewer_spec.to_dict()
         schema[field_name] = entry
 
     return schema

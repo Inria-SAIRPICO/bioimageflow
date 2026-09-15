@@ -249,7 +249,7 @@ class _LoadingMixin:
         Parameters
         ----------
         data
-            A schema-version-1 recursive graph produced by :meth:`to_dict`,
+            A schema-version-1 or schema-version-2 recursive graph,
             or a portable archive envelope produced by :meth:`export`.
         validate_only
             Drives the **return type**. When ``True``, returns a
@@ -331,20 +331,37 @@ class _LoadingMixin:
         errors: list[ValidationError] | None = None,
     ) -> "Workflow":
         """Materialize a strict graph or portable archive envelope."""
-        if set(data) == {"archive_version", "workflow", "custom_sources"}:
-            if data["archive_version"] != 1 or not isinstance(
-                data["custom_sources"], list
-            ):
-                raise ValueError("Unsupported workflow archive envelope.")
+        viewing_requirements = None
+        if data.get("archive_version") == 1:
+            if set(data) != {"archive_version", "workflow", "custom_sources"}:
+                raise ValueError("Malformed version-1 workflow archive envelope.")
+            graph = data["workflow"]
+            source_records = data["custom_sources"]
+        elif data.get("archive_version") == 2:
+            fields = {
+                "archive_version",
+                "workflow",
+                "custom_sources",
+                "viewing_requirements",
+            }
+            if set(data) != fields:
+                raise ValueError("Malformed version-2 workflow archive envelope.")
+            from bioimageflow.viewing import ViewingRequirementsManifest
+
+            viewing_requirements = ViewingRequirementsManifest.from_dict(
+                data["viewing_requirements"]
+            )
             graph = data["workflow"]
             source_records = data["custom_sources"]
         else:
             graph = data
             source_records = []
+        if not isinstance(source_records, list):
+            raise ValueError("Workflow archive custom_sources must be an array.")
         if not isinstance(graph, dict):
             raise TypeError("Workflow graph must be a dictionary.")
         custom_modules = _load_custom_sources(source_records)
-        return cls._materialize_graph(
+        workflow = cls._materialize_graph(
             graph,
             custom_modules=custom_modules,
             source_records=source_records,
@@ -357,3 +374,12 @@ class _LoadingMixin:
             partial=partial,
             errors=errors,
         )
+        workflow._imported_viewing_requirements = viewing_requirements
+        return workflow
+
+    @classmethod
+    def inspect_viewing_requirements(cls, value: Any) -> Any:
+        """Read an archive's viewer snapshot without loading its tool packages."""
+        from bioimageflow.viewing import inspect_viewing_requirements
+
+        return inspect_viewing_requirements(value)
