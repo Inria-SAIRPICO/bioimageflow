@@ -11,6 +11,14 @@ from bioimageflow_core.types import (
     check_compatibility as check_compatibility,
     extract_gui_meta as extract_gui_meta,
 )
+from bioimageflow_core.viewer import (
+    NapariRequirement as NapariRequirement,
+    PackageRequirement as PackageRequirement,
+    ViewerSpec as ViewerSpec,
+    coerce_viewer_spec as coerce_viewer_spec,
+    extract_viewer_spec as extract_viewer_spec,
+    merge_viewer_specs as merge_viewer_specs,
+)
 from bioimageflow_core.environment import (
     EnvironmentMismatchError as EnvironmentMismatchError,
     EnvironmentSpec as EnvironmentSpec,
@@ -74,6 +82,8 @@ __all__ = [
     "ImageSpec",
     "InstalledModuleOriginV1",
     "Layout",
+    "NapariRequirement",
+    "PackageRequirement",
     "PathPicker",
     "ProcessingTaskResultV1",
     "ProcessingTaskV1",
@@ -89,8 +99,10 @@ __all__ = [
     "SourceFileOriginV1",
     "Template",
     "VersionedModuleOriginV1",
+    "ViewerSpec",
     "WorkerToolOriginV1",
     "check_compatibility",
+    "coerce_viewer_spec",
     "decode_processing_result",
     "decode_processing_task",
     "decode_worker_tool_origin",
@@ -98,6 +110,8 @@ __all__ = [
     "encode_processing_task",
     "encode_worker_tool_origin",
     "extract_gui_meta",
+    "extract_viewer_spec",
+    "merge_viewer_specs",
     "run_external_command",
     "run_external_command_with_staged_output",
     "validate_processing_result",

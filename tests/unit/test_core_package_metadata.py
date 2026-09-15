@@ -136,12 +136,13 @@ def test_direct_runtime_imports_are_declared() -> None:
     assert offenders == {}
 
 
-def test_core_declares_numpy_runtime_dependency() -> None:
+def test_core_declares_worker_safe_runtime_dependencies() -> None:
     pyproject = _pyproject(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
 
     dependencies = _dependency_names(pyproject["project"]["dependencies"])
 
     assert "numpy" in dependencies
+    assert "packaging" in dependencies
     assert "zero dependencies" not in pyproject["project"]["description"].lower()
 
 

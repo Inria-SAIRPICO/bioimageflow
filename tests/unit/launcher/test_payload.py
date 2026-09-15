@@ -31,7 +31,7 @@ def test_graph_payload_round_trip_uses_explicit_runtime_storage(tmp_path: Path) 
     payload = serialize_workflow_payload(workflow)
     restored = load_workflow_payload(payload, storage_path=assigned_storage)
 
-    assert payload["kind"] == "graph_v1"
+    assert payload["kind"] == "graph_v2"
     assert "storage_path" not in payload["payload"]["config"]
     assert restored.storage_path == assigned_storage.absolute()
 
@@ -81,7 +81,8 @@ def test_archive_payload_includes_custom_source_once_and_round_trips(
         storage_path=tmp_path / "assigned",
     )
 
-    assert payload["kind"] == "archive_v1"
+    assert payload["kind"] == "archive_v2"
+    assert payload["payload"]["viewing_requirements"]["complete"] is True
     assert len(payload["payload"]["custom_sources"]) == 1
     assert restored.storage_path == (tmp_path / "assigned").absolute()
     assert restored.to_dict(include_custom_tools=True) == payload["payload"]

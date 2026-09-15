@@ -222,7 +222,12 @@ class ToolRegistry:
 
             visit_live(workflow)
         elif isinstance(workflow, dict):
-            if set(workflow) == {"archive_version", "workflow", "custom_sources"}:
+            if workflow.get("archive_version") in {1, 2}:
+                expected = {"archive_version", "workflow", "custom_sources"}
+                if workflow["archive_version"] == 2:
+                    expected.add("viewing_requirements")
+                if set(workflow) != expected:
+                    raise ValueError("Malformed workflow archive envelope.")
                 modules = _load_custom_sources(workflow["custom_sources"])
                 graph = workflow["workflow"]
             else:

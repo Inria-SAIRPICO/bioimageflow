@@ -23,7 +23,7 @@ from .custom_sources import (
 
 class _SerializationMixin:
     def to_dict(self, *, include_custom_tools: bool = False) -> dict[str, Any]:
-        """Serialize the strict recursive schema-version-1 graph."""
+        """Serialize the strict recursive schema-version-2 graph or archive."""
         sources: list[dict[str, Any]] = copy.deepcopy(
             self._captured_custom_sources or []
         )
@@ -34,8 +34,29 @@ class _SerializationMixin:
             source_ids=source_ids,
         )
         if include_custom_tools and sources:
-            return {"archive_version": 1, "workflow": graph, "custom_sources": sources}
+            return {
+                "archive_version": 2,
+                "workflow": graph,
+                "custom_sources": sources,
+                "viewing_requirements": self.viewing_requirements().to_dict(),
+            }
         return graph
+
+    def to_archive_dict(self) -> dict[str, Any]:
+        """Return the explicit portable artifact envelope.
+
+        Unlike :meth:`to_dict`, this always includes the derived viewing
+        snapshot, even when the workflow has no custom Python sources.
+        """
+        document = self.to_dict(include_custom_tools=True)
+        if document.get("archive_version") == 2:
+            return document
+        return {
+            "archive_version": 2,
+            "workflow": document,
+            "custom_sources": [],
+            "viewing_requirements": self.viewing_requirements().to_dict(),
+        }
 
     def _graph_to_dict(
         self,
@@ -72,6 +93,11 @@ class _SerializationMixin:
                 }
                 if not node.enabled:
                     node_info["enabled"] = False
+                if node.viewer_additions:
+                    node_info["viewer_additions"] = {
+                        output: spec.to_dict()
+                        for output, spec in sorted(node.viewer_additions.items())
+                    }
                 nodes_data.append(node_info)
 
                 for port_id, col_ref in node._input_column_bindings.items():
@@ -132,6 +158,11 @@ class _SerializationMixin:
                     node_info["output_templates"] = dict(node.output_templates)
                 if node.resource_overrides is not None:
                     node_info["resource_overrides"] = node.resource_overrides.to_dict()
+                if node.viewer_additions:
+                    node_info["viewer_additions"] = {
+                        output: spec.to_dict()
+                        for output, spec in sorted(node.viewer_additions.items())
+                    }
                 nodes_data.append(node_info)
 
                 for field, col_ref in node._column_bindings.items():
@@ -174,7 +205,7 @@ class _SerializationMixin:
                         )
 
         result = {
-            "schema_version": 1,
+            "schema_version": 2,
             "name": self.name,
             "display_name": self.display_name,
             "interface": {
@@ -210,6 +241,11 @@ class _SerializationMixin:
                             "node": port.source_node,
                             "column": port.source_output,
                         },
+                        **(
+                            {"viewer_addition": port.viewer_addition.to_dict()}
+                            if port.viewer_addition is not None
+                            else {}
+                        ),
                     }
                     for port in self._interface_outputs.values()
                 ],
@@ -236,7 +272,7 @@ class _SerializationMixin:
         path.write_text(json.dumps(data, indent=2, default=str))
 
     def _export_archive(self, path: Path) -> None:
-        data = self.to_dict(include_custom_tools=True)
+        data = self.to_archive_dict()
         path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("workflow.json", json.dumps(data, indent=2, default=str))

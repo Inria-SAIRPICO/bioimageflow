@@ -132,7 +132,7 @@ def test_compute_writes_run_view_for_dataframe_cache_miss_and_hit(
     first_result = json.loads(
         (first_run / "nodes" / node_name / "result.json").read_text()
     )
-    assert first_result["schema"] == "bioimageflow.run.node_result.v1"
+    assert first_result["schema"] == "bioimageflow.run.node_result.v2"
     assert first_result["node_key"] == node_name
     assert first_result["cache_hit"] is False
     assert (

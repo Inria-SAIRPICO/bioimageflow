@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .common import (
     Any,
+    LEGACY_RUN_NODE_RESULT_SCHEMA,
     Path,
     RUN_NODE_RESULT_SCHEMA,
     RUN_SCHEMA,
@@ -17,6 +18,8 @@ from .common import (
 )
 from .models import (
     CacheCorruptionError,
+    OutputViewerMetadata,
+    RunNodeResult,
 )
 from .allocation import RunAllocationLock
 from .identity import (
@@ -176,8 +179,18 @@ class _RunViewsMixin:
         record_id: str,
         cache_hit: bool,
         provenance: dict[str, Any] | None = None,
+        viewers: dict[str, Any] | None = None,
     ) -> Path:
         """Write a run-local view over one immutable record."""
+        from bioimageflow_core import coerce_viewer_spec
+
+        encoded_viewers = {
+            output: coerce_viewer_spec(viewer).to_dict()
+            for output, viewer in sorted((viewers or {}).items())
+            if isinstance(output, str) and output
+        }
+        if len(encoded_viewers) != len(viewers or {}):
+            raise ValueError("Viewer metadata output keys must be non-empty strings.")
         safe_run_id = _validate_path_segment(run_id, label="Run ID")
         safe_node_key = _validate_node_key(node_key)
         result_shard_parts(result_key)
@@ -195,6 +208,7 @@ class _RunViewsMixin:
             "cache_hit": bool(cache_hit),
             "canonical": canonical,
             "outputs": list(manifest.outputs),
+            "viewers": encoded_viewers,
         }
         if provenance is not None:
             payload["provenance"] = provenance
@@ -207,6 +221,30 @@ class _RunViewsMixin:
         )
         self._write_output_links(node_dir, record_dir, manifest.outputs)
         return result_path
+
+    def read_run_node_result(self, run_id: str, node_key: str) -> RunNodeResult:
+        """Validate and return one retained run/node result through public APIs."""
+        payload = self._validate_run_node_view(run_id, node_key)
+        viewers = payload.get("viewers", {})
+        from bioimageflow_core import ViewerSpec
+
+        return RunNodeResult(
+            run_id=payload["run_id"],
+            node_key=payload["node_key"],
+            result_key=payload["result_key"],
+            record_id=payload["record_id"],
+            cache_hit=payload["cache_hit"],
+            canonical=payload["canonical"],
+            outputs=tuple(payload["outputs"]),
+            provenance=payload.get("provenance"),
+            viewers=tuple(
+                OutputViewerMetadata(
+                    output=output,
+                    viewer=ViewerSpec.from_dict(viewer),
+                )
+                for output, viewer in sorted(viewers.items())
+            ),
+        )
 
     def update_latest_node(self, node_key: str, run_id: str) -> Path:
         """Atomically point ``views/latest/<node-key>`` at a run-node view."""
@@ -273,12 +311,40 @@ class _RunViewsMixin:
         node_dir = self.run_node_dir(run_id, node_key)
         result_path = node_dir / "result.json"
         payload = self._load_run_node_payload(result_path)
-        if payload.get("schema") != RUN_NODE_RESULT_SCHEMA:
+        schema = payload.get("schema")
+        if schema not in {LEGACY_RUN_NODE_RESULT_SCHEMA, RUN_NODE_RESULT_SCHEMA}:
             raise CacheCorruptionError("Run node result has an invalid schema.")
+        allowed = {
+            "schema",
+            "run_id",
+            "node_key",
+            "result_key",
+            "record_id",
+            "cache_hit",
+            "canonical",
+            "outputs",
+            "provenance",
+        }
+        if schema == RUN_NODE_RESULT_SCHEMA:
+            allowed.add("viewers")
+            if "viewers" not in payload:
+                raise CacheCorruptionError("Run node result is missing viewer metadata.")
+        unknown = set(payload) - allowed
+        if unknown:
+            raise CacheCorruptionError(
+                f"Run node result contains unknown fields: {sorted(unknown)!r}"
+            )
+        required = allowed - {"provenance"}
+        if not required <= set(payload):
+            raise CacheCorruptionError("Run node result is missing required fields.")
         if payload.get("run_id") != run_id:
             raise CacheCorruptionError("Run node result run ID mismatch.")
         if payload.get("node_key") != node_key:
             raise CacheCorruptionError("Run node result node key mismatch.")
+        if type(payload.get("cache_hit")) is not bool:
+            raise CacheCorruptionError("Run node result cache_hit must be boolean.")
+        if not isinstance(payload.get("outputs"), list):
+            raise CacheCorruptionError("Run node result outputs must be an array.")
         result_key = str(payload.get("result_key", ""))
         record_id = str(payload.get("record_id", ""))
         try:
@@ -297,6 +363,19 @@ class _RunViewsMixin:
         provenance = payload.get("provenance")
         if provenance is not None and not isinstance(provenance, dict):
             raise CacheCorruptionError("Run node provenance must be a JSON object.")
+        viewers = payload.get("viewers", {})
+        if not isinstance(viewers, dict) or not all(
+            isinstance(output, str) and output and isinstance(viewer, dict)
+            for output, viewer in viewers.items()
+        ):
+            raise CacheCorruptionError("Run node viewers must be an output-keyed object.")
+        from bioimageflow_core import ViewerSpec
+
+        try:
+            for viewer in viewers.values():
+                ViewerSpec.from_dict(viewer)
+        except (TypeError, ValueError) as exc:
+            raise CacheCorruptionError("Run node viewer metadata is invalid.") from exc
         expected_canonical = self._relative_target(result_path, record_dir)
         if payload.get("canonical") != expected_canonical:
             raise CacheCorruptionError("Run node result canonical path mismatch.")

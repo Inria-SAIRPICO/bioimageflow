@@ -26,6 +26,7 @@ class DataFrameTool(BaseTool):
         *upstream_nodes: Any,
         name: str | None = None,
         output_templates: dict[str, str] | None = None,
+        viewer_additions: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Create a graph node. No computation occurs."""
@@ -49,6 +50,7 @@ class DataFrameTool(BaseTool):
             kwargs=kwargs,
             name=name,
             output_templates=output_templates,
+            viewer_additions=viewer_additions,
         )
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:

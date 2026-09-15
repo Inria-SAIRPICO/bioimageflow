@@ -204,7 +204,7 @@ def _submit_workflow(
         shared_runtime_root,
         field="shared_runtime_root",
     )
-    if payload["kind"] == "archive_v1" and runtime_root is None:
+    if payload["kind"].startswith("archive_") and runtime_root is None:
         raise ValueError(
             "Submitted workflows with custom sources require shared_runtime_root."
         )

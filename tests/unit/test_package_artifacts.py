@@ -372,3 +372,26 @@ def test_orchestrator_wheel_declares_bounded_runtime_extras(
     [psij_requirement] = psij_requirements
     assert str(psij_requirement.specifier) == "<0.10,>=0.9.11"
     assert str(psij_requirement.marker) == 'extra == "psij"'
+
+
+def test_core_wheel_declares_packaging_for_viewer_specifiers(
+    built_artifacts: Path,
+) -> None:
+    if "bioimageflow-core" not in _distribution_names():
+        pytest.skip("bioimageflow-core is not the selected release package")
+
+    metadata = _wheel_metadata(_wheel_path(built_artifacts, "bioimageflow-core"))
+    requirements = [
+        Requirement(requirement)
+        for requirement in metadata.get_all("Requires-Dist") or []
+    ]
+    packaging_requirements = [
+        requirement
+        for requirement in requirements
+        if requirement.name == "packaging"
+    ]
+
+    assert len(packaging_requirements) == 1
+    [packaging_requirement] = packaging_requirements
+    assert str(packaging_requirement.specifier) == ">=24.0"
+    assert packaging_requirement.marker is None

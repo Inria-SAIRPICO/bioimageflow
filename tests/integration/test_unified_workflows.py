@@ -255,7 +255,7 @@ def test_recursive_graph_round_trip_is_canonical(tmp_path: Path) -> None:
         parent.output("answer", nested["result"], id="output-answer")
 
     graph = parent.to_dict()
-    assert graph["schema_version"] == 1
+    assert graph["schema_version"] == 2
     assert graph["nodes"][0]["type"] == "workflow"
     assert Workflow.from_dict(graph, storage_path=tmp_path).to_dict() == graph
     assert (
@@ -469,7 +469,18 @@ def test_golden_recursive_fixtures_round_trip(
     path = Path("tests/fixtures") / fixture_name
     source = json.loads(path.read_text())
     workflow = Workflow.from_dict(source, storage_path=tmp_path / "runtime")
-    assert workflow.to_dict(include_custom_tools=include_custom_tools) == source
+    normalized = workflow.to_dict(include_custom_tools=include_custom_tools)
+    if include_custom_tools:
+        assert normalized["archive_version"] == 2
+        assert normalized["workflow"]["schema_version"] == 2
+        assert normalized["viewing_requirements"]["complete"] is True
+    else:
+        assert normalized["schema_version"] == 2
+    restored = Workflow.from_dict(
+        normalized,
+        storage_path=tmp_path / "normalized-runtime",
+    )
+    assert restored.to_dict(include_custom_tools=include_custom_tools) == normalized
 
     result = workflow.compute()
     if include_custom_tools:

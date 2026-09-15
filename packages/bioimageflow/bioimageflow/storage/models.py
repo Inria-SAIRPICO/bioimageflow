@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, Mapping
+
+from bioimageflow_core import ViewerSpec
 
 
 class CacheCorruptionError(RuntimeError):
@@ -24,3 +26,26 @@ class OutputViewCapability:
         "io_error",
     ]
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class OutputViewerMetadata:
+    """Typed retained viewer metadata for one produced output column."""
+
+    output: str
+    viewer: ViewerSpec
+
+
+@dataclass(frozen=True)
+class RunNodeResult:
+    """Public typed lookup result for one retained run/node selection."""
+
+    run_id: str
+    node_key: str
+    result_key: str
+    record_id: str
+    cache_hit: bool
+    canonical: str
+    outputs: tuple[Mapping[str, Any], ...]
+    provenance: Mapping[str, Any] | None = None
+    viewers: tuple[OutputViewerMetadata, ...] = ()

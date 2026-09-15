@@ -207,8 +207,8 @@ See the [remote cluster guide](https://bioimageflow.readthedocs.io/latest/how-to
 ## Architecture
 
 ```
-bioimageflow-core          bioimageflow
-(worker-safe + numpy)      (pandas + pydantic, main process)
+bioimageflow-core                    bioimageflow
+(worker-safe + numpy + packaging)    (pandas + pydantic, main process)
 ┌─────────────────────┐   ┌──────────────────────────┐
 │  Semantic, Layout    │   │  Workflow                 │
 │  ImageSpec, groups   │   │  Node, ColumnRef          │
@@ -219,7 +219,7 @@ bioimageflow-core          bioimageflow
 └─────────────────────┘   └──────────────────────────┘
 ```
 
-**`bioimageflow-core`** is installed everywhere — main process and worker environments. It contains the type system, tool base classes, and shared-memory utilities, and declares NumPy because shared-memory array views use it at runtime.
+**`bioimageflow-core`** is installed everywhere — main process and worker environments. It contains the type system, tool base classes, shared-memory utilities, and portable viewer requirements. It declares NumPy for shared-memory array views and `packaging` for PEP 440/503 requirement validation.
 
 **`bioimageflow`** is the orchestrator. It builds the DAG, resolves bindings, executes tools in topological order, and manages caching. It depends on pandas and pydantic.
 

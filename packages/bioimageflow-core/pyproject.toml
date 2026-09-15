@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.23.5",
+    "packaging>=24.0",
 ]
 
 [project.urls]

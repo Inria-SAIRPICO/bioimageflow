@@ -44,10 +44,12 @@ precommit_suites = ["unit", "integration"]
 name = "workflow"
 sources = [
     "packages/bioimageflow/bioimageflow/session.py",
+    "packages/bioimageflow/bioimageflow/viewing.py",
     "packages/bioimageflow/bioimageflow/workflow",
 ]
 edit_tests = [
     "tests/unit/test_workflow_clean_api.py",
+    "tests/unit/test_viewer_requirements.py",
     "tests/integration/test_basic_workflow.py",
     "tests/integration/test_branching.py",
     "tests/integration/test_disable_nodes.py",

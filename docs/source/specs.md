@@ -316,13 +316,13 @@ The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offer
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
+Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None, "viewer": dict | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
 ### 2.5 Interface Type Constraints
 
-`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
+`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, `ViewerSpec`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
 
 **Runtime type resolution:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), but the orchestrator's Pydantic model builder resolves both to `Union[Path, str, SharedArray]` at validation time. This is necessary because caching may convert a `SharedArray` output to a file `Path` (see [Section 8.2](#82-lifecycle)), and the reverse can happen when shared memory is enabled. Tools should use `load_image()` which handles both transparently.
 
@@ -1858,7 +1858,7 @@ Live engines, Parsl Config/DFK objects, executor bindings, routes, task policy, 
 An explicit engine passed to `compute()` or `compute_steps()` has precedence over the stored preference.
 `to_dict()` emits the recursive graph.
 `to_dict(include_custom_tools=True)` emits the portable archive envelope when custom sources exist.
-`from_dict(data, storage_path=..., validate_only=True, partial=True)` retains its diagnostic tuple form but parses only schema version 1.
+`from_dict(data, storage_path=..., validate_only=True, partial=True)` retains its diagnostic tuple form and parses strict schema versions 1 and 2; version 1 normalizes to the canonical version-2 graph before subsequent identity operations.
 
 ### 4.4 Progress Monitoring
 
@@ -2041,7 +2041,8 @@ run = submit_workflow(
 Its keyword arguments are finite JSON-safe values and its optional secret references are opaque environment-variable names resolved by the orchestrator host.
 Literal credentials must not be supplied, secret-looking field names are rejected, and arbitrary callables, pickle payloads, Config, DFK, executor, and provider objects are rejected.
 
-The submitted workflow definition is exactly the recursive graph-v1 payload or archive-v1 envelope.
+The submitted workflow definition is exactly the canonical recursive graph-v2 payload or archive-v2 envelope.
+Strict legacy graph-v1 and archive-v1 definitions remain loadable and normalize to version 2 before submission identity is computed.
 Runtime storage stays outside that definition: `workflow.storage_path` is normalized into launcher metadata and passed explicitly to `Workflow.from_dict(..., storage_path=...)` in the detached process.
 Partial workflows, unresolved tools, invalid routes, unsupported launch backends, and unavailable secret references fail before allocation or process launch as applicable.
 
@@ -3023,6 +3024,7 @@ Exhausting or explicitly closing the iterator detaches the context and applies c
 from bioimageflow_core import (
     # Types
     Semantic, Layout, ImageSpec, SharedArray, ImageShared,
+    ViewerSpec, NapariRequirement, PackageRequirement,
     SCALAR_IMAGE_SEMANTICS, check_compatibility,
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
@@ -3123,24 +3125,41 @@ A zero-output workflow executes its terminals and returns a zero-row, zero-colum
 
 ### 14.3 Strict recursive graph and archive formats
 
-`Workflow.to_dict()`, `Workflow.from_dict()`, `Workflow.load()`, and `Workflow.export()` accept only `schema_version: 1`.
+`Workflow.to_dict()` emits `schema_version: 2`; `Workflow.from_dict()` and `Workflow.load()` accept strict version-1 legacy graphs and strict version-2 graphs, normalizing loaded version 1 to version 2.
 A recursive node has `"type": "workflow"`, an inline `workflow` graph, and constant `bindings` keyed by stable child-input IDs.
 Tool nodes use `"type": "tool"`.
 Edges have explicit `"column"` or `"dataframe"` variants and stable IDs.
-Unknown variants, extra fields, malformed endpoints, duplicate IDs, and unversioned graphs are errors.
+Version 2 adds only portable `viewer_additions` on tool/workflow nodes and `viewer_addition` on public workflow outputs.
+Unknown variants, extra fields (including version-2 fields claimed by version 1), malformed endpoints, duplicate IDs, and unversioned graphs are errors.
+
+`PackageRequirement` preserves an author's Python distribution spelling, exposes its PEP 503 `normalized_name`, and validates its optional PEP 440 `version` constraint.
+`NapariRequirement` contains required and recommended package lists, an optional PEP 440 `napari_version`, and an optional opaque `reader_id`.
+`ViewerSpec(napari=...)` attaches this metadata to one `Outputs` annotation without importing napari or performing manifest discovery.
+Per-node and public-output additions combine additively with tool declarations, and published outputs inherit resolved requirements recursively.
+Viewer requirements are distinct from processing dependencies, environment recipes, resource requirements, and every computation/cache identity.
 
 The portable archive envelope is separate from the graph:
 
 ```json
 {
-  "archive_version": 1,
-  "workflow": {"schema_version": 1, "...": "..."},
-  "custom_sources": []
+  "archive_version": 2,
+  "workflow": {"schema_version": 2, "...": "..."},
+  "custom_sources": [],
+  "viewing_requirements": {
+    "schema": "bioimageflow.viewing_requirements.v1",
+    "complete": true,
+    "outputs": {}
+  }
 }
 ```
 
 The source table is collected once across the recursive graph.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
+The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
+`Workflow.to_archive_dict()` and ZIP export produce this artifact form, while `Workflow.to_dict()` remains the editable graph boundary.
+JSON export likewise remains an editable graph when no custom sources exist and becomes an artifact envelope when embedded custom sources require one.
+Version-1 archive envelopes load with no viewer declarations and normalize to version 2; both versions reject fields not declared by that version.
+Exports never include local viewer environments, selections, paths, discovery/enabled state, credentials, executable install commands, or process state.
 Export serializes the already-materialized graph and never calls a factory again.
 
 ### 14.4 Trusted Python loading

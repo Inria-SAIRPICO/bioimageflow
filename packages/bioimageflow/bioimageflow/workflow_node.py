@@ -14,6 +14,11 @@ from bioimageflow.node import (
     get_active_workflow,
 )
 from bioimageflow_core.tool import IOModel
+from bioimageflow_core.viewer import (
+    ViewerSpec,
+    coerce_viewer_spec,
+    merge_viewer_specs,
+)
 
 if TYPE_CHECKING:
     from bioimageflow.workflow import Workflow
@@ -53,11 +58,19 @@ class WorkflowNode(Node):
         *,
         name: str | None = None,
         bindings: dict[str, Any] | None = None,
+        viewer_additions: dict[str, Any] | None = None,
     ) -> None:
         self.workflow = workflow
         self.tool = _WorkflowToolFacade(workflow)  # type: ignore[assignment]
         self.enabled = True
         self.output_templates: dict[str, str] = {}
+        self._viewer_additions: dict[str, ViewerSpec] = {}
+        for output_id, addition in (viewer_additions or {}).items():
+            if output_id not in workflow._interface_outputs:
+                raise ValueError(
+                    f"Unknown public output ID {output_id!r} for workflow {workflow.name!r}."
+                )
+            self._viewer_additions[output_id] = coerce_viewer_spec(addition)
         self._args: list[Any] = []
         self._kwargs: dict[str, Any] = {}
         self._column_bindings: dict[str, ColumnRef] = {}
@@ -137,6 +150,22 @@ class WorkflowNode(Node):
                 port.source_output,
             )
             for port in self.workflow._interface_outputs.values()
+        }
+
+    def get_output_viewer_spec(self, output: str) -> ViewerSpec | None:
+        """Return recursively inherited requirements plus invocation additions."""
+        if output not in self.workflow._interface_outputs:
+            raise KeyError(f"Unknown workflow output ID {output!r}.")
+        return merge_viewer_specs(
+            self.workflow.get_output_viewer_spec(output),
+            self._viewer_additions.get(output),
+        )
+
+    def get_output_viewer_specs(self) -> dict[str, ViewerSpec]:
+        return {
+            output_id: spec
+            for output_id in self.workflow._interface_outputs
+            if (spec := self.get_output_viewer_spec(output_id)) is not None
         }
 
     def _bound_port_ids(self) -> set[str]:

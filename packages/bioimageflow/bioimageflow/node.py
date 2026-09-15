@@ -1,6 +1,7 @@
 """Node and ColumnRef — graph construction primitives."""
 
 import contextvars
+import copy
 from contextlib import contextmanager
 import threading
 from dataclasses import dataclass
@@ -15,6 +16,11 @@ from bioimageflow.validation import (
     extract_image_spec,
 )
 from bioimageflow_core.types import check_compatibility
+from bioimageflow_core.viewer import (
+    ViewerSpec,
+    coerce_viewer_spec,
+    merge_viewer_specs,
+)
 
 if TYPE_CHECKING:
     from bioimageflow.resources import NodeResourceOverrides
@@ -168,6 +174,7 @@ class Node:
         name: str | None = None,
         output_templates: dict[str, str] | None = None,
         resource_overrides: "NodeResourceOverrides | None" = None,
+        viewer_additions: dict[str, Any] | None = None,
     ) -> None:
         from bioimageflow.resources import NodeResourceOverrides
 
@@ -175,6 +182,11 @@ class Node:
         self._kwargs = kwargs or {}
         self._args: list[Any] = args or []
         self.output_templates: dict[str, str] = dict(output_templates or {})
+        self._viewer_additions: dict[str, ViewerSpec] = {}
+        for output, addition in (viewer_additions or {}).items():
+            if not isinstance(output, str) or not output:
+                raise ValueError("Viewer addition output keys must be non-empty strings.")
+            self._viewer_additions[output] = coerce_viewer_spec(addition)
         if resource_overrides is not None:
             if not isinstance(tool, ProcessingTool):
                 raise TypeError(
@@ -412,6 +424,24 @@ class Node:
                             field=field_name,
                         ))
 
+        schema = self.get_output_schema()
+        if schema is not None and "_passthrough" not in schema:
+            unknown_viewers = set(self._viewer_additions) - set(schema)
+            if unknown_viewers:
+                exc = ValueError(
+                    "Viewer additions reference unknown output fields: "
+                    f"{sorted(unknown_viewers)}."
+                )
+                if capture is None:
+                    raise exc
+                for field_name in sorted(unknown_viewers):
+                    capture.append(ValidationError(
+                        kind="construction_failed",
+                        message=str(exc),
+                        node=self._name,
+                        field=field_name,
+                    ))
+
     @property
     def resource_overrides(self) -> "NodeResourceOverrides | None":
         """Return this node instance's portable worker resource overrides."""
@@ -439,6 +469,43 @@ class Node:
         from bioimageflow.resources import effective_node_resources
 
         return effective_node_resources(self)
+
+    @property
+    def viewer_additions(self) -> dict[str, ViewerSpec]:
+        """Return this node's portable additive per-output viewer metadata."""
+        return dict(self._viewer_additions)
+
+    def set_viewer_addition(self, output: str, value: Any | None) -> "Node":
+        """Set or clear a portable viewer addition and return this node."""
+        if not isinstance(output, str) or not output:
+            raise ValueError("Viewer addition output must be a non-empty string.")
+        schema = self.get_output_schema()
+        if schema is not None and "_passthrough" not in schema and output not in schema:
+            raise ValueError(f"Unknown output field {output!r} on node {self.name!r}.")
+        if value is None:
+            self._viewer_additions.pop(output, None)
+        else:
+            self._viewer_additions[output] = coerce_viewer_spec(value)
+        return self
+
+    def get_output_viewer_spec(self, output: str) -> ViewerSpec | None:
+        """Return the tool declaration plus this node's additive declaration."""
+        schema = self.get_output_schema()
+        if schema is not None and output in schema:
+            encoded = schema[output].get("viewer")
+            if encoded is not None:
+                return ViewerSpec.from_dict(encoded)
+        return self._viewer_additions.get(output)
+
+    def get_output_viewer_specs(self) -> dict[str, ViewerSpec]:
+        """Return every known non-empty effective output viewer declaration."""
+        schema = self.get_output_schema() or {}
+        outputs = (set(schema) - {"_passthrough"}) | set(self._viewer_additions)
+        return {
+            output: spec
+            for output in sorted(outputs)
+            if (spec := self.get_output_viewer_spec(output)) is not None
+        }
 
     def _check_type_compat(self, input_field: str, col_ref: ColumnRef) -> None:
         """Check type compatibility between upstream output and this input."""
@@ -511,15 +578,36 @@ class Node:
                     arg.get_output_schema() if isinstance(arg, Node) else None
                     for arg in self._args
                 ]
-                return df_tool_cls.resolve_merge_schema(
+                schema = df_tool_cls.resolve_merge_schema(
                     upstream_schemas, self._constant_bindings,
                 )
-            return df_tool_cls.resolve_outputs(self._constant_bindings)
+            else:
+                schema = df_tool_cls.resolve_outputs(self._constant_bindings)
+            return self._schema_with_viewer_additions(schema)
 
         # ProcessingTool: static schema.
         if getattr(tool_cls, "Outputs", None) is None:
             return None
-        return serialize_output_schema(tool_cls)
+        return self._schema_with_viewer_additions(serialize_output_schema(tool_cls))
+
+    def _schema_with_viewer_additions(
+        self,
+        schema: dict[str, dict[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]] | None:
+        if schema is None:
+            return None
+        result = copy.deepcopy(schema)
+        for output, addition in self._viewer_additions.items():
+            if output not in result or output == "_passthrough":
+                continue
+            declared = result[output].get("viewer")
+            combined = merge_viewer_specs(
+                None if declared is None else ViewerSpec.from_dict(declared),
+                addition,
+            )
+            if combined is not None:
+                result[output]["viewer"] = combined.to_dict()
+        return result
 
     def __getitem__(self, column: str) -> ColumnRef:
         """Create a ColumnRef: node['column_name']."""
