@@ -73,7 +73,15 @@ class IOModel:
         """
         annotations: dict[str, Any] = {}
         for klass in reversed(cls.__mro__):
-            declared = vars(klass).get("__annotations__", {})
+            if sys.version_info >= (3, 14):
+                # Deferred class annotations are absent from vars(klass) until
+                # evaluated. FORWARDREF preserves the existing namespace-aware
+                # resolution below, including class-local aliases.
+                from annotationlib import Format, get_annotations
+
+                declared = get_annotations(klass, format=Format.FORWARDREF)
+            else:
+                declared = vars(klass).get("__annotations__", {})
             if not declared:
                 continue
             # Resolve only this declaration: inherited fields belong to their
