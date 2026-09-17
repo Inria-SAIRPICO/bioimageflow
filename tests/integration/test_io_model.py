@@ -83,6 +83,22 @@ class TestIOModelMRO:
         assert "a" in ann
         assert "b" in ann
 
+    def test_lazy_annotations_preserve_inheritance_aliases_and_metadata(self):
+        class Base(IOModel):
+            inherited: int
+
+        class Child(Base):
+            Alias = str
+            named: "Alias"
+            image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+
+        annotations = Child._get_all_annotations()
+        assert annotations["inherited"] is int
+        assert annotations["named"] is str
+        assert annotations["image"].__metadata__ == (
+            ImageSpec(semantics={Semantic.INTENSITY}),
+        )
+
     def test_child_overrides_parent_annotation(self):
         class Base(IOModel):
             x: int

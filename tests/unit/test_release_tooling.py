@@ -403,6 +403,7 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
     assert set(ci["jobs"]) == {
         "quality",
         "unit-tests",
+        "core-python314-tests",
         "integration-tests",
         "compatibility-tests",
         "parsl-fast-tests",
