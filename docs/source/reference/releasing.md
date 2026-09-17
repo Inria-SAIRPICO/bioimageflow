@@ -143,7 +143,7 @@ uv version --package bioimageflow-core 0.1.8 --no-sync
 uv version --package bioimageflow-segmentation-tools 0.2.0 --no-sync
 ```
 
-When releasing `bioimageflow-core`, also update the root workspace dependency `bioimageflow-core==<version>` to the new local core version.
+When releasing `bioimageflow-core`, also update the lower bound of the root workspace dependency to the new local core version and keep its upper compatibility boundary.
 Update affected first-party dependency ranges in the same change, then regenerate `uv.lock`.
 
 During development, run only tests focused on the changed code and package metadata.
