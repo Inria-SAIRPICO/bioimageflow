@@ -198,6 +198,8 @@ The actual environment provisioning is handled by `Wetlands
 adapter that converts ``EnvironmentSpec`` into Wetlands environment
 declarations and dispatches ``ProcessingTool.process_row`` calls into
 worker processes.
+Hosts can pass ``on_provision_event`` to ``WetlandsEnvManager.get_or_create`` to receive Wetlands operation events before the call waits for setup. The callback receives stage, progress, and sanitized output events, including Pixi stdout and stderr. It is not called when the requested worker pool is already running. The callback runs on a Wetlands operation thread and should hand UI updates to the host event loop without blocking provisioning.
+
 Hosts should use the public :class:`~bioimageflow.env_manager.WetlandsEnvManager` lifecycle surface described above for worker ownership and status.
 Deeper Wetlands provisioning and process-health details remain implementation-level and should use Wetlands' own APIs when necessary.
 

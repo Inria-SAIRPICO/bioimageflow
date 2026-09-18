@@ -45,7 +45,12 @@ class _Operation:
     def __init__(self, value: Any) -> None:
         self.value = value
 
+    def listen(self, callback: Any) -> None:
+        self.callback = callback
+
     def wait_for(self) -> Any:
+        if hasattr(self, "callback"):
+            self.callback("pixi installed")
         return self.value
 
 
@@ -334,3 +339,14 @@ def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
     else:
         assert augmented.get("pip") == ["numpy==2.4.2", existing_dependency]
         assert "local" not in augmented
+
+
+def test_get_or_create_forwards_provision_events_before_wait() -> None:
+    manager = _runtime_manager_with_core_dependency("bioimageflow-core==0.4.1")
+    spec = EnvironmentSpec(name="segment", dependencies={"python": "3.11"})
+    events: list[str] = []
+
+    manager.get_or_create(spec, on_provision_event=events.append)
+    manager.get_or_create(spec, on_provision_event=events.append)
+
+    assert events == ["pixi installed"]

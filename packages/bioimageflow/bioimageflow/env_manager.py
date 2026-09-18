@@ -8,7 +8,7 @@ import re
 import threading
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
@@ -21,6 +21,7 @@ from wetlands import (
     EnvironmentSpec,
     LocalPackage,
     ManagedEnvironment,
+    OperationEvent,
     WorkerPool,
 )
 
@@ -372,8 +373,15 @@ class WetlandsEnvManager:
         env_spec: BioImageFlowEnvironmentSpec,
         max_workers: int = 1,
         worker_timeout: float | None = None,
+        *,
+        on_provision_event: Callable[[OperationEvent], None] | None = None,
     ) -> WorkerPool:
-        """Provision an environment and return its cached Wetlands 2 pool."""
+        """Provision an environment and return its cached Wetlands 2 pool.
+
+        ``on_provision_event`` receives Wetlands setup events, including sanitized
+        Pixi output, before this method waits for provisioning to finish. It is
+        unused when an already running pool is returned.
+        """
         wetlands_spec = self._to_wetlands_spec(env_spec)
         config = (max_workers, worker_timeout)
         with self._lock:
@@ -391,10 +399,10 @@ class WetlandsEnvManager:
                         f"worker_timeout={self._pool_configs[env_spec.name][1]}."
                     )
                 return existing
-            environment = self._manager.provision(
-                env_spec.name,
-                wetlands_spec,
-            ).wait_for()
+            operation = self._manager.provision(env_spec.name, wetlands_spec)
+            if on_provision_event is not None:
+                operation.listen(on_provision_event)
+            environment = operation.wait_for()
             pool = environment.start(
                 workers=max_workers,
                 worker_timeout=worker_timeout,
