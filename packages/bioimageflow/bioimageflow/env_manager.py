@@ -189,21 +189,24 @@ def _reset_shared_manager() -> None:
 
 def _translate_conda(
     values: list[Any],
-    channels: list[str],
+    channels: list[str] | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     translated: list[str] = []
-    ordered_channels = list(channels)
+    prefix_channels: list[str] = []
     for value in values:
         if not isinstance(value, str):
             raise TypeError(f"Wetlands 2 Conda dependencies must be strings, got {value!r}.")
         if "::" in value:
             channel, value = value.split("::", 1)
-            if channel and channel not in ordered_channels:
-                ordered_channels.append(channel)
+            if channel:
+                prefix_channels.append(channel)
         translated.append(value)
-    if not ordered_channels:
-        ordered_channels.append("conda-forge")
-    return tuple(translated), tuple(ordered_channels)
+    ordered_channels = (
+        [*prefix_channels, "conda-forge"]
+        if channels is None
+        else [*channels, *prefix_channels]
+    )
+    return tuple(translated), tuple(dict.fromkeys(ordered_channels))
 
 
 def _translate_local_dependency(value: Any) -> LocalPackage:
@@ -340,8 +343,12 @@ class WetlandsEnvManager:
         if re.fullmatch(r"[0-9]+\.[0-9]+", python):
             python = f"{python}.*"
         raw_conda = list(dependencies.get("conda", []))
-        raw_channels = list(dependencies.get("channels", []))
-        if any(not isinstance(channel, str) for channel in raw_channels):
+        raw_channels = (
+            list(dependencies["channels"]) if "channels" in dependencies else None
+        )
+        if raw_channels is not None and any(
+            not isinstance(channel, str) for channel in raw_channels
+        ):
             raise TypeError("Environment channels must be strings.")
         conda, channels = _translate_conda(raw_conda, raw_channels)
         pypi, local_from_pypi = _translate_pypi_dependencies(
