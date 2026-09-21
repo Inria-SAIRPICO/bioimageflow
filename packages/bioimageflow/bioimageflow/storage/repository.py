@@ -91,9 +91,7 @@ class _RepositoryMixin:
         if not tool_identity or not engine:
             raise ValueError("Tool identity and engine must be non-empty.")
         node_key = _validate_node_key(node_key)
-        attempt_dir = (
-            self.result_dir(result_key) / "attempts" / attempt_id
-        )
+        attempt_dir = self.result_dir(result_key) / "attempts" / attempt_id
         attempt_dir.mkdir(parents=True, exist_ok=True)
         if attempt_dir.is_symlink():
             raise CacheCorruptionError("Attempt directory must not be a symlink.")
@@ -129,12 +127,7 @@ class _RepositoryMixin:
             raise ValueError(f"Invalid cache attempt status: {status!r}")
         if not re.fullmatch(r"att_[0-9a-f]{32}", attempt_id):
             raise ValueError(f"Invalid attempt ID: {attempt_id!r}")
-        path = (
-            self.result_dir(result_key)
-            / "attempts"
-            / attempt_id
-            / "attempt.json"
-        )
+        path = self.result_dir(result_key) / "attempts" / attempt_id / "attempt.json"
         try:
             payload = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
@@ -290,13 +283,9 @@ class _RepositoryMixin:
             "task_id": task_id,
         }
         if any(payload.get(key) != value for key, value in expected.items()):
-            raise CacheCorruptionError(
-                "Backend task diagnostic correlation mismatch."
-            )
+            raise CacheCorruptionError("Backend task diagnostic correlation mismatch.")
         if payload.get("status") != "submitted":
-            raise CacheCorruptionError(
-                "Backend task diagnostic is already terminal."
-            )
+            raise CacheCorruptionError("Backend task diagnostic is already terminal.")
         payload["status"] = status
         payload["completed_at"] = datetime.now(timezone.utc).isoformat()
         payload["error_type"] = error_type
@@ -461,6 +450,50 @@ class _RepositoryMixin:
         if manifest.record_id != pointer.record_id:
             raise CacheCorruptionError("Current pointer record ID mismatch.")
         return pointer
+
+    def quarantine_corrupt_record(
+        self,
+        result_key: str,
+        record_id: str,
+    ) -> Path | None:
+        """Move one safely identified corrupt record out of ``records/``.
+
+        A valid immutable record is never moved merely because its current
+        pointer is malformed. Missing, unsafe, and symlinked record paths are
+        left untouched.
+        """
+        try:
+            safe_record_id = _validate_record_id(record_id)
+        except ValueError:
+            return None
+        result_dir = self.result_dir(result_key)
+        records_dir = result_dir / "records"
+        record_dir = records_dir / safe_record_id
+        if (
+            not record_dir.exists()
+            or record_dir.is_symlink()
+            or not record_dir.is_dir()
+        ):
+            return None
+        try:
+            record_dir.resolve().relative_to(records_dir.resolve())
+        except ValueError:
+            return None
+        try:
+            self._load_record_manifest(result_key, safe_record_id)
+        except CacheCorruptionError:
+            pass
+        else:
+            return None
+        quarantine_dir = result_dir / "quarantine"
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        if quarantine_dir.is_symlink():
+            raise CacheCorruptionError(
+                "Cache quarantine directory must not be a symlink."
+            )
+        destination = quarantine_dir / f"{safe_record_id}.{uuid.uuid4().hex}"
+        os.replace(record_dir, destination)
+        return destination
 
     def select_current_record(
         self,

@@ -45,17 +45,29 @@ def test_failed_source_processing_tool_does_not_publish_current(tmp_path: Path) 
     assert _current_pointer_files(storage_path) == []
 
 
-def test_source_processing_tool_rejects_templated_output_outside_staging(
+def test_source_processing_tool_classifies_templated_external_output_by_value(
     tmp_path: Path,
 ) -> None:
     storage_path = tmp_path / "results"
 
     with Workflow(engine="direct", storage_path=storage_path) as wf:
         node = EscapingSourceAssetWriter()(directory=tmp_path)
-        with pytest.raises(CacheCorruptionError):
-            wf.compute(node)
+        result = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
 
-    assert _current_pointer_files(storage_path) == []
+    assert result.loc["0", "mask"] == str(tmp_path / "outside.txt")
+    pointer = Storage(storage_path).load_current(result_key)
+    assert pointer is not None
+    record_dir = (
+        Storage(storage_path).result_dir(result_key) / "records" / pointer.record_id
+    )
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    path_schema = next(
+        column
+        for column in manifest["dataframe"]["logical_schema"]
+        if column["name"] == "mask"
+    )
+    assert path_schema["kind"] == "external_path"
 
 
 @pytest.mark.parametrize(
@@ -292,4 +304,67 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
             staging_assets_dir=assets_dir,
             path_columns={"directory", "child"},
             owned_path_columns={"directory", "child"},
+        )
+
+
+def test_processing_tool_publish_rejects_relative_external_path(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
+        storage_path,
+        "RelativeWriter_1",
+        "sig",
+        run_id="run_4123456789abcdef0123456789abcdef",
+        invocation_id="inv_4123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:RelativeWriter",
+    )
+
+    with pytest.raises(CacheCorruptionError, match="relative path"):
+        processing_publish(
+            storage_path,
+            "RelativeWriter_1",
+            "sig",
+            pd.DataFrame({"output": ["relative.txt"]}, index=["0"]),
+            result_key=result_key,
+            attempt_id=attempt_id,
+            run_id="run_4123456789abcdef0123456789abcdef",
+            staging_dir=staging_dir,
+            staging_assets_dir=assets_dir,
+            path_columns={"output"},
+            owned_path_columns=set(),
+        )
+
+
+def test_processing_tool_publish_rejects_mixed_path_ownership(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    result_key, attempt_id, staging_dir, assets_dir = processing_prepare_attempt(
+        storage_path,
+        "MixedWriter_1",
+        "sig",
+        run_id="run_5123456789abcdef0123456789abcdef",
+        invocation_id="inv_5123456789abcdef0123456789abcdef",
+        engine="direct:parallel",
+        tool_identity="tests:MixedWriter",
+    )
+    owned = assets_dir / "owned.txt"
+    owned.write_text("owned")
+    external = tmp_path / "external.txt"
+    external.write_text("external")
+
+    with pytest.raises(CacheCorruptionError, match="mixes record-owned assets"):
+        processing_publish(
+            storage_path,
+            "MixedWriter_1",
+            "sig",
+            pd.DataFrame(
+                {"output": [str(owned), str(external)]},
+                index=["0", "1"],
+            ),
+            result_key=result_key,
+            attempt_id=attempt_id,
+            run_id="run_5123456789abcdef0123456789abcdef",
+            staging_dir=staging_dir,
+            staging_assets_dir=assets_dir,
+            path_columns={"output"},
+            owned_path_columns=set(),
         )

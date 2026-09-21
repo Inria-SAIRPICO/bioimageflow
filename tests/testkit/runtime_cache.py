@@ -213,6 +213,28 @@ class SourceExternalPaths(ProcessingTool):
         ]
 
 
+class DynamicSourceAssets(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
+    display_name = "Dynamic Source Assets"
+    environment = EnvironmentSpec(name="dynamic_source_assets", dependencies={})
+    executions = 0
+
+    class Outputs(IOModel):
+        path: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
+
+    def process_row(
+        self, arguments: Arguments, *, context: ExecutionContext | None = None
+    ):
+        type(self).executions += 1
+        assert context is not None
+        results = []
+        for name in ("alpha.txt", "beta.txt", "gamma.txt"):
+            path = context.assets_dir / name
+            path.write_text(name)
+            results.append(self.Outputs(path=path))
+        return results
+
+
 class FailingSourceAssetWriter(ProcessingTool):
     row_consumption = RowConsumption.MAPPED
     display_name = "Failing Source Asset Writer"

@@ -7,18 +7,21 @@ from pathlib import Path
 
 
 import pandas as pd
+import pytest
 
 
 from bioimageflow import NodePlanStatus, ProgressEvent, Workflow
 
 
 from bioimageflow.storage import (
+    CacheCorruptionError,
     Storage,
 )
 
 
 from tests.testkit.runtime_cache import (
     DefaultTemplateZeroRowWriter,
+    DynamicSourceAssets,
     SourceAssetWriter,
     SourceExternalPaths,
     ZeroRowAssetWriter,
@@ -68,6 +71,46 @@ def test_source_processing_tool_publishes_owned_asset_record_and_uses_cache_hit(
     pd.testing.assert_frame_equal(first, second)
     assert SourceAssetWriter.executions == 1
     assert ("SourceAssetWriter_1", "cached") in events
+
+
+def test_dynamic_context_assets_are_record_owned_and_cwd_independent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    storage_path = tmp_path / "results"
+    DynamicSourceAssets.executions = 0
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = DynamicSourceAssets()()
+        first = wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    path_schema = next(
+        column
+        for column in manifest["dataframe"]["logical_schema"]
+        if column["name"] == "path"
+    )
+    assert path_schema["kind"] == "record_asset"
+    assert {entry["path"] for entry in manifest["outputs"]} == {
+        "assets/alpha.txt",
+        "assets/beta.txt",
+        "assets/gamma.txt",
+    }
+
+    other_cwd = tmp_path / "other-cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = DynamicSourceAssets()()
+        assert wf.plan()[node.name].status is NodePlanStatus.CACHED
+        second = wf.compute(node)
+
+    pd.testing.assert_frame_equal(first, second)
+    assert DynamicSourceAssets.executions == 1
 
 
 def test_zero_row_processing_tool_publishes_written_template_asset_without_sentinel_row(
@@ -365,3 +408,74 @@ def test_source_processing_tool_invalidate_removes_corrupt_current_with_default_
 
     assert _invalidated_node_names(cleared) == {node_name}
     assert not current_path.exists()
+
+
+def test_corrupt_pointer_does_not_quarantine_its_valid_record(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="valid-record")
+        wf.compute(node)
+        result_key = _planned_result_key(wf, node.name)
+
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    current_path = storage.result_dir(result_key) / "current.json"
+    raw_pointer = json.loads(current_path.read_text())
+    raw_pointer["manifest"] = "../unsafe-manifest.json"
+    current_path.write_text(json.dumps(raw_pointer))
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="valid-record")
+        selection = _selection_for(wf.invalidate([node.name]), node.name)
+
+    assert selection.status == "corrupt_removed"
+    assert selection.selected_record_id == pointer.record_id
+    assert record_dir.is_dir()
+    assert not (storage.result_dir(result_key) / "quarantine").exists()
+
+
+def test_corrupt_selected_record_is_diagnostic_in_plan_and_quarantined_on_clear(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "results"
+    SourceAssetWriter.executions = 0
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="repair")
+        wf.compute(node)
+        node_name = node.name
+        result_key = _planned_result_key(wf, node_name)
+
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    (record_dir / "assets" / "mask_0.txt").write_text("corrupt")
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="repair")
+        plan = wf.plan()
+        assert plan[node.name].status is NodePlanStatus.CORRUPT
+        assert plan[node.name].diagnostic is not None
+        with pytest.raises(CacheCorruptionError):
+            wf.compute(node)
+        cleared = wf.invalidate([node.name])
+
+    selection = _selection_for(cleared, node_name)
+    assert selection.status == "corrupt_removed"
+    assert not record_dir.exists()
+    quarantined = list(
+        (storage.result_dir(result_key) / "quarantine").glob(f"{pointer.record_id}.*")
+    )
+    assert len(quarantined) == 1
+
+    with Workflow(engine="direct", storage_path=storage_path) as wf:
+        node = SourceAssetWriter()(text="repair")
+        repaired = wf.compute(node)
+        assert wf.plan()[node.name].status is NodePlanStatus.CACHED
+
+    assert Path(repaired.loc["0", "mask"]).read_text() == "repair"
+    assert SourceAssetWriter.executions == 2

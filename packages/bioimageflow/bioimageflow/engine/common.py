@@ -403,6 +403,9 @@ class NodePlanStatus(str, Enum):
         At least one upstream selected record is not known yet, so the
         node's final result key cannot be determined from a stable
         record graph snapshot.
+    CORRUPT
+        Cache metadata or the selected immutable record is corrupt. Planning
+        reports the diagnostic, while normal lookup and execution stay strict.
     """
 
     CACHED = "cached"
@@ -410,6 +413,7 @@ class NodePlanStatus(str, Enum):
     UNEXECUTED = "unexecuted"
     SKIPPED = "skipped"
     PENDING_UPSTREAM = "pending_upstream"
+    CORRUPT = "corrupt"
 
 
 @dataclass(frozen=True)
@@ -451,6 +455,7 @@ class NodePlan:
     final_result_key: str | None = None
     selected_record_id: str | None = None
     pending_upstreams: tuple[str, ...] = ()
+    diagnostic: str | None = None
 
     @property
     def cached(self) -> bool:

@@ -357,7 +357,7 @@ def test_column_bound_processing_tool_rejects_unsafe_output_template_before_exec
     assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
 
 
-def test_column_bound_processing_tool_rejects_templated_output_outside_staging(
+def test_column_bound_processing_tool_classifies_actual_output_outside_staging_as_external(
     tmp_path: Path,
 ) -> None:
     storage_path = tmp_path / "results"
@@ -365,8 +365,19 @@ def test_column_bound_processing_tool_rejects_templated_output_outside_staging(
     with Workflow(engine="direct", storage_path=storage_path) as wf:
         table = CountingTable()(value=8)
         node = EscapingColumnBoundWriter()(label=table["label"], directory=tmp_path)
-        with pytest.raises(CacheCorruptionError):
-            wf.compute(node)
+        frame = wf.compute(node)
         result_key = _planned_result_key(wf, node.name)
 
-    assert not (Storage(storage_path).result_dir(result_key) / "current.json").exists()
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    output_schema = next(
+        column
+        for column in manifest["dataframe"]["logical_schema"]
+        if column["name"] == "output"
+    )
+    assert output_schema["kind"] == "external_path"
+    assert all(Path(value).is_absolute() for value in frame["output"])
+    assert all(not Path(value).is_relative_to(record_dir) for value in frame["output"])

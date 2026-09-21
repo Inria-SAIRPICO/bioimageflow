@@ -210,7 +210,12 @@ def _processing_manifest_entries_and_dataframe(
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]]
     | None = None,
     declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
-) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path]]:
+) -> tuple[
+    pd.DataFrame,
+    list[dict[str, Any]],
+    dict[str, Path],
+    dict[str, str],
+]:
     stored = df.copy()
     outputs: list[dict[str, Any]] = []
     owned_assets: dict[str, Path] = {}
@@ -218,7 +223,26 @@ def _processing_manifest_entries_and_dataframe(
     seen_scalar_outputs: set[tuple[str, str, str]] = set()
     staging_root = staging_assets_dir.resolve()
     shared_array_columns = shared_array_columns or set()
+    declared_record_asset_columns = set(owned_path_columns) | shared_array_columns
+    column_kinds: dict[str, str] = {
+        column: (
+            "record_asset"
+            if column in declared_record_asset_columns
+            else "external_path"
+        )
+        for column in path_columns | shared_array_columns
+    }
+    observed_column_kinds: dict[str, str] = {}
     from bioimageflow_core.types import SharedArray
+
+    def observe_column_kind(column: str, kind: str) -> None:
+        previous = observed_column_kinds.setdefault(column, kind)
+        if previous != kind:
+            raise CacheCorruptionError(
+                f"Path output column {column!r} mixes record-owned assets "
+                "and external paths."
+            )
+        column_kinds[column] = kind
 
     for column in shared_array_columns:
         if column not in stored.columns:
@@ -248,6 +272,7 @@ def _processing_manifest_entries_and_dataframe(
             outputs.append(entry)
             seen_outputs.add(("owned_asset", record_relative))
             stored.at[index, column] = record_relative
+            observe_column_kind(column, "record_asset")
     for column in path_columns:
         if column not in stored.columns:
             continue
@@ -267,15 +292,13 @@ def _processing_manifest_entries_and_dataframe(
                 )
             path = Path(value)
             if not path.is_absolute():
-                path = Path.cwd() / path
+                raise CacheCorruptionError(
+                    f"Declared path output column {column!r} contains a relative path: {path}"
+                )
             try:
                 path.resolve().relative_to(staging_root)
             except ValueError:
                 _reject_mutable_workspace_output(path, staging_assets_dir)
-                if column in owned_path_columns:
-                    raise CacheCorruptionError(
-                        f"Declared owned output asset is outside staging assets: {path}"
-                    )
                 external = path.as_posix()
                 entry_key = ("external_path", external)
                 if entry_key not in seen_outputs:
@@ -284,6 +307,7 @@ def _processing_manifest_entries_and_dataframe(
                     )
                     seen_outputs.add(entry_key)
                 stored.at[index, column] = external
+                observe_column_kind(column, "external_path")
                 continue
             record_relative = _add_processing_owned_asset(
                 path=path,
@@ -294,6 +318,7 @@ def _processing_manifest_entries_and_dataframe(
             )
             assert record_relative is not None
             stored.at[index, column] = record_relative
+            observe_column_kind(column, "record_asset")
     for column, row_index, value in declared_owned_artifact_paths or ():
         if column not in path_columns:
             continue
@@ -305,7 +330,9 @@ def _processing_manifest_entries_and_dataframe(
             )
         path = Path(value)
         if not path.is_absolute():
-            path = Path.cwd() / path
+            raise CacheCorruptionError(
+                f"Declared owned output path {column!r} contains a relative path: {path}"
+            )
         _add_processing_owned_asset(
             path=path,
             staging_root=staging_root,
@@ -324,4 +351,4 @@ def _processing_manifest_entries_and_dataframe(
             outputs=outputs,
             seen_outputs=seen_scalar_outputs,
         )
-    return stored, outputs, owned_assets
+    return stored, outputs, owned_assets, column_kinds

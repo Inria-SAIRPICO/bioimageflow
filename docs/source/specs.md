@@ -2461,6 +2461,9 @@ Published node outputs are immutable records under a result-key directory.
 If `current.json` is missing, cache lookup treats the result key as a miss.
 If `current.json` is corrupt, points outside the result-key directory, points to a missing record, or points to a record whose manifest is invalid, cache lookup raises a cache corruption error.
 Normal lookup must not repair corrupt `current.json` silently, must not choose a record by filesystem iteration, and must not replace an invalid current pointer during publication.
+Planning is the diagnostic exception: it catches `CacheCorruptionError` for the affected node, returns `NodePlanStatus.CORRUPT` with a diagnostic, and keeps projecting other branches.
+Execution and ordinary cache lookup continue to raise strictly.
+Invalidating a corrupt selection removes its current pointer and moves a safely identified invalid record directory into per-result quarantine so deterministic recomputation cannot collide with the corrupt immutable record ID.
 
 V1 uses one current-record policy: `first-valid`.
 If two workers publish different records for the same result key, the first valid current record remains selected and later differing records are conflicts or alternates.
@@ -2498,7 +2501,7 @@ for name, entry in plan.items():
     # entry.cached / entry.skipped: boolean shortcuts derived from status
 ```
 
-`NodePlan` is a frozen dataclass with fields `node_name`, `final_result_key`, `selected_record_id`, `status` (a `NodePlanStatus`), `upstream` (tuple of upstream scoped names), `pending_upstreams` (tuple of upstream scoped names whose selected records are not known yet), and `logical_signature` (a diagnostic value, not a cache key).
+`NodePlan` is a frozen dataclass with fields `node_name`, `final_result_key`, `selected_record_id`, `status` (a `NodePlanStatus`), `upstream` (tuple of upstream scoped names), `pending_upstreams` (tuple of upstream scoped names whose selected records are not known yet), `logical_signature` (a diagnostic value, not a cache key), and optional `diagnostic` text.
 The `cached` and `skipped` booleans are read-only shortcuts (`cached == status is CACHED`, `skipped == status is SKIPPED`).
 `NodePlanStatus` values:
 
@@ -2509,9 +2512,10 @@ The `cached` and `skipped` booleans are read-only shortcuts (`cached == status i
 | `UNEXECUTED` | No reusable record exists yet for this node/result lineage. |
 | `SKIPPED` | Node is disabled, or its upstream chain contains a disabled node. `final_result_key` and `selected_record_id` are `None`. |
 | `PENDING_UPSTREAM` | At least one consumed upstream selected record is not known until that upstream executes. `final_result_key` is `None`. |
+| `CORRUPT` | Planning found corrupt cache metadata or a corrupt selected record for this node. `diagnostic` describes the failure; downstream nodes remain projectable, while cache lookup and execution still raise strictly. |
 
 Nested workflow tools appear under scoped names `"workflow_node/internal_name"`.
-The outer workflow-node entry's status is `CACHED` only when every internal node is `CACHED`, otherwise `PENDING_UPSTREAM` or `UNEXECUTED` according to the internal state.
+The outer workflow-node entry is `CORRUPT` when an internal node is corrupt, is `CACHED` only when every internal node is `CACHED` or `SKIPPED`, and is otherwise `PENDING_UPSTREAM` or `UNEXECUTED` according to the internal state.
 `plan()` never launches a Wetlands environment.
 It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list[str]`) on a cyclic graph; call `workflow.validate()` first if a cycle is possible.
 

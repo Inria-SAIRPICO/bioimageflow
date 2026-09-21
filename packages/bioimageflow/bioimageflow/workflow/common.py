@@ -280,6 +280,11 @@ def _remove_current_selection(
         return None
     current_path = storage.result_dir(result_key) / "current.json"
     current_path.unlink()
+    if (
+        selection.status == "corrupt_removed"
+        and selection.selected_record_id is not None
+    ):
+        storage.quarantine_corrupt_record(result_key, selection.selected_record_id)
     return selection
 
 

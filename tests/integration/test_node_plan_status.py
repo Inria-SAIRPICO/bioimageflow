@@ -56,7 +56,9 @@ class TestNodePlanStatusBasics:
             assert entry.selected_record_id is not None
             assert entry.pending_upstreams == ()
 
-    def test_cached_plan_exposes_selected_record_from_current_pointer(self, tmp_path: Path) -> None:
+    def test_cached_plan_exposes_selected_record_from_current_pointer(
+        self, tmp_path: Path
+    ) -> None:
         src = tmp_path / "files"
         src.mkdir()
         (src / "a.txt").write_text("a")
@@ -100,7 +102,9 @@ class TestNodePlanStatusBasics:
         assert seg.selected_record_id is None
         assert seg.pending_upstreams == ()
 
-    def test_dataframe_tool_prior_selection_miss_after_parameter_change(self, tmp_path: Path) -> None:
+    def test_dataframe_tool_prior_selection_miss_after_parameter_change(
+        self, tmp_path: Path
+    ) -> None:
         src_a = tmp_path / "files_a"
         src_b = tmp_path / "files_b"
         src_a.mkdir()
@@ -145,3 +149,4 @@ class TestNodePlanStatusValues:
         assert NodePlanStatus.UNEXECUTED == "unexecuted"
         assert NodePlanStatus.SKIPPED == "skipped"
         assert NodePlanStatus.PENDING_UPSTREAM == "pending_upstream"
+        assert NodePlanStatus.CORRUPT == "corrupt"

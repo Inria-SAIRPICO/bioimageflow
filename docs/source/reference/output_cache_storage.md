@@ -312,6 +312,9 @@ An explicit repair operation may rebuild `current.json`, but it must report ambi
 
 If `current.json` is corrupt, points outside the result-key directory, or points to a missing or invalid record, lookup must raise a cache corruption error.
 Normal publication must not silently replace an invalid current pointer; repair is a separate operation.
+Diagnostic planning catches corruption per node, reports it without hydrating owned assets, and continues projecting unrelated graph branches.
+Execution and ordinary cache lookup remain strict and raise the original corruption error.
+Explicit invalidation removes the corrupt `current.json`; when its record ID and confined real directory can be identified safely and record validation fails, invalidation moves that directory from `records/` to the result key's `quarantine/` directory before recomputation.
 
 Required fields:
 
@@ -458,14 +461,22 @@ The engine must not infer asset columns heuristically from arbitrary strings.
 
 Before computing the record ID and writing the published dataframe, the engine canonicalizes declared path/asset columns:
 
+- Ownership is derived from every produced value after path normalization, not from whether an output template exists.
 - A declared `ProcessingTool.Outputs` path field whose value is under the attempt `staging/assets/` tree is an owned asset and is rewritten to a record-relative artifact reference such as `assets/mask.tif`.
+- An absolute path outside the attempt workspace is an `external_path`; a relative external path is rejected rather than resolved against the process working directory.
+- A logical output column cannot mix record-owned assets and external paths.
+- An empty declared path column retains its declared kind, including a templated record-owned output that produced no rows.
 - If a declared templated path output is resolved and the tool writes the file but returns zero dataframe rows, the written file is still published as an owned asset in `manifest.outputs`. The dataframe remains empty; publication must not add sentinel rows solely to expose artifacts.
 - If a table-only `ProcessingTool` declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes the declared scalar values as `scalar_output` entries in `manifest.outputs`. These entries are provenance metadata only; they are not rehydrated into dataframe rows.
-- A path under the attempt `staging/work/` tree is rejected unless the tool explicitly declared that file as an output artifact.
+- A path anywhere under the mutable attempt workspace outside `staging/assets/` is rejected.
 - Two outputs resolving to the same canonical `assets/...` path are an error unless the tool returns the same file and the manifest records it once.
 - Absolute paths, `..`, symlink escapes, and platform-specific aliases must not appear in record-owned path columns.
-- Source-tool and `DataFrameTool` path columns are external references unless explicitly declared as owned assets.
+- `DataFrameTool` path columns are external references. Processing outputs use their produced locations, including dynamic files written directly below `ExecutionContext.assets_dir` without output templates.
 - A legitimate external path, such as a source file path emitted by a source node, is represented as a declared external reference and included in result-key hash material using the path-based external identity.
+
+URLs remain ordinary source values rather than filesystem ownership declarations. A tool that downloads a URL into `ExecutionContext.assets_dir` produces a record-owned local asset when it returns that downloaded path.
+
+The canonicalized DataFrame and the computed column-kind map are one publication result. The engine uses that same result for the stored DataFrame, manifest logical schema, logical digest, and record ID, so identity is independent of the orchestrator's current working directory.
 
 Manifest entries distinguish owned assets from external references:
 

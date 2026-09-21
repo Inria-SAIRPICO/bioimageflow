@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from .common import (
     Any,
+    CacheCorruptionError,
     CycleError,
     CycleInWorkflowError,
     Node,
@@ -130,13 +131,38 @@ class _PlanningMixin:
             )
             return
 
-        cached_df, sig_hash = self._check_node_cache(
-            node,
-            results,
-            sig_hashes,
-            workflow,
-            hydrate_assets=False,
-        )
+        try:
+            cached_df, sig_hash = self._check_node_cache(
+                node,
+                results,
+                sig_hashes,
+                workflow,
+                hydrate_assets=False,
+            )
+        except CacheCorruptionError as exc:
+            upstream = tuple(self._plan_upstream_names(node))
+            sig_hashes[node] = None
+            diagnostic_hash = self._compute_pending_diagnostic_sig_hash(
+                node,
+                diagnostic_hashes,
+                workflow,
+            )
+            diagnostic_hashes[node] = diagnostic_hash
+            plan[node.name] = NodePlan(
+                node.name,
+                diagnostic_hash,
+                NodePlanStatus.CORRUPT,
+                upstream,
+                pending_upstreams=tuple(
+                    name
+                    for name in upstream
+                    if (entry := plan.get(name)) is not None
+                    and entry.selected_record_id is None
+                    and entry.status is not NodePlanStatus.SKIPPED
+                ),
+                diagnostic=str(exc),
+            )
+            return
         if sig_hash is None:
             upstream = tuple(self._plan_upstream_names(node))
             pending_upstreams = tuple(
@@ -242,7 +268,15 @@ class _PlanningMixin:
             for internal in node.internal_nodes
             if internal.name in plan
         ]
-        if any(
+        corrupt_entries = [
+            plan[internal.name]
+            for internal in node.internal_nodes
+            if internal.name in plan
+            and plan[internal.name].status is NodePlanStatus.CORRUPT
+        ]
+        if corrupt_entries:
+            status = NodePlanStatus.CORRUPT
+        elif any(
             status is NodePlanStatus.PENDING_UPSTREAM for status in internal_statuses
         ):
             status = NodePlanStatus.PENDING_UPSTREAM
@@ -276,6 +310,12 @@ class _PlanningMixin:
                     for pending in entry.pending_upstreams
                 )
             ),
+            diagnostic="; ".join(
+                entry.diagnostic
+                for entry in corrupt_entries
+                if entry.diagnostic is not None
+            )
+            or None,
         )
 
     def _plan_upstream_names(self, node: Node) -> list[str]:

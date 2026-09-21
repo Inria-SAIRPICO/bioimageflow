@@ -53,23 +53,19 @@ def processing_publish(
 ) -> pd.DataFrame:
     """Publish a source ProcessingTool attempt as an immutable record."""
     storage = Storage(storage_path)
-    stored_df, outputs, owned_assets = _processing_manifest_entries_and_dataframe(
-        df,
-        path_columns,
-        owned_path_columns,
-        staging_assets_dir,
-        shared_array_columns,
-        declared_owned_artifact_paths,
-        declared_scalar_outputs,
+    stored_df, outputs, owned_assets, column_kinds = (
+        _processing_manifest_entries_and_dataframe(
+            df,
+            path_columns,
+            owned_path_columns,
+            staging_assets_dir,
+            shared_array_columns,
+            declared_owned_artifact_paths,
+            declared_scalar_outputs,
+        )
     )
     staging_parquet = staging_dir / "dataframe.parquet"
     _write_canonical_parquet(stored_df, staging_parquet)
-    record_asset_columns = set(owned_path_columns)
-    record_asset_columns.update(shared_array_columns or set())
-    column_kinds = {
-        column: ("record_asset" if column in record_asset_columns else "external_path")
-        for column in path_columns | (shared_array_columns or set())
-    }
     logical_schema, logical_digest = canonical_dataframe_identity(
         stored_df,
         declared_columns=[str(column) for column in stored_df.columns],
