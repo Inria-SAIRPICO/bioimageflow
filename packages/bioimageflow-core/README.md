@@ -7,7 +7,8 @@ It is installed in the main process and in tool worker environments.
 It declares NumPy because shared-memory helpers expose NumPy array views at runtime.
 It declares `packaging` to validate portable PEP 440 viewer-package constraints without importing napari or plugin discovery code.
 The `bioimageflow` orchestrator injects a pinned published `bioimageflow-core` package into Wetlands worker environments by default.
-During source development, set `BIOIMAGEFLOW_USE_LOCAL_CORE=1` before creating worker environments to inject this local editable project instead.
+During source development, set `BIOIMAGEFLOW_CORE_SOURCE` to this project directory before creating worker environments to validate and inject it as an editable dependency.
+The legacy `BIOIMAGEFLOW_USE_LOCAL_CORE=1` mode requires the orchestrator environment to import this package from its editable source checkout.
 
 Install:
 

@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow"
-version = "0.8.4"
+version = "0.8.5"
 description = "Python library for orchestrating bioimage analysis workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
     "pandas>=2.0.0",
     "pyarrow>=12.0.0",
     "pydantic>=2.0.0",
+    "tomli>=2.0.1; python_version < '3.11'",
     "wetlands>=2.3.3,<3",
 ]
 
@@ -37,9 +38,7 @@ bioimageflow-cluster-agent = "bioimageflow.launcher.cluster_agent:main"
 [project.optional-dependencies]
 parsl = ["parsl>=2026.5.25,<2026.6"]
 psij = ["psij-python>=0.9.11,<0.10"]
-cluster = [
-    "tomli>=2.0; python_version < '3.11'",
-]
+cluster = []
 
 [project.urls]
 Homepage = "https://github.com/Inria-SAIRPICO/bioimageflow"

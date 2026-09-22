@@ -32,4 +32,5 @@ uv run pytest packages/bioimageflow tests
 
 Wetlands worker environments install `bioimageflow-core` independently from the orchestrator environment.
 By default `WetlandsEnvManager` injects `bioimageflow-core==<installed version>` for reproducible runtime environments.
-Set `BIOIMAGEFLOW_USE_LOCAL_CORE=1` while developing from a source checkout to inject the local editable `bioimageflow-core` project into newly created worker environments.
+For regular source development, set `BIOIMAGEFLOW_CORE_SOURCE=/absolute/path/to/bioimageflow-core` to validate and inject that project as an editable dependency without installing it into the orchestrator environment.
+The legacy `BIOIMAGEFLOW_USE_LOCAL_CORE=1` mode remains available when the orchestrator already imports `bioimageflow-core` from an editable source checkout.

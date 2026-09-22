@@ -107,7 +107,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.8.4"
+version = "0.8.5"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -118,13 +118,11 @@ dependencies = [
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pyarrow" },
     { name = "pydantic" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "wetlands" },
 ]
 
 [package.optional-dependencies]
-cluster = [
-    { name = "tomli", marker = "python_full_version < '3.11'" },
-]
 parsl = [
     { name = "parsl" },
 ]
@@ -142,7 +140,7 @@ requires-dist = [
     { name = "psij-python", marker = "extra == 'psij'", specifier = ">=0.9.11,<0.10" },
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'cluster'", specifier = ">=2.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
     { name = "wetlands", specifier = ">=2.3.3,<3" },
 ]
 provides-extras = ["parsl", "psij", "cluster"]

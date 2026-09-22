@@ -360,10 +360,8 @@ def test_orchestrator_wheel_declares_bounded_runtime_extras(
     assert packaging_requirement.marker is None
     assert len(tomli_requirements) == 1
     [tomli_requirement] = tomli_requirements
-    assert str(tomli_requirement.specifier) == ">=2.0"
-    assert str(tomli_requirement.marker) == (
-        'python_version < "3.11" and extra == "cluster"'
-    )
+    assert str(tomli_requirement.specifier) == ">=2.0.1"
+    assert str(tomli_requirement.marker) == 'python_version < "3.11"'
     assert len(parsl_requirements) == 1
     [parsl_requirement] = parsl_requirements
     assert str(parsl_requirement.specifier) == "<2026.6,>=2026.5.25"

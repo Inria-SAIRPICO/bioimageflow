@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import threading
 import urllib.parse
 import urllib.request
@@ -15,6 +16,11 @@ from enum import Enum
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Literal
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -39,6 +45,7 @@ _LOCAL_PYPI_REFERENCE = re.compile(
     r"(?:\[(?P<extras>[A-Za-z0-9_.,-]+)\])?"
     r"\s*@\s*(?P<url>file://\S+)\s*$"
 )
+_CORE_SOURCE_ENV = "BIOIMAGEFLOW_CORE_SOURCE"
 
 
 class CoreRequirementConflictError(ValueError):
@@ -89,6 +96,65 @@ def _local_bioimageflow_core_project() -> Path | None:
     return None
 
 
+def _validated_bioimageflow_core_project(
+    value: str | Path,
+    *,
+    setting: str = _CORE_SOURCE_ENV,
+) -> Path:
+    """Return a validated local bioimageflow-core project directory."""
+
+    if not str(value).strip():
+        raise RuntimeError(f"{setting} must name a bioimageflow-core source directory.")
+    project_dir = Path(value).expanduser().resolve()
+    if not project_dir.is_dir():
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, which is not an existing directory."
+        )
+    pyproject = project_dir / "pyproject.toml"
+    if not pyproject.is_file():
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, which has no pyproject.toml."
+        )
+    try:
+        document = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, whose pyproject.toml cannot be read."
+        ) from exc
+    project = document.get("project")
+    name = project.get("name") if isinstance(project, dict) else None
+    if not isinstance(name, str) or canonicalize_name(name) != "bioimageflow-core":
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, whose project name is not "
+            "'bioimageflow-core'."
+        )
+    raw_version = project.get("version") if isinstance(project, dict) else None
+    if not isinstance(raw_version, str):
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, whose project version is unavailable."
+        )
+    try:
+        Version(raw_version)
+    except InvalidVersion as exc:
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, whose project version "
+            f"{raw_version!r} is invalid."
+        ) from exc
+    package_dir = project_dir / "bioimageflow_core"
+    if not package_dir.is_dir():
+        raise RuntimeError(
+            f"{setting} points to {project_dir}, which has no bioimageflow_core package."
+        )
+    return project_dir
+
+
+def _bioimageflow_core_source_from_environment() -> Path | None:
+    value = os.environ.get(_CORE_SOURCE_ENV)
+    if value is None or not value.strip():
+        return None
+    return _validated_bioimageflow_core_project(value)
+
+
 def _bioimageflow_core_editable_dependency(project_dir: Path) -> dict[str, Any]:
     """Return BioImageFlow's portable local-dependency declaration."""
     return {
@@ -126,6 +192,9 @@ def _env_var_is_truthy(name: str) -> bool:
 
 
 def _configured_core_dependency() -> Any:
+    source = _bioimageflow_core_source_from_environment()
+    if source is not None:
+        return _bioimageflow_core_editable_dependency(source)
     if _env_var_is_truthy("BIOIMAGEFLOW_USE_LOCAL_CORE"):
         project_dir = _local_bioimageflow_core_project()
         if project_dir is None:
@@ -452,6 +521,7 @@ class WetlandsEnvManager:
         network: Mapping[str, str] | None = None,
         termination_grace: float | None = None,
         bioimageflow_core_dependency: Any | None = None,
+        bioimageflow_core_source: str | Path | None = None,
         use_local_bioimageflow_core: bool | None = None,
     ) -> None:
         self._manager = get_shared_environment_manager(
@@ -468,16 +538,40 @@ class WetlandsEnvManager:
         if bioimageflow_core_dependency is not None:
             self._bioimageflow_core_dependency = bioimageflow_core_dependency
         else:
+            if (
+                bioimageflow_core_source is not None
+                and use_local_bioimageflow_core is False
+            ):
+                raise ValueError(
+                    "bioimageflow_core_source cannot be combined with "
+                    "use_local_bioimageflow_core=False."
+                )
+            if use_local_bioimageflow_core is False:
+                configured_source = None
+            elif bioimageflow_core_source is not None:
+                configured_source = _validated_bioimageflow_core_project(
+                    bioimageflow_core_source,
+                    setting="bioimageflow_core_source",
+                )
+            else:
+                configured_source = _bioimageflow_core_source_from_environment()
             if use_local_bioimageflow_core is None:
                 use_local_bioimageflow_core = _env_var_is_truthy(
                     "BIOIMAGEFLOW_USE_LOCAL_CORE"
                 )
             self._bioimageflow_core_dependency = self._default_core_dependency(
-                use_local_bioimageflow_core=use_local_bioimageflow_core
+                use_local_bioimageflow_core=use_local_bioimageflow_core,
+                bioimageflow_core_source=configured_source,
             )
 
     @staticmethod
-    def _default_core_dependency(*, use_local_bioimageflow_core: bool) -> Any:
+    def _default_core_dependency(
+        *,
+        use_local_bioimageflow_core: bool,
+        bioimageflow_core_source: Path | None = None,
+    ) -> Any:
+        if bioimageflow_core_source is not None:
+            return _bioimageflow_core_editable_dependency(bioimageflow_core_source)
         if not use_local_bioimageflow_core:
             return _bioimageflow_core_pin()
         project_dir = _local_bioimageflow_core_project()
