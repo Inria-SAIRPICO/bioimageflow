@@ -11,6 +11,7 @@ import pytest
 
 from bioimageflow import ProgressEvent, Workflow
 from bioimageflow.engine import WorkflowCancelledError
+from bioimageflow.env_manager import _reset_shared_manager
 from tests.testkit.integration_tools import FileLoader
 
 from .wetlands_test_tools import CancellableBatchTool, CancellableRowTool
@@ -19,9 +20,16 @@ pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
 
 
 @pytest.fixture(autouse=True)
-def _disable_wetlands():
+def _disable_wetlands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Override the integration fixture that disables Wetlands."""
-    yield
+    core_source = Path(__file__).resolve().parents[2] / "packages" / "bioimageflow-core"
+    monkeypatch.setenv("BIOIMAGEFLOW_CORE_SOURCE", str(core_source))
+    monkeypatch.setenv("BIOIMAGEFLOW_WETLANDS", str(tmp_path / "wetlands"))
+    _reset_shared_manager()
+    try:
+        yield
+    finally:
+        _reset_shared_manager()
 
 
 @pytest.fixture
