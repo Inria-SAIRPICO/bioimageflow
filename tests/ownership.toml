@@ -21,6 +21,7 @@ precommit_suites = ["unit", "integration"]
 name = "engine"
 sources = [
     "packages/bioimageflow/bioimageflow/backends.py",
+    "packages/bioimageflow/bioimageflow/_core_dependency.py",
     "packages/bioimageflow/bioimageflow/engine",
     "packages/bioimageflow/bioimageflow/env_manager.py",
     "packages/bioimageflow/bioimageflow/events.py",
@@ -28,6 +29,7 @@ sources = [
 ]
 edit_tests = [
     "tests/unit/test_env_manager_core_dependency.py",
+    "tests/unit/test_env_manager_core_source.py",
     "tests/unit/test_environment_lifecycle.py",
     "tests/unit/worker_timeout",
     "tests/integration/test_compute_steps.py",
