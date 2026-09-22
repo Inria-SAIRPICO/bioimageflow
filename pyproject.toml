@@ -37,7 +37,7 @@ dev = [
     "pyyaml>=6.0.3",
     "scikit-image>=0.21.0",
     "ipython>=8.38.0",
-    "wetlands>=2.3.3,<3",
+    "wetlands>=2.4.2,<3",
 ]
 
 [tool.uv.workspace]

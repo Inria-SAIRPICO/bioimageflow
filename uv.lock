@@ -107,7 +107,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.8.5"
+version = "0.8.6"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -141,7 +141,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=2.3.3,<3" },
+    { name = "wetlands", specifier = ">=2.4.2,<3" },
 ]
 provides-extras = ["parsl", "psij", "cluster"]
 
@@ -447,7 +447,7 @@ dev = [
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile", specifier = ">=2023.7.10" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=2.3.3,<3" },
+    { name = "wetlands", specifier = ">=2.4.2,<3" },
 ]
 
 [[package]]
@@ -3213,7 +3213,7 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "2.3.3"
+version = "2.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
@@ -3221,7 +3221,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/cf/55cc7c904c273077f8d0d8d42218145b28c4cea3d2877d0b3890e748acdc/wetlands-2.3.3.tar.gz", hash = "sha256:8fe278dca5877f731913ba6f291d8eee7b3bcfa1e1d35e9bdc9f6823c295eb7f", size = 309077, upload-time = "2026-08-07T10:33:44.903Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/7b/787c6a5c9d20f4b2ca6b43d86045a4fe2a9898e285cbd28d2a2b668c64c7/wetlands-2.4.2.tar.gz", hash = "sha256:564a7e20679196f3bd56ef32a16e7684c6440c0c74998034cc68ad344e6ea739", size = 343735, upload-time = "2026-09-22T16:51:21.214Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/85/193fa8f26c3a1fabd9a3eb6cc451c2c49ff3320d219e61cc5f155b2f6d79/wetlands-2.3.3-py3-none-any.whl", hash = "sha256:673e71392eacadf69155386cb6100d9ad7a43d60600c7db9f22267e57ba64469", size = 124481, upload-time = "2026-08-07T10:33:45.913Z" },
+    { url = "https://files.pythonhosted.org/packages/15/3c/e2c61c4aadf4011f8cd340db6cb50248a83ded86639516af1f310a304fe8/wetlands-2.4.2-py3-none-any.whl", hash = "sha256:9ff0b016fb46dfd26edef5bcdda516aa80cc14eef85c7b487d8f391d89df2f17", size = 138991, upload-time = "2026-09-22T16:51:19.629Z" },
 ]
