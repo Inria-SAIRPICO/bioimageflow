@@ -24,6 +24,7 @@ ValidationErrorKind = Literal[
     "parameter_invalid",
     "unknown_tool",
     "duplicate_name",
+    "environment_incompatible",
     "construction_failed",
     "source_tool_upstream",
 ]

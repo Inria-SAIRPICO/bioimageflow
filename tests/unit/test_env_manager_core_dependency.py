@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -57,10 +58,26 @@ class _Operation:
 class _MutatingWetlandsManager:
     def __init__(self) -> None:
         self.provisioned_specs: list[Any] = []
+        self.replace_existing: list[bool] = []
         self.environment = _MutatingWetlandsEnvironment()
+        self.infos: tuple[Any, ...] = ()
 
-    def provision(self, name: str, spec: Any) -> _Operation:
+    def managed_environments(self) -> tuple[Any, ...]:
+        return self.infos
+
+    def provision(
+        self, name: str, spec: Any, *, replace_existing: bool = False
+    ) -> _Operation:
+        _ = name, replace_existing
         self.provisioned_specs.append(spec)
+        self.replace_existing.append(replace_existing)
+        self.infos = (
+            SimpleNamespace(
+                name=name,
+                ready=True,
+                recipe_hash=spec.recipe_hash,
+            ),
+        )
         return _Operation(self.environment)
 
 
@@ -277,7 +294,13 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
             self.provisioned_specs: list[Any] = []
             self.env = _MutatingWetlandsEnvironment()
 
-        def provision(self, name: str, spec: Any) -> _Operation:
+        def managed_environments(self) -> tuple[Any, ...]:
+            return ()
+
+        def provision(
+            self, name: str, spec: Any, *, replace_existing: bool = False
+        ) -> _Operation:
+            _ = name, replace_existing
             self.provisioned_specs.append(spec)
             if len(self.provisioned_specs) > 1:
                 raise RuntimeError("wetlands recipe mismatch")
@@ -303,18 +326,30 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
     assert manager._manager.env.start_count == 1
 
 
+def test_augment_dependencies_replaces_compatible_core_constraint_with_authoritative_pin() -> None:
+    manager = _manager_with_core_dependency("bioimageflow-core==0.4.1")
+    dependencies = {
+        "python": "3.9",
+        "pip": ["numpy==2.4.2", "bioimageflow-core>=0.4,<0.5"],
+    }
+
+    augmented = manager._augment_dependencies(dependencies)
+
+    assert augmented["pip"] == ["numpy==2.4.2", "bioimageflow-core==0.4.1"]
+
+
 @pytest.mark.parametrize(
     "existing_dependency",
     [
         "bioimageflow-core==0.1.4",
         {
             "name": "bioimageflow-core",
-            "path": "/repo/packages/bioimageflow-core",
+            "path": "/repo/other-bioimageflow-core",
             "editable": True,
         },
     ],
 )
-def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
+def test_augment_dependencies_rejects_divergent_core_dependency(
     existing_dependency: object,
 ) -> None:
     manager = _manager_with_core_dependency(
@@ -331,14 +366,8 @@ def test_augment_dependencies_does_not_duplicate_existing_core_dependency(
     else:
         dependencies["pip"].append(existing_dependency)
 
-    augmented = manager._augment_dependencies(dependencies)
-
-    if isinstance(existing_dependency, dict):
-        assert augmented.get("pip") == ["numpy==2.4.2"]
-        assert augmented.get("local") == [existing_dependency]
-    else:
-        assert augmented.get("pip") == ["numpy==2.4.2", existing_dependency]
-        assert "local" not in augmented
+    with pytest.raises(ValueError, match="bioimageflow-core"):
+        manager._augment_dependencies(dependencies)
 
 
 def test_get_or_create_forwards_provision_events_before_wait() -> None:
@@ -350,3 +379,54 @@ def test_get_or_create_forwards_provision_events_before_wait() -> None:
     manager.get_or_create(spec, on_provision_event=events.append)
 
     assert events == ["pixi installed"]
+
+
+def test_get_or_create_replaces_changed_cached_recipe_after_closing_pool() -> None:
+    manager = _runtime_manager_with_core_dependency("bioimageflow-core==0.4.1")
+    first = EnvironmentSpec(name="segment", dependencies={"python": "3.11"})
+    second = EnvironmentSpec(name="segment", dependencies={"python": "3.12"})
+    preparations: list[str] = []
+
+    old_pool = manager.get_or_create(first)
+    new_pool = manager.get_or_create(
+        second,
+        replace_existing=True,
+        on_preparation=lambda event: preparations.append(event.action),
+    )
+
+    assert old_pool.close_count == 1
+    assert new_pool is old_pool
+    assert manager._manager.replace_existing == [False, True]
+    assert preparations == ["updating"]
+
+
+def test_get_or_create_explicitly_recreates_current_cached_recipe() -> None:
+    manager = _runtime_manager_with_core_dependency("bioimageflow-core==0.4.1")
+    spec = EnvironmentSpec(name="segment", dependencies={"python": "3.11"})
+    preparations: list[str] = []
+
+    old_pool = manager.get_or_create(spec)
+    manager.get_or_create(
+        spec,
+        replace_existing=True,
+        on_preparation=lambda event: preparations.append(event.action),
+    )
+
+    assert old_pool.close_count == 1
+    assert manager._manager.replace_existing == [False, True]
+    assert preparations == ["updating"]
+
+
+def test_inspect_environment_reports_current_and_stale_managed_recipes() -> None:
+    from bioimageflow.env_manager import EnvironmentRecipeState
+
+    manager = _runtime_manager_with_core_dependency("bioimageflow-core==0.4.1")
+    first = EnvironmentSpec(name="segment", dependencies={"python": "3.11"})
+    second = EnvironmentSpec(name="segment", dependencies={"python": "3.12"})
+
+    assert manager.inspect_environment(first) is EnvironmentRecipeState.MISSING
+    manager.get_or_create(first)
+    manager.stop(first.name)
+
+    assert manager.inspect_environment(first) is EnvironmentRecipeState.CURRENT
+    assert manager.inspect_environment(second) is EnvironmentRecipeState.STALE

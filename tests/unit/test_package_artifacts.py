@@ -357,7 +357,7 @@ def test_orchestrator_wheel_declares_bounded_runtime_extras(
     assert len(packaging_requirements) == 1
     [packaging_requirement] = packaging_requirements
     assert str(packaging_requirement.specifier) == ">=24.0"
-    assert str(packaging_requirement.marker) == 'extra == "cluster"'
+    assert packaging_requirement.marker is None
     assert len(tomli_requirements) == 1
     [tomli_requirement] = tomli_requirements
     assert str(tomli_requirement.specifier) == ">=2.0"

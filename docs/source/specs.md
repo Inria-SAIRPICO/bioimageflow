@@ -379,6 +379,10 @@ Wetlands 2 rejects channel-qualified Conda dependencies, so BioImageFlow passes 
 
 Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates the workflow graph before execution: reachable tools sharing the same `name` must declare identical `dependencies`, or `EnvironmentMismatchError` is raised with the conflicting tool names and dependency declarations. During Wetlands execution, BioImageFlow translates the augmented environment recipe to the Wetlands 2 immutable specification, calls `EnvironmentManager.provision(...).wait_for()`, and lets Wetlands validate whether a ready same-name managed environment can be reused.
 
+BioImageFlow owns the worker-side `bioimageflow-core` dependency. A tool may declare a compatible version constraint, but the environment recipe uses the orchestrator's authoritative exact published version or configured local checkout. A constraint or direct/local reference that would select a different core produces an `environment_incompatible` workflow validation error and is rejected again at provisioning time if validation was skipped.
+
+`WetlandsEnvManager.inspect_environment()` reports whether the augmented requested recipe is missing, current, or stale without provisioning it. `get_or_create(..., replace_existing=True)` is the explicit authorization boundary for replacing a Wetlands-managed processing environment, including an intentional rebuild of the current recipe. Automatic callers inspect first and grant that authorization only for a stale owned recipe; an explicit lifecycle action may use it to force a rebuild. The manager closes a cached worker pool before delegating replacement to Wetlands and never authorizes mutation of an unmanaged target. Preparation callbacks distinguish creation, update, worker startup, and warm-pool reuse.
+
 **Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
 - Dependency lists are sorted alphabetically (e.g., `["numpy==2.4.2", "cellpose==3.1.1.1"]` and `["cellpose==3.1.1.1", "numpy==2.4.2"]` produce the same hash).
 - Version strings are normalized to PEP 440 canonical form (e.g., `"3.0"` and `"3.0.0"` are treated as equivalent).
@@ -3212,8 +3216,8 @@ spec = EnvironmentSpec(
 environment = manager.provision("cellpose_env", spec).wait_for()
 ```
 
-BioImageFlow translates its own immutable environment declaration into this Wetlands 2 value and includes `bioimageflow-core`.
-Provisioning is lazy on the first uncached node that needs the environment.
+BioImageFlow translates its own immutable environment declaration into this Wetlands 2 value and includes its authoritative `bioimageflow-core` dependency.
+Provisioning is lazy on the first uncached node that needs the environment unless an application explicitly inspects and warms a managed processing environment.
 The observable provisioning operation is always awaited through `wait_for()`.
 
 ### A.3 Start a Worker Pool

@@ -49,7 +49,10 @@ class TestWorkerTimeoutPlumbing:
                 return _FakeEnv()
 
         class _FakeManager:
-            def provision(self, name, spec):
+            def managed_environments(self):
+                return ()
+
+            def provision(self, name, spec, *, replace_existing=False):
                 return _Operation()
 
         monkeypatch.setattr(
@@ -80,7 +83,10 @@ class TestWorkerTimeoutPlumbing:
                 return _FakeEnv()
 
         class _FakeManager:
-            def provision(self, name, spec):
+            def managed_environments(self):
+                return ()
+
+            def provision(self, name, spec, *, replace_existing=False):
                 return _Operation()
 
         monkeypatch.setattr(

@@ -73,8 +73,12 @@ from bioimageflow.registry import (
 )
 from bioimageflow.session import WorkflowSession as WorkflowSession
 from bioimageflow.env_manager import (
+    CoreRequirementConflictError as CoreRequirementConflictError,
+    EnvironmentPreparation as EnvironmentPreparation,
+    EnvironmentRecipeState as EnvironmentRecipeState,
     WetlandsEnvManager as WetlandsEnvManager,
     configure_wetlands as configure_wetlands,
+    core_requirement_conflict as core_requirement_conflict,
 )
 from bioimageflow.logging_config import configure_logging as configure_logging
 from bioimageflow.resources import (
@@ -191,12 +195,15 @@ __all__ = [
     "ClusterValidationReport",
     "ColumnNotFoundError",
     "ColumnRef",
+    "CoreRequirementConflictError",
     "CycleInWorkflowError",
     "DataFrameTool",
     "DefaultEngine",
     "DisabledNodeError",
     "DistributedExecutionPlan",
     "DistributedNodePlan",
+    "EnvironmentPreparation",
+    "EnvironmentRecipeState",
     "ExecutionCapabilityReport",
     "ExecutionProviderOutcome",
     "ExecutorBinding",
@@ -288,6 +295,7 @@ __all__ = [
     "check_type_compat",
     "configure_logging",
     "configure_wetlands",
+    "core_requirement_conflict",
     "derive_viewing_requirements",
     "deserialize_constant",
     "effective_node_resources",

@@ -61,6 +61,8 @@ class _InspectionMixin:
             Deduplicated, sorted by (path, node, field, kind).
         """
         from bioimageflow.engine import topological_order
+        from bioimageflow.env_manager import core_requirement_conflict
+        from bioimageflow_core import ProcessingTool
         from bioimageflow.validation import (
             check_type_compat,
             validate_parameters,
@@ -253,6 +255,17 @@ class _InspectionMixin:
                         )
                     )
                 continue
+
+            if isinstance(node.tool, ProcessingTool):
+                conflict = core_requirement_conflict(node.tool.environment)
+                if conflict is not None:
+                    errors.append(
+                        ValidationError(
+                            kind="environment_incompatible",
+                            message=conflict,
+                            node=name,
+                        )
+                    )
 
             # Step 2: type compatibility on column bindings.
             for field, col_ref in node._column_bindings.items():

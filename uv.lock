@@ -107,12 +107,13 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.8.3"
+version = "0.8.4"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "packaging" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pyarrow" },
@@ -122,7 +123,6 @@ dependencies = [
 
 [package.optional-dependencies]
 cluster = [
-    { name = "packaging" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 parsl = [
@@ -136,7 +136,7 @@ psij = [
 requires-dist = [
     { name = "bioimageflow-core", editable = "packages/bioimageflow-core" },
     { name = "numpy", specifier = ">=1.23.5" },
-    { name = "packaging", marker = "extra == 'cluster'", specifier = ">=24.0" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "parsl", marker = "extra == 'parsl'", specifier = ">=2026.5.25,<2026.6" },
     { name = "psij-python", marker = "extra == 'psij'", specifier = ">=0.9.11,<0.10" },

@@ -10,9 +10,15 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
+from enum import Enum
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from bioimageflow_core.environment import EnvironmentSpec as BioImageFlowEnvironmentSpec
 from bioimageflow.paths import get_wetlands_path
@@ -33,6 +39,28 @@ _LOCAL_PYPI_REFERENCE = re.compile(
     r"(?:\[(?P<extras>[A-Za-z0-9_.,-]+)\])?"
     r"\s*@\s*(?P<url>file://\S+)\s*$"
 )
+
+
+class CoreRequirementConflictError(ValueError):
+    """A tool environment requests a divergent bioimageflow-core runtime."""
+
+
+class EnvironmentRecipeState(Enum):
+    """Relationship between a requested recipe and Wetlands-managed state."""
+
+    MISSING = "missing"
+    CURRENT = "current"
+    STALE = "stale"
+
+
+@dataclass(frozen=True)
+class EnvironmentPreparation:
+    """One observable processing-environment preparation decision."""
+
+    name: str
+    action: Literal["creating", "updating", "starting", "reusing"]
+    requested_recipe_hash: str
+    existing_recipe_hash: str | None = None
 
 
 def _bioimageflow_core_pin() -> str:
@@ -83,13 +111,9 @@ def _dependency_name(dependency: Any) -> str | None:
     return value.strip()
 
 
-def _has_bioimageflow_core_dependency(*dependency_lists: list[Any]) -> bool:
-    return any(
-        (_dependency_name(dependency) or "").replace("_", "-").lower()
-        == "bioimageflow-core"
-        for dependency_list in dependency_lists
-        for dependency in dependency_list
-    )
+def _is_core_dependency(dependency: Any) -> bool:
+    name = _dependency_name(dependency)
+    return name is not None and canonicalize_name(name) == "bioimageflow-core"
 
 
 def _is_local_dependency(dependency: Any) -> bool:
@@ -99,6 +123,158 @@ def _is_local_dependency(dependency: Any) -> bool:
 def _env_var_is_truthy(name: str) -> bool:
     value = os.environ.get(name, "")
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configured_core_dependency() -> Any:
+    if _env_var_is_truthy("BIOIMAGEFLOW_USE_LOCAL_CORE"):
+        project_dir = _local_bioimageflow_core_project()
+        if project_dir is None:
+            raise RuntimeError(
+                "BIOIMAGEFLOW_USE_LOCAL_CORE requires a bioimageflow-core source checkout."
+            )
+        return _bioimageflow_core_editable_dependency(project_dir)
+    return _bioimageflow_core_pin()
+
+
+def _configured_core_version(dependency: Any = None) -> Version:
+    if isinstance(dependency, str):
+        try:
+            requirement = Requirement(dependency)
+        except InvalidRequirement:
+            requirement = None
+        if requirement is not None and requirement.url is None:
+            exact_versions = [
+                specifier.version
+                for specifier in requirement.specifier
+                if specifier.operator in {"==", "==="} and "*" not in specifier.version
+            ]
+            if len(exact_versions) == 1:
+                try:
+                    return Version(exact_versions[0])
+                except InvalidVersion:
+                    pass
+    try:
+        return Version(_pkg_version("bioimageflow-core"))
+    except (PackageNotFoundError, InvalidVersion) as exc:
+        raise CoreRequirementConflictError(
+            "The active bioimageflow-core distribution version is unavailable."
+        ) from exc
+
+
+def _local_reference_path(requirement: Requirement) -> Path | None:
+    if requirement.url is None:
+        return None
+    parsed = urllib.parse.urlparse(requirement.url)
+    if parsed.scheme != "file" or parsed.query or parsed.fragment:
+        return None
+    if parsed.netloc not in {"", "localhost"}:
+        return None
+    return Path(
+        urllib.request.url2pathname(urllib.parse.unquote(parsed.path))
+    ).expanduser().resolve()
+
+
+def _configured_local_core_path(dependency: Any) -> Path | None:
+    if _is_local_dependency(dependency):
+        return Path(str(dependency["path"])).expanduser().resolve()
+    if isinstance(dependency, str):
+        try:
+            requirement = Requirement(dependency)
+        except InvalidRequirement:
+            return None
+        return _local_reference_path(requirement)
+    return None
+
+
+def core_requirement_conflict(
+    env_spec: BioImageFlowEnvironmentSpec,
+    *,
+    configured_dependency: Any | None = None,
+) -> str | None:
+    """Return why a tool's explicit core dependency cannot use the active core.
+
+    BioImageFlow owns the worker-side core dependency. Compatible tool-declared
+    constraints are accepted as validation intent, but the manager still installs
+    its exact configured dependency so workers cannot silently diverge.
+    """
+
+    dependency = (
+        _configured_core_dependency()
+        if configured_dependency is None
+        else configured_dependency
+    )
+    raw_conda = list(env_spec.dependencies.get("conda", ()))
+    conda_core = [item for item in raw_conda if _is_core_dependency(item)]
+    if conda_core:
+        return (
+            "bioimageflow-core is managed by BioImageFlow and cannot be declared "
+            "as a Conda dependency."
+        )
+
+    raw_pip = list(env_spec.dependencies.get("pip", ()))
+    raw_local = list(env_spec.dependencies.get("local", ()))
+    explicit_pip = [item for item in raw_pip if _is_core_dependency(item)]
+    explicit_local = [item for item in raw_local if _is_core_dependency(item)]
+    if len(explicit_pip) + len(explicit_local) > 1:
+        return "bioimageflow-core may be declared at most once in a tool environment."
+    if not explicit_pip and not explicit_local:
+        return None
+
+    if explicit_local:
+        declared = explicit_local[0]
+        if not isinstance(declared, dict) or not _is_local_dependency(declared):
+            return "The explicit bioimageflow-core local dependency is invalid."
+        configured_path = _configured_local_core_path(dependency)
+        if configured_path is None:
+            return (
+                "The tool requests a local bioimageflow-core checkout, but this "
+                "BioImageFlow runtime uses a published core distribution."
+            )
+        declared_path = Path(str(declared["path"])).expanduser().resolve()
+        if declared_path != configured_path:
+            return (
+                f"The tool requests bioimageflow-core from {declared_path}, but the "
+                f"active runtime uses {configured_path}."
+            )
+        return None
+
+    declared = explicit_pip[0]
+    if not isinstance(declared, str):
+        return "The explicit bioimageflow-core PyPI dependency must be a string."
+    try:
+        requirement = Requirement(declared)
+    except InvalidRequirement:
+        return f"The tool declares an invalid bioimageflow-core requirement: {declared!r}."
+
+    if requirement.url is not None:
+        configured_path = _configured_local_core_path(dependency)
+        if configured_path is None:
+            return (
+                "The tool requests bioimageflow-core from a direct reference, but this "
+                "BioImageFlow runtime uses a published core distribution."
+            )
+        declared_path = _local_reference_path(requirement)
+        if declared_path != configured_path:
+            return (
+                f"The tool requests bioimageflow-core from {requirement.url!r}, but "
+                f"the active runtime uses {configured_path}."
+            )
+        return None
+
+    if _configured_local_core_path(dependency) is not None:
+        return (
+            "The tool requests a published bioimageflow-core distribution, but this "
+            "BioImageFlow runtime uses a local core checkout."
+        )
+    if not requirement.specifier:
+        return "The explicit bioimageflow-core requirement must constrain its version."
+    version = _configured_core_version(dependency)
+    if not requirement.specifier.contains(version, prereleases=True):
+        return (
+            f"The tool requires {requirement}, which is incompatible with the "
+            f"active bioimageflow-core=={version}."
+        )
+    return None
 
 
 def _manager_config(
@@ -314,16 +490,32 @@ class WetlandsEnvManager:
     def _augment_dependencies(self, dependencies: dict[str, Any]) -> dict[str, Any]:
         """Return an independent BioImageFlow declaration including core."""
         deps = deepcopy(dependencies)
-        pip_deps = list(deps.get("pip", []))
-        local_deps = list(deps.get("local", []))
-        if not _has_bioimageflow_core_dependency(pip_deps, local_deps):
-            if _is_local_dependency(self._bioimageflow_core_dependency):
-                local_deps.append(deepcopy(self._bioimageflow_core_dependency))
-            else:
-                pip_deps.append(self._bioimageflow_core_dependency)
+        env_spec = BioImageFlowEnvironmentSpec(
+            name="validation",
+            dependencies=deps,
+            allow_flexible_versions=True,
+        )
+        conflict = core_requirement_conflict(
+            env_spec,
+            configured_dependency=self._bioimageflow_core_dependency,
+        )
+        if conflict is not None:
+            raise CoreRequirementConflictError(conflict)
+        pip_deps = [
+            item for item in deps.get("pip", []) if not _is_core_dependency(item)
+        ]
+        local_deps = [
+            item for item in deps.get("local", []) if not _is_core_dependency(item)
+        ]
+        if _is_local_dependency(self._bioimageflow_core_dependency):
+            local_deps.append(deepcopy(self._bioimageflow_core_dependency))
+        else:
+            pip_deps.append(self._bioimageflow_core_dependency)
         deps["pip"] = pip_deps
         if local_deps:
             deps["local"] = local_deps
+        else:
+            deps.pop("local", None)
         return deps
 
     def _to_wetlands_spec(
@@ -368,6 +560,37 @@ class WetlandsEnvManager:
             local=local,
         )
 
+    def _recipe_state(
+        self,
+        name: str,
+        wetlands_spec: EnvironmentSpec,
+    ) -> tuple[EnvironmentRecipeState, str | None]:
+        infos = self._manager.managed_environments()
+        info = next((candidate for candidate in infos if candidate.name == name), None)
+        if info is None or not info.ready or info.recipe_hash is None:
+            return EnvironmentRecipeState.MISSING, None
+        if info.recipe_hash == wetlands_spec.recipe_hash:
+            return EnvironmentRecipeState.CURRENT, info.recipe_hash
+        return EnvironmentRecipeState.STALE, info.recipe_hash
+
+    def inspect_environment(
+        self,
+        env_spec: BioImageFlowEnvironmentSpec,
+    ) -> EnvironmentRecipeState:
+        """Inspect a requested recipe without provisioning or starting workers."""
+
+        wetlands_spec = self._to_wetlands_spec(env_spec)
+        with self._lock:
+            running_spec = self._specs.get(env_spec.name)
+            if running_spec is not None:
+                return (
+                    EnvironmentRecipeState.CURRENT
+                    if running_spec == wetlands_spec
+                    else EnvironmentRecipeState.STALE
+                )
+            state, _ = self._recipe_state(env_spec.name, wetlands_spec)
+            return state
+
     def get_or_create(
         self,
         env_spec: BioImageFlowEnvironmentSpec,
@@ -375,31 +598,83 @@ class WetlandsEnvManager:
         worker_timeout: float | None = None,
         *,
         on_provision_event: Callable[[OperationEvent], None] | None = None,
+        replace_existing: bool = False,
+        on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
     ) -> WorkerPool:
         """Provision an environment and return its cached Wetlands 2 pool.
 
         ``on_provision_event`` receives Wetlands setup events, including sanitized
         Pixi output, before this method waits for provisioning to finish. It is
-        unused when an already running pool is returned.
+        unused when an already running pool is returned. ``replace_existing``
+        requests replacement of a Wetlands-managed environment, including one
+        with the current recipe; it never authorizes mutation of an unmanaged target.
         """
         wetlands_spec = self._to_wetlands_spec(env_spec)
         config = (max_workers, worker_timeout)
         with self._lock:
+            preparation_published = False
             existing = self._pools.get(env_spec.name)
             if existing is not None:
-                if self._specs[env_spec.name] != wetlands_spec:
-                    raise ValueError(
-                        f"Environment {env_spec.name!r} was already provisioned "
-                        "with a different recipe."
+                if replace_existing or self._specs[env_spec.name] != wetlands_spec:
+                    if not replace_existing:
+                        raise ValueError(
+                            f"Environment {env_spec.name!r} was already provisioned "
+                            "with a different recipe."
+                        )
+                    existing_hash = self._specs[env_spec.name].recipe_hash
+                    if on_preparation is not None:
+                        on_preparation(
+                            EnvironmentPreparation(
+                                name=env_spec.name,
+                                action="updating",
+                                requested_recipe_hash=wetlands_spec.recipe_hash,
+                                existing_recipe_hash=existing_hash,
+                            )
+                        )
+                        preparation_published = True
+                    self.stop(env_spec.name)
+                    existing = None
+                else:
+                    if self._pool_configs[env_spec.name] != config:
+                        raise ValueError(
+                            f"Environment {env_spec.name!r} already has a pool with "
+                            f"workers={self._pool_configs[env_spec.name][0]} and "
+                            f"worker_timeout={self._pool_configs[env_spec.name][1]}."
+                        )
+                    if on_preparation is not None:
+                        on_preparation(
+                            EnvironmentPreparation(
+                                name=env_spec.name,
+                                action="reusing",
+                                requested_recipe_hash=wetlands_spec.recipe_hash,
+                                existing_recipe_hash=wetlands_spec.recipe_hash,
+                            )
+                        )
+                    return existing
+            state, existing_hash = self._recipe_state(env_spec.name, wetlands_spec)
+            action: Literal["creating", "updating", "starting"]
+            if replace_existing and state is not EnvironmentRecipeState.MISSING:
+                action = "updating"
+            elif state is EnvironmentRecipeState.STALE:
+                action = "updating"
+            elif state is EnvironmentRecipeState.CURRENT:
+                action = "starting"
+            else:
+                action = "creating"
+            if on_preparation is not None and not preparation_published:
+                on_preparation(
+                    EnvironmentPreparation(
+                        name=env_spec.name,
+                        action=action,
+                        requested_recipe_hash=wetlands_spec.recipe_hash,
+                        existing_recipe_hash=existing_hash,
                     )
-                if self._pool_configs[env_spec.name] != config:
-                    raise ValueError(
-                        f"Environment {env_spec.name!r} already has a pool with "
-                        f"workers={self._pool_configs[env_spec.name][0]} and "
-                        f"worker_timeout={self._pool_configs[env_spec.name][1]}."
-                    )
-                return existing
-            operation = self._manager.provision(env_spec.name, wetlands_spec)
+                )
+            operation = self._manager.provision(
+                env_spec.name,
+                wetlands_spec,
+                replace_existing=replace_existing,
+            )
             if on_provision_event is not None:
                 operation.listen(on_provision_event)
             environment = operation.wait_for()

@@ -90,7 +90,13 @@ class _FakeWetlandsBackend:
         self.env = env
         self.create_calls = 0
 
-    def provision(self, name: str, dependencies: Any) -> Any:
+    def managed_environments(self) -> tuple[Any, ...]:
+        return ()
+
+    def provision(
+        self, name: str, dependencies: Any, *, replace_existing: bool = False
+    ) -> Any:
+        _ = name, replace_existing
         self.create_calls += 1
         return SimpleNamespace(wait_for=lambda: self.env)
 
