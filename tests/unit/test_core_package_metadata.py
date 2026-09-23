@@ -118,24 +118,6 @@ def _runtime_imports_package(package_dir: Path, import_name: str) -> bool:
     return False
 
 
-def test_direct_runtime_imports_are_declared() -> None:
-    expected = {
-        "bioimageflow": {"numpy"},
-        "bioimageflow-spot-tools": {"pandas"},
-        "bioimageflow-tracking-tools": {"pandas"},
-    }
-    offenders: dict[str, set[str]] = {}
-
-    for path in _package_pyprojects():
-        project = _project(path)
-        dependencies = _dependency_names(project.get("dependencies", []))
-        missing = expected.get(project["name"], set()) - dependencies
-        if missing:
-            offenders[str(path.relative_to(ROOT))] = missing
-
-    assert offenders == {}
-
-
 def test_core_declares_worker_safe_runtime_dependencies() -> None:
     pyproject = _pyproject(ROOT / "packages" / "bioimageflow-core" / "pyproject.toml")
 

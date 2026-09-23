@@ -222,6 +222,33 @@ class TestInstallPackageSeparation:
         assert hasattr(reg, "install_package")
         assert hasattr(reg, "register_package")
 
+    @pytest.mark.parametrize("install_dependencies", [True, False])
+    def test_install_forwards_dependency_option(
+        self, tmp_path, monkeypatch, install_dependencies: bool
+    ) -> None:
+        import bioimageflow.registry as registry_module
+
+        calls: list[tuple[object, ...]] = []
+
+        def fake_install(*args: object, **kwargs: object) -> None:
+            calls.append((*args, kwargs))
+
+        monkeypatch.setattr(registry_module, "ensure_installed", fake_install)
+        reg = ToolRegistry(store_path=tmp_path)
+        reg.install_package(
+            "example_tools", "1.2.3", install_dependencies=install_dependencies
+        )
+
+        assert calls == [
+            (
+                "example_tools",
+                "1.2.3",
+                "example-tools",
+                tmp_path,
+                {"install_dependencies": install_dependencies},
+            )
+        ]
+
 
 @pytest.fixture
 def tool_store_absolute_imports(tmp_path):

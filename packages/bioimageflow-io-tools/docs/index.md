@@ -4,7 +4,8 @@
 microscopy image selection, axis slicing, and simple OME-compatible output.
 It is focused on file layout and format handling rather than biological analysis.
 
-Core lightweight libraries are imageio, NumPy, and tifffile.
+The package requires only `bioimageflow-core` for discovery and workflow construction.
+Ordinary image tools obtain ImageIO, NumPy, and tifffile from the shared worker environment when they execute.
 `BioIOConvertImage` and `ConvertToOmeZarr` use a pinned BioIO/plugin-backed environment for microscopy formats and maintained OME-Zarr output.
 
 ## Tools

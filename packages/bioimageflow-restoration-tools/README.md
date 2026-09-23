@@ -1,6 +1,7 @@
 # bioimageflow-restoration-tools
 
 Tools for restoration inference, simple image-processing comparisons, and restoration metrics.
+Package discovery requires only `bioimageflow-core`; ImageIO, NumPy, SciPy, scikit-image, and CAREamics are supplied by the processing environments when tools execute.
 
 ## Tools
 

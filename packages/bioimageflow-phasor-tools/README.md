@@ -7,4 +7,5 @@ The package converts PicoQuant PTU and Becker & Hickl SDT histograms to Phasor O
 Phasor OME-TIFF is treated as an exchange and workflow-intermediate artifact.
 Retain the original PTU or SDT acquisition as the archival source.
 
-Heavy PhasorPy and format-reader dependencies are installed only in the isolated `spectral-phasorpy` environment.
+Package discovery requires only `bioimageflow-core`.
+NumPy, tifffile, PhasorPy, and format-reader dependencies are installed in the isolated `spectral-phasorpy` environment.

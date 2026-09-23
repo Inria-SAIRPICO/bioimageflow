@@ -1,6 +1,7 @@
 # bioimageflow-tracking-tools
 
 Tools for label-stack object extraction, deterministic centroid linking, track rendering, and migration metrics.
+Main-process dataframe tools require BioImageFlow, NumPy, pandas, and SciPy from the host; image-processing tools obtain ImageIO and scikit-image from their worker environment.
 
 ## Tools
 
