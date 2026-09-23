@@ -1477,6 +1477,10 @@ Tool packages are installed in a **tool store** — a directory that holds versi
 ```
 
 Packages are installed via `<orchestrator-python> -m pip install --target <dir> simpleitk-tools==X.Y.Z`.
+`ensure_installed(..., install_dependencies=False)` and `ToolRegistry.install_package(..., install_dependencies=False)` add `--no-deps` for hosts that provide compatible main-process package dependencies.
+The default installs declared dependencies, including PEP 723 and workflow auto-install paths.
+For packages that keep ProcessingTool-only requirements in `EnvironmentSpec`, those requirements are provisioned in Wetlands worker environments rather than through tool-store installation.
+The Direct test backend executes ProcessingTools in the current interpreter, so its test environment must provide their execution dependencies explicitly.
 This tool-store operation is intentionally independent of the Wetlands 2 environment lifecycle.
 Set `BIOIMAGEFLOW_TOOL_STORE` when a workflow needs an explicit shared or project-local store.
 
@@ -1542,7 +1546,7 @@ The `get_tool_version()` function (used by the cache system) checks `_bif_packag
 
 #### Transitive Dependencies
 
-When a versioned package is loaded, its version directory (e.g., `~/.bioimageflow/tool_packages/simpleitk_tools/1.0.0/`) is prepended to `sys.path`. This makes third-party libraries installed alongside the package (via `uv pip install --target`) importable by main-process code — important for `DataFrameTool` classes or `__init__.py` files that import non-standard libraries at module level. The entry is removed on `unload_versioned_package`.
+When a versioned package is loaded, its version directory (e.g., `~/.bioimageflow/tool_packages/simpleitk_tools/1.0.0/`) is prepended to `sys.path`. This makes third-party libraries installed alongside the package by default importable by main-process code. With `install_dependencies=False`, `DataFrameTool` classes and package import code instead use dependencies supplied by the host. The entry is removed on `unload_versioned_package`.
 
 #### Shareable Workflow Scripts (PEP 723)
 
@@ -1613,6 +1617,8 @@ reg.forget("CellposeSegmenter")                      # drop from index; no-op if
 ```
 
 `register_package` raises `FileNotFoundError` when the package is not present in the store — it never reaches for the network. Callers that validate on every keystroke must call `register_package` on hot paths and `install_package` only from explicit user actions.
+Hosts providing compatible dependencies may call `reg.install_package("cellpose_tools", "2.3.1", install_dependencies=False)` to pass `--no-deps` to pip.
+The `install_dependencies` flag affects only pip installation; registration still loads and validates the installed package separately.
 
 For a specific workflow or platform workspace, GUIs must also register the
 custom tools bundled with that project:

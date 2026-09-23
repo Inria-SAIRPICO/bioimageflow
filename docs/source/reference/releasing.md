@@ -60,7 +60,7 @@ Complete these steps once:
 1. Ensure the PyPI account that owns the BioImageFlow projects has a verified email address and two-factor authentication.
 2. In the GitHub repository, create an environment named `pypi` and configure the maintainers who must approve deployments to it.
 3. Create a GitHub repository ruleset for tags matching `bioimageflow*-v*` that restricts tag creation, update, and deletion to release maintainers.
-4. For each existing BioImageFlow project on PyPI, add a GitHub Actions Trusted Publisher with owner `bioimageit`, repository `bioimageflow`, workflow `release.yml`, and environment `pypi`.
+4. For each existing BioImageFlow project on PyPI, add a GitHub Actions Trusted Publisher with owner `Inria-SAIRPICO`, repository `bioimageflow`, workflow `release.yml`, and environment `pypi`.
 5. Bootstrap projects that do not yet exist using one of the procedures below, then add the same normal GitHub Actions Trusted Publisher to every new project.
 
 The same workflow identity can be registered for every independently versioned distribution in this repository.
@@ -217,7 +217,7 @@ Pushing tags does not publish anything.
 
 Open **Actions > Publish coordinated package release** and run the workflow from `main`.
 Enter every tag in the `release_tags` input, separated by spaces.
-Normally select `publish`: the PyPI environment approval is the final publication gate.
+Normally select `publish`: dispatching this workflow starts publication unless the GitHub `pypi` environment has required reviewers configured.
 Use `validate` only for an optional dry run; a later publish run must rebuild its artifacts, so running both modes routinely wastes time.
 
 The workflow performs only release-specific work:

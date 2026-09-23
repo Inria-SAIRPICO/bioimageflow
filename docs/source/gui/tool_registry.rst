@@ -26,7 +26,7 @@ performance:
 
    * - Method
      - Behaviour
-   * - ``install_package(name, version)``
+   * - ``install_package(name, version, *, install_dependencies=True)``
      - **Slow, network-bound.** Downloads, installs, and unpacks a
        versioned package into the tool store. Calls do not load or
        index anything.
@@ -40,6 +40,9 @@ performance:
 Hot validation paths (sessions, validators, keystroke-rate previews)
 must call ``register_package`` only. Trigger ``install_package`` from
 a user-initiated action (a "Install plugin" button, an explicit dialog).
+Hosts with compatible main-process dependencies may pass
+``install_dependencies=False`` to install only the tool distribution.
+The default installs its declared dependencies.
 
 Workflow custom tools
 ---------------------

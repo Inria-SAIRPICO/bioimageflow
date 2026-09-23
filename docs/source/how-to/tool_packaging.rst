@@ -23,6 +23,11 @@ runtime assets. Keep package boundaries explicit:
   ``bioimageflow``, pandas, and other main-process dependencies at module
   import time.
 
+The Direct engine runs ``ProcessingTool`` methods in the current Python
+interpreter for tests. A Direct test environment must install the tool's
+``EnvironmentSpec`` libraries explicitly; only Wetlands provisions that
+environment automatically.
+
 Package layout
 --------------
 
@@ -291,10 +296,17 @@ The path is resolved from ``BIOIMAGEFLOW_TOOL_STORE``, then
 Packages are installed automatically by ``require_tool_packages`` or
 ``Workflow.load()`` when version info is present in a serialized workflow.
 
-``require_tool_packages`` uses Wetlands' Pixi installation to run
-``pip install --target`` for missing packages. If a script needs a
-project-local Wetlands directory, call ``configure_wetlands()`` before
-``require_tool_packages()``; otherwise the default instance path is used.
+``require_tool_packages`` runs the orchestrator interpreter's
+``python -m pip install --target`` for missing packages and installs their
+declared dependencies by default. ``Workflow.load()`` uses the same default.
+This installation is independent of Wetlands worker environments.
+
+Hosts that already provide compatible main-process dependencies may call
+``ToolRegistry.install_package(..., install_dependencies=False)`` or
+``ensure_installed(..., install_dependencies=False)``. This passes
+``--no-deps`` to pip. The host must then provide dependencies needed by
+package import code and ``DataFrameTool`` classes; worker dependencies
+remain declared in each ``ProcessingTool``'s ``EnvironmentSpec``.
 
 Programmatic tool enumeration
 -----------------------------

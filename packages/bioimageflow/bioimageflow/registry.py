@@ -95,7 +95,9 @@ class ToolRegistry:
 
     # -- install vs register ------------------------------------------------
 
-    def install_package(self, name: str, version: str) -> None:
+    def install_package(
+        self, name: str, version: str, *, install_dependencies: bool = True
+    ) -> None:
         """Install a versioned package into the tool store.
 
         This is the slow, network-bound side effect — it does not load
@@ -106,9 +108,18 @@ class ToolRegistry:
         import). ``ensure_installed`` infers the PyPI name from this
         by replacing underscores with hyphens, matching the convention
         used by :meth:`Workflow.from_dict`'s auto-installer.
+
+        Set ``install_dependencies=False`` only when the host provides the
+        package's compatible main-process dependencies.
         """
         pypi_name = name.replace("_", "-")
-        ensure_installed(name, version, pypi_name, self._store_path)
+        ensure_installed(
+            name,
+            version,
+            pypi_name,
+            self._store_path,
+            install_dependencies=install_dependencies,
+        )
 
     def register_package(self, name: str, version: str) -> list[ToolMetadata]:
         """Load an *already installed* package and index its tools.

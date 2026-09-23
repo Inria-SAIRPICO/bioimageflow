@@ -34,8 +34,8 @@ CI_PACKAGE_ARTIFACTS_COMMAND = (
 )
 PACKAGE_METADATA_CONTRACTS_COMMAND = (
     "uv run pytest tests/unit/test_package_artifacts.py "
-    "tests/unit/test_package_docs_dependency_posture.py "
-    "tests/unit/test_core_package_metadata.py"
+    "tests/unit/test_core_package_metadata.py "
+    "tests/unit/test_tool_package_dependency_metadata.py"
 )
 CI_QUALITY_CONFIG_COMMAND = (
     "uv run pytest tests/unit/test_development_workflow.py "
