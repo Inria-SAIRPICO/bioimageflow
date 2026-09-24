@@ -242,6 +242,35 @@ def test_transient_processing_outcome_records_exact_invocation(
     assert Path(result.loc["row", "asset"]).parent == invocation_dir / "assets"
 
 
+
+def test_parallel_nested_branches_record_distinct_scoped_outcomes(tmp_path: Path) -> None:
+    child = Workflow(name="child", storage_path=tmp_path / "child", engine="direct")
+    with child:
+        text = child.input("text", str, id="text-input")
+        writer = SourceAssetWriter()(text=text, name="writer")
+        child.output("mask", writer["mask"], id="mask-output")
+
+    parent = Workflow(
+        name="parent",
+        storage_path=tmp_path / "parent",
+        engine="direct",
+        execution="parallel",
+    )
+    with parent:
+        first = child(text="first", name="first")
+        second = child(text="second", name="second")
+        parent.output("first", first["mask"], id="first-output")
+        parent.output("second", second["mask"], id="second-output")
+
+    context = WorkflowExecutionContext()
+    result = parent.compute(run_context=context)
+
+    assert list(result.columns) == ["first", "second"]
+    outcomes = {item.node_key: item for item in context.execution_outcomes}
+    assert set(outcomes) == {"first/writer", "second/writer"}
+    assert outcomes["first/writer"].result_key != outcomes["second/writer"].result_key
+
+
 def test_outcome_catalog_is_ordered_idempotent_and_tracks_shared_kinds() -> None:
     context = WorkflowExecutionContext()
     context._bind(object(), on_success=lambda: None, on_failure=lambda error: None)

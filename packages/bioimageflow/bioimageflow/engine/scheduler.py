@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import copy_context
 from typing import TYPE_CHECKING
 
 from .common import (
@@ -453,7 +454,12 @@ class DefaultEngine(
                 ) as pool:
                     future_to_node = {
                         pool.submit(
-                            self._execute_node, node, results, sig_hashes, workflow
+                            copy_context().run,
+                            self._execute_node,
+                            node,
+                            results,
+                            sig_hashes,
+                            workflow,
                         ): node
                         for node in pt_nodes
                     }

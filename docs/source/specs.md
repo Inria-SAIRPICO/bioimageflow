@@ -3131,6 +3131,7 @@ DataFrame inputs receive complete DataFrames at root and upstream nodes when nes
 Explicit values override interface defaults, which override local tool defaults.
 
 The compiler recursively expands workflow nodes into scoped executable paths such as `outer/inner/tool`.
+Parallel branch workers preserve those scoped paths when recording node results and execution outcomes.
 It assigns stable real-tool ordinals by deterministic topological order with scoped path as the ready-node tie breaker.
 Every enabled internal terminal is a completion dependency, including detached branches.
 Published output dependencies contribute values and provider/selector recipes that resolve selected real-provider records at runtime; completion-only dependencies do not change unrelated downstream identity.
