@@ -3,8 +3,9 @@
 `LabelOverlaps` counts pixel co-occurrences between two 2D label images.
 It produces one output row per `(reference_label, spot_label)` pair observed in the union of non-zero pixels.
 
-Inputs are `label_image` and `reference_image`.
-Outputs are `reference_label`, `spot_label`, and `overlap_count`.
+Inputs are `label_image`, `reference_image`, and optional `source_image`.
+Outputs are `source_image`, `reference_label`, `spot_label`, and `overlap_count`.
+Each row carries the original image filename when `source_image` is supplied; otherwise it carries the label image filename.
 Both images must have exactly the same shape and contain finite, integer-valued, non-negative labels.
 
 Use it to connect detected spots or predicted objects to reference objects.
@@ -26,13 +27,13 @@ from bioimageflow_core import Arguments
 from bioimageflow_common_tools import LabelOverlaps
 
 LabelOverlaps().process_row(
-    Arguments(label_image="spots.tif", reference_image="nuclei.tif")
+    Arguments(label_image="spots.tif", reference_image="nuclei.tif", source_image="original.tif")
 )
 ```
 
 ## Expected Results
 
-The output table contains one row per observed label pair and its pixel overlap count.
+The output table contains one row per observed label pair, its pixel overlap count, and the source image filename.
 
 ## Failure Modes
 

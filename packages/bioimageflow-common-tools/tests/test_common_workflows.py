@@ -245,6 +245,13 @@ class TestLabelOverlaps:
         assert "reference_label" in df.columns
         assert "spot_label" in df.columns
         assert "overlap_count" in df.columns
+        assert set(df["source_image"]) == {spots_path.name}
+
+        original = tmp_path / "original.tif"
+        explicit = tool.process_row(Arguments(
+            label_image=spots_path, reference_image=ref_path, source_image=original,
+        ))
+        assert {row.source_image for row in explicit} == {original.name}
 
         # Filter out background (spot_label=0) to check actual spot assignments
         real = df[df["spot_label"] > 0]

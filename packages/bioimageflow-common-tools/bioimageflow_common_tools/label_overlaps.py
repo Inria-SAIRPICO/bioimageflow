@@ -23,13 +23,13 @@ class LabelOverlaps(ProcessingTool):
 
     For each pixel, records which label from image 1 overlaps with which
     label from image 2. Outputs a DataFrame with columns:
-    reference_label, spot_label, overlap_count.
+    reference_label, spot_label, overlap_count, source_image.
     """
     row_consumption = RowConsumption.MAPPED
     display_name = "Label Overlaps"
     documentation = (
         "Compute the spatial overlap between two labeled images. "
-        "Outputs a table of (reference_label, spot_label, overlap_count) tuples."
+        "Outputs a table of (reference_label, spot_label, overlap_count) tuples with source image filenames."
     )
     category = Category.MEASUREMENT
     tags = ["measurement", "spatial correlation"]
@@ -50,6 +50,15 @@ class LabelOverlaps(ProcessingTool):
                 connectable=Connectable.BY_DEFAULT,
             ),
         ]
+        source_image: Annotated[
+            Path | None,
+            GUIMeta(
+                display_name="Source image",
+                description="Original image from which the labels were derived. "
+                "Defaults to the label image when no source is supplied.",
+                connectable=Connectable.BY_DEFAULT,
+            ),
+        ] = None
         reference_image: Annotated[
             Path,
             ImageSpec(
@@ -67,6 +76,10 @@ class LabelOverlaps(ProcessingTool):
         ]
 
     class Outputs(IOModel):
+        source_image: Annotated[str, GUIMeta(
+            display_name="Source image",
+            description="Original image filename, or label image filename if unspecified.",
+        )]
         reference_label: Annotated[int, GUIMeta(
             display_name="Reference label",
             description="Label value from the reference image.",
@@ -112,6 +125,7 @@ class LabelOverlaps(ProcessingTool):
 
         return [
             self.Outputs(
+                source_image=Path(getattr(arguments, "source_image", None) or arguments.label_image).name,
                 reference_label=int(ref_lbl),
                 spot_label=int(spot_lbl),
                 overlap_count=int(count),

@@ -211,6 +211,9 @@ def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths()
     label_outputs = serialize_output_schema(LabelOverlaps)
     assert label_inputs["label_image"]["type"] == "ImageFile"
     assert label_inputs["reference_image"]["type"] == "ImageFile"
+    assert label_inputs["source_image"]["type"] == "Path"
+    assert label_inputs["source_image"]["required"] is False
+    assert label_outputs["source_image"]["type"] == "str"
     assert label_outputs["reference_label"]["type"] == "int"
     assert label_outputs["spot_label"]["type"] == "int"
     assert label_outputs["overlap_count"]["type"] == "int"
@@ -218,3 +221,4 @@ def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths()
 
 def test_schema_serialization_error_exists() -> None:
     assert issubclass(SchemaSerializationError, Exception)
+
