@@ -1,6 +1,7 @@
 # Unified workflow contract
 
 This document is the normative library-to-host contract for recursive BioImageFlow workflows.
+It details [§14 of the library specification](../specs.md#14-unified-recursive-workflows); host persistence, UI state, and security adaptation remain owned by each host.
 The golden examples are `tests/fixtures/unified_workflow_graph.json` and `tests/fixtures/unified_workflow_archive.json`.
 
 ## Public Python API
@@ -117,8 +118,10 @@ It does not copy callbacks, cancellation state, execution engines, environment m
 
 ## Binding rules
 
-A `field` input can target named processing-tool fields or `field` inputs on child workflow nodes.
+A `field` input can target named ProcessingTool fields, DataFrameTool parameter fields, or `field` inputs on child workflow nodes.
 A `dataframe` input can target positional `DataFrameTool` inputs or `dataframe` inputs on child workflow nodes.
+When a field input ultimately targets a DataFrameTool parameter, it accepts constant values only; a column-valued binding is rejected through every recursive boundary.
+Complete upstream DataFrames still use positional DataFrameTool ports.
 A symbolic reference can fan out to multiple compatible targets.
 The library rejects references used outside their owning active workflow, kind mismatches, a target already carrying an internal data edge, duplicate targets owned by different inputs, missing required values, and unknown invocation keys.
 
@@ -262,7 +265,9 @@ Viewer additions combine additively through recursively published outputs and ne
 ## Trusted Python materialization
 
 Every shipped or documented reusable workflow module exports exactly `build_workflow`.
-It is callable without required arguments, creates a fresh `Workflow`, builds deterministically without executing tools, represents runtime values with interface inputs, uses explicit stable IDs, and publishes meaningful outputs.
+The host calls it as `build_workflow(storage_path=...)` with an explicit runtime root.
+It creates a fresh `Workflow`, builds deterministically without executing tools, represents runtime values with interface inputs, uses explicit stable IDs, and publishes meaningful outputs.
+The factory may provide a file-local storage default for standalone convenience, but hosts must still supply their selected runtime root and it never enters the portable graph.
 
 `from_python()` executes only that exact symbol and calls it once.
 It rejects absent, non-callable, tuple-returning, and non-`Workflow` factories.
@@ -291,7 +296,8 @@ A workflow with no outputs returns a canonical zero-row, zero-column DataFrame a
 Disabling a workflow node disables its complete subtree.
 `compute_steps()` yields only real tool steps, including disabled ordinary tools as skipped steps; it never yields workflow-node aggregate steps, and a disabled workflow node is not expanded.
 `plan()` reports executable tool entries and one aggregate entry per workflow node.
-The aggregate is `SKIPPED` when disabled, `CACHED` only when every executable internal is cached, `PENDING_UPSTREAM` when an internal final selection depends on unknown upstream records, and otherwise `UNEXECUTED`.
+The aggregate is `SKIPPED` when disabled, `CORRUPT` when any internal node is corrupt, `PENDING_UPSTREAM` when an internal final selection depends on unknown upstream records, `CACHED` only when every internal entry is cached or skipped, and otherwise `UNEXECUTED`.
+Corruption remains diagnostic in planning and strict in cache lookup/execution; aggregate entries never repair records or substitute raw files.
 `PENDING_UPSTREAM` retains a provider/selector provenance recipe and never fabricates a reusable result key.
 
 One root call owns one `WorkflowExecutionContext`, and the exact object propagates through every synthetic root wrapper and recursive boundary.
@@ -308,7 +314,8 @@ A standalone definition may have unsupplied required interface inputs.
 Root `compute(inputs=...)` validates values, while nested invocation requires every child input to have an edge, constant, parent symbolic input, interface default, or local fallback.
 
 Nested errors use `ValidationError.path` from root workflow node to leaf scope and keep the leaf `node`, `field`, `edge`, and `edge_id` identifiers.
-`from_dict(validate_only=True, partial=True)` may return an incomplete editor graph and structured errors, but never normalizes another schema.
+`from_dict(validate_only=True, partial=True)` may return an incomplete editor graph and structured errors.
+It performs only the explicitly supported strict version-1 to version-2 graph/archive normalization; it never guesses endpoints, coerces an unknown schema, or discards unknown fields.
 
 ## Deliberately unsupported operations
 

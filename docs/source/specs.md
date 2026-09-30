@@ -41,10 +41,13 @@ For Wetlands API details, see [Appendix A: Wetlands API](#appendix-a-wetlands-ap
 
 ### 1.1.1 Public Distributed-Execution Integration Contract
 
-The reviewed redesign is described by [Remote cluster experience and public API proposal](remote_cluster_experience_spec.md) and its corresponding [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md).
-These documents define the next implementation target and do not describe the current released API until that implementation is complete.
+The managed public API is described by [Remote cluster experience and public API](remote_cluster_experience_spec.md) and its normative [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md).
+The current source implements `RemoteCluster` deployment, preparation, validation, planning, submission, attachment, result download, and cleanup for locked uv projects and existing cluster Python installations.
+The detailed specifications retain broader implementation requirements; their status sections distinguish supported adapters from unfinished targets, publication status, and site certification.
+Hosts can use this managed interface without assembling transport or staging paths; see the [remote cluster guide](how-to/remote_cluster.rst).
 
-The public integration surface for a BioImageFlow execution UI consists of the following values and operations:
+The separately supported lower-level attached Parsl and submitted launcher contracts remain in [§4.5.2](#452-parsl-engine-configuration) and [§4.5.3](#453-submitted-parsl-execution).
+The following integration values and operations cover those lower-level contracts as well as shared resource, retry, diagnostic, and result semantics:
 
 - `NodeResourceOverrides`, `Node.resource_overrides`, `Node.set_resource_overrides()`, `Node.effective_resources`, and `effective_node_resources()` provide portable per-instance worker requirements for `ProcessingTool` nodes.
 - `validate_parsl_config_ref()` requires an explicit trusted-factory allowlist, resolves the `ParslConfigRef` in an isolated child process, validates secrets, `retries=0`, and executor labels, returns sanitized structured diagnostics, and creates neither a DataFlowKernel nor a workflow run.
@@ -302,7 +305,8 @@ For inputs, each field entry has exactly these keys:
 }
 ```
 
-The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `required`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImageFile"` and `"ImageShared"` respectively. The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
+The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `nullable`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImageFile"` and `"ImageShared"` respectively.
+The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
 DataFrameTool keyword parameters are constant-only, so their serialized input fields always report `connectable="never"`, including when field metadata would otherwise request a pin.
@@ -324,15 +328,18 @@ Callers that want the Python-facing objects (raw `type`, raw `Connectable`) shou
 
 `Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, `ViewerSpec`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
 
-**Runtime type resolution:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), but the orchestrator's Pydantic model builder resolves both to `Union[Path, str, SharedArray]` at validation time. This is necessary because caching may convert a `SharedArray` output to a file `Path` (see [Section 8.2](#82-lifecycle)), and the reverse can happen when shared memory is enabled. Tools should use `load_image()` which handles both transparently.
+**Runtime type resolution contract:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), while their common image-dispatch validation contract admits `Union[Path, str, SharedArray]`.
+This permissive validation supports `load_image()` without changing the declared graph interface.
+The current Pydantic constant-validation builder retains original annotations; an adapter implementing this broader validation contract remains an explicit implementation gap.
+Cached `SharedArray` values are persisted as record-owned `.npy` assets and rehydrated as fresh `SharedArray` values before downstream dispatch; the persisted file is not a replacement for the runtime shared-memory interface (see [Section 8.2](#82-lifecycle)).
 
 ---
 
 ## 3. Tool Definition
 
-BioImageFlow provides two kinds of tools, each with a single execution context:
+BioImageFlow provides two kinds of tools with distinct data-flow contracts:
 
-- **`ProcessingTool`** — runs computation in an isolated Wetlands environment. Every method the tool author implements (`process_row`, `process_batch`) executes in the worker.
+- **`ProcessingTool`** — provides one row/batch processing contract, called locally by Direct or dispatched to isolated Wetlands or attested Parsl workers according to the selected backend.
 - **`DataFrameTool`** — transforms DataFrames in the main process. The single `transform` method has full access to Pandas.
 
 Both inherit from `BaseTool`, which provides shared metadata attributes (`display_name`, `documentation`, `category`, `tags`, `Inputs`) and graph wiring via `__call__`.
@@ -425,15 +432,18 @@ Do not create one-off environments for these tasks.
 
 **When NOT to use `GENERAL_ENV`:** Tools that require specialized libraries (cellpose, stardist, SimpleITK, bioio, opencv, etc.) still declare their own `EnvironmentSpec`. The general env catches the long tail of tools that just need standard scientific Python.
 
-**Engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic. The engine provisions it on first use and reuses one cached Wetlands 2 worker pool for all tools referencing it. The pool size follows the workflow environment configuration.
+**Wetlands engine behavior:** `GENERAL_ENV` is a regular `EnvironmentSpec` — no sentinel, no magic.
+The Wetlands engine provisions it on first use and reuses one cached Wetlands 2 worker pool for all tools referencing it.
+The pool size follows the workflow environment configuration.
 
 ```python
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core import ProcessingTool, GENERAL_ENV, IOModel, Arguments, ImageSpec, Semantic, Template
+from bioimageflow_core import ProcessingTool, RowConsumption, GENERAL_ENV, IOModel, Arguments, ImageSpec, Semantic, Template
 
 class ThresholdImage(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Threshold Image"
     environment = GENERAL_ENV
 
@@ -522,13 +532,15 @@ GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.
 
 *Module: `bioimageflow_core.tool`*
 
-`ProcessingTool` is the base class for tools that process data in an isolated Wetlands environment. Every method the tool author implements runs in the worker — there are no main-process hooks on this class.
+`ProcessingTool` is the base class for row/batch computation using the selected execution backend.
+Direct calls the processing methods locally; Wetlands and Parsl dispatch the same processing contract to workers (see [§4.5](#45-environment-configuration)).
+The class has no orchestrator-only transformation hooks.
 
 ```python
 class ProcessingTool(BaseTool):
     """
-    Tool that processes data in an isolated Wetlands environment.
-    All custom methods (process_row, process_batch) run in the worker.
+    Row/batch processing contract for Direct, Wetlands, and Parsl.
+    Processing methods run locally or in workers according to the backend.
     """
     environment: EnvironmentSpec    # Required — defines the Wetlands environment
     row_consumption: RowConsumption # Required — mapped or collective row semantics
@@ -560,7 +572,7 @@ class ProcessingTool(BaseTool):
         context: ExecutionContext | None = None,
     ) -> "Outputs | list[Outputs]":
         """
-        Process a single row. Runs in the worker environment.
+        Process a single row using the selected backend.
 
         Returns:
             - Single Outputs: 1-to-1 mapping (common case).
@@ -579,7 +591,7 @@ class ProcessingTool(BaseTool):
         context: ExecutionContext | None = None,
     ) -> "list[list[Outputs]] | list[Outputs]":
         """
-        Process all rows at once. Runs in the worker environment.
+        Process all rows at once using the selected backend.
         Override for batch processing (e.g., GPU inference, training).
 
         Returns:
@@ -601,7 +613,11 @@ Batch tools are not called when their row-aligned upstream inputs are empty by d
 **Progress reporting:** `process_row` may declare an optional keyword parameter `task` to receive a `RemoteTaskHandle` for sub-row progress reporting. When present, Wetlands injects the handle automatically. Tools that don't declare `task` are unaffected.
 
 ```python
+# Partial method sketch; the environment and IOModel declarations are omitted.
+from bioimageflow_core import RowConsumption
+
 class MySegmenter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     def process_row(self, arguments: Arguments, *, task=None) -> Outputs:
         tiles = split_tiles(arguments.input_image, n=20)
         for i, tile in enumerate(tiles):
@@ -641,9 +657,10 @@ Runtime scratch directories are for intermediate and implicit runtime files only
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, Category, Template
+from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, ImageSpec, Semantic, Arguments, Category, Template
 
 class MySegmenter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "My Segmenter"
     documentation = "Segments cells."
     category = Category.SEGMENTATION
@@ -674,6 +691,7 @@ class CellposeBase(ProcessingTool):
     tags = ["cellpose"]
 
 class CellposeSegmenter(CellposeBase):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose Segmenter"
     documentation = "Segments cells using the Cellpose algorithm."
 
@@ -690,8 +708,9 @@ class CellposeSegmenter(CellposeBase):
         ...
 
 class CellposeTrain(CellposeBase):
+    row_consumption = RowConsumption.MAPPED  # Each input row trains an independent model.
     display_name = "Cellpose Train"
-    documentation = "Trains a custom Cellpose model."
+    documentation = "Trains an independent custom Cellpose model per input row."
     tags = ["cellpose", "training"]
 
     class Inputs(IOModel):
@@ -704,14 +723,16 @@ class CellposeTrain(CellposeBase):
 
     def process_batch(self, arguments_list: list[Arguments]) -> list[Outputs]:
         import cellpose.models
-        ...  # Returns list[Outputs] — one output per row (auto-wrapped)
+        ...  # Returns list[Outputs] — one independent model per row (auto-wrapped)
 ```
 
 **Inner class inheritance:** `Inputs` and `Outputs` are inner classes that do **not** automatically inherit from the parent's inner classes. If a tool family shares common input fields, the child must explicitly inherit: `class Inputs(CellposeBase.Inputs)`. `IOModel._get_all_annotations()` walks the MRO, so inherited fields are resolved correctly.
 
 **A tool not related to cellpose can still share the environment directly:**
 ```python
+# Partial declaration; add IOModel declarations and a processing method.
 class SomeOtherTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Other Tool"
     environment = cellpose_env  # Reuses the cellpose environment without inheriting
     ...
@@ -726,12 +747,19 @@ class SomeOtherTool(ProcessingTool):
 | `category`      | `Category \| None` | High-level functional category (optional)          |
 | `tags`          | `list[str]`        | Searchable tags                                    |
 | `environment`   | `EnvironmentSpec`  | Wetlands environment specification (shared object) |
+| `row_consumption` | `RowConsumption` | Required explicit `MAPPED` or `COLLECTIVE` declaration on every concrete processing class. |
+| `run_empty_batch` | `bool` | Opt in to the empty-batch behavior described above; defaults to `False`. |
+| `empty_batch_anchor_inputs` | `tuple[str, ...]` | Non-row context fields used to preserve empty-group artifacts. |
 | `resources`     | `ResourceSpec`     | Optional resource requirements (GPU, memory, concurrency). See [Section 10](#10-resource-constraints). |
 
-**Worker state warning:** State set on `self` during `__init__` (graph construction, main process) is **not** available in `process_row`/`process_batch` (worker process). For expensive resources like GPU models, use lazy initialization inside the processing method:
+**Worker state warning:** With Wetlands or Parsl dispatch, worker-side tool reconstruction does not carry state set on `self` during orchestrator graph construction.
+Direct calls the local instance and therefore does not certify worker isolation or serialization.
+For expensive resources like GPU models, use lazy initialization inside the processing method:
 
 ```python
+# Partial method sketch; the environment and IOModel declarations are omitted.
 class MyTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     _model = None
     _model_key = None
 
@@ -1054,7 +1082,7 @@ export = save(
 )
 ```
 
-### 3.5 IOModel and Inputs/Outputs
+### 3.5a IOModel and Inputs/Outputs
 
 *Module: `bioimageflow_core.tool`*
 
@@ -1172,11 +1200,14 @@ class GUIMeta:
 Both fields are purely cosmetic hints — the runtime never reads them.
 
 **Connectable states (Inputs only):**
-- `Connectable.NEVER` — the field can never be wired to an upstream column. No pin, no toggle. Use for source configuration fields (e.g. file path, glob pattern) or structural settings that never vary per-row.
+- `Connectable.NEVER` — the GUI offers no column pin or connectability toggle.
+  Use for source configuration fields (e.g. file path, glob pattern) or structural settings that the GUI should present as constants.
 - `Connectable.NOT_BY_DEFAULT` — the field is connectable, but the pin is hidden until the user enables it via a checkbox. Use for algorithm parameters (thresholds, model names) that are rarely column-bound but occasionally need to be.
 - `Connectable.BY_DEFAULT` — the pin is visible out of the box. Use for data inputs (image paths, required columns) that almost always come from a dataframe column.
 
 For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
+These states are GUI hints and do not independently reject Python bindings.
+The semantic rule that DataFrameTool parameters accept only constants applies regardless of GUI metadata (see [§3.5](#35-dataframetool)).
 
 **Path picker modes (path Inputs only):**
 - `PathPicker.FILE` — offer file selection only.
@@ -1193,9 +1224,10 @@ For `Outputs` fields, `connectable` is ignored (outputs always expose a pin).
 from pathlib import Path
 from typing import Annotated
 
-from bioimageflow_core import ProcessingTool, IOModel, ImageSpec, Semantic, Arguments, GUIMeta, Connectable, Template
+from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, ImageSpec, Semantic, Arguments, GUIMeta, Connectable, Template
 
 class CellposeSegmenter(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     display_name = "Cellpose Segmenter"
     environment = cellpose_env
 
@@ -1608,24 +1640,29 @@ metas: list[ToolMetadata] = reg.register_package(    # fast: loads + indexes alr
 
 reg.get_class("CellposeSegmenter")                   # type | None
 reg.get_metadata("CellposeSegmenter")                # ToolMetadata | None
+reg.get_class(                                      # exact package identity
+    "CellposeSegmenter", package="cellpose_tools", version="2.3.1"
+)
 reg.list_tools()                                     # list[ToolMetadata] in registration order
 reg.forget("CellposeSegmenter")                      # drop from index; no-op if absent
 ```
 
 `register_package` raises `FileNotFoundError` when the package is not present in the store — it never reaches for the network. Callers that validate on every keystroke must call `register_package` on hot paths and `install_package` only from explicit user actions.
 
-For a specific workflow or platform workspace, GUIs must also register the
-custom tools bundled with that project:
+For workflow-specific custom-tool discovery, a host may register bundled tools in a registry it owns and scopes to that workflow or project:
 
 ```python
 metas = reg.register_workflow(workflow)      # live Workflow object
 metas = reg.register_workflow(workflow_data) # exported workflow dict
 ```
 
-`register_workflow` discovers only custom tools carried by that workflow export
-or project context. It does not install or register package tools; call
-`register_package` for package references. For exported dicts, discovery uses
-the `custom_sources` archive table written by `Workflow.export()`.
+`register_workflow` discovers only custom tools carried by that workflow export or project context.
+It does not install or register package tools; call `register_package` for package references.
+For exported dicts, discovery uses the `custom_sources` archive table written by `Workflow.export()`.
+Registration is optional discovery, not a replacement for a node's explicit package or source binding.
+Hosts may serialize metadata from the actual resolved node class without adding that class to a shared catalog.
+Name-only lookups return the most recently registered matching class; use package/version and, when necessary, module qualifiers to select an exact registered identity.
+Same-named source-bound nodes must retain their explicit source identity independently of catalog lookup.
 
 `ToolMetadata` is a frozen dataclass:
 
@@ -1638,18 +1675,18 @@ the `custom_sources` archive table written by `Workflow.export()`.
 | `inputs_schema` | `dict[str, Any]` | Output of `serialize_input_schema(cls)`. |
 | `outputs_schema` | `dict[str, Any]` | Output of `serialize_output_schema(cls)`. |
 | `display_name` | `str` | The class's `display_name` attribute, or `class_name`. |
+| `row_consumption` | `str \| None` | `"mapped"` or `"collective"` for processing tools; `None` for DataFrame tools. |
 | `tags` | `tuple[str, ...]` | The class's `tags` attribute (empty tuple if none). |
 
 The registry indexes `BaseTool` subclasses only; abstract base classes are excluded. Multiple versions of the same package can be registered because `resolve_tool_class` keys on the scoped module, not the class name alone.
 
 ### 3.12 Project-Local Custom Tools
 
-A project may define custom `ProcessingTool` or `DataFrameTool` classes in a
-project-local `tools/` package and reusable workflow factories alongside them. In the BioImageFlow
-platform, the project root is the user's workspace, so workspace-owned custom
-tools live under `workspace/tools/` and can be reused by any workflow in
-`workspace/workflows/`. These tools do **not** need to be promoted to a
-versioned tool package merely to make a workflow shareable.
+A project may define custom `ProcessingTool` or `DataFrameTool` classes in a project-local `tools/` package and reusable workflow factories alongside them.
+These tools do **not** need to be promoted to a versioned tool package merely to make a workflow shareable.
+The reusable project-authoring layout below is distinct from a host's workflow-owned archive materialization.
+The BioImageFlow platform imports editable archive sources into `<workflow-directory>/tools/<source-id>/`, with source identity and module layout recorded in `module.json`; it owns their persistence and recursive copying.
+The library's transient `Workflow.load()` materialization remains a separate supported capability.
 
 Recommended layout:
 
@@ -1691,9 +1728,7 @@ Export behavior:
 - The bundle preserves relative paths under `tools/` and includes file hashes plus an overall bundle hash. Generated/cache files such as `__pycache__`, `.pyc`, `.pytest_cache`, and hidden temp files are excluded. Export fails for unexpectedly large files.
 - Tool nodes reference an embedded `tools/` bundle with `source_module`; nested graphs share the same archive-level source table.
 - `Workflow.load(path, storage_path=...)` validates the embedded bundle hash, materializes the `tools/` tree into a scoped temporary Python package, and resolves the class from that package before attempting package or normal import resolution.
-- `ToolRegistry.register_workflow(workflow_or_data)` discovers project-local
-  custom tools from either a live `Workflow` or an exported workflow dict, so GUI
-  tool discovery for a selected workflow includes the relevant custom tools.
+- `ToolRegistry.register_workflow(workflow_or_data)` optionally discovers project-local custom tools from either a live `Workflow` or an exported workflow dict for a host-owned discovery registry (see [§3.11](#311-tool-registry)).
 
 ---
 
@@ -1756,9 +1791,14 @@ registered = register(input_image=paired["image_path"], reference=paired["refere
 **ProcessingTool as source node (isolated file discovery):**
 
 ```python
+from pathlib import Path
+
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, RowConsumption
+
 class DicomLoader(ProcessingTool):
     """List DICOM files and extract metadata — requires pydicom, isolated from main process."""
     display_name = "DICOM Loader"
+    row_consumption = RowConsumption.MAPPED
     environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom=3.0.1"]})
 
     class Inputs(IOModel):
@@ -1817,7 +1857,9 @@ registered = register(
 - **Nodes** wrap a tool instance and its configuration (explicit arguments). Each node has a unique **node name** — either user-provided via `name=` in `__call__` or auto-generated from the tool class name and a counter (e.g., `CellposeSegmenter_1`, `CellposeSegmenter_2`). Node names must be unique within a Workflow; a tool class can be instantiated by multiple nodes.
 - **Edges** represent data dependency: an edge from Node A to Node B means Node B references columns from Node A (via `ColumnRef`) or receives Node A's output DataFrame (via positional argument to a DataFrameTool).
 - **`ColumnRef`** is created by subscripting a Node: `node["col"]`. It records the upstream node and column name. The engine validates column existence at construction time using `Node.get_output_schema()` (see §3.5), which covers both static `Outputs` and dynamic-but-resolvable schemas — `Generate(column_name="x")["x"]` validates immediately, and a fully-configured merge tool (e.g. `CrossJoin(Files(...), Generate(column_name="sensitivity", ...))`) validates the union of upstream column names. Validation is deferred to execution time only when the schema cannot be resolved (e.g. an upstream merge whose own upstream is unresolvable).
-- The graph must remain a DAG. Cycles are detected synchronously inside `__call__()` when the edge is created, providing instant feedback in scripts and notebooks.
+- The graph must remain a DAG.
+  `Workflow.validate()` reports cycles, and planning/topological execution rejects them.
+  Ordinary construction links new nodes to existing upstream nodes; editor mutation and loaded graphs must still use explicit validation before execution.
 - **Source nodes** are simply nodes with no upstream data dependencies — they are not a separate tool type or code path. Both tool types can act as source nodes:
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
   - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, the engine uses a single-row index (`["0"]`), builds arguments from constants and defaults only, and dispatches to `process_row`/`process_batch` as usual. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
@@ -2169,7 +2211,8 @@ All inputs are keyword arguments. Each must be one of:
 
 1. **Column Reference (`node["col"]`):** Binds the input field to a specific column from a specific upstream node. Creates a dependency edge. The engine validates column existence and type compatibility (per [Section 2.4](#24-type-compatibility)) at construction time for upstream nodes with known output schemas (i.e., nodes whose tool declares `Outputs`). For DataFrameTool upstream nodes without `Outputs`, column validation is deferred to execution time.
 2. **Node Shorthand (`node`):** Equivalent to `node["field_name"]` where `field_name` is the keyword argument name. Raises `ColumnNotFoundError` if the upstream node has no column with that name.
-3. **Constant Value:** A literal value (not a Node or ColumnRef). Validated against the `Inputs` field type using Pydantic. Used as-is for all rows.
+3. **Constant Value:** A literal value (not a Node or ColumnRef), retained for all rows.
+   `Workflow.validate()` checks supplied constants against the `Inputs` field type using Pydantic; construction retains invalid editor values so diagnostics can be collected explicitly.
 4. **Default Value:** If the `Inputs` field has a default and no argument was provided, use the default.
 5. **Failure:** If no source is found for a required field, raise `BindingError` listing the missing field and available sources.
 
@@ -2179,7 +2222,8 @@ Positional arguments are upstream nodes — their output DataFrames are passed t
 Both `ColumnRef` values and node shorthand in these keyword arguments raise `BindingError` during ordinary construction and produce structured validation errors under error capture or portable graph loading.
 Recursive interface bindings obey the same constraint at their ultimate tool target, with scoped node, input field, and edge identity retained in diagnostics when available.
 
-Construction-time validation checks that keyword arguments match the tool's `Inputs` declaration (type-checked via Pydantic).
+Construction checks keyword names and binding kinds against the tool's `Inputs` declaration.
+Explicit workflow validation checks constant parameter types using Pydantic, while runtime resolution checks supplied workflow input values and resolved bindings as appropriate.
 
 #### No Auto-Resolution
 
@@ -2189,7 +2233,7 @@ There is no implicit name-based or type-based column matching. Every column bind
 
 When `Node.__init__` runs under `Workflow.capture_errors()`, `BindingError` / `ColumnNotFoundError` raised by the binding rules above are appended to the active capture buffer as `ValidationError` entries instead of raising, and the node is registered with best-effort partial bindings so subsequent nodes can still be wired. See [Section 4.3](#43-the-workflow-object) for the `capture_errors()` contract and the Validation Error Reference section for the `ValidationError` shape.
 
-### 4.6 Enabling and Disabling Nodes
+### 4.6a Enabling and Disabling Nodes
 
 Nodes can be temporarily disabled so the engine skips them during execution. This is designed for GUI workflows where users want to iterate on part of a pipeline without executing expensive downstream nodes.
 
@@ -2267,9 +2311,10 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 
 ### 4.7 WorkflowSession (Incremental Editing API)
 
-`WorkflowSession` is a parallel, **dict-backed** model of a workflow designed for GUI clients that mutate the graph incrementally. The session is the canonical state — a `Workflow` is materialized on demand and cached across edits, with selective rebuilds triggered only by structural changes.
-
-**Why a separate class?** `Workflow` builds nodes eagerly in `__init__`, with `_upstream_nodes` and column bindings wired at construction. Retrofitting incremental mutation onto that model would require invasive changes to `Node`. A dict-backed session, materialized to a `Workflow` only when needed, is both simpler and matches what GUIs actually want to send over the wire.
+`WorkflowSession` is a **dict-backed** editing API for clients that choose to edit the library's portable graph format incrementally.
+Its dictionary owns editable state within that session; a `Workflow` is materialized on demand and cached across edits, with selective rebuilds triggered only by structural changes.
+It does not prescribe host persistence, draft ownership, or revision protocols.
+The BioImageFlow platform instead owns its canonical recursive `GraphState`, saved envelopes, and revisioned root drafts/nested snapshots, translating accepted graphs into library objects in memory.
 
 Both session constructors require the same runtime root and keep it outside the wire-format dictionary:
 
@@ -2352,7 +2397,7 @@ When `node.compute()` is called:
 
 1. **Graph Traversal:** Topological sort determines execution order. Only nodes in the dependency chain of the requested node are executed.
 
-1b. **Disabled-Node Filtering:** After topological sort, the engine walks the ordered list and removes disabled nodes and any node whose upstream includes a disabled node (see [Section 4.6](#46-enabling-and-disabling-nodes)). This is O(V) since upstreams are already classified by the time each node is visited.
+1b. **Disabled-Node Filtering:** After topological sort, the engine walks the ordered list and removes disabled nodes and any node whose upstream includes a disabled node (see [Section 4.6a](#46a-enabling-and-disabling-nodes)). This is O(V) since upstreams are already classified by the time each node is visited.
 
 2. **Per-Node Execution** (in topological order, skipping filtered nodes). The engine dispatches to different paths depending on the tool type:
 
@@ -2527,7 +2572,7 @@ It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list
 
 ---
 
-## 6.6 Validation Error Reference
+### 6.6 Validation Error Reference
 
 `ValidationError` is a frozen dataclass produced by:
 
@@ -2566,6 +2611,7 @@ class ValidationError:
 | `parameter_invalid` | A constant value fails Pydantic validation against its `Inputs` annotation. Produced only by `validate()` (and the module-level `validate_parameters()` helper). |
 | `unknown_tool` | `from_dict` could not resolve the tool module / class / versioned package. |
 | `duplicate_name` | Two nodes in the workflow share the same name. |
+| `environment_incompatible` | A processing environment's explicit `bioimageflow-core` requirement conflicts with the orchestrator's authoritative exact published version or configured local source. |
 | `construction_failed` | Catch-all for unexpected failures during node construction (e.g., the tool class's `__init__` raised). |
 | `source_tool_upstream` | A source `DataFrameTool` (`accepts_upstream = False`) was constructed with positional upstream arguments. |
 
@@ -2580,7 +2626,7 @@ Helpers are provided on each domain exception — `.to_validation_error(node, fi
 
 The module-level helper `bioimageflow.validate_parameters(tool_class, parameters)` returns `list[ValidationError]` for a single node's constants without needing a Workflow. The module-level helper `bioimageflow.check_type_compat(node, field, col_ref)` returns `ValidationError | None` for a single column binding. `bioimageflow.serialize_image_spec(spec)` returns a JSON-friendly dict representation of an `ImageSpec` (`{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}` with enum value strings) — exposed in `get_inputs_schema(tool)[field]["image_spec_serialized"]` for GUI use.
 
-**Tool-level wire-format schema.** GUIs exposing a tool's schema over the wire should use `bioimageflow.validation.serialize_input_schema(tool_class)` and `serialize_output_schema(tool_class)` — the canonical, JSON-safe representation. Both accept the tool class (no instantiation), return `{}` for tools without `Inputs` / `Outputs`, and serialize `connectable` as one of `"never" | "not_by_default" | "by_default"`. `Outputs` that subclass `Passthrough` are serialized as the marker `{"_passthrough": True}`. `required` is determined by presence of a class-level default — it is orthogonal to whether the field's type is `Optional[X]`. See §2.4 for the full field shape.
+**Tool-level wire-format schema.** Use the class-based `serialize_input_schema()` and `serialize_output_schema()` contracts in [§2.4](#24-type-compatibility), including their default/nullability distinction, GUI hints, and `Passthrough` marker.
 
 ---
 
@@ -2625,7 +2671,8 @@ For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, thi
 
 The runtime storage layout is rooted at `Workflow.storage_path`.
 When the platform runs a saved workflow, it passes `<workflow-directory>/results/` as the required runtime storage path.
-The workspace contains the saved workflow tree, workspace-local custom tools, user data, and co-located workflow results:
+The following project layout contains reusable tools, saved workflows, user data, and co-located results.
+Workflow-owned archive sources use the host materialization layout described in [§3.12](#312-project-local-custom-tools); neither authoring layout changes the runtime storage contract.
 
 ```text
 workspace/
@@ -2891,6 +2938,8 @@ class ResourceSpec:
     memory: str | None = None       # e.g., "16GB"
 
 class MyGPUTool(ProcessingTool):
+    # Partial declaration; the environment, IOModel classes, and method are omitted.
+    row_consumption = RowConsumption.MAPPED
     resources = ResourceSpec(gpu=1, max_concurrent=4)
     ...
 
@@ -3016,7 +3065,9 @@ Registration is linearized with cancellation: a task returned by a submission th
 Dispatch does not submit another row window after cancellation, does not decode results after cancellation wins, and waits for every submitted task to reach a terminal state without treating a cleanup timeout as success.
 
 ```python
+# Partial cancellation-method sketch; add an environment and IOModel declarations.
 class MyTool(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
     def process_row(self, arguments: Arguments, *, task=None) -> Outputs:
         for i in range(1000):
             if task and task.cancel_requested:
@@ -3031,7 +3082,7 @@ Exhausting or explicitly closing the iterator detaches the context and applies c
 
 ---
 
-## 14. Import Cheat Sheet
+## Import Cheat Sheet
 
 ```python
 # === bioimageflow-core (available in all environments) ===
@@ -3043,7 +3094,7 @@ from bioimageflow_core import (
     # Environment
     EnvironmentSpec, GENERAL_ENV, ResourceSpec,
     # Tool
-    BaseTool, ProcessingTool, IOModel, Category, GUIMeta,
+    BaseTool, ProcessingTool, RowConsumption, IOModel, Category, GUIMeta,
     # Arguments
     Arguments,
     # Strict remote-processing protocol and origins
@@ -3070,6 +3121,8 @@ from bioimageflow import (
     ParslConfigRef, OrchestratorLaunchConfig, PSIJLaunchConfig,
     SSHSubmissionTransport, LocalUpload,
     WorkflowRun, RemoteWorkflowRun, submit_workflow,
+    # Managed cluster interface (detailed contract linked from §1.1.1)
+    RemoteCluster, ClusterEnvironment, ParslConfiguration, SchedulerJob, SetupScript,
     RunRetryPlan, RecomputeRequest, RetryInvalidation,
     BackendNotSupportedError, PSIJSubmissionUncertainError,
     WorkflowRunFailedError, WorkflowRunLostError,

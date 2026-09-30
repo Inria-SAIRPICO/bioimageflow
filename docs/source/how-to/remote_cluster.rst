@@ -60,8 +60,8 @@ Define the workflow normally, without binding laptop input paths or remote runti
    from my_analysis_tools import MeasureImage
 
 
-   def build_workflow() -> Workflow:
-       workflow = Workflow(name="measure-images")
+   def build_workflow(*, storage_path: str | Path) -> Workflow:
+       workflow = Workflow(name="measure-images", storage_path=storage_path)
        with workflow:
            images = workflow.input("images", Path, id="input-images")
            files = Files()(path=images, name="files")
@@ -76,7 +76,8 @@ Define the workflow normally, without binding laptop input paths or remote runti
            )
        return workflow
 
-Remote execution chooses storage beneath ``<cluster-root>/results/<workflow-id>`` by default.
+The caller supplies a local runtime storage root while constructing the workflow; it is absent from portable graph bytes.
+Managed remote execution independently chooses storage beneath ``<cluster-root>/results/<workflow-id>`` by default.
 Pass ``results_root=...`` to the cluster only when the site uses a separate durable results area.
 
 Create the Parsl worker configuration
@@ -189,7 +190,7 @@ Create the cluster and submit the workflow from a laptop script:
    )
 
    run = cluster.submit(
-       build_workflow(),
+       build_workflow(storage_path=Path(".bioimageflow/local-results")),
        inputs={"images": LocalUpload(Path("images"))},
    )
    Path("run-id.txt").write_text(f"{run.id}\n", encoding="utf-8")
@@ -247,7 +248,7 @@ For a GUI or confirmation screen, call the same lifecycle in phases:
    connection = cluster.check_connection()
    deployment = cluster.deploy()
    prepared = cluster.prepare(
-       build_workflow(),
+       build_workflow(storage_path=Path(".bioimageflow/local-results")),
        inputs={"images": LocalUpload(Path("images"))},
    )
    validation = cluster.validate(deployment=deployment)

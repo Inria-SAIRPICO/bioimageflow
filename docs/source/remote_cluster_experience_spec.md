@@ -1,10 +1,14 @@
-# Remote cluster experience and public API proposal
+# Remote cluster experience and public API
 
 ## Status
 
-This document proposes a future BioImageFlow public API.
-It is the reviewed, example-led description of the experience we want, not the current released API.
-The corresponding normative implementation target is [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md).
+This document is the reviewed, example-led managed-cluster experience and public API contract.
+Its normative implementation target is [Remote cluster deployment and execution specification](remote_cluster_technical_spec.md), which takes precedence for resolved design decisions.
+The current source implements the managed API for locked uv projects and existing cluster Python installations, including deployment, preparation, validation, planning, submission, attachment, result download, and cleanup.
+Pixi, pylock, and standalone wheelhouse target realization remain unimplemented; target-side locked source builds and private-registry artifact authentication remain requirements of the broader technical target.
+Current managed uv requires a wheel-complete closure, captures local projects as universal wheels on the laptop, and uses public PyPI to capture the pinned uv installer.
+Source implementation is distinct from package publication or certification on a real scheduler site; this document does not certify either.
+The [remote cluster guide](how-to/remote_cluster.rst) describes the currently supported path.
 
 ## The experience we want
 
@@ -21,7 +25,7 @@ describe cluster → build workflow → submit → save run ID → reconnect →
 BioImageFlow still cannot remove facts that genuinely belong to the site.
 The user or a reusable site template must identify the SSH host, scheduler, account or project when required, queue, writable cluster root, and any Modules or Spack commands needed by the site.
 
-## Concepts introduced by this proposal
+## Managed-cluster concepts
 
 A **remote cluster** is a reusable description of one SSH-accessible execution destination.
 It owns remote paths, deployment, validation, submission, and reconnection.
@@ -29,7 +33,8 @@ Its `root` is the only operational-storage path a common-path user supplies.
 BioImageFlow chooses and records deployment, invocation, run-state, transfer, and result locations beneath that root, so user code never assembles internal remote paths.
 
 A **cluster environment** describes the software that should be available to the BioImageFlow orchestrator and ordinary Parsl workers.
-It may come from a locked uv or Pixi project, a standardized Python lock, an offline wheelhouse, a bare project manifest, or an administrator-managed Python installation.
+The target supports a locked uv or Pixi project, a standardized Python lock, an offline wheelhouse, or an administrator-managed Python installation.
+A bare project manifest is not an exact lock and is excluded from the first-version target.
 
 **Parsl** is the Python execution library that requests worker jobs from the scheduler and sends workflow tasks to them.
 BioImageFlow uses **PSI/J** as the scheduler-submission library for the orchestrator job; common-path users do not configure PSI/J directly.
@@ -54,7 +59,7 @@ Users should ask their cluster support team for these values rather than guess t
 
 ## Cluster prerequisites
 
-The proposed automation assumes:
+The managed-cluster contract assumes:
 
 - the laptop can authenticate using ordinary OpenSSH configuration;
 - site policy permits the user to execute non-interactive bootstrap and environment-installation commands on the login node;
@@ -124,23 +129,24 @@ from bioimageflow_common_tools import Files
 from bioimageflow_measurement_tools import ShapeProperties
 
 
-def build_workflow() -> Workflow:
-    workflow = Workflow(name="measure-images")
+def build_workflow(*, storage_path: str | Path) -> Workflow:
+    workflow = Workflow(name="measure-images", storage_path=storage_path)
 
     with workflow:
-        images = workflow.input("images", Path)
+        images = workflow.input("images", Path, id="input-images")
         files = Files()(path=images, pattern="*.tif", name="files")
         measurements = ShapeProperties()(
             label_image=files["path"],
             name="measure",
         )
-        workflow.output("areas", measurements["area"])
+        workflow.output("areas", measurements["area"], id="output-areas")
 
     return workflow
 ```
 
-The reusable workflow does not contain a laptop path or a cluster result directory.
-Those values belong to an invocation and its remote cluster.
+The caller supplies a local runtime storage root when constructing the workflow.
+That value stays outside portable graph bytes, and managed submission independently selects remote storage beneath the cluster's result root.
+Laptop input paths remain invocation values rather than reusable graph content.
 
 ### The Parsl configuration
 
@@ -244,7 +250,7 @@ cluster = RemoteCluster(
 )
 
 run = cluster.submit(
-    build_workflow(),
+    build_workflow(storage_path=Path(".bioimageflow/local-results")),
     inputs={"images": LocalUpload(Path("images"))},
 )
 
@@ -381,19 +387,20 @@ This proposal replaces the narrower `PreLaunchScript` concept because initializa
 The environment source answers one question: where should BioImageFlow get the Python packages needed by the orchestrator and workers?
 It does not replace the setup script, which exposes site software such as Python, CUDA, or native libraries.
 
-| Situation | Constructor | What the user prepares |
-| --- | --- | --- |
-| The project already uses uv | `from_uv_project()` | `pyproject.toml`, `uv.lock`, and required local project sources |
-| The project needs packages from Conda channels | `from_pixi_project()` | a Pixi manifest, `pixi.lock`, and the selected Pixi environment name |
-| The cluster cannot reach package indexes | `from_wheelhouse()` | compatible wheels and an exact lock |
-| The site supplies a complete tested Python | `from_existing_python()` | the versioned interpreter path from the administrator |
-| The project has standardized Python lock data | `from_pylock()` | `pylock.toml` and required local project sources |
-| The project has only `pyproject.toml` | Not in the first implementation | create a uv or standard Python lock before deployment |
+| Situation | Constructor | What the user prepares | Current source support |
+| --- | --- | --- | --- |
+| The project already uses uv | `from_uv_project()` | `pyproject.toml`, `uv.lock`, and required local project sources | Wheel-complete locked uv deployment |
+| The project needs packages from Conda channels | `from_pixi_project()` | a Pixi manifest, `pixi.lock`, and the selected Pixi environment name | Target realization unimplemented |
+| The cluster cannot reach package indexes | `from_wheelhouse()` | compatible wheels and an exact lock | Target realization unimplemented |
+| The site supplies a complete tested Python | `from_existing_python()` | the interpreter path from the administrator | Externally managed Python attestation |
+| The project has standardized Python lock data | `from_pylock()` | `pylock.toml` and required local project sources | Target realization unimplemented |
+| The project has only `pyproject.toml` | No first-version constructor | create a supported exact lock before deployment | Excluded from the target |
 
 For a new internet-connected project, start with the locked uv example.
-Use an administrator-managed Python when site policy forbids user installations, and use a wheelhouse when the cluster is offline.
+Use an administrator-managed Python when site policy forbids user installations.
+Standalone wheelhouse deployment is the specified offline target; current managed uv instead installs its captured wheel closure offline after laptop preparation.
 
-## Pixi project
+## Pixi project target
 
 Pixi is useful when a workflow needs Python packages and native scientific packages from Conda channels.
 
@@ -413,7 +420,7 @@ It runs a locked, non-interactive installation and does not update `pixi.lock` o
 Pixi cannot supply kernel drivers, scheduler services, or site policy.
 Those remain cluster prerequisites or setup-script responsibilities.
 
-## Offline wheelhouse
+## Offline wheelhouse target
 
 Clusters often block outbound internet access.
 An offline submission can use a laptop-prepared wheelhouse plus an exact lock:
@@ -464,7 +471,7 @@ A site that wants reproducible reuse should expose versioned immutable paths.
 
 ## Other Python project formats
 
-### Standard `pylock.toml`
+### Standard `pylock.toml` target
 
 ```python
 environment = ClusterEnvironment.from_pylock("pylock.toml", project=".")
@@ -481,7 +488,8 @@ It commonly contains version ranges and leaves transitive resolution to the inst
 The first implementation therefore requires the user to create a uv lock or standard Python lock instead of exposing `from_pyproject()`.
 A later adapter may resolve once and publish the complete hashed resolution, but it needs a separate confirmation design because the manifest alone cannot predict the deployment ID.
 
-The first implementation covers locked uv projects, locked Pixi projects, existing Python, offline wheelhouses with a lock, and standardized `pylock.toml`.
+The first-version target covers locked uv projects, locked Pixi projects, existing Python, offline wheelhouses with a lock, and standardized `pylock.toml`.
+Only locked uv and existing Python target realization are currently implemented.
 Dedicated adapters for Poetry, PDM, Conda-lock, Spack manifests, and container recipes are valid later extensions, not requirements for the first public experience.
 
 ## Explicit lifecycle operations
@@ -491,7 +499,7 @@ Dedicated adapters for Poetry, PDM, Conda-lock, Spack manifests, and container r
 ```python
 deployment = cluster.deploy()
 prepared = cluster.prepare(
-    build_workflow(),
+    build_workflow(storage_path=Path(".bioimageflow/local-results")),
     inputs={"images": LocalUpload(Path("images"))},
 )
 report = cluster.validate(deployment=deployment)

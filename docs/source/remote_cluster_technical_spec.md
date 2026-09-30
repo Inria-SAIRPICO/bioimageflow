@@ -2,10 +2,15 @@
 
 ## 1. Status and scope
 
-This document is the normative implementation target for the public experience described in [Remote cluster experience and public API proposal](remote_cluster_experience_spec.md).
+This document is the normative managed-cluster contract and implementation target for [Remote cluster experience and public API](remote_cluster_experience_spec.md).
 
-The API described here is not implemented yet.
-Until implementation is complete, the current submitted-execution contract in [BioImageFlow Library Specifications](specs.md) remains authoritative for released code.
+The current source implements the managed public API for locked uv projects and existing cluster Python installations.
+It does not yet satisfy every requirement below: Pixi, pylock, and standalone wheelhouse target realization, target-side source-distribution builds, and private-registry authentication during artifact capture remain implementation gaps.
+Current managed uv captures a wheel-complete closure and universal local-project wheels on the laptop, then installs offline around an existing compatible cluster interpreter; capture of the pinned uv installer currently uses public PyPI.
+Those limits do not weaken the locked native-build or authentication requirements in Sections 6 and 14.
+Source implementation, package publication, and certification at a real scheduler site are separate claims; no release or site certification is established by this specification.
+The [remote cluster guide](how-to/remote_cluster.rst) describes the supported source path.
+The separately supported lower-level submitted-execution contract remains in [library §4.5.3](specs.md#453-submitted-parsl-execution); the future retirement target in Section 20 has not been applied to that surface.
 
 The words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative.
 
@@ -22,7 +27,8 @@ This specification covers:
 This specification does not define a new scheduler language.
 Parsl worker configuration remains ordinary trusted Python.
 
-The implementation MAY reuse current launcher, upload, planning, diagnostic, and result-bundle internals, but the superseded low-level remote API is not a compatibility constraint.
+The managed implementation MAY reuse current launcher, upload, planning, diagnostic, and result-bundle internals without exposing those low-level paths in its common API.
+Existing supported lower-level library APIs remain governed by their own contract until an explicit breaking retirement implements Section 20.
 
 ## 2. Resolved design decisions
 
@@ -1178,9 +1184,11 @@ The laptop still needs workflow and tool packages required to construct the grap
 
 ## 20. Relationship to current APIs
 
-This redesign intentionally does not preserve the current transported-submission API.
+The managed common path uses the replacements below rather than requiring transported-submission construction.
+Current source still preserves the lower-level transported-submission API and its legacy run-handle dispatch.
+Managed reconnection uses `RemoteCluster.attach(run_id)`; lower-level `RemoteWorkflowRun.open(transport, storage_path, run_id)` remains a separate supported contract.
 
-When implemented:
+The future breaking retirement target, which requires a separate compatibility decision and is not accomplished merely by implementing the managed API, is:
 
 - `RemoteCluster` replaces user construction of `SSHSubmissionTransport`;
 - `SchedulerJob` replaces the remote use of `PSIJLaunchConfig`;
@@ -1191,8 +1199,8 @@ When implemented:
 - executor bindings move beside the Parsl `Config` in `ParslFactoryResult`;
 - internal staging, remote executable, and shared-runtime paths disappear from the common public API.
 
-No deprecated aliases or dual wire paths are required.
-Superseded public exports, compatibility tests, migration documents, and obsolete examples MUST be removed in the same implementation.
+For that retirement target, no deprecated aliases or dual wire paths are required.
+Superseded public exports, compatibility tests, migration documents, and obsolete examples MUST be removed in the same retirement implementation.
 
 Direct execution, Wetlands execution, attached Parsl routing, portable node resource overrides, cache keys, scoped node paths, progress, retry meaning, diagnostics, and result-bundle semantics remain behaviorally consistent unless this specification explicitly changes storage binding.
 

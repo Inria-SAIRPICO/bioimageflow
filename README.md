@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Annotated
 
 from bioimageflow_core import (
-    ProcessingTool, RowConsumption, GENERAL_ENV, ImageSpec, Arguments, Template,
+    ProcessingTool, RowConsumption, IOModel, GENERAL_ENV, ImageSpec, Arguments, Template,
 )
 from bioimageflow import Workflow, DataFrameTool
 
@@ -62,7 +62,7 @@ from bioimageflow import Workflow, DataFrameTool
 class FileLoader(DataFrameTool):
     display_name = "File Loader"
 
-    class Inputs:
+    class Inputs(IOModel):
         folder: Path
 
     def transform(self, df, arguments):
@@ -79,11 +79,11 @@ class Threshold(ProcessingTool):
     display_name = "Threshold"
     environment = GENERAL_ENV
 
-    class Inputs:
+    class Inputs(IOModel):
         image: Annotated[Path, ImageSpec()]
         cutoff: float = 128.0
 
-    class Outputs:
+    class Outputs(IOModel):
         mask: Annotated[Path, ImageSpec(semantics={"binary"})] = Template(
             "{image.stem}_mask.tif"
         )
