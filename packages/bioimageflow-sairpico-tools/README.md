@@ -2,6 +2,7 @@
 
 BioImageFlow wrappers for the SAIRPICO command-line tools from
 `bioimageit/PyFlow/Tools/Sairpico`.
+Package discovery requires only `bioimageflow-core`; image libraries and SAIRPICO binaries are supplied by the declared execution environments.
 
 ## Tools
 

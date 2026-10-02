@@ -3,7 +3,7 @@
 Optional BioImageFlow package for object measurements, label counting, table summaries, and segmentation benchmark metrics.
 
 Worker-side image tools use imageio, NumPy, and scikit-image through BioImageFlow's general environment.
-Main-process table tools use pandas and the `DataFrameTool` API.
+Main-process table tools use BioImageFlow, NumPy, and pandas, which remain package dependencies.
 The two tool families live in separate modules so worker imports never depend on the orchestrator package.
 
 Label inputs must be finite, non-negative, integer-valued 2D rasters; `0` is background.

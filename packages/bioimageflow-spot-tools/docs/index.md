@@ -3,8 +3,8 @@
 `bioimageflow-spot-tools` provides a focused puncta workflow: detect spots, assign spot coordinates to label images, and summarize spot counts/intensities per object.
 It is intended for FISH-like, smFISH-like, synapse, vesicle, or small puncta examples where a lightweight and deterministic baseline is enough.
 
-Core libraries are imageio, NumPy, pandas for dataframe tools, and BioImageFlow core APIs.
-SciPy provides filtering, global assignment, and spatial indexing, while scikit-image provides local-maxima and connected-component operations.
+Main-process dataframe tools require BioImageFlow, ImageIO, NumPy, pandas, and SciPy from the host.
+Processing tools obtain scikit-image and their image-processing dependencies from the shared worker environment for local-maxima and connected-component operations.
 Big-FISH remains a future optional evaluation backend, not a current default dependency.
 
 ## Tools

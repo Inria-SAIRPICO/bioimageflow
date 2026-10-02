@@ -21,7 +21,8 @@ Segmentation-focused tool package for BioImageFlow.
 Classical connected-component tools use face connectivity by default and treat `image > threshold` as foreground when `above` is enabled. Label inputs are validated as finite, integral, non-negative arrays, and object counts are based on distinct positive IDs rather than the largest ID.
 Default label-output paths use TIFF rather than inheriting an input extension that may be lossy or unable to store UInt32 label IDs.
 
-Heavy model dependencies are declared in isolated `EnvironmentSpec` objects and imported only inside `process_row`. Importing this package does not require Cellpose, TensorFlow, StarDist, or other model packages to be installed in the main process.
+Package discovery requires only `bioimageflow-core`.
+Classical image dependencies and heavy model dependencies are declared in worker `EnvironmentSpec` objects and imported only inside `process_row`. Importing this package does not require ImageIO, NumPy, SciPy, scikit-image, Cellpose, TensorFlow, StarDist, or other model packages in the main process.
 `Cellpose3`, `CellposeSAM`, and `StarDistSegmenter` lazily keep one model per worker-side tool instance.
 Repeated calls with the same model selection reuse the weights; changing `model_type` or `model_name` replaces the cached model, and `clear_model_cache()` releases it explicitly.
 Applications can invalidate remote worker caches by stopping the corresponding Wetlands environment.

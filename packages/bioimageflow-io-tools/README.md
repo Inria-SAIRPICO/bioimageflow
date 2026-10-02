@@ -2,7 +2,8 @@
 
 Optional BioImageFlow package for image ingestion, metadata inspection, axis validation, slicing, lightweight format conversion, and explicit bioio/plugin-backed conversion.
 
-Core libraries for lightweight tools are imageio, NumPy, and tifffile.
+Package discovery requires only `bioimageflow-core`.
+Ordinary image tools use ImageIO, NumPy, and tifffile from the shared worker environment.
 `BioIOConvertImage` and `ConvertToOmeZarr` declare a separate pinned BioIO/plugin-backed runtime for broad microscopy formats and maintained OME-Zarr writing.
 
 ## Tools

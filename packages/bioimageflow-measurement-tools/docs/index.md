@@ -2,8 +2,8 @@
 
 `bioimageflow-measurement-tools` provides lightweight feature extraction, object counting, table summarization, and label benchmark metrics.
 
-Image tools are worker-safe and use imageio, NumPy, and scikit-image from the general execution environment.
-Table tools run in the orchestrator process with pandas and expose dynamically resolved output columns when the upstream schema and configuration are known.
+Image tools are worker-safe and use ImageIO, NumPy, and scikit-image from the general execution environment.
+Table tools run in the orchestrator process with BioImageFlow, NumPy, and pandas, which remain package dependencies, and expose dynamically resolved output columns when the upstream schema and configuration are known.
 Every label raster must be 2D, finite, non-negative, and integer-valued, with `0` reserved for background.
 
 ## Tools

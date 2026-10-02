@@ -3,7 +3,8 @@
 `bioimageflow-tracking-tools` provides deterministic table utilities for live-cell migration tracking.
 It extracts object centroids from label movies, links adjacent frames, renders tracks, and computes unambiguous migration summaries.
 
-Core libraries are imageio, NumPy, pandas, SciPy, scikit-image, and BioImageFlow APIs.
+Main-process dataframe tools require BioImageFlow, NumPy, pandas, and SciPy from the host.
+ImageIO and scikit-image are supplied by the shared worker environment for label extraction and rendering.
 
 ## Tools
 
