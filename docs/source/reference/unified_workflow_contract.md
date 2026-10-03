@@ -246,6 +246,11 @@ The version-2 envelope has exactly these four fields.
 Each record has an explicit `id`, canonical `module`, `filename`, content hash, and either one source string or a hashed `files` bundle.
 Tool nodes refer to records through `source_module`.
 Source identity is the explicit ID plus verified content; class name alone is never an identity.
+Public `from_dict()`, `load()` and `import_archive()` capture and admit the complete source table before custom-source writes or imports.
+IDs and single-file names must be safe path components; bundle files may use safe relative nested paths, including helper modules and assets, with content hashes computed and supplied hashes verified under the existing contract before staging.
+Path components exclude colon, backslash and Windows reserved device names even on POSIX hosts.
+Captured bytes and paths remain fixed during staging even when trusted embedded Python executes.
+This containment does not sandbox that Python or change the owned extraction of the outer ZIP archive.
 Two source IDs can therefore export the same class name without shadowing one another.
 
 `to_dict()` returns the editable graph, and `to_dict(include_custom_tools=True)` returns an envelope when custom sources exist.

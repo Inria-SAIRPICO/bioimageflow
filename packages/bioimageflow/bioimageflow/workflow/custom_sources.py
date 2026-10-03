@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import PureWindowsPath
 from typing import TYPE_CHECKING
 
 from .common import (
@@ -247,54 +249,113 @@ def _register_custom_tool_module(
     return source_id
 
 
+@dataclass(frozen=True)
+class _AdmittedCustomSource:
+    source_id: str
+    original_module: str
+    source_hash: str
+    filename: str | None = None
+    source: bytes | None = None
+    root_package: str | None = None
+    files: tuple[tuple[str, bytes], ...] = ()
+
+
+def _safe_source_path(value: Any, *, nested: bool) -> str:
+    """Admit portable contained paths without changing safe normalization."""
+    if not isinstance(value, str) or not value or "\\" in value or "\0" in value:
+        raise ValueError("Invalid embedded custom tool path.")
+    path = Path(value)
+    windows_path = PureWindowsPath(value)
+    if (
+        path.is_absolute()
+        or windows_path.drive
+        or ":" in value
+        or any(PureWindowsPath(part).is_reserved() for part in path.parts)
+        or ".." in path.parts
+        or path.as_posix() == "."
+        or (not nested and ("/" in value or value in (".", "..")))
+    ):
+        raise ValueError(f"Invalid embedded custom tool path: {value!r}")
+    return path.as_posix()
+
+
+def _admit_custom_source(record: Any) -> _AdmittedCustomSource:
+    if not isinstance(record, dict):
+        raise ValueError("Custom source records must be objects.")
+    single_fields = {"id", "module", "filename", "source_hash", "source"}
+    bundle_fields = single_fields - {"source"} | {"root_package", "files"}
+    if set(record) != (bundle_fields if "files" in record else single_fields):
+        raise ValueError("Malformed custom source record.")
+    source_id = _safe_source_path(record["id"], nested=False)
+    original_module = record["module"]
+    if not isinstance(original_module, str):
+        raise ValueError("Custom source module names must be strings.")
+    expected_hash = record["source_hash"]
+    if "files" not in record:
+        source = record["source"]
+        if not isinstance(source, str):
+            raise ValueError("Embedded custom tool source must be a string.")
+        data = source.encode("utf-8")
+        actual_hash = hashlib.sha256(data).hexdigest()
+        if expected_hash and expected_hash != actual_hash:
+            raise ValueError(f"Embedded custom tool module {source_id!r} hash mismatch")
+        filename = _safe_source_path(
+            record["filename"] or f"{source_id}.py", nested=False
+        )
+        return _AdmittedCustomSource(
+            source_id, original_module, actual_hash, filename=filename, source=data
+        )
+
+    if not isinstance(record["files"], list):
+        raise ValueError("Custom source files must be an array.")
+    root_package = record["root_package"] or _CUSTOM_TOOLS_PACKAGE
+    if not isinstance(root_package, str):
+        raise ValueError("Custom source root packages must be strings.")
+    digest = hashlib.sha256()
+    files: list[tuple[str, bytes]] = []
+    for file_record in record["files"]:
+        if not isinstance(file_record, dict) or set(file_record) != {
+            "path", "encoding", "content", "source_hash"
+        }:
+            raise ValueError("Malformed custom source file record.")
+        if file_record["encoding"] != "base64":
+            raise ValueError("Custom source file encoding must be 'base64'.")
+        rel_posix = _safe_source_path(file_record["path"], nested=True)
+        data = base64.b64decode(file_record["content"])
+        actual_file_hash = hashlib.sha256(data).hexdigest()
+        if file_record["source_hash"] not in (None, actual_file_hash):
+            raise ValueError(f"Embedded custom tool file {rel_posix!s} hash mismatch")
+        digest.update(rel_posix.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(actual_file_hash.encode("ascii"))
+        digest.update(b"\0")
+        files.append((rel_posix, data))
+    actual_hash = digest.hexdigest()
+    if expected_hash and expected_hash != actual_hash:
+        raise ValueError(f"Embedded custom tool bundle {source_id!r} hash mismatch")
+    return _AdmittedCustomSource(
+        source_id, original_module, actual_hash,
+        root_package=root_package, files=tuple(files),
+    )
+
+
 def _load_custom_sources(
     records: Iterable[dict[str, Any]],
 ) -> dict[str, _CustomToolBundle]:
+    # Complete admission owns immutable bytes before any trusted source executes.
+    admitted = tuple(_admit_custom_source(record) for record in records)
+    if len({record.source_id for record in admitted}) != len(admitted):
+        raise ValueError("Custom source IDs must be unique non-empty strings.")
     modules: dict[str, _CustomToolBundle] = {}
-    for record in records:
-        if not isinstance(record, dict):
-            raise ValueError("Custom source records must be objects.")
-        single_fields = {"id", "module", "filename", "source_hash", "source"}
-        bundle_fields = {
-            "id",
-            "module",
-            "filename",
-            "root_package",
-            "source_hash",
-            "files",
-        }
-        expected_fields = bundle_fields if "files" in record else single_fields
-        if set(record) != expected_fields:
-            raise ValueError("Malformed custom source record.")
-        source_id = record["id"]
-        if not isinstance(source_id, str) or not source_id or source_id in modules:
-            raise ValueError("Custom source IDs must be unique non-empty strings.")
-        if "files" in record:
-            if not isinstance(record["files"], list):
-                raise ValueError("Custom source files must be an array.")
-            for file_record in record["files"]:
-                if not isinstance(file_record, dict) or set(file_record) != {
-                    "path",
-                    "encoding",
-                    "content",
-                    "source_hash",
-                }:
-                    raise ValueError("Malformed custom source file record.")
-                if file_record["encoding"] != "base64":
-                    raise ValueError("Custom source file encoding must be 'base64'.")
-            modules[source_id] = _load_custom_tools_dir_bundle(record)
+    for record in admitted:
+        source_id = record.source_id
+        if record.root_package is not None:
+            modules[source_id] = _materialize_custom_tools_dir_bundle(record)
             continue
-
-        source = record["source"]
-        expected_hash = record.get("source_hash")
-        actual_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        if expected_hash and expected_hash != actual_hash:
-            raise ValueError(f"Embedded custom tool module {source_id!r} hash mismatch")
-
-        filename = record.get("filename") or f"{source_id}.py"
+        assert record.filename is not None and record.source is not None
         module_dir = Path(tempfile.mkdtemp(prefix="bioimageflow_custom_tools_"))
-        module_path = module_dir / filename
-        module_path.write_text(source, encoding="utf-8")
+        module_path = module_dir / record.filename
+        module_path.write_bytes(record.source)
         module_name = f"bioimageflow_custom_tools_{source_id}"
         spec = importlib.util.spec_from_file_location(module_name, module_path)
         if spec is None or spec.loader is None:
@@ -303,64 +364,41 @@ def _load_custom_sources(
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
         _stamp_embedded_custom_classes(
-            module,
-            source_id,
-            actual_hash,
-            record.get("module", ""),
+            module, source_id, record.source_hash, record.original_module
         )
         modules[source_id] = _CustomToolBundle(
-            source_id=source_id,
-            source_hash=actual_hash,
-            module=module,
+            source_id=source_id, source_hash=record.source_hash, module=module,
         )
     return modules
 
 
 def _load_custom_tools_dir_bundle(record: dict[str, Any]) -> _CustomToolBundle:
-    source_id = record["id"]
-    expected_hash = record.get("source_hash")
-    digest = hashlib.sha256()
-    root_package = record.get("root_package") or _CUSTOM_TOOLS_PACKAGE
-    scoped_root = f"bioimageflow_custom_tools_{source_id}"
+    admitted = _admit_custom_source(record)
+    if admitted.root_package is None:
+        raise ValueError("Custom source bundle requires files.")
+    return _materialize_custom_tools_dir_bundle(admitted)
+
+
+def _materialize_custom_tools_dir_bundle(
+    record: _AdmittedCustomSource,
+) -> _CustomToolBundle:
+    scoped_root = f"bioimageflow_custom_tools_{record.source_id}"
     temp_root = Path(tempfile.mkdtemp(prefix="bioimageflow_custom_tools_"))
     package_root = temp_root / scoped_root
     package_root.mkdir(parents=True)
     (package_root / "__init__.py").write_text("", encoding="utf-8")
-
-    for file_record in record.get("files", []):
-        rel_path = Path(file_record["path"])
-        if rel_path.is_absolute() or ".." in rel_path.parts:
-            raise ValueError(
-                f"Invalid embedded custom tool path: {file_record['path']!r}"
-            )
-        if file_record.get("encoding") == "base64":
-            data = base64.b64decode(file_record["content"])
-        else:
-            data = file_record["source"].encode("utf-8")
-        actual_file_hash = hashlib.sha256(data).hexdigest()
-        if file_record.get("source_hash") not in (None, actual_file_hash):
-            raise ValueError(f"Embedded custom tool file {rel_path!s} hash mismatch")
-        rel_posix = rel_path.as_posix()
-        digest.update(rel_posix.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(actual_file_hash.encode("ascii"))
-        digest.update(b"\0")
-        output_path = package_root / rel_path
+    for rel_posix, data in record.files:
+        output_path = package_root / rel_posix
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(data)
-
-    actual_hash = digest.hexdigest()
-    if expected_hash and expected_hash != actual_hash:
-        raise ValueError(f"Embedded custom tool bundle {source_id!r} hash mismatch")
     sys.path.insert(0, str(temp_root))
-    bundle = _CustomToolBundle(
-        source_id=source_id,
-        source_hash=actual_hash,
+    return _CustomToolBundle(
+        source_id=record.source_id,
+        source_hash=record.source_hash,
         scoped_root=scoped_root,
-        root_package=root_package,
+        root_package=record.root_package,
         sys_path=str(temp_root),
     )
-    return bundle
 
 
 def _resolve_custom_tool_class(

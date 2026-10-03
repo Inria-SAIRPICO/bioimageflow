@@ -3228,6 +3228,11 @@ The portable archive envelope is separate from the graph:
 ```
 
 The source table is collected once across the recursive graph.
+Before creating custom-source staging files or importing embedded Python, public archive loaders capture and validate the complete source table, including unique safe single-component IDs, contained single-file names and relative bundle paths, and computed content hashes with supplied hashes verified under the existing contract.
+Portable source paths reject colon, backslash and Windows reserved device components even on POSIX hosts.
+Staging consumes captured immutable bytes and paths; invalid later records cannot cause earlier custom sources to execute or partially stage.
+Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
+Embedded Python remains trusted executable code; contained staging is not a Python sandbox.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
 `Workflow.to_archive_dict()` and ZIP export produce this artifact form, while `Workflow.to_dict()` remains the editable graph boundary.
