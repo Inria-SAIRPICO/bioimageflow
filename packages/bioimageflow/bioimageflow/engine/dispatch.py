@@ -8,9 +8,9 @@ from __future__ import annotations
 import threading
 
 from bioimageflow_core import (
-    ProcessingTaskV1,
+    ProcessingTask,
     ResourceSpec,
-    RowInvocationV1,
+    RowInvocation,
     decode_processing_result,
     encode_processing_task,
     validate_processing_result,
@@ -231,7 +231,7 @@ class _DispatchMixin:
             if has_batch:
                 if workflow.cancel_requested:
                     raise WorkflowCancelledError("Workflow cancelled by user")
-                invocation = ProcessingTaskV1(
+                invocation = ProcessingTask(
                     task_id="task_0000000000000000",
                     node_name=node_name,
                     invocation_id=invocation_id,
@@ -240,7 +240,7 @@ class _DispatchMixin:
                     mode="process_batch",
                     tool=origin,
                     rows=tuple(
-                        RowInvocationV1(
+                        RowInvocation(
                             position=position,
                             row_index=(
                                 context.row_index
@@ -302,7 +302,7 @@ class _DispatchMixin:
                 return validate_processing_result_rows(result.rows, tool.Outputs)
 
             invocations = [
-                ProcessingTaskV1(
+                ProcessingTask(
                     task_id=f"task_{position:016x}",
                     node_name=node_name,
                     invocation_id=invocation_id,
@@ -311,7 +311,7 @@ class _DispatchMixin:
                     mode="row_chunk",
                     tool=origin,
                     rows=(
-                        RowInvocationV1(
+                        RowInvocation(
                             position=position,
                             row_index=(
                                 context.row_index

@@ -11,8 +11,8 @@ from bioimageflow.engine.output_validation import validate_processing_result_row
 from bioimageflow.parsl.routing import RoutingPlan
 from bioimageflow.storage import Storage
 from bioimageflow_core import (
-    ProcessingTaskV1,
-    RowInvocationV1,
+    ProcessingTask,
+    RowInvocation,
     encode_processing_task,
     encode_worker_tool_origin,
 )
@@ -107,7 +107,7 @@ class ParslBackend:
         ):
             return []
         rows = tuple(
-            RowInvocationV1(
+            RowInvocation(
                 position=position,
                 row_index=request.row_indexes[position],
                 arguments=arguments,
@@ -119,7 +119,7 @@ class ParslBackend:
             )
         )
         if request.has_batch:
-            tasks: tuple[ProcessingTaskV1, ...] = (
+            tasks: tuple[ProcessingTask, ...] = (
                 make_batch_task(
                     node_name=request.node_name,
                     invocation_id=request.invocation_id,
@@ -148,7 +148,7 @@ class ParslBackend:
         app = self._app(route.executor_label)
         storage = Storage(request.workflow.storage_path)
 
-        def task_submitted(task: ProcessingTaskV1) -> None:
+        def task_submitted(task: ProcessingTask) -> None:
             storage.start_backend_task_diagnostic(
                 request.run_id,
                 request.node_name,
@@ -164,7 +164,7 @@ class ParslBackend:
             )
 
         def task_terminal(
-            task: ProcessingTaskV1,
+            task: ProcessingTask,
             status: str,
             error: BaseException | None,
         ) -> None:

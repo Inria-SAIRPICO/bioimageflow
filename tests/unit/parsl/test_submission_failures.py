@@ -7,13 +7,13 @@ from collections.abc import Iterator
 import pytest
 
 from bioimageflow.parsl.submission import BoundedParslCollector
-from bioimageflow_core import ProcessingTaskV1
+from bioimageflow_core import ProcessingTask
 
 
 def test_task_iterator_failure_has_deterministic_node_order() -> None:
     observed: list[BaseException] = []
 
-    def broken_tasks() -> Iterator[ProcessingTaskV1]:
+    def broken_tasks() -> Iterator[ProcessingTask]:
         raise RuntimeError("task packing failed")
         yield
 

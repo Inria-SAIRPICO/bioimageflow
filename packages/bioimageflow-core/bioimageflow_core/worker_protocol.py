@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+from copy import deepcopy
 import os
 from pathlib import Path
 import re
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple, cast
 
 from bioimageflow_core.arguments import ExecutionContext
+from bioimageflow_core._processing_values import (
+    decode_processing_value,
+    encode_processing_value,
+)
 from bioimageflow_core.worker_origins import (
     WorkerToolOriginV1,
     decode_worker_tool_origin,
@@ -16,8 +21,8 @@ from bioimageflow_core.worker_origins import (
 )
 
 
-TASK_SCHEMA = "bioimageflow.processing_task.v1"
-RESULT_SCHEMA = "bioimageflow.processing_result.v1"
+TASK_SCHEMA = "bioimageflow.processing_task.v2"
+RESULT_SCHEMA = "bioimageflow.processing_result.v2"
 _TASK_ID_RE = re.compile(r"^task_[0-9a-f]{16}$")
 _INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
 _ATTEMPT_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
@@ -34,7 +39,7 @@ _CONTEXT_FIELDS = {
 
 
 @dataclass(frozen=True)
-class RowInvocationV1:
+class RowInvocation:
     position: int
     row_index: str
     arguments: Dict[str, Any]
@@ -42,7 +47,7 @@ class RowInvocationV1:
 
 
 @dataclass(frozen=True)
-class ProcessingTaskV1:
+class ProcessingTask:
     task_id: str
     node_name: str
     invocation_id: str
@@ -50,31 +55,31 @@ class ProcessingTaskV1:
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
     tool: WorkerToolOriginV1
-    rows: Tuple[RowInvocationV1, ...]
+    rows: Tuple[RowInvocation, ...]
     batch_context: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_task.v1"] = field(
+    schema: Literal["bioimageflow.processing_task.v2"] = field(
         default=TASK_SCHEMA, init=False
     )
 
 
 @dataclass(frozen=True)
-class RowResultV1:
+class RowResult:
     position: int
     row_index: str
     outputs: Tuple[Dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
-class ProcessingTaskResultV1:
+class ProcessingTaskResult:
     task_id: str
     node_name: str
     invocation_id: str
     cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
-    rows: Tuple[RowResultV1, ...]
+    rows: Tuple[RowResult, ...]
     metrics: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_result.v1"] = field(
+    schema: Literal["bioimageflow.processing_result.v2"] = field(
         default=RESULT_SCHEMA, init=False
     )
 
@@ -138,22 +143,6 @@ def _require_plain_dict(value: Any, label: str) -> Dict[str, Any]:
     return dict(value)
 
 
-def _encode_portable_value(value: Any) -> Any:
-    """Convert path values recursively without changing ordinary transport values."""
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {
-            key: _encode_portable_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_encode_portable_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_encode_portable_value(item) for item in value)
-    return value
-
-
 def _require_path(value: Any, label: str) -> str:
     text = _require_text(value, label)
     if not Path(text).is_absolute() or os.path.normpath(text) != text:
@@ -180,15 +169,17 @@ def _decode_context(value: Any, label: str) -> Optional[Dict[str, Any]]:
     return context
 
 
-def _decode_row_invocation(payload: Any) -> RowInvocationV1:
+def _decode_row_invocation(payload: Any) -> RowInvocation:
     row = _require_plain_dict(payload, "row invocation")
     _require_exact_keys(
         row, {"position", "row_index", "arguments", "context"}, "row invocation"
     )
-    return RowInvocationV1(
+    return RowInvocation(
         position=_require_integer(row["position"], "row position"),
         row_index=_require_row_index(row["row_index"], "row_index"),
-        arguments=_require_plain_dict(row["arguments"], "row arguments"),
+        arguments=_require_plain_dict(
+            decode_processing_value(row["arguments"]), "row arguments"
+        ),
         context=_decode_context(row["context"], "row context"),
     )
 
@@ -205,20 +196,33 @@ def _decode_rows(value: Any, decoder: Any, label: str) -> Tuple[Any, ...]:
     return rows
 
 
-def encode_processing_task(task: ProcessingTaskV1) -> Dict[str, Any]:
+def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
     """Encode a processing task to its exact worker-safe object."""
-    if not isinstance(task, ProcessingTaskV1):
-        raise TypeError("task must be a ProcessingTaskV1 value.")
-    payload = asdict(task)
-    payload["tool"] = encode_worker_tool_origin(task.tool)
-    payload["rows"] = [
-        _encode_portable_value(asdict(row))
-        for row in task.rows
-    ]
-    return payload
+    if not isinstance(task, ProcessingTask):
+        raise TypeError("task must be a ProcessingTask value.")
+    return {
+        "schema": task.schema,
+        "task_id": task.task_id,
+        "node_name": task.node_name,
+        "invocation_id": task.invocation_id,
+        "cache_attempt_id": task.cache_attempt_id,
+        "task_retry": task.task_retry,
+        "mode": task.mode,
+        "tool": encode_worker_tool_origin(task.tool),
+        "rows": [
+            {
+                "position": row.position,
+                "row_index": row.row_index,
+                "arguments": encode_processing_value(row.arguments),
+                "context": deepcopy(row.context),
+            }
+            for row in task.rows
+        ],
+        "batch_context": deepcopy(task.batch_context),
+    }
 
 
-def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTaskV1:
+def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
     """Decode one task and fail closed before any tool code runs."""
     task = _require_plain_dict(payload, "processing task")
     expected = {
@@ -246,7 +250,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTaskV1:
         raise ValueError("row_chunk tasks must not define batch_context.")
     if mode == "process_batch" and batch_context is None:
         raise ValueError("process_batch tasks require batch_context.")
-    return ProcessingTaskV1(
+    return ProcessingTask(
         task_id=_require_identifier(task["task_id"], _TASK_ID_RE, "task_id"),
         node_name=_require_text(task["node_name"], "node_name"),
         invocation_id=_require_identifier(
@@ -261,39 +265,48 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTaskV1:
     )
 
 
-def _decode_row_result(payload: Any) -> RowResultV1:
+def _decode_row_result(payload: Any) -> RowResult:
     row = _require_plain_dict(payload, "row result")
     _require_exact_keys(row, {"position", "row_index", "outputs"}, "row result")
     outputs_value = row["outputs"]
     if type(outputs_value) is not list:
         raise ValueError("row outputs must be an array.")
     outputs = tuple(
-        _require_plain_dict(output, "row output") for output in outputs_value
+        _require_plain_dict(decode_processing_value(output), "row output")
+        for output in outputs_value
     )
-    return RowResultV1(
+    return RowResult(
         position=_require_integer(row["position"], "row position"),
         row_index=_require_row_index(row["row_index"], "row_index"),
         outputs=outputs,
     )
 
 
-def encode_processing_result(result: ProcessingTaskResultV1) -> Dict[str, Any]:
+def encode_processing_result(result: ProcessingTaskResult) -> Dict[str, Any]:
     """Encode a processing result to its exact orchestrator-safe object."""
-    if not isinstance(result, ProcessingTaskResultV1):
-        raise TypeError("result must be a ProcessingTaskResultV1 value.")
-    payload = asdict(result)
-    payload["rows"] = [
-        {
-            "position": row.position,
-            "row_index": row.row_index,
-            "outputs": [dict(output) for output in row.outputs],
-        }
-        for row in result.rows
-    ]
-    return payload
+    if not isinstance(result, ProcessingTaskResult):
+        raise TypeError("result must be a ProcessingTaskResult value.")
+    return {
+        "schema": result.schema,
+        "task_id": result.task_id,
+        "node_name": result.node_name,
+        "invocation_id": result.invocation_id,
+        "cache_attempt_id": result.cache_attempt_id,
+        "task_retry": result.task_retry,
+        "mode": result.mode,
+        "rows": [
+            {
+                "position": row.position,
+                "row_index": row.row_index,
+                "outputs": [encode_processing_value(output) for output in row.outputs],
+            }
+            for row in result.rows
+        ],
+        "metrics": deepcopy(result.metrics),
+    }
 
 
-def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResultV1:
+def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult:
     """Decode one result and fail closed before output acceptance."""
     result = _require_plain_dict(payload, "processing result")
     expected = {
@@ -316,7 +329,7 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
     metrics = result["metrics"]
     if metrics is not None:
         metrics = _require_plain_dict(metrics, "result metrics")
-    return ProcessingTaskResultV1(
+    return ProcessingTaskResult(
         task_id=_require_identifier(result["task_id"], _TASK_ID_RE, "task_id"),
         node_name=_require_text(result["node_name"], "node_name"),
         invocation_id=_require_identifier(
@@ -331,7 +344,7 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
 
 
 def validate_processing_result(
-    task: ProcessingTaskV1, result: ProcessingTaskResultV1
+    task: ProcessingTask, result: ProcessingTaskResult
 ) -> None:
     """Require exact task/result correlation and row correspondence."""
     task_fields = (

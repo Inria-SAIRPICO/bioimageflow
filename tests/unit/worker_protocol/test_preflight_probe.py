@@ -102,7 +102,7 @@ def test_probe_returns_exact_success_evidence_without_invoking_tool(
     assert result == {
         "schema": "bioimageflow.parsl.executor_preflight_result.v1",
         "executor_label": "cpu",
-        "worker_api": "bioimageflow.processing_task.v1",
+        "worker_api": "bioimageflow.processing_task.v2",
         "core_version": importlib.metadata.version("bioimageflow-core"),
         "core_requirements": [CURRENT_CORE_REQUIREMENT],
         "core_compatible": True,

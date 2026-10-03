@@ -25,3 +25,9 @@ uv run pytest packages/bioimageflow-core tests/unit/test_core_package_metadata.p
 
 Shared-memory creation and attachment helpers reject object-containing NumPy dtypes before allocation or attachment.
 Numeric data and Path/str image dispatch keep their existing behavior; local handles close on context exit while segment unlinking remains with the caller/engine owner.
+
+Current processing transport uses `ProcessingTask`, `RowInvocation`, `ProcessingTaskResult`, and `RowResult` with explicit task/result v2 envelopes.
+The public task/result codecs use the same typed grammar for arguments and outputs: primitive leaves, explicit dictionary/list/tuple nodes, Paths, SharedArray references, NumPy arrays, and dtype-preserving numeric NumPy scalars.
+Literal dictionaries cannot collide with typed descriptors, and SharedArray decoding never allocates or attaches memory.
+Unsupported objects, cyclic containers, object-containing dtypes, and malformed descriptors are refused; picklability alone is not sufficient.
+SharedArray references are host-local, so distributed callers such as Parsl must refuse them even though local Wetlands workers can transport the reference.

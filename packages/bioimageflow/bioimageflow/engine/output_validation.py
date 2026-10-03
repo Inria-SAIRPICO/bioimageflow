@@ -11,7 +11,20 @@ from pydantic import ConfigDict, PydanticUserError, TypeAdapter, ValidationError
 from bioimageflow.validation import is_path_type
 from bioimageflow_core import IOModel
 from bioimageflow_core.types import SharedArray
-from bioimageflow_core.worker_protocol import RowResultV1
+from bioimageflow_core.worker_protocol import RowResult
+
+
+def _contains_shared_array(value: Any) -> bool:
+    if isinstance(value, SharedArray):
+        return True
+    if isinstance(value, dict):
+        return any(
+            _contains_shared_array(key) or _contains_shared_array(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_shared_array(item) for item in value)
+    return False
 
 
 def _output_values(
@@ -48,7 +61,7 @@ def validate_processing_output(
     validated: dict[str, Any] = {}
     for field, annotation in annotations.items():
         value = values[field]
-        if reject_shared_array and isinstance(value, SharedArray):
+        if reject_shared_array and _contains_shared_array(value):
             raise TypeError(
                 f"Processing output field {field!r} returned SharedArray across "
                 "an unsupported remote boundary."
@@ -134,7 +147,7 @@ def normalize_processing_batch_outputs(
 
 
 def validate_processing_result_rows(
-    rows: Sequence[RowResultV1],
+    rows: Sequence[RowResult],
     output_type: type[IOModel],
     *,
     reject_shared_array: bool = False,

@@ -617,7 +617,7 @@ Their status is:
 Wetlands and Parsl invoke the same top-level worker-safe function from `bioimageflow-core`.
 Parsl wraps that function in a `PythonApp` bound to one explicit DFK and executor label.
 
-The worker function imports its dependencies inside the worker process and accepts only picklable values.
+The worker function imports its dependencies inside the worker process and accepts only the declared current Core task envelope and typed-value grammar; arbitrary picklability is not a transport contract.
 
 Parsl app caching MUST be disabled.
 BioImageFlow v1 caching remains the only result cache.
@@ -628,8 +628,8 @@ Every task uses an explicit versioned envelope.
 
 ```python
 @dataclass(frozen=True)
-class ProcessingTaskV1:
-    schema: Literal["bioimageflow.processing_task.v1"]
+class ProcessingTask:
+    schema: Literal["bioimageflow.processing_task.v2"]
     task_id: str
     node_name: str
     invocation_id: str
@@ -637,11 +637,11 @@ class ProcessingTaskV1:
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
     tool: "WorkerToolOriginV1"
-    rows: tuple[RowInvocationV1, ...]
+    rows: tuple[RowInvocation, ...]
     batch_context: Optional[dict[str, Any]] = None
 
 @dataclass(frozen=True)
-class RowInvocationV1:
+class RowInvocation:
     position: int
     row_index: str
     arguments: dict[str, Any]
@@ -664,19 +664,19 @@ Invalid input fails before tool code runs.
 
 ```python
 @dataclass(frozen=True)
-class ProcessingTaskResultV1:
-    schema: Literal["bioimageflow.processing_result.v1"]
+class ProcessingTaskResult:
+    schema: Literal["bioimageflow.processing_result.v2"]
     task_id: str
     node_name: str
     invocation_id: str
     cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
-    rows: tuple[RowResultV1, ...]
+    rows: tuple[RowResult, ...]
     metrics: Optional[dict[str, Any]] = None
 
 @dataclass(frozen=True)
-class RowResultV1:
+class RowResult:
     position: int
     row_index: str
     outputs: tuple[dict[str, Any], ...]
@@ -696,6 +696,13 @@ The orchestrator MUST verify exact correspondence between the invocation and res
 
 Result decoding applies the same exact-key and scalar validation as invocation decoding.
 Unknown, duplicate, missing, or unexpected positions fail the node before any output is accepted or published.
+
+Task/result DTOs have one current public name each, while their encoded envelopes use the explicit v2 schema identifiers above.
+Arguments and outputs share the typed-value grammar specified in library specs Section 5.2: primitive leaves, tagged dictionary/list/tuple containers, Path, SharedArray reference, NumPy array, and dtype-preserving numeric NumPy scalar nodes.
+A literal dictionary resembling a descriptor remains a dictionary because it is encoded as a dictionary node.
+SharedArray decoding constructs only the validated name/shape/dtype reference and never attaches or allocates memory.
+Parsl still refuses these host-local references recursively in inputs and outputs; a supported local Core codec value is not automatically a supported remote Parsl value.
+Origin schemas remain independently versioned as `WorkerToolOriginV1`; task/result v2 does not change origin or row correlation contracts.
 
 These worker-side examples use `Optional[...]`, not PEP 604 unions, because `bioimageflow-core` supports Python 3.9.
 
@@ -1313,8 +1320,8 @@ POSIX shared-memory names are host-local and cannot safely cross a general Parsl
 
 Phase 1 MUST reject:
 
-- a remote task input whose runtime value is `SharedArray`,
-- a remote task output whose runtime value is `SharedArray`,
+- a remote task input containing `SharedArray`, including references nested in dictionaries, lists, or tuples,
+- a remote task output containing `SharedArray`, including references nested in dictionaries, lists, or tuples,
 - an `ImageShared` input that would be supplied to a remote `ProcessingTool`,
 - an `ImageShared` output that a remote `ProcessingTool` would produce.
 

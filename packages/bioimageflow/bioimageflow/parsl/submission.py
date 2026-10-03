@@ -11,10 +11,10 @@ from typing import Any, Protocol
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.parsl.errors import ParslTaskError
 from bioimageflow_core import (
-    ProcessingTaskResultV1,
-    ProcessingTaskV1,
-    RowInvocationV1,
-    RowResultV1,
+    ProcessingTaskResult,
+    ProcessingTask,
+    RowInvocation,
+    RowResult,
     decode_processing_result,
     validate_processing_result,
 )
@@ -58,19 +58,19 @@ def iter_row_tasks(
     invocation_id: str,
     cache_attempt_id: str | None,
     tool: WorkerToolOriginV1,
-    rows: Iterable[RowInvocationV1],
+    rows: Iterable[RowInvocation],
     row_chunk_size: int,
-) -> Iterator[ProcessingTaskV1]:
+) -> Iterator[ProcessingTask]:
     """Yield consecutive row chunks without constructing an unbounded future list."""
     if type(row_chunk_size) is not int or row_chunk_size < 1:
         raise ValueError("row_chunk_size must be an integer >= 1.")
-    chunk: list[RowInvocationV1] = []
+    chunk: list[RowInvocation] = []
     sequence = 0
     for row in rows:
         chunk.append(row)
         if len(chunk) < row_chunk_size:
             continue
-        yield ProcessingTaskV1(
+        yield ProcessingTask(
             task_id=f"task_{sequence:016x}",
             node_name=node_name,
             invocation_id=invocation_id,
@@ -83,7 +83,7 @@ def iter_row_tasks(
         sequence += 1
         chunk = []
     if chunk:
-        yield ProcessingTaskV1(
+        yield ProcessingTask(
             task_id=f"task_{sequence:016x}",
             node_name=node_name,
             invocation_id=invocation_id,
@@ -101,11 +101,11 @@ def make_batch_task(
     invocation_id: str,
     cache_attempt_id: str | None,
     tool: WorkerToolOriginV1,
-    rows: Iterable[RowInvocationV1],
+    rows: Iterable[RowInvocation],
     batch_context: dict[str, Any],
-) -> ProcessingTaskV1:
+) -> ProcessingTask:
     """Build the one whole-node process_batch envelope."""
-    return ProcessingTaskV1(
+    return ProcessingTask(
         task_id="task_0000000000000000",
         node_name=node_name,
         invocation_id=invocation_id,
@@ -131,7 +131,7 @@ def _contains_shared_array(value: Any) -> bool:
     return False
 
 
-def validate_task_runtime_values(task: ProcessingTaskV1) -> None:
+def validate_task_runtime_values(task: ProcessingTask) -> None:
     """Reject SharedArray values immediately before remote submission."""
     for row in task.rows:
         if _contains_shared_array(row.arguments):
@@ -147,23 +147,23 @@ class BoundedParslCollector:
     def __init__(
         self,
         *,
-        submit: Callable[[ProcessingTaskV1], ParslFuture],
+        submit: Callable[[ProcessingTask], ParslFuture],
         max_in_flight: int,
         node_ordinal: int,
         executor_label: str,
         cancel_requested: Callable[[], bool],
         stop_requested: Callable[[], bool] = lambda: False,
         register_future: Callable[
-            [ParslFuture, ProcessingTaskV1], None
+            [ParslFuture, ProcessingTask], None
         ] = lambda _future, _task: None,
         task_submitted: Callable[
-            [ProcessingTaskV1], None
+            [ProcessingTask], None
         ] = lambda _task: None,
         task_terminal: Callable[
-            [ProcessingTaskV1, str, BaseException | None], None
+            [ProcessingTask, str, BaseException | None], None
         ] = lambda _task, _status, _error: None,
         release_future: Callable[
-            [ParslFuture, ProcessingTaskV1], None
+            [ParslFuture, ProcessingTask], None
         ] = lambda _future, _task: None,
         row_complete: Callable[[int, str], None] = lambda _position, _index: None,
         failure_observed: Callable[
@@ -189,11 +189,11 @@ class BoundedParslCollector:
         self._failure_observed = failure_observed
         self._stopped_error = stopped_error
 
-    def run(self, tasks: Iterable[ProcessingTaskV1]) -> tuple[RowResultV1, ...]:
+    def run(self, tasks: Iterable[ProcessingTask]) -> tuple[RowResult, ...]:
         """Submit lazily, accept by position, and drain every submitted future."""
         task_iterator = iter(tasks)
-        active: dict[ParslFuture, ProcessingTaskV1] = {}
-        accepted: dict[int, RowResultV1] = {}
+        active: dict[ParslFuture, ProcessingTask] = {}
+        accepted: dict[int, RowResult] = {}
         failures: list[ParslTaskError] = []
         stopped = False
         cancelled = False
@@ -210,7 +210,7 @@ class BoundedParslCollector:
 
         def report_pre_submission_error(
             error: BaseException,
-            task: ProcessingTaskV1 | None = None,
+            task: ProcessingTask | None = None,
         ) -> None:
             nonlocal pre_submission_error
             if not hasattr(error, "failure_order_key"):
@@ -291,7 +291,7 @@ class BoundedParslCollector:
                         continue
                     result = (
                         raw_result
-                        if isinstance(raw_result, ProcessingTaskResultV1)
+                        if isinstance(raw_result, ProcessingTaskResult)
                         else decode_processing_result(raw_result)
                     )
                     validate_processing_result(task, result)
@@ -366,7 +366,7 @@ class BoundedParslCollector:
 
     def _task_error(
         self,
-        task: ProcessingTaskV1,
+        task: ProcessingTask,
         error: BaseException,
     ) -> ParslTaskError:
         positions = tuple(row.position for row in task.rows)

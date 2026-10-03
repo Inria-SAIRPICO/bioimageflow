@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from bioimageflow_core import (
-    ProcessingTaskV1,
-    RowInvocationV1,
+    ProcessingTask,
+    RowInvocation,
     SourceFileOriginV1,
     decode_processing_result,
     encode_processing_task,
@@ -68,7 +68,7 @@ class ContextTool(ProcessingTool):
         encoding="utf-8",
     )
     run_dir = (tmp_path / "run").resolve()
-    invocation = ProcessingTaskV1(
+    invocation = ProcessingTask(
         task_id="task_0000000000000000",
         node_name="context",
         invocation_id=f"inv_{'1' * 32}",
@@ -77,7 +77,7 @@ class ContextTool(ProcessingTool):
         mode="row_chunk",
         tool=_origin(source),
         rows=(
-            RowInvocationV1(
+            RowInvocation(
                 position=0,
                 row_index="sample",
                 arguments={"value": "marker"},
@@ -115,7 +115,7 @@ class ContextTool(ProcessingTool):
         encoding="utf-8",
     )
     run_dir = (tmp_path / "run").resolve()
-    invocation = ProcessingTaskV1(
+    invocation = ProcessingTask(
         task_id="task_0000000000000000",
         node_name="context",
         invocation_id=f"inv_{'1' * 32}",
@@ -124,7 +124,7 @@ class ContextTool(ProcessingTool):
         mode="process_batch",
         tool=_origin(source),
         rows=tuple(
-            RowInvocationV1(
+            RowInvocation(
                 position=position,
                 row_index=index,
                 arguments={"value": index},
@@ -154,7 +154,7 @@ Path({str(marker)!r}).write_text("executed")
 """,
         encoding="utf-8",
     )
-    invocation = ProcessingTaskV1(
+    invocation = ProcessingTask(
         task_id="task_0000000000000000",
         node_name="context",
         invocation_id=f"inv_{'1' * 32}",

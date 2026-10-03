@@ -17,9 +17,9 @@ from bioimageflow.parsl.submission import (
     validate_task_runtime_values,
 )
 from bioimageflow_core import (
-    ProcessingTaskResultV1,
-    RowInvocationV1,
-    RowResultV1,
+    ProcessingTaskResult,
+    RowInvocation,
+    RowResult,
     SourceFileOriginV1,
     encode_processing_result,
 )
@@ -35,9 +35,9 @@ INVOCATION_ID = "inv_" + "1" * 32
 ATTEMPT_ID = "att_" + "2" * 32
 
 
-def _rows(count: int) -> Iterator[RowInvocationV1]:
+def _rows(count: int) -> Iterator[RowInvocation]:
     for position in range(count):
-        yield RowInvocationV1(
+        yield RowInvocation(
             position=position,
             row_index=f"row-{position}",
             arguments={"value": position},
@@ -47,7 +47,7 @@ def _rows(count: int) -> Iterator[RowInvocationV1]:
 
 def _result(task, *, value_offset: int = 0):
     return encode_processing_result(
-        ProcessingTaskResultV1(
+        ProcessingTaskResult(
             task_id=task.task_id,
             node_name=task.node_name,
             invocation_id=task.invocation_id,
@@ -55,7 +55,7 @@ def _result(task, *, value_offset: int = 0):
             task_retry=task.task_retry,
             mode=task.mode,
             rows=tuple(
-                RowResultV1(
+                RowResult(
                     position=row.position,
                     row_index=row.row_index,
                     outputs=({"value": row.position + value_offset},),
@@ -273,7 +273,7 @@ def test_runtime_shared_array_is_rejected_before_submission() -> None:
             cache_attempt_id=None,
             tool=ORIGIN,
             rows=[
-                RowInvocationV1(
+                RowInvocation(
                     position=0,
                     row_index="0",
                     arguments={
@@ -302,13 +302,13 @@ def test_late_runtime_validation_failure_cancels_and_drains_prior_future() -> No
             cache_attempt_id=None,
             tool=ORIGIN,
             rows=[
-                RowInvocationV1(
+                RowInvocation(
                     position=0,
                     row_index="0",
                     arguments={"image": "plain"},
                     context=None,
                 ),
-                RowInvocationV1(
+                RowInvocation(
                     position=1,
                     row_index="1",
                     arguments={

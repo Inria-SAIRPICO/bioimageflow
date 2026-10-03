@@ -8,10 +8,10 @@ import pytest
 from bioimageflow_core import (
     ArchiveModuleOriginV1,
     InstalledModuleOriginV1,
-    ProcessingTaskResultV1,
-    ProcessingTaskV1,
-    RowInvocationV1,
-    RowResultV1,
+    ProcessingTaskResult,
+    ProcessingTask,
+    RowInvocation,
+    RowResult,
     SharedModuleOriginV1,
     SourceFileOriginV1,
     VersionedModuleOriginV1,
@@ -49,8 +49,8 @@ def _context(tmp_path, *, row: bool) -> dict[str, str | None]:
     }
 
 
-def _task(tmp_path) -> ProcessingTaskV1:
-    return ProcessingTaskV1(
+def _task(tmp_path) -> ProcessingTask:
+    return ProcessingTask(
         task_id="task_0000000000000000",
         node_name="nested/tool",
         invocation_id=f"inv_{'1' * 32}",
@@ -59,7 +59,7 @@ def _task(tmp_path) -> ProcessingTaskV1:
         mode="row_chunk",
         tool=_source_origin(tmp_path),
         rows=(
-            RowInvocationV1(
+            RowInvocation(
                 position=0,
                 row_index="sample",
                 arguments={"value": 3},
@@ -69,8 +69,8 @@ def _task(tmp_path) -> ProcessingTaskV1:
     )
 
 
-def _result(task: ProcessingTaskV1) -> ProcessingTaskResultV1:
-    return ProcessingTaskResultV1(
+def _result(task: ProcessingTask) -> ProcessingTaskResult:
+    return ProcessingTaskResult(
         task_id=task.task_id,
         node_name=task.node_name,
         invocation_id=task.invocation_id,
@@ -78,7 +78,7 @@ def _result(task: ProcessingTaskV1) -> ProcessingTaskResultV1:
         task_retry=task.task_retry,
         mode=task.mode,
         rows=(
-            RowResultV1(
+            RowResult(
                 position=0,
                 row_index="sample",
                 outputs=({"value": 4},),
@@ -111,9 +111,9 @@ def test_processing_task_recursively_encodes_paths(tmp_path) -> None:
 
     payload = encode_processing_task(task)
 
-    assert payload["rows"][0]["arguments"] == {
-        "input": str(path),
-        "nested": [{"mask": str(path)}],
+    assert decode_processing_task(payload).rows[0].arguments == {
+        "input": path,
+        "nested": [{"mask": path}],
     }
 
 
@@ -125,7 +125,7 @@ def test_processing_result_has_exact_round_trip(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_task.v2"),
+        lambda payload: payload.update(schema="bioimageflow.processing_task.v3"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_id="task_1"),
         lambda payload: payload.update(invocation_id="run_" + "1" * 32),
@@ -156,7 +156,7 @@ def test_batch_requires_batch_context(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_result.v2"),
+        lambda payload: payload.update(schema="bioimageflow.processing_result.v3"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_retry=True),
         lambda payload: payload.update(extra=True),
@@ -258,3 +258,137 @@ def test_origin_identity_covers_complete_origin(tmp_path) -> None:
     first = _source_origin(tmp_path)
     second = replace(first, class_name="OtherTool")
     assert worker_tool_origin_identity(first) != worker_tool_origin_identity(second)
+
+
+@pytest.mark.parametrize("direction", ["task", "result"])
+def test_shared_array_descriptor_round_trip_preserves_typed_values(
+    tmp_path, monkeypatch, direction
+) -> None:
+    from multiprocessing import shared_memory
+    from pathlib import Path
+    from bioimageflow_core import SharedArray
+
+    def refuse_shared_memory(*args, **kwargs):
+        pytest.fail("Pure descriptor codec must not allocate or attach shared memory")
+
+    monkeypatch.setattr(shared_memory, "SharedMemory", refuse_shared_memory)
+    ref = SharedArray(name="owned_numeric_segment", shape=(2, 3), dtype="uint16")
+    path = Path(tmp_path) / "numeric.tif"
+    literal = {"kind": "shared_array", "name": "literal", "shape": [9], "dtype": "u1"}
+    values = {"shared": ref, "nested": [ref, (path, literal)], "bytes": b"\x00data"}
+    task = _task(tmp_path)
+    if direction == "task":
+        task = replace(task, rows=(replace(task.rows[0], arguments=values),))
+        decoded = decode_processing_task(encode_processing_task(task))
+        actual = decoded.rows[0].arguments
+    else:
+        result = _result(task)
+        result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+        decoded = decode_processing_result(encode_processing_result(result))
+        validate_processing_result(task, decoded)
+        actual = decoded.rows[0].outputs[0]
+    assert isinstance(actual["shared"], SharedArray)
+    assert actual["shared"] == ref
+    assert isinstance(actual["nested"], list)
+    assert isinstance(actual["nested"][1], tuple)
+    assert isinstance(actual["nested"][1][0], Path)
+    assert actual == values
+
+
+@pytest.mark.parametrize("direction", ["task", "result"])
+def test_processing_numeric_values_keep_dtype_precision_and_container_identity(
+    tmp_path, direction
+):
+    import numpy as np
+
+    task = _task(tmp_path)
+    values = {
+        "array": np.arange(12, dtype="uint16").reshape(3, 4)[:, ::2],
+        "unsigned": np.uint64(2**63 + 17),
+        "signed": np.int16(-3),
+        "complex": np.complex64(1 + 2j),
+        "boolean": np.bool_(True),
+        "nan": np.float64(np.nan),
+        "infinity": np.float32(np.inf),
+        "literal": {"kind": "numpy_scalar", "value": [1, 2]},
+        "nested": {7: (b"raw", [None, True, 4, 2.5])},
+    }
+    if direction == "task":
+        task = replace(task, rows=(replace(task.rows[0], arguments=values),))
+        payload = encode_processing_task(task)
+        actual = decode_processing_task(payload).rows[0].arguments
+    else:
+        result = _result(task)
+        result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+        payload = encode_processing_result(result)
+        actual = decode_processing_result(payload).rows[0].outputs[0]
+    assert actual["array"].dtype == values["array"].dtype
+    np.testing.assert_array_equal(actual["array"], values["array"])
+    assert not np.shares_memory(actual["array"], values["array"])
+    for field in ("unsigned", "signed", "complex", "boolean", "nan", "infinity"):
+        assert type(actual[field]) is type(values[field])
+        assert actual[field].dtype == values[field].dtype
+        if field == "nan":
+            assert np.isnan(actual[field])
+        else:
+            assert actual[field] == values[field]
+    assert actual["literal"] == values["literal"]
+    assert actual["nested"] == values["nested"]
+
+
+@pytest.mark.parametrize("direction", ["task", "result"])
+def test_object_array_is_refused_before_any_transport_send(tmp_path, direction):
+    import numpy as np
+
+    task = _task(tmp_path)
+    values = {"unsafe": np.array([object()], dtype=object)}
+    sent = []
+
+    def send(payload):
+        sent.append(payload)
+        pytest.fail("Object memory must never reach worker transport")
+
+    with pytest.raises(ValueError, match="objects"):
+        if direction == "task":
+            task = replace(task, rows=(replace(task.rows[0], arguments=values),))
+            send(encode_processing_task(task))
+        else:
+            result = _result(task)
+            result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+            send(encode_processing_result(result))
+    assert sent == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value.update(kind="unknown"),
+        lambda value: value.update(shape=[True]),
+        lambda value: value.update(dtype="object"),
+        lambda value: value.update(name="\x00invalid"),
+        lambda value: value.update(extra=1),
+    ],
+)
+def test_malformed_shared_reference_decode_never_attaches(
+    tmp_path, monkeypatch, mutate
+):
+    from multiprocessing import shared_memory
+    from bioimageflow_core import SharedArray
+
+    monkeypatch.setattr(
+        shared_memory,
+        "SharedMemory",
+        lambda *a, **kw: pytest.fail("Decoder attached memory"),
+    )
+    task = _task(tmp_path)
+    task = replace(
+        task,
+        rows=(
+            replace(task.rows[0], arguments={"ref": SharedArray("safe", (2,), "u1")}),
+        ),
+    )
+    payload = encode_processing_task(task)
+    node = payload["rows"][0]["arguments"]["items"][0][1]
+    mutate(node)
+    with pytest.raises((TypeError, ValueError)):
+        decode_processing_task(payload)

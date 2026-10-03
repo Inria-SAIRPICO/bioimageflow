@@ -12,8 +12,8 @@ from bioimageflow.engine.output_validation import (
     validate_processing_output,
     validate_processing_result_rows,
 )
-from bioimageflow_core import IOModel
-from bioimageflow_core.worker_protocol import RowResultV1
+from bioimageflow_core import IOModel, SharedArray
+from bioimageflow_core.worker_protocol import RowResult
 
 
 class Outputs(IOModel):
@@ -119,7 +119,7 @@ def test_batch_outputs_require_exact_flat_or_nested_cardinality() -> None:
 
 def test_plain_result_rows_share_the_same_validator() -> None:
     rows = (
-        RowResultV1(
+        RowResult(
             position=0,
             row_index="row",
             outputs=(
@@ -136,3 +136,21 @@ def test_plain_result_rows_share_the_same_validator() -> None:
 
     assert output.path == Path("/shared/mask.tif")
     assert output.count == 2
+
+
+def test_remote_outputs_reject_shared_array_inside_typed_containers() -> None:
+    class NestedOutputs(IOModel):
+        payload: dict[str, object]
+
+    reference = SharedArray(name="bif_remote_reference", shape=(2,), dtype="float32")
+    payload = {"items": [({"image": reference},)]}
+
+    with pytest.raises(TypeError, match="payload.*SharedArray"):
+        validate_processing_output(
+            {"payload": payload},
+            NestedOutputs,
+            reject_shared_array=True,
+        )
+
+    local = validate_processing_output({"payload": payload}, NestedOutputs)
+    assert local.payload["items"][0][0]["image"] is reference

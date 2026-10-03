@@ -29,7 +29,7 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - **BioImageFlow** is the orchestrator: it decides *what* to run and *in which order*. **Wetlands** is the executor: it spins up isolated environments and runs Python code inside them.
 - Wetlands environments are created lazily on first use.
 - By default they remain alive for one workflow execution, while an explicit engine ownership policy can retain them for an engine session or delegate their lifetime to an external manager.
-- Communication between the main process and worker environments uses Python's `multiprocessing.connection`, so all transferred objects must be picklable.
+- Processing calls and results use the explicit current Core typed-value protocol over the public Wetlands worker transport; picklability alone does not make a value supported.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
 - BioImageFlow requires Wetlands `>=2.0.0,<3` and uses only its public top-level API.
 - BioImageFlow translates its public `EnvironmentSpec` into the immutable Wetlands 2 `EnvironmentSpec`, provisions with `EnvironmentManager.provision(...).wait_for()`, and starts a `WorkerPool` with `ManagedEnvironment.start()`.
@@ -632,7 +632,7 @@ The `task` parameter also provides cooperative cancellation via `task.cancel_req
 
 **Execution scratch context:** `process_row` and `process_batch` may declare an optional keyword-only `context: ExecutionContext` parameter. The engine injects it only when the method explicitly declares `context`; existing tools with `process_row(arguments)` or `process_batch(arguments_list)` are unchanged.
 
-`ExecutionContext` is defined in `bioimageflow-core` and is picklable across the Wetlands serialization boundary:
+`ExecutionContext` is defined in `bioimageflow-core`; remote dispatch encodes its declared directory paths and row index as an explicit context dictionary, and the worker reconstructs the context rather than transporting an arbitrary dataclass:
 
 ```python
 @dataclass(frozen=True)
@@ -2426,7 +2426,7 @@ When `node.compute()` is called:
    3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The orchestrator resolves paths before dispatch beneath the selected reusable-attempt or transient invocation `assets/` directory.
    4. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, and selected provider/selector record references. A valid selected record is loaded immediately. When the resolver returns `None`, execution uses the run-scoped transient path and creates no reusable cache state.
    5. **Execution Context:** Allocate a required invocation ID. Reusable work uses `cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/`; non-reusable work uses `cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/`. Build one `ExecutionContext` per input row and one batch context with shared `assets/`, `work/`, and `rows/` roots plus private row/batch directories.
-   6. **Serialization:** Encode each remote call as strict `ProcessingTaskV1`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
+   6. **Serialization:** Encode each remote call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
    7. **Backend Preparation:** Direct acquires no remote resource. Wetlands prepares the selected environment. Parsl completes route validation, archive materialization, DFK acquisition, and executor preflight before processing submission.
    8. **Dispatch:** If `process_batch` was overridden, call one whole-node batch operation. Otherwise, dispatch row calls or explicit row chunks. Wetlands and Parsl use the same core protocol, origin resolver, worker entry point, and worker-instance cache. Parsl submission is bounded and results are collected by aligned position rather than completion order.
    8b. **Output Validation:** The shared orchestrator validator reconstructs returned dictionaries in declared field order, rejects missing/extra fields and invalid types or paths, normalizes row and batch returns to `list[list[Outputs]]`, and enforces exact batch cardinality for direct, Wetlands, and Parsl.
@@ -2438,9 +2438,22 @@ When `node.compute()` is called:
 The immutable backend dispatch request contains resolved arguments and contexts, ordered aligned positions, the scoped node, active run context, required invocation identity, and optional reusable-attempt identity.
 The scheduler owns cache lookup, publication, dataframe construction, progress, cancellation, and failure semantics around this request.
 
-Remote backends encode the request as `ProcessingTaskV1` with schema `bioimageflow.processing_task.v1`.
-The result uses `ProcessingTaskResultV1` with schema `bioimageflow.processing_result.v1`.
+Remote backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v2`.
+The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v2`.
 Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, mode, row positions, and row-index strings exactly.
+The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ProcessingTaskResult`, and `RowResult`; there are no historical task/result DTO aliases or wire fallbacks.
+
+Task arguments and result outputs use one recursive typed-value grammar.
+`None`, `bool`, `int`, `float`, `str`, and `bytes` are bare leaves.
+Plain dictionaries encode as `{kind: "dict", items: [[key, encoded_value], ...]}` with primitive keys; lists and tuples encode as `{kind: "list" | "tuple", items: [...]}` and preserve their container type and order.
+Every dictionary is encoded as a dictionary node, so a user dictionary resembling a typed descriptor remains a dictionary.
+Paths encode as `{kind: "path", value: string}`.
+A `SharedArray` encodes as `{kind: "shared_array", name: string, shape: [nonnegative_integer, ...], dtype: string}`; decoding validates the reference and constructs a `SharedArray` without allocating, attaching, reading, or unlinking shared memory.
+NumPy arrays encode as `{kind: "ndarray", value: ndarray}` through Wetlands' public numeric-array transport.
+NumPy boolean, signed/unsigned integer, floating, and complex scalars encode as `{kind: "numpy_scalar", value: zero_dimensional_ndarray}` and retain dtype, precision, and nonfinite values; NumPy string/bytes scalars normalize to the corresponding bare leaves.
+Object-containing dtypes and dtype metadata are refused; cyclic containers, arbitrary dataclasses, unsupported objects, malformed descriptors, and extra descriptor fields are refused.
+These codecs apply identically to input arguments and output values; they do not change graph-level IOModel validation or ownership.
+Parsl refuses host-local `SharedArray` references anywhere in task input or result output containers, even though the same references are supported between workers on a shared local host.
 Decoders reject unknown schemas or modes, missing or extra fields, malformed origins and paths, invalid scalar types, booleans in integer fields, duplicate positions, and mismatched result correlation.
 
 `WorkerToolOriginV1` has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
@@ -2456,7 +2469,7 @@ Backend routing metadata is outside the worker envelope.
 
 - **No column carry-forward (ProcessingTool):** A ProcessingTool's output DataFrame contains **only** the columns declared in its `Outputs` class, plus the row index. Upstream columns are not carried forward. Downstream tools that need upstream data reference the originating node directly (e.g., `raw["path"]`). This makes output schemas deterministic — a node's output depends only on its own `Outputs` declaration, never on what happens upstream.
 - **DataFrameTool output:** A DataFrameTool's output DataFrame is whatever `transform()` returns. The tool author decides which columns to include. This is where intentional carry-forward happens — tools like `FilterRows` naturally preserve all input columns, while tools like `CountLabelOverlaps` may produce entirely new schemas.
-- **Transport:** Pandas DataFrames on the orchestrator side; `list[dict]` across the serialization boundary (ProcessingTool only).
+- **Transport:** Pandas DataFrames remain on the orchestrator side; ProcessingTool tasks/results carry ordered row DTOs with logical argument/output dictionaries encoded through the current Core typed-value protocol.
 - **Index:** The DataFrame index represents a unique identifier for each data item (e.g., image ID). It is preserved across nodes. DataFrameTools that intentionally change the data granularity (e.g., aggregation) may produce a new index.
 - **Index alignment:** When a ProcessingTool references columns from multiple upstream nodes via ColumnRefs, the engine aligns values by index. If one upstream has a finer-grained index (due to explosion), the coarser index is expanded using parent-index lookup. For example, if `raw` has index `[0, 1, 2]` and `tiles` has index `[0::0, 0::1, 1::0, 1::1, 2::0, 2::1]`, referencing both aligns `raw[0]` with `tiles[0::0]` and `tiles[0::1]`, etc. If upstream indices have no common lineage (e.g., two independent `load_images` calls), the engine raises `IndexAlignmentError`. **Divergent sibling explosions** (same parent row exploded differently by two sibling nodes, e.g., Node A produces `0::0, 0::1` and Node B produces `0::0, 0::1, 0::2`) also raise `IndexAlignmentError` — the user must insert a merge DataFrameTool (e.g., `CrossJoin`) to explicitly define the combination.
 - **Explosion and the `::` separator:** When `process_row` returns multiple outputs for a single row, the engine extends the index using `::` as the explosion separator: `"<parent>::0"`, `"<parent>::1"`, etc. Successive explosions nest naturally: `"img_001::0::2"` means "image img_001, first split, third tile." The `::` sequence is **reserved** — source nodes must not produce indices containing `::`. For `ProcessingTool` sources, the engine controls index assignment. For `DataFrameTool` sources, the engine validates the returned DataFrame's index at execution time.
@@ -2912,7 +2925,10 @@ def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
 - **Crash Safety:** Shared-memory recovery is an application responsibility; no cleanup CLI is part of the public library contract.
 - **Persistence:** Shared memory is volatile. If caching is requested for a source or column-bound `ProcessingTool` node that produced shared memory outputs, the engine publishes each non-null `SharedArray` output cell as a durable record-owned `.npy` asset under the reserved `assets/shm/` namespace. When the node is subsequently loaded from cache, the engine reads each durable asset back into a fresh `SharedArray` before dispatching to downstream tools, thereby strictly respecting the `ImageShared` interface contract.
 
-When a tool stores a `SharedArray` in an output DataFrame column, it carries the shared memory name, array shape, and dtype — sufficient for downstream tools to attach and read the data. Since `SharedArray` is a frozen dataclass defined in `bioimageflow-core`, it is picklable and can cross the serialization boundary.
+When a tool stores a `SharedArray` in an output DataFrame column, it carries the shared memory name, array shape, and dtype — sufficient for downstream tools to attach and read the data.
+The Core typed-value codec transports this explicit reference and reconstructs it without attachment or ownership transfer by the decoder.
+Actual consumers attach through the shared-memory helpers; engine/tool lifecycle rules above determine closing and unlinking.
+These host-local references are supported by local Wetlands processing but are refused recursively across a Parsl task boundary.
 
 ---
 
@@ -3112,8 +3128,8 @@ from bioimageflow_core import (
     # Arguments
     Arguments,
     # Strict remote-processing protocol and origins
-    ProcessingTaskV1, RowInvocationV1,
-    ProcessingTaskResultV1, RowResultV1,
+    ProcessingTask, RowInvocation,
+    ProcessingTaskResult, RowResult,
     InstalledModuleOriginV1, VersionedModuleOriginV1,
     SharedModuleOriginV1, SourceFileOriginV1, ArchiveModuleOriginV1,
 )

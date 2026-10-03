@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.worker_origins import load_worker_tool
 from bioimageflow_core.worker_protocol import (
-    ProcessingTaskResultV1,
-    ProcessingTaskV1,
-    RowResultV1,
+    ProcessingTaskResult,
+    ProcessingTask,
+    RowResult,
     decode_processing_task,
     encode_processing_result,
 )
@@ -30,7 +29,7 @@ def _outputs_to_dict(output: IOModel, output_type: type) -> Dict[str, Any]:
     values: Dict[str, Any] = {}
     for name in output._get_all_annotations():
         value = getattr(output, name)
-        values[name] = str(value) if isinstance(value, Path) else value
+        values[name] = value
     return values
 
 
@@ -68,19 +67,19 @@ def _batch_kwargs(
 
 
 def _execute_rows(
-    task: ProcessingTaskV1,
+    task: ProcessingTask,
     tool: ProcessingTool,
     output_type: type,
     remote_task: Any,
-) -> Tuple[RowResultV1, ...]:
-    results: List[RowResultV1] = []
+) -> Tuple[RowResult, ...]:
+    results: List[RowResult] = []
     for row in sorted(task.rows, key=lambda item: item.position):
         output = tool.process_row(
             Arguments(**row.arguments),
             **_row_kwargs(tool, row.context, remote_task),
         )
         results.append(
-            RowResultV1(
+            RowResult(
                 position=row.position,
                 row_index=row.row_index,
                 outputs=_normalize_row_outputs(output, output_type),
@@ -90,11 +89,11 @@ def _execute_rows(
 
 
 def _execute_batch(
-    task: ProcessingTaskV1,
+    task: ProcessingTask,
     tool: ProcessingTool,
     output_type: type,
     remote_task: Any,
-) -> Tuple[RowResultV1, ...]:
+) -> Tuple[RowResult, ...]:
     ordered_rows = tuple(sorted(task.rows, key=lambda item: item.position))
     raw = tool.process_batch(
         [Arguments(**row.arguments) for row in ordered_rows],
@@ -115,7 +114,7 @@ def _execute_batch(
                 "Nested process_batch output groups must match the input row count."
             )
     return tuple(
-        RowResultV1(
+        RowResult(
             position=row.position,
             row_index=row.row_index,
             outputs=tuple(
@@ -140,7 +139,7 @@ def execute_processing_task(
     else:
         rows = _execute_batch(invocation, tool, output_type, task)
     return encode_processing_result(
-        ProcessingTaskResultV1(
+        ProcessingTaskResult(
             task_id=invocation.task_id,
             node_name=invocation.node_name,
             invocation_id=invocation.invocation_id,

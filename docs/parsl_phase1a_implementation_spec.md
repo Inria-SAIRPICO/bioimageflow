@@ -343,12 +343,12 @@ When a direct or Wetlands path differs from the final normative contract, replac
 
 ### 10.1 Protocol types
 
-Add the exact versioned worker-safe types from distributed-engine Sections 9.2, 9.3, and 12.1:
+Use the single current worker-safe task/result DTOs and the independently versioned origins from distributed-engine Sections 9.2, 9.3, and 12.1:
 
-- `ProcessingTaskV1`,
-- `RowInvocationV1`,
-- `ProcessingTaskResultV1`,
-- `RowResultV1`,
+- `ProcessingTask`,
+- `RowInvocation`,
+- `ProcessingTaskResult`,
+- `RowResult`,
 - `InstalledModuleOriginV1`,
 - `VersionedModuleOriginV1`,
 - `SharedModuleOriginV1`,
@@ -356,6 +356,8 @@ Add the exact versioned worker-safe types from distributed-engine Sections 9.2, 
 - `ArchiveModuleOriginV1`,
 - `WorkerToolOriginV1`.
 
+The task and result envelopes use `bioimageflow.processing_task.v2` and `bioimageflow.processing_result.v2`, with no historical DTO aliases or schema fallback.
+Both directions use the current Core typed-value grammar for primitives, explicit containers, Paths, local SharedArray references, and NumPy arrays/scalars; arbitrary picklable objects are not admitted.
 Invocation decoders must reject an unknown schema, kind, mode, missing key, extra key, duplicate position, invalid scalar type, and malformed path or hash before tool code runs.
 Result decoders apply the same strictness after worker execution and before any result is accepted or published.
 Boolean values must not pass integer-only validation accidentally.
@@ -887,7 +889,7 @@ The validator must:
 - apply the library's lightweight annotation-based runtime checks,
 - convert path values to worker-safe strings for transport and restore the canonical runtime form in the orchestrator,
 - preserve declared field order,
-- reject a runtime `SharedArray` returned across the remote boundary; `ImageShared` input/output schemas have already been rejected during static route validation,
+- reject a runtime `SharedArray` returned anywhere in nested dictionary/list/tuple output values across the remote boundary; `ImageShared` input/output schemas have already been rejected during static route validation,
 - reject invalid owned, work, or worker-local paths before publication.
 
 `IOModel` construction alone is not sufficient type validation.
