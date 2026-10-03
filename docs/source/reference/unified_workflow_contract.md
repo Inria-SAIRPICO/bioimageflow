@@ -246,6 +246,8 @@ The version-2 envelope has exactly these four fields.
 Each record has an explicit `id`, canonical `module`, `filename`, content hash, and either one source string or a hashed `files` bundle.
 Tool nodes refer to records through `source_module`.
 Source identity is the explicit ID plus verified content; class name alone is never an identity.
+Directory-bundle imports use a bounded content-and-ID namespace, independent of the logical archive ID and canonical module reference.
+Loading another accepted archive with the same logical bundle ID and different verified bytes creates a distinct executable snapshot; existing workflows retain their original helper/asset resolution and captured source export.
 Public `from_dict()`, `load()` and `import_archive()` capture and admit the complete source table before custom-source writes or imports.
 IDs and single-file names must be safe path components; bundle files may use safe relative nested paths, including helper modules and assets, with content hashes computed and supplied hashes verified under the existing contract before staging.
 Path components exclude colon, backslash and Windows reserved device names even on POSIX hosts.

@@ -382,7 +382,10 @@ def _load_custom_tools_dir_bundle(record: dict[str, Any]) -> _CustomToolBundle:
 def _materialize_custom_tools_dir_bundle(
     record: _AdmittedCustomSource,
 ) -> _CustomToolBundle:
-    scoped_root = f"bioimageflow_custom_tools_{record.source_id}"
+    scope_key = hashlib.sha256(
+        record.source_id.encode("utf-8") + b"\0" + record.source_hash.encode("ascii")
+    ).hexdigest()
+    scoped_root = f"bioimageflow_custom_tools_{scope_key}"
     temp_root = Path(tempfile.mkdtemp(prefix="bioimageflow_custom_tools_"))
     package_root = temp_root / scoped_root
     package_root.mkdir(parents=True)

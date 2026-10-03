@@ -151,3 +151,70 @@ def test_public_archive_rejects_reserved_device_filename_before_staging(
     monkeypatch.setattr(tempfile, "mkdtemp", no_custom_staging)
     with pytest.raises(ValueError, match="Invalid embedded custom tool path"):
         Workflow.from_dict(archive, storage_path=tmp_path / "runtime", engine="direct")
+
+
+def test_same_source_id_changed_bundle_keeps_independent_executable_snapshots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = json.loads(Path("tests/fixtures/unified_workflow_archive.json").read_text())
+    old = archive["custom_sources"][0]
+    source_id = "same-id-" + tmp_path.name
+    source = "from .helper import read_value\n" + old["source"].replace("[1]", "[VALUE]")
+    source = source.replace(
+        "    accepts_upstream = False\n",
+        "    accepts_upstream = False\n    calls = []\n",
+    ).replace(
+        "        import pandas as pd\n",
+        "        VALUE = read_value()\n        self.calls.append(VALUE)\n        import pandas as pd\n",
+    )
+    graph_node = archive["workflow"]["nodes"][0]["workflow"]["nodes"][0]
+    graph_node.update(source_module=source_id, tool_module="tools.first")
+    files = {
+        "tools/__init__.py": b"",
+        "tools/first.py": source.encode(),
+        "tools/helper.py": b"from pathlib import Path\ndef read_value():\n    return int((Path(__file__).parent / 'data/value.txt').read_text())\n",
+        "tools/data/value.txt": b"1",
+    }
+    record_a = _bundle(source_id, files, root_package="")
+    record_b = _bundle(source_id, {**files, "tools/data/value.txt": b"9"}, root_package="")
+    assert record_a["source_hash"] != record_b["source_hash"]
+    archive["custom_sources"][0] = record_a
+    archive_b = deepcopy(archive)
+    archive_b["custom_sources"][0] = record_b
+    original_a, original_b = deepcopy(archive), deepcopy(archive_b)
+    original_mkdtemp = tempfile.mkdtemp
+
+    def source_mkdtemp(*args, **kwargs):
+        if kwargs.get("prefix") == "bioimageflow_custom_tools_":
+            kwargs["dir"] = tmp_path
+        return original_mkdtemp(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", source_mkdtemp)
+    loaded_a = Workflow.from_dict(archive, storage_path=tmp_path / "runtime-a")
+    child_a = loaded_a.nodes["first"].workflow
+    tool_a = child_a.nodes["collision"].tool
+    result_a = loaded_a.compute().iloc[0].to_dict()
+    exported_a = loaded_a.to_archive_dict()
+    calls_a = len(tool_a.calls)
+    assert calls_a == 1
+
+    loaded_b = Workflow.from_dict(archive_b, storage_path=tmp_path / "runtime-b")
+    tool_b = loaded_b.nodes["first"].workflow.nodes["collision"].tool
+    result_b = loaded_b.compute().iloc[0].to_dict()
+    child_a.invalidate(["collision"])
+    loaded_a.invalidate(["first"])
+    result_a_again = loaded_a.compute().iloc[0].to_dict()
+
+    assert result_a == {"one": 1, "two": 2}
+    assert result_b == {"one": 9, "two": 2}
+    assert result_a_again == result_a
+    assert type(tool_a) is not type(tool_b)
+    assert tool_a.calls == [1, 1], "original executable must actually run again after B loads"
+    assert tool_b.calls == [9]
+    assert loaded_a.to_archive_dict() == exported_a
+    exported_record_a = next(item for item in exported_a["custom_sources"] if item["id"] == source_id)
+    exported_record_b = next(item for item in loaded_b.to_archive_dict()["custom_sources"] if item["id"] == source_id)
+    assert exported_record_a == record_a
+    assert exported_record_b == record_b
+    assert archive == original_a
+    assert archive_b == original_b

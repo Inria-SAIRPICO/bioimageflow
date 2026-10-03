@@ -1734,6 +1734,9 @@ Export behavior:
 - The bundle preserves relative paths under `tools/` and includes file hashes plus an overall bundle hash. Generated/cache files such as `__pycache__`, `.pyc`, `.pytest_cache`, and hidden temp files are excluded. Export fails for unexpectedly large files.
 - Tool nodes reference an embedded `tools/` bundle with `source_module`; nested graphs share the same archive-level source table.
 - `Workflow.load(path, storage_path=...)` validates the embedded bundle hash, materializes the `tools/` tree into a scoped temporary Python package, and resolves the class from that package before attempting package or normal import resolution.
+- Directory-bundle package namespaces derive from the explicit logical source ID and complete verified content hash using a bounded digest.
+  Different verified content under the same logical ID resolves to a distinct executable package; previously loaded workflows retain their own relative helpers, runtime assets and captured exported bytes.
+  Logical archive IDs and canonical module references remain independent of the private materialization namespace.
 - `ToolRegistry.register_workflow(workflow_or_data)` optionally discovers project-local custom tools from either a live `Workflow` or an exported workflow dict for a host-owned discovery registry (see [§3.11](#311-tool-registry)).
 
 ---
