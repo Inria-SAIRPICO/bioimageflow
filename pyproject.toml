@@ -3,13 +3,13 @@ name = "bioimageflow-workspace"
 version = "0.0.1"
 requires-python = ">=3.10"
 dependencies = [
-    "bioimageflow-core>=0.4.1,<0.5",
+    "bioimageflow-core>=0.5.0,<0.6",
 ]
 
 [dependency-groups]
 dev = [
-    "bioimageflow>=0.8.0",
-    "bioimageflow-common-tools>=0.2.1",
+    "bioimageflow>=0.9.0,<1",
+    "bioimageflow-common-tools>=0.2.2",
     "bioimageflow-io-tools>=0.2.2",
     "bioimageflow-measurement-tools>=0.2.2",
     "bioimageflow-phasor-tools>=0.1.0",
@@ -38,7 +38,7 @@ dev = [
     "scikit-image>=0.21.0",
     "scipy>=1.10.0",
     "ipython>=8.38.0",
-    "wetlands>=2.4.2,<3",
+    "wetlands>=2.5.0,<3",
 ]
 
 [tool.uv.workspace]
@@ -75,7 +75,7 @@ markers = [
     "sairpico_binary: tests that require real SAIRPICO command-line tools",
     "model_runtime: tests that require optional model runtimes or model downloads",
     "package_tools: tests owned by optional tool packages",
-    "shared_memory: deterministic tests requiring POSIX/shared-memory platform support",
+    "shared_memory: deterministic scoped numeric file/mmap lifetime tests",
     "compat: deterministic Python-version compatibility smoke coverage",
 ]
 

@@ -33,3 +33,9 @@ def test_tool_package_runtime_dependency_matrix() -> None:
         project = tomllib.loads(project_path.read_text())["project"]
         actual = {Requirement(value).name.lower() for value in project["dependencies"]}
         assert actual == expected, project_path
+        requirements = {Requirement(value).name: Requirement(value) for value in project["dependencies"]}
+        core = requirements["bioimageflow-core"].specifier
+        assert set((item.operator, item.version) for item in core) == {(">=", "0.5.0"), ("<", "0.6")}
+        if "bioimageflow" in requirements:
+            orchestrator = requirements["bioimageflow"].specifier
+            assert set((item.operator, item.version) for item in orchestrator) == {(">=", "0.9.0"), ("<", "1")}

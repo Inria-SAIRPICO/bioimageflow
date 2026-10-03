@@ -346,9 +346,10 @@ Check local versions against PyPI with:
 uv run python scripts/package_status.py
 ```
 
-Package-specific releases use protected annotated tags such as `bioimageflow-core-v0.1.7` and an approval-gated coordinated GitHub Actions publication workflow.
+Package-specific releases use annotated tags such as `bioimageflow-core-v0.5.0` and an explicitly dispatched coordinated GitHub Actions publication workflow after exact-head CI and selected runtime validation.
 `scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
-See the [release operator guide](docs/source/reference/releasing.md) for setup and release steps.
+The current tested cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.5.0,<3`; first-party tools declare that current SDK cohort.
+See the [release operator guide](docs/source/reference/releasing.md) for setup, actual deployment controls and release steps.
 
 ## FAQ
 

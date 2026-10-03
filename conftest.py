@@ -24,7 +24,7 @@ REGISTERED_TEST_MARKERS = [
     "acceptance: deterministic high-level workflow or example coverage excluded from the fast development loop",
     "packaging: build artifact, wheel, sdist, or package metadata artifact checks",
     "package_tools: tests owned by optional tool packages",
-    "shared_memory: deterministic tests requiring POSIX/shared-memory platform support",
+    "shared_memory: deterministic scoped numeric file/mmap lifetime tests",
     "compat: deterministic Python-version compatibility smoke coverage",
 ]
 

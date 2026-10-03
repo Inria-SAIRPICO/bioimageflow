@@ -1,7 +1,7 @@
 # Releasing Python Packages
 
 BioImageFlow distributions are versioned and published independently from the shared repository.
-The repository is tested as one workspace, but a release tag selects and publishes exactly one package.
+The repository is tested as one workspace; each annotated release tag identifies one package version at the selected commit, and the explicitly dispatched coordinated workflow publishes the selected set.
 
 ## Release Identity
 
@@ -20,22 +20,22 @@ The GitHub release workflow rejects a lightweight tag, a dirty checkout, a misma
 
 Each distribution owns its version.
 A change in one tool package does not require releases of unrelated packages.
-The workspace integration tests still run before every publication.
+Normal exact-head CI and any selected affected runtime suite must pass before publication.
 
 Choose the version bump from the selected package's public behavior:
 
-- Patch: compatible fixes, documentation corrections shipped in the source distribution, and compatible implementation improvements.
+- Patch: fixes or metadata-only adoption of the tested current SDK cohort when the tool’s public scientific behavior is unchanged, documentation corrections shipped in the source distribution, and implementation improvements.
 - Minor: new public tools or features, or a breaking change while the package remains on major version `0`.
 - Major: breaking changes after the package reaches `1.0.0`.
 
-First-party dependency ranges declare the oldest tested compatible version and an upper compatibility boundary, for example `bioimageflow-core>=0.1.7,<0.2`.
-A downstream package needs a release when it starts using a newer first-party API or when its compatibility range changes.
-A core or orchestrator release alone does not require downstream releases when their declared ranges remain accurate.
-
-The first-party DataFrame tool packages treat `DataFrameTool`, `Passthrough`, public input/output schema serialization, and their tested `Workflow` integration as a stable tool-authoring contract throughout BioImageFlow 0.x.
-Their `bioimageflow>=0.1.6,<1` range therefore allows execution, launcher, and GUI-integration releases without republishing unchanged tools.
-Changing that tool-authoring contract requires updating and releasing the affected tool packages.
-This policy does not extend the compatibility range of `bioimageflow-core`; changing the core SDK boundary requires a separate compatibility review.
+First-party dependency ranges identify the single supported current release cohort.
+Core is `>=0.5.0,<0.6`, the orchestrator is `>=0.9.0,<1`, and its Wetlands completion dependency is `>=2.5.0,<3`.
+All nine first-party tool packages use that Core range; common, measurement, spot and tracking also use the current orchestrator range.
+These ranges must resolve and pass current scientific and tool-authoring controls before publication.
+There is no obligation to preserve old DTOs, wire schemas, aliases or dependency floors solely for backward compatibility.
+Essential scientific types, file workflows, durable results and current ownership/cancellation semantics remain mandatory.
+A downstream package needs a metadata release when its declared cohort changes.
+The selected base release set contains Core, BioImageFlow and the eight already published tool packages; Phasor’s first publisher remains a separate gate.
 
 ## Check Package Status
 
@@ -58,10 +58,16 @@ It does not use a stored PyPI password or API token.
 Complete these steps once:
 
 1. Ensure the PyPI account that owns the BioImageFlow projects has a verified email address and two-factor authentication.
-2. In the GitHub repository, create an environment named `pypi` and configure the maintainers who must approve deployments to it.
-3. Create a GitHub repository ruleset for tags matching `bioimageflow*-v*` that restricts tag creation, update, and deletion to release maintainers.
+2. In the GitHub repository, use the environment named `pypi`; deployment approval occurs only when required reviewers are actually configured.
+3. Inspect the actual tag ruleset for `bioimageflow*-v*`; annotated exact-source tags are required by tooling even when a repository ruleset is not enforced.
 4. For each existing BioImageFlow project on PyPI, add a GitHub Actions Trusted Publisher with owner `Inria-SAIRPICO`, repository `bioimageflow`, workflow `release.yml`, and environment `pypi`.
 5. Bootstrap projects that do not yet exist using one of the procedures below, then add the same normal GitHub Actions Trusted Publisher to every new project.
+
+GitHub inspection on October 3, 2026 found the `pypi` environment with no protection rules or required reviewers, and tag ruleset `19387789` disabled.
+Do not describe those controls as enforced; recheck their actual state at publication.
+Campaign package source review, exact-head CI, artifact checks and registry installability are technical release gates.
+The user has authorized necessary reviewed campaign releases without another confirmation.
+Trusted Publisher/account eligibility is still an external prerequisite, and no credential bypass is permitted.
 
 The same workflow identity can be registered for every independently versioned distribution in this repository.
 Normal publishers support this one-repository-to-many-projects relationship.
@@ -116,7 +122,8 @@ For every newly created PyPI project, add the normal `release.yml` Trusted Publi
 The bootstrap upload has no package-specific release tag, so `package_status.py` will report that version as `unknown`; do not create a retrospective tag unless the published artifacts can be proven to match the tagged commit.
 
 Use this local path only for initial project creation.
-For later coordinated changes, such as a tool API compatibility boundary, update the affected packages in one reviewed commit and push one package-specific tag per affected distribution so the normal GitHub release workflow remains the publication authority.
+For later coordinated changes, update the affected packages in one reviewed commit and create one annotated package-specific tag per affected distribution to identify that commit.
+Tag push publishes nothing; the explicitly dispatched coordinated GitHub workflow is the publication authority.
 
 ## Prepare a Coordinated Release Set
 
@@ -125,8 +132,8 @@ It can contain one package for an independent release or several packages for a 
 Packages that remain compatible and unchanged do not belong in the set.
 
 For every selected package, decide its new version and whether its first-party dependency bounds still describe the supported versions.
-Raise a dependency floor only when the package uses an API introduced by that version.
-Keep the existing upper compatibility boundary unless compatibility has intentionally changed.
+Declare the tested current dependency cohort and update all affected tool bounds coherently.
+Do not retain historical floors or widen an upper bound without current consumer evidence.
 
 Start from an updated branch and inspect the workspace:
 
@@ -164,6 +171,7 @@ git push origin main
 Wait for the normal **CI** workflow to succeed on the exact release commit.
 The coordinated release workflow refuses to publish a commit without a successful `ci.yml` run for that SHA.
 
+The Core 0.5 scoped array surface additionally requires source-disabled numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
 Run an additional resource-dependent suite only when the release changes that runtime surface:
 
 | Release surface | Additional suite in **Complete validation** |
@@ -225,7 +233,7 @@ The workflow performs only release-specific work:
 1. It resolves the tags to one commit and validates all versions, selected dependency ranges, and current PyPI versions.
 2. It requires a successful normal CI workflow for the exact tagged commit instead of rerunning the workspace tests.
 3. It builds and validates only the selected distributions, in parallel.
-4. After approval of the `pypi` environment, it publishes dependencies before their selected dependants with short-lived trusted-publishing credentials.
+4. Subject to the actual configured `pypi` environment controls, it publishes dependencies before their selected dependants with short-lived trusted-publishing credentials.
 5. It waits until every requested version is visible on PyPI.
 
 If publication stops partway through, rerun the same workflow with the same release set.

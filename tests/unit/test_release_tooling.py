@@ -404,6 +404,7 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "quality",
         "unit-tests",
         "core-python314-tests",
+        "core-array-lifetime",
         "integration-tests",
         "compatibility-tests",
         "parsl-fast-tests",
@@ -418,6 +419,16 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "external-binaries",
         "model-runtimes",
     }
+
+    array_capability = ci["jobs"]["core-array-lifetime"]
+    assert array_capability["strategy"]["matrix"] == {
+        "os": ["ubuntu-latest", "windows-latest"], "python": ["3.9", "3.12"],
+    }
+    capability_script = _job_script(array_capability)
+    assert "--no-sources" in capability_script
+    assert "numpy==1.26.4" in capability_script
+    assert "-I check_core_array_lifetime.py" in capability_script
+    assert "uv pip check" in capability_script
 
     parsl_fast = ci["jobs"]["parsl-fast-tests"]
     parsl_process = ci["jobs"]["parsl-process-tests"]

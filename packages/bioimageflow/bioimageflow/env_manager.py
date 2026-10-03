@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
+import math
 import re
 import threading
 import urllib.parse
 import urllib.request
+from asyncio import CancelledError
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
+
+from packaging.version import Version
 
 from bioimageflow_core.environment import EnvironmentSpec as BioImageFlowEnvironmentSpec
 from bioimageflow._core_dependency import (
@@ -30,9 +35,11 @@ from bioimageflow._core_dependency import (
 from bioimageflow.paths import get_wetlands_path
 from wetlands import (
     EnvironmentManager,
+    EnvironmentNotReadyError,
     EnvironmentSpec,
     LocalPackage,
     ManagedEnvironment,
+    Operation,
     OperationEvent,
     WorkerPool,
 )
@@ -403,6 +410,173 @@ class WetlandsEnvManager:
             state, _ = self._recipe_state(env_spec.name, wetlands_spec)
             return state
 
+    @staticmethod
+    def _wait_for_recreation_operation(
+        operation: Operation[Any],
+        on_event: Callable[[OperationEvent], None] | None = None,
+    ) -> Any:
+        """Own listener replay and public completion without stranding publication."""
+        interruptions: list[BaseException] = []
+
+        def forward_event(event: OperationEvent) -> None:
+            if interruptions:
+                return
+            try:
+                if on_event is not None:
+                    on_event(event)
+            except Exception:
+                # Wetlands retains its ordinary listener-exception isolation.
+                raise
+            except BaseException as error:
+                interruptions.append(error)
+
+        try:
+            if on_event is not None:
+                operation.listen(forward_event)
+            if interruptions:
+                raise interruptions[0]
+            result = operation.wait_for()
+            if interruptions:
+                raise interruptions[0]
+            if on_event is not None:
+                operation.remove_listener(forward_event)
+            return result
+        except BaseException as error:
+            original = interruptions[0] if interruptions else error
+            if not interruptions:
+                interruptions.append(original)
+            if on_event is not None:
+                try:
+                    operation.remove_listener(forward_event)
+                except BaseException:
+                    pass
+            try:
+                operation.cancel()
+            except BaseException:
+                pass
+            # Completion observation is independent of the stored outcome.
+            while True:
+                try:
+                    operation.wait_for_completion()
+                    break
+                except (KeyboardInterrupt, SystemExit, CancelledError):
+                    continue
+                except BaseException as drain_error:
+                    # Unsupported owner/API failure is not drained success.
+                    raise original from drain_error
+            raise original
+
+    def recreate(
+        self,
+        env_spec: BioImageFlowEnvironmentSpec,
+        max_workers: int = 1,
+        worker_timeout: float | None = None,
+        *,
+        on_provision_event: Callable[[OperationEvent], None] | None = None,
+        on_removal_event: Callable[[OperationEvent], None] | None = None,
+        on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
+    ) -> WorkerPool:
+        """Strictly close and rebuild one Wetlands-managed processing environment.
+
+        Target, independent recipe/Core and startup arguments are captured before
+        callbacks and effects. Pool close is synchronous; a close failure retains
+        its cleanup owner and propagates before removal.
+        Removal/provision/start failures propagate without publishing a running
+        pool; committed removal is destructive and has no rollback. Unrelated
+        environments are untouched. Removal and provisioning events use separate
+        callbacks. Listener BaseExceptions are captured without blocking the event
+        thread and rethrown on the owner after replay or public completion. Owner
+        interruption detaches the forwarding listener, requests cancellation and
+        observes public completion separately from stored outcome before raising
+        the original error; the next phase
+        never starts. This is not a child-process/PID termination certificate.
+        """
+        try:
+            supported_runtime = Version("2.5.0") <= Version(
+                importlib.metadata.version("wetlands")
+            ) < Version("3")
+        except (importlib.metadata.PackageNotFoundError, ValueError):
+            supported_runtime = False
+        if not supported_runtime or not callable(
+            getattr(Operation, "wait_for_completion", None)
+        ):
+            raise RuntimeError(
+                "Forced recreation requires Wetlands >=2.5.0,<3 with the public "
+                "Operation.wait_for_completion API."
+            )
+        captured = BioImageFlowEnvironmentSpec(
+            name=env_spec.name,
+            dependencies=deepcopy(env_spec.dependencies),
+            allow_flexible_versions=env_spec.allow_flexible_versions,
+        )
+        name = captured.name
+        wetlands_spec = self._to_wetlands_spec(captured)
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer.")
+        if worker_timeout is not None and (
+            isinstance(worker_timeout, bool)
+            or not isinstance(worker_timeout, (int, float))
+            or not math.isfinite(worker_timeout)
+            or worker_timeout <= 0
+        ):
+            raise ValueError("worker_timeout must be None or a positive finite number.")
+        config = (max_workers, worker_timeout)
+        with self._lock:
+            try:
+                self._manager.environment(name)
+            except EnvironmentNotReadyError:
+                pass
+            info = next(
+                (candidate for candidate in self._manager.managed_environments()
+                 if candidate.name == name),
+                None,
+            )
+            existing = self._pools.get(name)
+            if on_preparation is not None:
+                on_preparation(EnvironmentPreparation(
+                    name=name,
+                    action="updating" if existing is not None or info is not None else "creating",
+                    requested_recipe_hash=wetlands_spec.recipe_hash,
+                    existing_recipe_hash=(
+                        self._specs[name].recipe_hash if existing is not None
+                        else info.recipe_hash if info is not None else None
+                    ),
+                ))
+            if existing is not None:
+                existing.close()
+                self._retire_closed_pool(name)
+            if info is not None:
+                removal = self._manager.remove(name)
+                self._wait_for_recreation_operation(removal, on_removal_event)
+            return self._provision_and_start(
+                name, wetlands_spec, config,
+                on_provision_event=on_provision_event,
+                recreation=True,
+            )
+
+    def _provision_and_start(
+        self,
+        name: str,
+        wetlands_spec: EnvironmentSpec,
+        config: tuple[int, float | None],
+        *,
+        on_provision_event: Callable[[OperationEvent], None] | None = None,
+        recreation: bool = False,
+    ) -> WorkerPool:
+        operation = self._manager.provision(name, wetlands_spec, replace_existing=False)
+        if recreation:
+            environment = self._wait_for_recreation_operation(operation, on_provision_event)
+        else:
+            if on_provision_event is not None:
+                operation.listen(on_provision_event)
+            environment = operation.wait_for()
+        pool = environment.start(workers=config[0], worker_timeout=config[1])
+        self._environments[name] = environment
+        self._pools[name] = pool
+        self._pool_configs[name] = config
+        self._specs[name] = wetlands_spec
+        return pool
+
     def get_or_create(
         self,
         env_spec: BioImageFlowEnvironmentSpec,
@@ -410,6 +584,7 @@ class WetlandsEnvManager:
         worker_timeout: float | None = None,
         *,
         on_provision_event: Callable[[OperationEvent], None] | None = None,
+        on_removal_event: Callable[[OperationEvent], None] | None = None,
         replace_existing: bool = False,
         on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
     ) -> WorkerPool:
@@ -418,63 +593,53 @@ class WetlandsEnvManager:
         ``on_provision_event`` receives Wetlands setup events, including sanitized
         Pixi output, before this method waits for provisioning to finish. It is
         unused when an already running pool is returned. ``replace_existing``
-        requests replacement of a Wetlands-managed environment, including one
-        with the current recipe; it never authorizes mutation of an unmanaged target.
+        delegates to strict :meth:`recreate`, including for the current recipe;
+        ``on_removal_event`` receives its separate removal events. False preserves
+        warm-pool reuse. Force failures propagate and never authorize mutation of
+        an unmanaged target.
         """
+        if replace_existing:
+            return self.recreate(
+                env_spec, max_workers, worker_timeout,
+                on_provision_event=on_provision_event,
+                on_removal_event=on_removal_event,
+                on_preparation=on_preparation,
+            )
         wetlands_spec = self._to_wetlands_spec(env_spec)
         config = (max_workers, worker_timeout)
         with self._lock:
-            preparation_published = False
             existing = self._pools.get(env_spec.name)
             if existing is not None:
-                if replace_existing or self._specs[env_spec.name] != wetlands_spec:
-                    if not replace_existing:
-                        raise ValueError(
-                            f"Environment {env_spec.name!r} was already provisioned "
-                            "with a different recipe."
+                if self._specs[env_spec.name] != wetlands_spec:
+                    raise ValueError(
+                        f"Environment {env_spec.name!r} was already provisioned "
+                        "with a different recipe."
+                    )
+                if self._pool_configs[env_spec.name] != config:
+                    raise ValueError(
+                        f"Environment {env_spec.name!r} already has a pool with "
+                        f"workers={self._pool_configs[env_spec.name][0]} and "
+                        f"worker_timeout={self._pool_configs[env_spec.name][1]}."
+                    )
+                if on_preparation is not None:
+                    on_preparation(
+                        EnvironmentPreparation(
+                            name=env_spec.name,
+                            action="reusing",
+                            requested_recipe_hash=wetlands_spec.recipe_hash,
+                            existing_recipe_hash=wetlands_spec.recipe_hash,
                         )
-                    existing_hash = self._specs[env_spec.name].recipe_hash
-                    if on_preparation is not None:
-                        on_preparation(
-                            EnvironmentPreparation(
-                                name=env_spec.name,
-                                action="updating",
-                                requested_recipe_hash=wetlands_spec.recipe_hash,
-                                existing_recipe_hash=existing_hash,
-                            )
-                        )
-                        preparation_published = True
-                    if not self.stop(env_spec.name):
-                        raise RuntimeError("Previous worker pool did not physically drain")
-                    existing = None
-                else:
-                    if self._pool_configs[env_spec.name] != config:
-                        raise ValueError(
-                            f"Environment {env_spec.name!r} already has a pool with "
-                            f"workers={self._pool_configs[env_spec.name][0]} and "
-                            f"worker_timeout={self._pool_configs[env_spec.name][1]}."
-                        )
-                    if on_preparation is not None:
-                        on_preparation(
-                            EnvironmentPreparation(
-                                name=env_spec.name,
-                                action="reusing",
-                                requested_recipe_hash=wetlands_spec.recipe_hash,
-                                existing_recipe_hash=wetlands_spec.recipe_hash,
-                            )
-                        )
-                    return existing
+                    )
+                return existing
             state, existing_hash = self._recipe_state(env_spec.name, wetlands_spec)
             action: Literal["creating", "updating", "starting"]
-            if replace_existing and state is not EnvironmentRecipeState.MISSING:
-                action = "updating"
-            elif state is EnvironmentRecipeState.STALE:
+            if state is EnvironmentRecipeState.STALE:
                 action = "updating"
             elif state is EnvironmentRecipeState.CURRENT:
                 action = "starting"
             else:
                 action = "creating"
-            if on_preparation is not None and not preparation_published:
+            if on_preparation is not None:
                 on_preparation(
                     EnvironmentPreparation(
                         name=env_spec.name,
@@ -483,23 +648,10 @@ class WetlandsEnvManager:
                         existing_recipe_hash=existing_hash,
                     )
                 )
-            operation = self._manager.provision(
-                env_spec.name,
-                wetlands_spec,
-                replace_existing=replace_existing,
+            return self._provision_and_start(
+                env_spec.name, wetlands_spec, config,
+                on_provision_event=on_provision_event,
             )
-            if on_provision_event is not None:
-                operation.listen(on_provision_event)
-            environment = operation.wait_for()
-            pool = environment.start(
-                workers=max_workers,
-                worker_timeout=worker_timeout,
-            )
-            self._environments[env_spec.name] = environment
-            self._pools[env_spec.name] = pool
-            self._pool_configs[env_spec.name] = config
-            self._specs[env_spec.name] = wetlands_spec
-            return pool
 
     def submit_processing_task(
         self,
@@ -559,13 +711,18 @@ class WetlandsEnvManager:
                 logger.warning("Failed to close Wetlands pool %r", env_name, exc_info=True)
                 return False
             # A task's logical result/terminal status is not this physical fence.
-            self._pools.pop(env_name)
-            self._pool_configs.pop(env_name, None)
-            self._environments.pop(env_name, None)
-            self._specs.pop(env_name, None)
-            for grant in self._shared_memory_grants.pop(env_name, []):
-                grant.drained()
+            self._retire_closed_pool(env_name)
             return True
+
+    def _retire_closed_pool(self, name: str) -> None:
+        """Retire only the selected physically closed pool and its grants."""
+        for grant in self._shared_memory_grants.get(name, ()):
+            grant.drained()
+        self._shared_memory_grants.pop(name, None)
+        self._pools.pop(name, None)
+        self._pool_configs.pop(name, None)
+        self._environments.pop(name, None)
+        self._specs.pop(name, None)
 
     def is_running(self, env_name: str) -> bool:
         with self._lock:

@@ -54,7 +54,7 @@ def _repository(
     return root
 
 
-def test_dataframe_tool_packages_support_the_stable_pre_one_orchestrator_api() -> None:
+def test_dataframe_tool_packages_declare_the_current_orchestrator_cohort() -> None:
     package_names = {
         "bioimageflow-common-tools",
         "bioimageflow-measurement-tools",
@@ -80,7 +80,7 @@ def test_dataframe_tool_packages_support_the_stable_pre_one_orchestrator_api() -
         assert {
             (specifier.operator, specifier.version)
             for specifier in requirement.specifier
-        } == {(">=", "0.1.6"), ("<", "1")}
+        } == {(">=", "0.9.0"), ("<", "1")}
 
 
 def test_auto_selection_uses_only_pending_packages(tmp_path: Path) -> None:

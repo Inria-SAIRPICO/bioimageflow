@@ -14,7 +14,7 @@ BioImageFlow addresses three challenges in bioimage analysis:
 
 BioImageFlow targets Python `>=3.10` for the orchestrator and first-party tool packages.
 `bioimageflow-core` targets Python `>=3.9` because it is injected into Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
-First-party packages are versioned independently and declare bounded compatibility requirements for other first-party distributions they use.
+First-party packages are versioned independently and declare bounded requirements for the tested current first-party cohort.
 The repository root project is workspace-only: it exists to coordinate local package development and documentation, not as a runtime package imported by users.
 Its `dev` dependency group therefore installs the workspace members and repository-only test, lint, and documentation tools.
 Runtime dependencies belong in the `[project].dependencies` table of each distributable package, where every third-party requirement declares an explicit compatible lower bound.
@@ -31,7 +31,7 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - By default they remain alive for one workflow execution, while an explicit engine ownership policy can retain them for an engine session or delegate their lifetime to an external manager.
 - Processing calls and results use the explicit current Core typed-value protocol over the public Wetlands worker transport; picklability alone does not make a value supported.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
-- BioImageFlow requires Wetlands `>=2.0.0,<3` and uses only its public top-level API.
+- BioImageFlow requires Wetlands `>=2.5.0,<3` and uses only its public top-level API.
 - BioImageFlow translates its public `EnvironmentSpec` into the immutable Wetlands 2 `EnvironmentSpec`, provisions with `EnvironmentManager.provision(...).wait_for()`, and starts a `WorkerPool` with `ManagedEnvironment.start()`.
 - Processing calls use `WorkerPool.submit_import("bioimageflow_core.worker:execute_processing_task", ...)`.
 - `max_workers` selects the Wetlands 2 pool size. Node-effective `max_concurrent` bounds the number of row tasks BioImageFlow keeps active for that node.
@@ -100,7 +100,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
-BioImageFlow 0.8.0 requires `bioimageflow-core>=0.4.0,<0.5` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
+BioImageFlow 0.9.0 requires `bioimageflow-core>=0.5.0,<0.6` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
 
 The orchestrator package exposes its final public imports explicitly while implementation modules remain focused.
 The scheduler owns graph, cache, progress, and failure semantics; execution-specific processing dispatch is isolated behind the `ProcessingBackend` protocol so all backends use those semantics.
@@ -390,9 +390,25 @@ Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates 
 
 BioImageFlow owns the worker-side `bioimageflow-core` dependency. A tool may declare a compatible version constraint, but the environment recipe uses the orchestrator's authoritative exact published version or configured local checkout. A constraint or direct/local reference that would select a different core produces an `environment_incompatible` workflow validation error and is rejected again at provisioning time if validation was skipped.
 
-The default authoritative dependency is `bioimageflow-core==<installed version>`. `BIOIMAGEFLOW_CORE_SOURCE` selects an explicit local project without requiring it to be installed editably in the orchestrator environment; BioImageFlow resolves the path and validates its `pyproject.toml` project name, version, and `bioimageflow_core` package before constructing a Wetlands editable local dependency. The legacy `BIOIMAGEFLOW_USE_LOCAL_CORE=1` setting instead discovers the project from the imported `bioimageflow_core` package and therefore requires an editable orchestrator installation. An invalid explicit source is a configuration error and never silently falls back to the published core.
+The default authoritative dependency is `bioimageflow-core==<installed version>`. `BIOIMAGEFLOW_CORE_SOURCE` selects an explicit local project without requiring it to be installed editably in the orchestrator environment; BioImageFlow resolves the path and validates its `pyproject.toml` project name, version, and `bioimageflow_core` package before constructing a Wetlands editable local dependency. The `BIOIMAGEFLOW_USE_LOCAL_CORE=1` setting instead discovers the project from the imported `bioimageflow_core` package and therefore requires an editable orchestrator installation. An invalid explicit source is a configuration error and never silently falls back to the published core.
 
-`WetlandsEnvManager.inspect_environment()` reports whether the augmented requested recipe is missing, current, or stale without provisioning it. `get_or_create(..., replace_existing=True)` is the explicit authorization boundary for replacing a Wetlands-managed processing environment, including an intentional rebuild of the current recipe. Automatic callers inspect first and grant that authorization only for a stale owned recipe; an explicit lifecycle action may use it to force a rebuild. The manager closes a cached worker pool before delegating replacement to Wetlands and never authorizes mutation of an unmanaged target. Preparation callbacks distinguish creation, update, worker startup, and warm-pool reuse.
+`WetlandsEnvManager.inspect_environment()` reports whether the augmented requested recipe is missing, current, or stale without provisioning it.
+`recreate(...)` and the `get_or_create(..., replace_existing=True)` entry point explicitly rebuild one Wetlands-managed processing environment, including the current recipe.
+Automatic callers inspect first and grant that authorization only for a stale owned recipe; an explicit lifecycle action may force a rebuild.
+Forced recreation requires installed Wetlands >=2.5.0,<3 and its public `Operation.wait_for_completion()` API; unsupported runtimes are refused before preparation callbacks or destructive effects, while False preserves matching warm-pool reuse.
+Before effects, the manager captures the selected name, independent validated recipe/Core dependency and valid positive worker count/finite timeout.
+Under its existing wrapper lock it synchronously and strictly closes only the selected cached pool, drains that pool’s exact shared-array grants while leaving controller output disposition independent, retires its pool caches, removes the selected managed target through the same public Wetlands manager, provisions with `replace_existing=False`, starts workers and publishes caches only after success.
+A close failure propagates with the selected cleanup owner retained for explicit retry; retained bookkeeping does not certify that a partially closed pool is healthy.
+Removal, provisioning or startup failure propagates without publishing a running pool; committed removal is destructive and has no rollback, while unrelated environments remain untouched.
+Public Wetlands ownership checks still refuse unmanaged or live-resource targets; separate manager instances/processes have no compound generation-exclusivity guarantee, and an identical recipe created between removal and provisioning may be reused.
+`on_removal_event` and `on_provision_event` observe their respective public operations.
+Ordinary listener exceptions retain Wetlands isolation; the first listener non-Exception `BaseException` is captured without blocking the event thread and rethrown by the owner after replay or public completion, without promising instantaneous background-callback cancellation.
+Owner interruption detaches the exact forwarding listener, requests cancellation and independently observes `wait_for_completion()` even when cancellation is interrupted; this public completion wait does not rethrow stored operation outcomes or infer completion from state/exception identity.
+Actual waiter interruptions are retried; the original interruption propagates and the next phase never starts.
+An unexpected completion-API failure preserves the original error with that failure as its cause and cannot be reported as completed cleanup.
+Public operation completion does not certify final operation-thread return, child-process/PID cleanup success or completion of background managed reclamation.
+Preparation callbacks distinguish creation, update, worker startup, and warm-pool reuse; their exceptions occur before destructive force effects, and reentrant lifecycle mutation from those callbacks is unsupported.
+Ordinary `get_or_create(..., replace_existing=False)` preserves matching warm-pool reuse, while `stop()` and `shutdown_all()` retain their existing best-effort behavior.
 
 **Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
 - Dependency lists are sorted alphabetically (e.g., `["numpy==2.4.2", "cellpose==3.1.1.1"]` and `["cellpose==3.1.1.1", "numpy==2.4.2"]` produce the same hash).

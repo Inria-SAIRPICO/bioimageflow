@@ -12,14 +12,15 @@ The repository is tested as one workspace, while package-specific annotated tags
 See [Releasing Python Packages](releasing.md) for the release tag contract, status tool, CI workflow, and operator procedure.
 The orchestrator and first-party tool packages declare Python `>=3.10`; `bioimageflow-core` declares Python `>=3.9` so Wetlands worker environments with Python 3.9-only binary dependencies can install the shared worker API.
 The deterministic CI matrix validates the main development/runtime surface with full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
-Full deterministic Python 3.11 validation is manually available before tagging and rerun as a required release gate, while static compatibility tests keep `bioimageflow-core` import syntax compatible with Python 3.9.
+Normal exact-head CI is reused by the coordinated release workflow rather than rerun in a separate release validation job.
+Source-disabled Core numeric mapping and process-lifetime witnesses on Linux and Windows, Python 3.9 and current Python, cover the supported array capability beyond syntax checks.
 
 Package metadata separates distribution dependencies from isolated runtime dependencies.
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
 Heavy or tool-specific runtimes belong in the tool's `EnvironmentSpec`, not in the package import path.
 Hosts may install a tool distribution with `ToolRegistry.install_package(..., install_dependencies=False)` when they provide compatible main-process dependencies; other callers install declared dependencies by default.
 Package-local `uv.sources` entries mirror first-party runtime dependencies so editable workspace runs and built artifacts use the same package graph.
-Published first-party dependency requirements declare the oldest tested compatible version and an upper compatibility boundary.
+Published first-party dependency requirements declare the tested current support cohort and its upper boundary.
 Downstream packages are released only when their code, packaged content, or compatibility requirements change.
 
 The regular CI gate for package and documentation changes includes:
@@ -30,7 +31,6 @@ uv run pyright
 uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime"
 uv run pytest -m "acceptance and not complete"
 uv run pytest -m "package_tools and not complete"
-uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py
 uv run sphinx-build -W --keep-going docs/source docs/_build/html
@@ -42,8 +42,12 @@ They are useful release evidence, but deterministic unit, package-artifact, and 
 Wheels exclude package documentation, package tests, generated build outputs, and local caches.
 Source distributions keep package docs and tests so release artifacts remain auditable without bloating installed wheels.
 Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
-Publishing is an approval-gated GitHub Actions deployment triggered by a protected package-specific release tag.
-The release job reruns deterministic Python 3.11 validation, builds only the tagged distribution with workspace sources disabled, validates the exact artifacts, and uploads them to PyPI.
+Publishing uses an explicitly dispatched coordinated GitHub Actions release set of annotated package tags at one reviewed SHA, after exact-head CI and affected runtime/artifact checks.
+Current GitHub inspection found no required reviewers on the `pypi` environment and the tag ruleset disabled; no approval or tag protection is inferred.
+The supported current cohort is Core `>=0.5.0,<0.6`; DataFrame packages also require BioImageFlow `>=0.9.0,<1`.
+All nine tool bounds must resolve and validate; the eight existing projects are the base release set, while first-time Phasor publisher admission is separate.
+The release job requires successful exact-head normal CI, builds the selected distributions with workspace sources disabled, validates their artifacts, then publishes them in dependency order.
+A manually selected affected resource suite is additionally blocking; unrelated models, downloads and binaries are not automatic release gates.
 
 ## Package-Owned Documentation Contract
 

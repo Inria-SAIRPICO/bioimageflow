@@ -125,6 +125,50 @@ taking precedence. After the manager exists, later calls to
 shareable scripts because ``require_tool_packages()`` may initialize
 Wetlands while installing missing tool packages.
 
+Explicit managed recreation
+---------------------------
+
+``WetlandsEnvManager.recreate(spec, ...)`` synchronously and strictly closes the selected cached pool,
+removes that managed target through its public Wetlands manager, provisions the
+captured recipe with replacement disabled, starts workers and returns the new pool.
+``get_or_create(spec, replace_existing=True)`` delegates to the same operation,
+including when the recipe already matches; False preserves matching warm reuse.
+
+Forced recreation requires installed Wetlands >=2.5.0,<3 and the callable public
+``Operation.wait_for_completion()`` API; unsupported runtimes are refused before
+preparation or destructive work. False preserves matching warm reuse.
+
+The recipe, Core dependency, target name and startup arguments are captured and
+validated before preparation callbacks or destructive work.
+A successful physical close drains only that pool’s shared-array grants before
+retiring its caches and removing the target. Controller output disposition remains
+independent, so pending or accepted outputs are not treated as rejected by drain.
+A failed close propagates and retains the selected pool, grants and cleanup owner for an explicit
+retry; retained bookkeeping does not certify pool health.
+Removal, provisioning and startup failures propagate without publishing a running
+pool, and a committed removal has no rollback. Unrelated environments stay intact.
+Ownership and live-resource refusals remain authoritative in public Wetlands APIs.
+The wrapper lock is local to this manager instance; another manager or process can
+create an identical recipe between removal and provisioning, which Wetlands may reuse.
+
+``on_removal_event`` and ``on_provision_event`` receive separate public operation
+events. Preparation callbacks remain observational; reentrant lifecycle mutation
+from them is unsupported.
+Ordinary listener exceptions retain Wetlands isolation. The first non-Exception
+``BaseException`` is captured without blocking the event thread and rethrown by
+the owner after replay or public completion; background callback interruption does
+not promise instantaneous cancellation.
+An owner interruption detaches the exact forwarding listener, requests cancellation
+and independently observes ``wait_for_completion()``, even if cancellation is
+interrupted. This public wait separates completion from stored operation outcomes;
+no state or exception-identity inference is used. Actual waiter interruptions are
+retried. The original interruption is raised and the next phase never starts.
+An unexpected completion-API error preserves the original error with that failure
+as its cause and cannot be reported as completed cleanup.
+Public completion does not certify final operation-thread return, child-process/PID
+cleanup success or completion of background managed reclamation.
+``stop()`` and ``shutdown_all()`` retain their existing best-effort cleanup behavior.
+
 Environment lifetime and ownership
 ----------------------------------
 

@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow"
-version = "0.8.7"
+version = "0.9.0"
 description = "Python library for orchestrating bioimage analysis workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,14 +21,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "bioimageflow-core>=0.4.0,<0.5",
+    "bioimageflow-core>=0.5.0,<0.6",
     "numpy>=1.23.5",
     "packaging>=24.0",
     "pandas>=2.0.0",
     "pyarrow>=12.0.0",
     "pydantic>=2.0.0",
     "tomli>=2.0.1; python_version < '3.11'",
-    "wetlands>=2.4.2,<3",
+    "wetlands>=2.5.0,<3",
 ]
 
 [project.scripts]
