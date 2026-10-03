@@ -96,18 +96,6 @@ class _SharedArrayWriter(ProcessingTool):
             return self.Outputs(image=reference)
 
 
-def _unlink_shared_memory(names: set[str]) -> None:
-    from multiprocessing.shared_memory import SharedMemory
-
-    for name in names:
-        try:
-            shared = SharedMemory(name=name)
-        except FileNotFoundError:
-            continue
-        shared.close()
-        shared.unlink()
-
-
 def _control_dir(tmp_path: Path) -> Path:
     control = tmp_path / "launcher" / "v1" / "runs" / RUN_ID
     control.mkdir(parents=True)
@@ -452,13 +440,10 @@ def test_record_backed_shared_array_uses_raw_exact_record_locator(
         with open_shared_array(loaded_reference) as array:
             assert array.tolist() == [[5, 5], [5, 5]]
     finally:
-        names = {
-            *_SharedArrayWriter.created_names,
-            returned_reference.name,
-        }
+        returned_reference.bound_owner.close()
         if loaded_reference is not None:
-            names.add(loaded_reference.name)
-        _unlink_shared_memory(names)
+            loaded_reference.bound_owner.close()
+
 
 
 def test_declared_path_string_without_provider_route_fails_closed(

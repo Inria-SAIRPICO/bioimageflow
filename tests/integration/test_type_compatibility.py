@@ -176,7 +176,7 @@ class TestSharedArray:
     def test_shared_array_is_picklable(self):
         import pickle
 
-        ref = SharedArray(name="bif_test_001", shape=(64, 64), dtype="uint16")
+        ref = SharedArray(name="bif_test_001", shape=(64, 64), dtype="uint16", scope_id="unbound_scope")
         pickled = pickle.dumps(ref)
         unpickled = pickle.loads(pickled)
         assert unpickled.name == "bif_test_001"
@@ -184,6 +184,6 @@ class TestSharedArray:
         assert unpickled.dtype == "uint16"
 
     def test_shared_array_is_frozen(self):
-        ref = SharedArray(name="bif_test", shape=(10,), dtype="float32")
+        ref = SharedArray(name="bif_test", shape=(10,), dtype="float32", scope_id="unbound_scope")
         with pytest.raises(AttributeError):
             ref.name = "new_name"  # type: ignore[reportAttributeAccessIssue]

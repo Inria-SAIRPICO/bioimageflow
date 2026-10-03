@@ -1,60 +1,32 @@
 """Shared memory helpers that expose NumPy array views."""
 
-import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Optional
 
 from bioimageflow_core.types import SharedArray
-
-
-def _shared_memory_dtype(value: Any) -> Any:
-    """Reject Python-object storage before creating or attaching a segment."""
-    import numpy as np
-
-    dtype = np.dtype(value)
-    if dtype.hasobject:
-        raise ValueError("Shared memory arrays cannot contain Python objects.")
-    return dtype
+from bioimageflow_core.shared_memory import get_shared_memory_context
+from bioimageflow_core._shared_storage import dtype as _shared_memory_dtype
 
 
 @contextmanager
 def create_shared_output(data: Any, name: Optional[str] = None) -> Generator[SharedArray, None, None]:
     """
-    Create a shared memory segment, copy data into it, and yield a SharedArray.
-    Closes the local handle on exit but does NOT unlink (data persists).
+    Copy data into the explicitly active controller-owned allocation namespace.
+    Lexical exit does not release the reference or its backing storage.
     """
     import numpy as np
-    from multiprocessing.shared_memory import SharedMemory
-
     arr = np.asarray(data)
     _shared_memory_dtype(arr.dtype)
-    if name is None:
-        name = f"bif_{uuid.uuid4().hex[:16]}"
-
-    shm = SharedMemory(name=name, create=True, size=arr.nbytes)
-    try:
-        shared_arr = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
-        shared_arr[:] = arr[:]
-        ref = SharedArray(name=shm.name, shape=arr.shape, dtype=str(arr.dtype))
-        yield ref
-    finally:
-        shm.close()
+    yield get_shared_memory_context().create(arr, name=name)
 
 
 @contextmanager
 def open_shared_array(ref: SharedArray) -> Generator[Any, None, None]:
     """
-    Attach to an existing shared memory segment.
-    Yields a zero-copy numpy array. Closes handle on exit.
+    Map an admitted backing file and yield a zero-copy numeric array.
+    Live arrays and derived views retain the mapping beyond lexical exit.
     """
-    import numpy as np
-    from multiprocessing.shared_memory import SharedMemory
-
-    dtype = _shared_memory_dtype(ref.dtype)
-    shm = SharedMemory(name=ref.name)
-    try:
-        arr = np.ndarray(ref.shape, dtype=dtype, buffer=shm.buf)
-        yield arr
-    finally:
-        shm.close()
+    _shared_memory_dtype(ref.dtype)
+    context = ref.bound_owner or get_shared_memory_context()
+    yield context.open(ref)

@@ -60,3 +60,9 @@ Shared Memory
    :members:
    :undoc-members:
    :show-inheritance:
+
+Shared-array ownership
+----------------------
+
+.. automodule:: bioimageflow_core.shared_memory
+   :members: SharedMemoryContext, CleanupStatus, WorkerGrant, collect_input_scopes, validate_scope_descriptor

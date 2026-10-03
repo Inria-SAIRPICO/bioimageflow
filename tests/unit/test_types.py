@@ -240,12 +240,12 @@ class TestExtractGUIMeta:
 class TestSharedArray:
 
     def test_frozen(self):
-        sa = SharedArray(name="test", shape=(10, 10), dtype="float32")
+        sa = SharedArray(name="test", shape=(10, 10), dtype="float32", scope_id="unbound_scope")
         with pytest.raises(AttributeError):
             sa.name = "other"  # type: ignore[reportAttributeAccessIssue]
 
     def test_fields(self):
-        sa = SharedArray(name="seg", shape=(3, 256, 256), dtype="uint8")
+        sa = SharedArray(name="seg", shape=(3, 256, 256), dtype="uint8", scope_id="unbound_scope")
         assert sa.name == "seg"
         assert sa.shape == (3, 256, 256)
         assert sa.dtype == "uint8"

@@ -46,6 +46,7 @@ class _InterfacesMixin:
         wetlands_config: dict[str, Any] | None = None,
         max_workers: int = 1,
         output_view: OutputView | Mapping[str, Any] | str | None = None,
+        shared_memory_context: Any = None,
     ) -> None:
         if not name or "/" in name:
             raise ValueError("Workflow name must be non-empty and may not contain '/'.")
@@ -69,6 +70,11 @@ class _InterfacesMixin:
         self.max_workers = max_workers
         self.output_view = _normalize_output_view(output_view)
         self._env_configs: dict[str, WorkflowEnvironment] = {}
+        if shared_memory_context is not None:
+            from bioimageflow_core import SharedMemoryContext
+            if not isinstance(shared_memory_context, SharedMemoryContext):
+                raise TypeError("shared_memory_context must be a SharedMemoryContext")
+        self._shared_memory_context = shared_memory_context
         self._execution_lock = threading.RLock()
         self._active_run_context: Any = None
         self._nodes: dict[str, Node] = {}

@@ -1,9 +1,9 @@
 Pass Arrays Through Shared Memory
 =================================
 
-BioImageFlow supports zero-copy array transfer between tools using shared
-memory. This avoids writing intermediate arrays to disk, which is significantly
-faster for large images.
+BioImageFlow shares numeric arrays through scoped NPY2 file-backed mmap storage.
+Allocation copies data once; subsequent mapped reads use zero-copy NumPy views.
+This storage contract does not promise a measured speedup over ordinary files.
 
 Overview
 --------
@@ -26,7 +26,7 @@ Producing shared arrays
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, GENERAL_ENV, ImageShared, ImageSpec, Arguments, Template,
+       ProcessingTool, IOModel, GENERAL_ENV, ImageShared, ImageSpec, Arguments, Template,
    )
    from bioimageflow_core.shm import create_shared_output
 
@@ -34,10 +34,10 @@ Producing shared arrays
        display_name = "Preprocess"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            result: ImageShared()
 
        def process_row(self, arguments: Arguments) -> "Preprocess.Outputs":
@@ -51,8 +51,8 @@ Producing shared arrays
                return self.Outputs(result=shm_ref)
 
 :func:`~bioimageflow_core.shm.create_shared_output` creates a
-:class:`~bioimageflow_core.SharedArray` reference. The shared memory block
-persists after the context manager exits --- only the local handle is closed.
+:class:`~bioimageflow_core.SharedArray` reference in the active explicit allocation scope.
+Lexical exit does not delete its backing; returned references retain a reachable controller owner.
 
 Consuming shared arrays
 -----------------------
@@ -65,10 +65,10 @@ Consuming shared arrays
        display_name = "Segment"
        environment = EnvironmentSpec(name="cellpose", dependencies={})
 
-       class Inputs:
+       class Inputs(IOModel):
            image: ImageShared()
 
-       class Outputs:
+       class Outputs(IOModel):
            mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
                "{node_name}_mask.tif"
            )
@@ -83,8 +83,8 @@ Consuming shared arrays
            return self.Outputs(mask=arguments.mask)
 
 :func:`~bioimageflow_core.io.load_image` detects that the input is a
-``SharedArray`` and attaches to the shared memory block. The resulting numpy
-array shares the same underlying buffer --- no data is copied.
+``SharedArray`` and maps its admitted numeric backing file.
+The resulting NumPy array and derived views retain their mapping beyond lexical exit.
 
 Wiring it together
 ------------------
@@ -121,7 +121,7 @@ layouts, and dtypes are checked at graph-construction time.
 When to use shared memory
 -------------------------
 
-- Large intermediate arrays that would be slow to write/read as files
+- Pipelines that benefit from sharing mapped numeric backing after the initial copy
 - Pipelines where multiple tools process the same array
 - GPU workflows where data stays in host memory between steps
 
@@ -130,3 +130,28 @@ When to prefer files:
 - Results that need to persist across runs (caching)
 - Outputs that users need to inspect visually
 - Small data where I/O overhead is negligible
+
+Explicit ownership and cleanup
+------------------------------
+
+Workflow execution establishes a controller scope automatically; standalone helper calls require an explicit scope.
+Returned DataFrames retain their reference owners even when a temporary Workflow is collected.
+Workflow/context exit and execution completion do not close returned arrays.
+
+.. code-block:: python
+
+   from bioimageflow_core import SharedMemoryContext
+   from bioimageflow_core.shm import create_shared_output, open_shared_array
+
+   owner = SharedMemoryContext("./shared-arrays", max_bytes=512 * 1024 * 1024)
+   with owner.activate(), create_shared_output(data) as reference:
+       pass
+   with open_shared_array(reference) as array:
+       view = array[1:]
+   status = owner.close()  # pending while mapped views or worker grants remain
+
+Explicit ``close()`` or ``release(reference)`` refuses new controller access.
+Already admitted workers and existing base/slice/asarray views retain backing until physical drain.
+``CleanupStatus`` reports pending readers, grants, files and errors; Windows deletion failures stay pending for retry.
+Workers borrow scopes and never own deletion; public pool close releases grants only after successful physical drain.
+No resource tracker, private unregister or automatic context-exit unlink is used.

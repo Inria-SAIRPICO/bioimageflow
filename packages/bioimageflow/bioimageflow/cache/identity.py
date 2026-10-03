@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow_core import SharedArray
+
 from .common import (
     Any,
     Enum,
@@ -57,6 +59,8 @@ def deterministic_serialize(obj: Any) -> str:
             return list(o)
         if isinstance(o, Enum):
             return o.value
+        if isinstance(o, SharedArray):
+            return {"name": o.name, "shape": o.shape, "dtype": o.dtype, "scope_id": o.scope_id}
         if hasattr(o, "__dataclass_fields__"):
             return {k: getattr(o, k) for k in o.__dataclass_fields__}
         raise TypeError(

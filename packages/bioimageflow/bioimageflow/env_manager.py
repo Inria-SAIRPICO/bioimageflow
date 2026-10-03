@@ -249,6 +249,7 @@ class WetlandsEnvManager:
         )
         self._environments: dict[str, ManagedEnvironment] = {}
         self._pools: dict[str, WorkerPool] = {}
+        self._shared_memory_grants: dict[str, list[Any]] = {}
         self._pool_configs: dict[str, tuple[int, float | None]] = {}
         self._specs: dict[str, EnvironmentSpec] = {}
         self._lock = threading.RLock()
@@ -443,7 +444,8 @@ class WetlandsEnvManager:
                             )
                         )
                         preparation_published = True
-                    self.stop(env_spec.name)
+                    if not self.stop(env_spec.name):
+                        raise RuntimeError("Previous worker pool did not physically drain")
                     existing = None
                 else:
                     if self._pool_configs[env_spec.name] != config:
@@ -505,17 +507,24 @@ class WetlandsEnvManager:
         payload: dict[str, Any],
         max_workers: int = 1,
         worker_timeout: float | None = None,
+        *,
+        shared_memory_grant: Any = None,
     ) -> Any:
-        pool = self.get_or_create(
-            env_spec,
-            max_workers=max_workers,
-            worker_timeout=worker_timeout,
-        )
-        return pool.submit_import(
-            _WORKER_TARGET,
-            args=(payload,),
-            context_keyword="task",
-        )
+        with self._lock:
+            try:
+                pool = self.get_or_create(
+                    env_spec, max_workers=max_workers, worker_timeout=worker_timeout,
+                )
+            except BaseException:
+                if shared_memory_grant is not None:
+                    shared_memory_grant.drained()
+                raise
+            if shared_memory_grant is not None:
+                self._shared_memory_grants.setdefault(env_spec.name, []).append(shared_memory_grant)
+            # Registration/submission shares the pool owner's close fence.
+            # A mutating/raising submission may already have handed the scope
+            # to a live worker, so keep its grant until successful pool close.
+            return pool.submit_import(_WORKER_TARGET, args=(payload,), context_keyword="task")
 
     def map_processing_tasks(
         self,
@@ -541,16 +550,21 @@ class WetlandsEnvManager:
 
     def stop(self, env_name: str) -> bool:
         with self._lock:
-            pool = self._pools.pop(env_name, None)
-            self._pool_configs.pop(env_name, None)
-            self._environments.pop(env_name, None)
-            self._specs.pop(env_name, None)
+            pool = self._pools.get(env_name)
             if pool is None:
                 return False
             try:
                 pool.close()
             except Exception:
                 logger.warning("Failed to close Wetlands pool %r", env_name, exc_info=True)
+                return False
+            # A task's logical result/terminal status is not this physical fence.
+            self._pools.pop(env_name)
+            self._pool_configs.pop(env_name, None)
+            self._environments.pop(env_name, None)
+            self._specs.pop(env_name, None)
+            for grant in self._shared_memory_grants.pop(env_name, []):
+                grant.drained()
             return True
 
     def is_running(self, env_name: str) -> bool:

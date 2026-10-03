@@ -25,15 +25,10 @@ def _array(value: Any) -> np.ndarray:
 
 
 def _reference(value: dict) -> SharedArray:
-    _fields(value, {"kind", "name", "shape", "dtype"})
+    _fields(value, {"kind", "name", "shape", "dtype", "scope_id"})
     name = value["name"]
-    if (
-        type(name) is not str
-        or not name
-        or name != name.strip()
-        or any(ord(char) < 32 for char in name)
-    ):
-        raise ValueError("SharedArray name must be normalized nonempty text.")
+    from bioimageflow_core._shared_storage import token
+    token(name)  # bounded portable allocation token; validation performs no I/O
     shape = value["shape"]
     if type(shape) is not list or any(type(n) is not int or n < 0 for n in shape):
         raise ValueError("SharedArray shape must contain nonnegative integers.")
@@ -41,7 +36,12 @@ def _reference(value: dict) -> SharedArray:
     if type(dtype) is not str:
         raise ValueError("SharedArray dtype must be a string.")
     _shared_memory_dtype(dtype)
-    return SharedArray(name=name, shape=tuple(shape), dtype=dtype)
+    scope_id = value["scope_id"]
+    if type(scope_id) is not str or not scope_id or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in scope_id):
+        raise ValueError("SharedArray scope identity must be a bounded token.")
+    if len(scope_id) > 96:
+        raise ValueError("SharedArray scope identity is too long.")
+    return SharedArray(name=name, shape=tuple(shape), dtype=dtype, scope_id=scope_id)
 
 
 def encode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
@@ -68,6 +68,7 @@ def encode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
             "name": value.name,
             "shape": list(value.shape),
             "dtype": value.dtype,
+            "scope_id": value.scope_id,
         }
         _reference(node)
         return node

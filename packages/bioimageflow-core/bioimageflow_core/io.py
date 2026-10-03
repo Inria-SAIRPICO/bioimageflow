@@ -2,30 +2,23 @@
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Any, Union
 
 from bioimageflow_core.types import SharedArray
-from bioimageflow_core.shm import _shared_memory_dtype
+from bioimageflow_core.shm import open_shared_array
 
 
 @contextmanager
 def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[Any, None, None]:
     """
     Dispatch between file and shared memory sources.
-    - SharedArray: attaches to shared memory, yields numpy view.
+    - SharedArray: maps an admitted numeric backing, yields a retained NumPy view.
     - Path or str: delegates to file_reader, yields result.
     """
     if isinstance(source, SharedArray):
-        import numpy as np
-        dtype = _shared_memory_dtype(source.dtype)
-        shm = SharedMemory(name=source.name)
-        try:
-            arr = np.ndarray(source.shape, dtype=dtype, buffer=shm.buf)
+        with open_shared_array(source) as arr:
             yield arr
-        finally:
-            shm.close()
     else:
         yield file_reader(Path(source))
 

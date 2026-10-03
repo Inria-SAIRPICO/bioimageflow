@@ -89,6 +89,19 @@ class _WorkflowSteps(Iterator["NodeStep"]):
 
 
 class _RuntimeMixin:
+    @property
+    def shared_memory_context(self) -> Any:
+        """Retained controller owner; explicitly close it to release array resources."""
+        from bioimageflow_core import SharedMemoryContext
+        with self._execution_lock:
+            if self._shared_memory_context is None:
+                if self.storage_path is None:
+                    raise RuntimeError("Shared arrays require bound runtime storage.")
+                self._shared_memory_context = SharedMemoryContext(
+                    Path(self.storage_path) / ".bioimageflow" / "shared_arrays"
+                )
+            return self._shared_memory_context
+
     def create_engine(
         self,
         *,
@@ -219,6 +232,13 @@ class _RuntimeMixin:
         with self._execution_lock:
             if self._active_run_context is not None:
                 raise RuntimeError("This Workflow already has an active execution.")
+            requested_owner = context.shared_memory_context
+            if requested_owner is not None:
+                if self._shared_memory_context not in (None, requested_owner):
+                    raise ValueError("Run and Workflow shared-array owners disagree.")
+                self._shared_memory_context = requested_owner
+            else:
+                context.shared_memory_context = self.shared_memory_context
             self._active_run_context = context
 
     def _end_public_execution(self) -> None:
@@ -319,6 +339,7 @@ class _RuntimeMixin:
                 wetlands_config=self.wetlands_config,
                 max_workers=self.max_workers,
                 output_view=self.output_view,
+                shared_memory_context=self.shared_memory_context,
             )
             parent._accept_root_dataframes = True
             parent._captured_custom_sources = copy.deepcopy(
@@ -450,6 +471,7 @@ class _RuntimeMixin:
                 wetlands_config=self.wetlands_config,
                 max_workers=self.max_workers,
                 output_view=self.output_view,
+                shared_memory_context=self.shared_memory_context,
             )
             parent._accept_root_dataframes = True
             with parent:

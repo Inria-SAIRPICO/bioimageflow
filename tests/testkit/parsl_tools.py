@@ -260,7 +260,7 @@ class ParslRuntimeSharedArray(ProcessingTool):
     ) -> "ParslRuntimeSharedArray.Outputs":
         del arguments
         return self.Outputs(
-            value=SharedArray(name="runtime", shape=(1,), dtype="uint8")
+            value=SharedArray(name="runtime", shape=(1,), dtype="uint8", scope_id="unbound_scope")
         )
 
 

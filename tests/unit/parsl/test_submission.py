@@ -281,7 +281,7 @@ def test_runtime_shared_array_is_rejected_before_submission() -> None:
                             name="shared",
                             shape=(1,),
                             dtype="uint8",
-                        )
+                         scope_id="unbound_scope")
                     },
                     context=None,
                 )
@@ -316,7 +316,7 @@ def test_late_runtime_validation_failure_cancels_and_drains_prior_future() -> No
                             name="shared",
                             shape=(1,),
                             dtype="uint8",
-                        )
+                         scope_id="unbound_scope")
                     },
                     context=None,
                 ),

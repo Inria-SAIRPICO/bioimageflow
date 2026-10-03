@@ -40,14 +40,8 @@ Run the Python-version compatibility smoke selector with:
 uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 ```
 
-For restricted sandboxes that cannot create POSIX shared-memory segments, agents may run a partial local fast loop with shared-memory tests excluded:
-
-```bash
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl and not shared_memory"
-```
-
-That command is only for local sandbox triage.
-It does not replace the required CI fast matrix, where `shared_memory` remains included.
+Shared-array controls use controller-owned temporary NPY/mmap files on supported Python/OS runtimes and remain included in the required fast matrix.
+They no longer require POSIX shared-memory segments; a real filesystem/mapping admission failure must be reported separately rather than silently excluding the marker or crediting unrun lifetime coverage.
 
 Package-local regular tests are a separate deterministic required tier and can be run with:
 
@@ -84,7 +78,7 @@ Use these markers when coverage is valuable but too broad or artifact-oriented f
 - `parsl`: tests that execute the real optional Parsl runtime in the dedicated runtime jobs;
 - `packaging`: build artifact, wheel, sdist, or package metadata artifact checks;
 - `package_tools`: package-local deterministic coverage that is required in a separate CI job;
-- `shared_memory`: deterministic tests requiring POSIX/shared-memory platform support;
+- `shared_memory`: deterministic scoped numeric file/mmap lifetime tests;
 - `slow`: deterministic or external tests excluded from the fast development loop.
 
 Run deterministic acceptance coverage with:

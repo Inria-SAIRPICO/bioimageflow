@@ -67,10 +67,17 @@ class ImageSpec:
 
 @dataclass(frozen=True)
 class SharedArray:
-    """A reference to data in shared memory. Picklable."""
+    """A scoped numeric backing reference; local deletion ownership is not wire data."""
     name: str
     shape: Tuple[int, ...]
     dtype: str
+    scope_id: str
+    _owner: Any = field(default=None, compare=False, hash=False, repr=False)
+
+    @property
+    def bound_owner(self) -> Any:
+        """The explicitly admitted local context, or None after pure decoding."""
+        return self._owner
 
 
 def _normalize_param(value: Any) -> set[Any]:

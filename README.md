@@ -10,7 +10,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 - **Two-package architecture** — a minimal worker-safe core (`bioimageflow-core`) and an orchestrator (`bioimageflow`) for the main process
 - **Typed image I/O** — annotate inputs/outputs with semantic type, layout, and dtype constraints; reusable groups such as `SCALAR_IMAGE_SEMANTICS` cover common scalar image consumers
 - **Automatic caching** — result-key/current-record caching skips redundant computation
-- **Shared memory** — zero-copy array transfer between tools via `SharedArray`
+- **Shared memory** — scoped numeric file-backed array sharing via `SharedArray`, with zero-copy mapped views after the initial copy
 - **Companion merge strategies** — inner join, cross join, concat, and collect tools from `bioimageflow-common-tools`
 - **Output templating** — declarative output path patterns with `{input.stem}`, `{row_index}`, etc.
 - **Environment isolation** — each tool declares its own `EnvironmentSpec` so dependencies never conflict

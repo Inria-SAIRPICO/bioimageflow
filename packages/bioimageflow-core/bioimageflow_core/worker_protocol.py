@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple, cast
 
 from bioimageflow_core.arguments import ExecutionContext
+from bioimageflow_core.shared_memory import validate_scope_descriptor
 from bioimageflow_core._processing_values import (
     decode_processing_value,
     encode_processing_value,
@@ -57,6 +58,7 @@ class ProcessingTask:
     tool: WorkerToolOriginV1
     rows: Tuple[RowInvocation, ...]
     batch_context: Optional[Dict[str, Any]] = None
+    shared_memory_context: Optional[Dict[str, Any]] = None
     schema: Literal["bioimageflow.processing_task.v2"] = field(
         default=TASK_SCHEMA, init=False
     )
@@ -196,6 +198,21 @@ def _decode_rows(value: Any, decoder: Any, label: str) -> Tuple[Any, ...]:
     return rows
 
 
+def _decode_shared_memory_context(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    context = _require_plain_dict(value, "shared memory context")
+    _require_exact_keys(context, {"output", "inputs"}, "shared memory context")
+    output = validate_scope_descriptor(context["output"])
+    if type(context["inputs"]) is not list:
+        raise ValueError("Shared memory input scopes must be a list.")
+    inputs = [validate_scope_descriptor(item) for item in context["inputs"]]
+    ids = [item["scope_id"] for item in inputs]
+    if len(set(ids)) != len(ids) or output["scope_id"] in ids:
+        raise ValueError("Shared memory scope identities must be unique.")
+    return {"output": output, "inputs": inputs}
+
+
 def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
     """Encode a processing task to its exact worker-safe object."""
     if not isinstance(task, ProcessingTask):
@@ -219,6 +236,7 @@ def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
             for row in task.rows
         ],
         "batch_context": deepcopy(task.batch_context),
+        "shared_memory_context": _decode_shared_memory_context(task.shared_memory_context),
     }
 
 
@@ -236,6 +254,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         "tool",
         "rows",
         "batch_context",
+        "shared_memory_context",
     }
     _require_exact_keys(task, expected, "processing task")
     if task["schema"] != TASK_SCHEMA:
@@ -262,6 +281,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         tool=decode_worker_tool_origin(task["tool"]),
         rows=rows,
         batch_context=batch_context,
+        shared_memory_context=_decode_shared_memory_context(task["shared_memory_context"]),
     )
 
 

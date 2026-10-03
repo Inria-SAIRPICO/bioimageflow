@@ -130,6 +130,7 @@ class _StubEnvManager:
         self.submitted_rows: list[dict] = []
         self.last_worker_timeout: float | None = None
         self.hanging_tasks: list[_HangingTask] = []
+        self.shared_memory_grants: list[Any] = []
 
     def submit_processing_task(
         self,
@@ -137,8 +138,12 @@ class _StubEnvManager:
         payload,
         max_workers=1,
         worker_timeout=None,
+        *,
+        shared_memory_grant=None,
     ):
         self.last_worker_timeout = worker_timeout
+        if shared_memory_grant is not None:
+            self.shared_memory_grants.append(shared_memory_grant)
         t = _HangingTask()
         self.hanging_tasks.append(t)
         return t

@@ -23,6 +23,17 @@ from tests.testkit.integration_tools import (
 )
 
 
+@pytest.fixture(autouse=True)
+def owned_shared_arrays(tmp_path):
+    """Public helper calls explicitly allocate inside a retained controller scope."""
+    from bioimageflow_core import SharedMemoryContext
+
+    owner = SharedMemoryContext(tmp_path / "shared")
+    with owner.activate():
+        yield owner
+    owner.close()
+
+
 @pytest.mark.shared_memory
 class TestSharedMemoryWorkflow:
 
@@ -66,8 +77,7 @@ class TestSharedMemoryHelpers:
             # Data still accessible after create context manager exits
             # (close, not unlink)
 
-        # After outer context, the handle is closed but segment may still exist
-        # (engine is responsible for unlinking)
+        # Lexical exit never requests allocation release.
 
     def test_shared_array_survives_return_inside_with(self):
         """Returning SharedArray from inside a 'with' block is valid."""
@@ -84,10 +94,7 @@ class TestSharedMemoryHelpers:
             with open_shared_array(ref) as arr:
                 assert arr.sum() == 25
         finally:
-            from multiprocessing.shared_memory import SharedMemory
-            shm = SharedMemory(name=ref.name)
-            shm.close()
-            shm.unlink()
+            ref.bound_owner.release(ref)
 
 
 class TestLoadImageDispatch:
@@ -121,10 +128,7 @@ class TestLoadImageDispatch:
                 with load_image(ref, file_reader=should_not_be_called) as arr:
                     np.testing.assert_array_equal(arr, original)
             finally:
-                from multiprocessing.shared_memory import SharedMemory
-                shm = SharedMemory(name=ref.name)
-                shm.close()
-                shm.unlink()
+                ref.bound_owner.release(ref)
 
 
 class TestSaveImage:
@@ -176,17 +180,17 @@ class TestSharedMemoryCachePersistence:
 def test_object_dtype_refused_before_shared_memory(entrypoint, monkeypatch):
     """Public helpers must refuse process-local references before any effect."""
     import numpy as np
-    import multiprocessing.shared_memory as shared_memory
+    import bioimageflow_core._shared_storage as shared_storage
     import bioimageflow_core.io as image_io
     from bioimageflow_core import SharedArray
     from bioimageflow_core.shm import create_shared_output, open_shared_array
 
     def no_segment(*args, **kwargs):
-        raise AssertionError("SharedMemory must not create or attach object storage")
+        raise AssertionError("Backing must not create or map object storage")
 
-    monkeypatch.setattr(shared_memory, "SharedMemory", no_segment)
-    monkeypatch.setattr(image_io, "SharedMemory", no_segment)
-    ref = SharedArray("unused_object_segment", (1,), "object")
+    monkeypatch.setattr(shared_storage, "create", no_segment)
+    monkeypatch.setattr(shared_storage, "map_array", no_segment)
+    ref = SharedArray("unused_object_segment", (1,), "object", "unopened_scope")
     if entrypoint == "create":
         operation = create_shared_output(np.array([object()], dtype=object))
     elif entrypoint == "open":
@@ -203,13 +207,13 @@ def test_object_dtype_refused_before_shared_memory(entrypoint, monkeypatch):
 def test_structured_object_dtype_refused_before_creation(monkeypatch):
     """A nested object field is unsafe even when dtype.kind is not object."""
     import numpy as np
-    import multiprocessing.shared_memory as shared_memory
+    import bioimageflow_core._shared_storage as shared_storage
     from bioimageflow_core.shm import create_shared_output
 
     def no_segment(*args, **kwargs):
         raise AssertionError("SharedMemory must not create object storage")
 
-    monkeypatch.setattr(shared_memory, "SharedMemory", no_segment)
+    monkeypatch.setattr(shared_storage, "create", no_segment)
     data = np.zeros(1, dtype=[("value", [("payload", object)])])
     with pytest.raises(ValueError, match="Python objects"):
         with create_shared_output(data):

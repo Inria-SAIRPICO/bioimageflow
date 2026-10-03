@@ -224,6 +224,30 @@ def _rehydrate_processing_shared_arrays(
 
 
 def _rehydrate_processing_assets(
+    df: pd.DataFrame, record_dir: Path, path_columns: set[str],
+    shared_array_columns: set[str], outputs: list[dict[str, Any]],
+) -> pd.DataFrame:
+    if not shared_array_columns:
+        return _rehydrate_processing_paths(df, record_dir, path_columns)
+    import uuid
+    from bioimageflow_core import get_shared_memory_context
+
+    scope = get_shared_memory_context().task_scope("cache_" + uuid.uuid4().hex)
+    try:
+        with scope.activate():
+            hydrated = _rehydrate_processing_assets_bound(
+                df, record_dir, path_columns, shared_array_columns, outputs,
+            )
+        scope.accept_result({column: hydrated[column].tolist()
+                             for column in shared_array_columns if column in hydrated.columns})
+        scope.discard_unreturned()
+        return hydrated
+    except BaseException:
+        scope.close()
+        raise
+
+
+def _rehydrate_processing_assets_bound(
     df: pd.DataFrame,
     record_dir: Path,
     path_columns: set[str],

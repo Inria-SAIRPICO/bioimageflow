@@ -169,3 +169,26 @@ Path({str(marker)!r}).write_text("executed")
     with pytest.raises(ValueError):
         execute_processing_task(payload)
     assert not marker.exists()
+
+
+def test_unadmitted_scope_is_refused_before_trusted_tool_import(tmp_path):
+    from bioimageflow_core import SharedArray, SharedMemoryContext
+    owner = SharedMemoryContext(tmp_path / "owned")
+    sentinel = tmp_path / "executed"
+    source = tmp_path / "tool.py"
+    source.write_text(f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('executed')\n")
+    invocation = ProcessingTask(
+        task_id="task_0000000000000000", node_name="scope", invocation_id="inv_" + "1" * 32,
+        cache_attempt_id=None, task_retry=0, mode="row_chunk", tool=_origin(source),
+        rows=(RowInvocation(position=0, row_index="sample", arguments={
+            "reference": SharedArray("valid", (1,), "u1", "unadmitted"),
+        }, context=None),),
+        shared_memory_context={"output": owner.descriptor(), "inputs": []},
+    )
+    try:
+        with pytest.raises(ValueError, match="scope is not admitted"):
+            execute_processing_task(encode_processing_task(invocation))
+        assert not sentinel.exists()
+        assert list((tmp_path / "owned").rglob("*.npy")) == []
+    finally:
+        owner.close()

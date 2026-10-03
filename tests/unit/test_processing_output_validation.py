@@ -142,7 +142,7 @@ def test_remote_outputs_reject_shared_array_inside_typed_containers() -> None:
     class NestedOutputs(IOModel):
         payload: dict[str, object]
 
-    reference = SharedArray(name="bif_remote_reference", shape=(2,), dtype="float32")
+    reference = SharedArray(name="bif_remote_reference", shape=(2,), dtype="float32", scope_id="unbound_scope")
     payload = {"items": [({"image": reference},)]}
 
     with pytest.raises(TypeError, match="payload.*SharedArray"):

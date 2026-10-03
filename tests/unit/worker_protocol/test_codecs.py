@@ -272,7 +272,7 @@ def test_shared_array_descriptor_round_trip_preserves_typed_values(
         pytest.fail("Pure descriptor codec must not allocate or attach shared memory")
 
     monkeypatch.setattr(shared_memory, "SharedMemory", refuse_shared_memory)
-    ref = SharedArray(name="owned_numeric_segment", shape=(2, 3), dtype="uint16")
+    ref = SharedArray(name="owned_numeric_segment", shape=(2, 3), dtype="uint16", scope_id="a" * 32)
     path = Path(tmp_path) / "numeric.tif"
     literal = {"kind": "shared_array", "name": "literal", "shape": [9], "dtype": "u1"}
     values = {"shared": ref, "nested": [ref, (path, literal)], "bytes": b"\x00data"}
@@ -384,7 +384,7 @@ def test_malformed_shared_reference_decode_never_attaches(
     task = replace(
         task,
         rows=(
-            replace(task.rows[0], arguments={"ref": SharedArray("safe", (2,), "u1")}),
+            replace(task.rows[0], arguments={"ref": SharedArray("safe", (2,), "u1", "a" * 32)}),
         ),
     )
     payload = encode_processing_task(task)
@@ -392,3 +392,27 @@ def test_malformed_shared_reference_decode_never_attaches(
     mutate(node)
     with pytest.raises((TypeError, ValueError)):
         decode_processing_task(payload)
+
+
+@pytest.mark.parametrize("name", ["../outside", "absolute/path", "a" * 97])
+def test_shared_reference_path_tokens_are_refused_without_storage_access(tmp_path, name):
+    from bioimageflow_core import SharedArray
+    task = _task(tmp_path)
+    task = replace(task, rows=(replace(task.rows[0], arguments={
+        "reference": SharedArray(name, (1,), "u1", "a" * 32),
+    }),))
+    with pytest.raises(ValueError):
+        encode_processing_task(task)
+
+
+def test_scope_descriptors_roundtrip_without_allocating_or_binding(tmp_path, monkeypatch):
+    from bioimageflow_core import SharedMemoryContext
+    owner = SharedMemoryContext(tmp_path)
+    task = replace(_task(tmp_path), shared_memory_context={"output": owner.descriptor(), "inputs": []})
+    payload = encode_processing_task(task)
+    def no_io(*args, **kwargs):
+        raise AssertionError("Pure decoder consulted storage")
+    monkeypatch.setattr("bioimageflow_core._shared_storage.verify", no_io)
+    decoded = decode_processing_task(payload)
+    assert decoded.shared_memory_context == task.shared_memory_context
+    assert list(tmp_path.rglob("*.npy")) == []

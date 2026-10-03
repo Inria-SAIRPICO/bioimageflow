@@ -56,7 +56,28 @@ def _reject_reserved_source_indexes(
 
 
 class _NodeExecutionMixin:
-    def _execute_node(
+    def _execute_node(self, node: Node, results: dict[Node, pd.DataFrame], sig_hashes: dict[Node, str | None], workflow: Any) -> Any:
+        from bioimageflow.dataframe_tool import DataFrameTool
+        from .shared_arrays import references
+        import uuid
+
+        owner = workflow.shared_memory_context
+        if not isinstance(node.tool, DataFrameTool):
+            with owner.activate():
+                return self._execute_node_bound(node, results, sig_hashes, workflow)
+        scope = owner.task_scope("dataframe_" + uuid.uuid4().hex)
+        try:
+            with scope.activate():
+                dataframe, signature = self._execute_node_bound(node, results, sig_hashes, workflow)
+            scope.accept_result([ref for ref in references(dataframe.to_numpy(dtype=object).tolist())
+                                 if ref.scope_id == scope.scope_id])
+            scope.discard_unreturned()
+            return dataframe, signature
+        except BaseException:
+            scope.close()
+            raise
+
+    def _execute_node_bound(
         self,
         node: Node,
         results: dict[Node, pd.DataFrame],

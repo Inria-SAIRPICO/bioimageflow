@@ -205,3 +205,11 @@ Deeper Wetlands provisioning and process-health details remain implementation-le
 
 The local execution reference :doc:`execution/local` covers worker ownership and lifecycle.
 The how-to guide :doc:`/how-to/run_in_parallel` shows how environment settings affect row-level parallelism.
+
+Shared-array owners and worker retirement
+-----------------------------------------
+
+Returned shared arrays retain their controller owner independently of worker/engine lifetime.
+Successful public pool close releases captured worker grants; failed close retains the pool and grants for retry and keeps cleanup pending.
+Task terminal/result notification alone is not a physical release fence.
+Workflow execution/context exit never closes returned-array owners; explicit owner close/release waits for existing mapped views and admitted workers.

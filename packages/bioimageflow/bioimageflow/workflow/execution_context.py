@@ -46,6 +46,7 @@ class WorkflowExecutionContext:
         run_id: str | None = None,
         *,
         defer_success_finalization: bool = False,
+        shared_memory_context: object | None = None,
     ) -> None:
         if run_id is not None and _RUN_ID_RE.fullmatch(run_id) is None:
             raise ValueError(
@@ -54,6 +55,11 @@ class WorkflowExecutionContext:
             )
         if not isinstance(defer_success_finalization, bool):
             raise TypeError("defer_success_finalization must be a bool.")
+        if shared_memory_context is not None:
+            from bioimageflow_core import SharedMemoryContext
+            if not isinstance(shared_memory_context, SharedMemoryContext):
+                raise TypeError("shared_memory_context must be a SharedMemoryContext")
+        self.shared_memory_context = shared_memory_context
         self.run_id = run_id
         self.defer_success_finalization = defer_success_finalization
         self._cancel_event = threading.Event()

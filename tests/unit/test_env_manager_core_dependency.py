@@ -92,6 +92,7 @@ def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvMana
     manager._manager = _MutatingWetlandsManager()
     manager._environments = {}
     manager._pools = {}
+    manager._shared_memory_grants = {}
     manager._pool_configs = {}
     manager._specs = {}
     manager._lock = threading.RLock()
@@ -314,6 +315,7 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
     manager._manager = _ValidatingWetlandsManager()
     manager._environments = {}
     manager._pools = {}
+    manager._shared_memory_grants = {}
     manager._pool_configs = {}
     manager._specs = {}
     manager._lock = threading.RLock()

@@ -161,7 +161,11 @@ class _CacheRuntimeMixin:
 
     # ── Graph traversal ────────────────────────────────────────────────
 
-    def _check_node_cache(
+    def _check_node_cache(self, node: Node, results: dict[Node, pd.DataFrame], sig_hashes: dict[Node, str | None], workflow: Any, *, hydrate_assets: bool = True) -> Any:
+        with workflow.shared_memory_context.activate():
+            return self._check_node_cache_bound(node, results, sig_hashes, workflow, hydrate_assets=hydrate_assets)
+
+    def _check_node_cache_bound(
         self,
         node: Node,
         results: dict[Node, pd.DataFrame],

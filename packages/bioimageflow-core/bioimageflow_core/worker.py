@@ -6,6 +6,9 @@ import inspect
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
+from bioimageflow_core.shared_memory import SharedMemoryContext
+from contextlib import nullcontext
+from dataclasses import replace
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.worker_origins import load_worker_tool
 from bioimageflow_core.worker_protocol import (
@@ -130,6 +133,21 @@ def execute_processing_task(
 ) -> Dict[str, Any]:
     """Decode, execute, and encode one strict processing-task envelope."""
     invocation = decode_processing_task(payload)
+    scope = invocation.shared_memory_context
+    runtime = (
+        SharedMemoryContext.borrow(scope["output"], inputs=scope["inputs"])
+        if scope is not None else None
+    )
+    with runtime.activate() if runtime is not None else nullcontext():
+        if runtime is not None:
+            invocation = replace(invocation, rows=tuple(
+                replace(row, arguments=runtime.bind_value(row.arguments))
+                for row in invocation.rows
+            ))
+        return _execute_bound(invocation, task=task)
+
+
+def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
     tool = load_worker_tool(invocation.tool)
     output_type = tool.Outputs
     if output_type is None:

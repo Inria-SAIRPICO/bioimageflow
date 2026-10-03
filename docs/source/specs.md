@@ -178,12 +178,14 @@ class ImageSpec:
 @dataclass(frozen=True)
 class SharedArray:
     """
-    A reference to data in shared memory. Replaces Path when data is in RAM.
-    Picklable — can cross the serialization boundary.
+    A scoped numeric file-backed reference transported by the typed codec.
+    Local owner binding is excluded from wire, equality and hash identity.
     """
-    name: str                  # Key in shared memory (e.g., /dev/shm/bif_name)
+    name: str                  # Bounded allocation token inside the admitted scope
     shape: Tuple[int, ...]
     dtype: str
+    scope_id: str
+    _owner: Any = field(default=None, compare=False, hash=False, repr=False)
 ```
 
 ### 2.3 Image Annotations
@@ -1419,19 +1421,13 @@ def load_image(
 
     - Path or str: delegates to file_reader (provided by the tool) and yields
       the loaded object.
-    - SharedArray: attaches to the shared memory segment and yields a zero-copy
-      numpy view. The shared memory handle is closed automatically when the
-      context exits.
+    - SharedArray: maps an admitted numeric backing file and yields a zero-copy
+      NumPy view. Live arrays and derived views retain the mapping.
     """
     if isinstance(source, SharedArray):
-        import numpy as np
-        from multiprocessing.shared_memory import SharedMemory
-        shm = SharedMemory(name=source.name)
-        try:
-            arr = np.ndarray(source.shape, dtype=source.dtype, buffer=shm.buf)
-            yield arr
-        finally:
-            shm.close()
+        from bioimageflow_core.shm import open_shared_array
+        with open_shared_array(source) as array:
+            yield array
     else:
         yield file_reader(Path(source))
 
@@ -2448,7 +2444,12 @@ Task arguments and result outputs use one recursive typed-value grammar.
 Plain dictionaries encode as `{kind: "dict", items: [[key, encoded_value], ...]}` with primitive keys; lists and tuples encode as `{kind: "list" | "tuple", items: [...]}` and preserve their container type and order.
 Every dictionary is encoded as a dictionary node, so a user dictionary resembling a typed descriptor remains a dictionary.
 Paths encode as `{kind: "path", value: string}`.
-A `SharedArray` encodes as `{kind: "shared_array", name: string, shape: [nonnegative_integer, ...], dtype: string}`; decoding validates the reference and constructs a `SharedArray` without allocating, attaching, reading, or unlinking shared memory.
+A `SharedArray` encodes as `{kind: "shared_array", name: token, shape: [nonnegative_integer, ...], dtype: string, scope_id: token}`; decoding validates the reference and constructs an unbound `SharedArray` without allocating, attaching, reading, registering an owner or deleting storage.
+Allocation names use `[a-zA-Z0-9_-]{1,96}`; actual scope identities are controller-generated UUID tokens.
+Each task has `shared_memory_context`, either null for tasks without shared references or exactly `{output: descriptor, inputs: [descriptor, ...]}`.
+Each descriptor contains exactly `scope_id`, `root`, `root_identity`, `owner_id`, `owner_root`, `owner_root_identity`, `max_bytes`, and `max_header_bytes`; identities are captured `[st_dev, st_ino]` pairs and budgets are finite positive integers.
+Descriptor validation and typed decoding are pure; the canonical worker explicitly borrows these admitted scopes and binds input references before invoking trusted tool code.
+The controller checks task/result correlation and declared output fields before binding outputs; only the task output scope or the exact admitted input references may return.
 NumPy arrays encode as `{kind: "ndarray", value: ndarray}` through Wetlands' public numeric-array transport.
 NumPy boolean, signed/unsigned integer, floating, and complex scalars encode as `{kind: "numpy_scalar", value: zero_dimensional_ndarray}` and retain dtype, precision, and nonfinite values; NumPy string/bytes scalars normalize to the corresponding bare leaves.
 Object-containing dtypes and dtype metadata are refused; cyclic containers, arbitrary dataclasses, unsupported objects, malformed descriptors, and extra descriptor fields are refused.
@@ -2861,74 +2862,61 @@ The exhaustive storage contract is specified in [Output and Cache Storage Specif
 
 ## 8. Shared Memory Management
 
-*Module: `bioimageflow_core.shm`*
+*Modules: `bioimageflow_core.shared_memory`, `bioimageflow_core.shm`, `bioimageflow_core.io`*
 
-BioImageFlow supports shared memory for high-throughput pipelines where disk I/O is a bottleneck. Shared memory is used exclusively by `ProcessingTool`.
+Shared arrays use one uniform numeric file-backed mmap design on supported Python versions and operating systems.
+Allocation copies numeric data once into an owned NPY version-2 file; subsequent mapped reads expose zero-copy NumPy views.
+No multiprocessing shared-memory segment, resource tracker, private unregister, Python-version fallback or automatic unlink policy participates in this contract.
+This storage choice does not establish a latency improvement over ordinary files or certify every scientific tool.
 
 ### 8.1 Shared Memory Helpers
 
+`SharedMemoryContext(root, max_bytes=None, max_header_bytes=10000)` creates the explicit controller owner.
+A default byte budget captures available free space once; allocations across its child namespaces share this finite budget under public OS file locks.
+`create_shared_output(data, name=None)` requires an active context, creates an allocation and yields its bound `SharedArray`; exiting the helper only unbinds lexical work and leaves backing intact.
+`open_shared_array(ref)` and the SharedArray branch of `load_image()` use the reference's bound owner or an explicitly active borrowed context.
+They validate the admitted directory identities, owner marker, bounded NPY header, dtype, exact shape and data size before mapping the same admitted file descriptor.
+Object-containing dtypes are rejected before allocation or mapping; Path/str image reader dispatch and numeric dtype/shape are preserved.
+Live arrays, sliced views and `numpy.asarray` views retain their mappings beyond context-manager exit.
+
 ```python
-@contextmanager
-def create_shared_output(
-    data: "np.ndarray",
-    name: str | None = None
-) -> "Iterator[SharedArray]":
-    """
-    Create a shared memory segment, copy data into it, and yield a SharedArray
-    descriptor. The local handle is closed on exit — the tool cannot write to
-    the segment after the with block. The data persists in shared memory until
-    the engine unlinks it.
+from bioimageflow_core import SharedMemoryContext
+from bioimageflow_core.shm import create_shared_output, open_shared_array
 
-    If name is None, generates a unique name with the 'bif_' prefix.
-    """
-    ...
-
-@contextmanager
-def open_shared_array(ref: SharedArray) -> "Iterator[np.ndarray]":
-    """
-    Attach to an existing shared memory segment.
-    Yields a zero-copy numpy array backed by shared memory.
-    The local handle is closed on exit.
-    """
-    ...
-```
-
-`create_shared_output()`, `open_shared_array()` and the SharedArray branch of `load_image()` reject any dtype with `numpy.dtype.hasobject`, including nested object-containing structured dtypes, before creating or attaching a shared-memory segment.
-Python object references are process-local and cannot be safely stored as raw shared-memory bytes.
-Numeric/non-object storage keeps its existing dtype/shape representation and handle ownership; Path/str image-reader dispatch is unchanged.
-This safety refusal does not add scalar/empty-array formats or certify typed worker transport merely because a descriptor is picklable.
-
-Both helpers use `numpy` and `multiprocessing.shared_memory` at runtime. NumPy is declared by `bioimageflow-core`, so shared-memory APIs work in worker environments even when an individual tool did not list NumPy explicitly.
-
-**Important: `close()` vs `unlink()`** — Both context managers **close** the local shared memory handle on exit but do **not unlink** (delete) the segment. The data persists after the `with` block ends so that downstream consumers and the engine can access it. This means `return` inside a `with create_shared_output(...)` block is correct and expected. Tool authors should never unlink shared memory themselves — only the engine does that.
-
-**Usage in a ProcessingTool:**
-```python
-def process_row(self, arguments: Arguments) -> Outputs | list[Outputs]:
-    from bioimageflow_core.io import load_image
-    from bioimageflow_core.shm import create_shared_output
-    import imageio.v3 as iio
-
-    with load_image(arguments.input_image, file_reader=iio.imread) as image:
-        result = some_processing(image)
-
-    with create_shared_output(result) as shm_ref:
-        return self.Outputs(output_data=shm_ref)  # Safe: data outlives the handle
+owner = SharedMemoryContext("./shared-arrays", max_bytes=512 * 1024 * 1024)
+with owner.activate(), create_shared_output(data) as reference:
+    pass
+with open_shared_array(reference) as array:
+    view = array[1:]
+status = owner.close()  # pending while array/view readers remain
 ```
 
 ### 8.2 Lifecycle
 
-- **Allocation:** Tools create shared memory segments using `create_shared_output()`, which uses the `bif_` namespace prefix.
-- **Ownership:** When a tool returns a `SharedArray` in its outputs, the engine assumes full ownership. Since `create_shared_output` closes the tool's handle automatically, ownership transfer is enforced by the API.
-- **Consumption:** Downstream tools read shared memory via `load_image()` (Path/SharedArray dispatch) or `open_shared_array()` directly.
-- **Garbage Collection:** The helper closes local shared-memory handles but does not unlink segments automatically.
-- **Crash Safety:** Shared-memory recovery is an application responsibility; no cleanup CLI is part of the public library contract.
-- **Persistence:** Shared memory is volatile. If caching is requested for a source or column-bound `ProcessingTool` node that produced shared memory outputs, the engine publishes each non-null `SharedArray` output cell as a durable record-owned `.npy` asset under the reserved `assets/shm/` namespace. When the node is subsequently loaded from cache, the engine reads each durable asset back into a fresh `SharedArray` before dispatching to downstream tools, thereby strictly respecting the `ImageShared` interface contract.
+The controller precreates one task output namespace and grants access to explicitly bound inputs before dispatch.
+The worker borrows those descriptors and has allocation/read access but no deletion ownership.
+Direct processing uses the same admitted borrowed-context semantics; DataFrame execution and cache/return hydration allocate in separately owned groups.
+The pure typed decoder never attaches or transfers ownership.
+Accepted results regain a strong local owner binding that is excluded from reference equality, cache identity and wire data; input pass-through preserves its original exact owner.
+A Workflow lazily retains its owner and may receive `shared_memory_context=` explicitly; a `WorkflowExecutionContext` can provide the same captured owner but cannot retarget an existing Workflow owner.
+Temporary parent Workflows inherit that owner, and returned DataFrames keep it reachable through their references after Workflow collection.
+Workflow execution, context-manager exit, result finalization, cache completion and engine cleanup never automatically close returned-array owners.
 
-When a tool stores a `SharedArray` in an output DataFrame column, it carries the shared memory name, array shape, and dtype — sufficient for downstream tools to attach and read the data.
-The Core typed-value codec transports this explicit reference and reconstructs it without attachment or ownership transfer by the decoder.
-Actual consumers attach through the shared-memory helpers; engine/tool lifecycle rules above determine closing and unlinking.
-These host-local references are supported by local Wetlands processing but are refused recursively across a Parsl task boundary.
+`owner.close()`, `owner.release(ref)` and `owner.status()` expose immutable `CleanupStatus(state, pending_readers, pending_grants, pending_files, errors)`.
+Explicit close/release refuses new controller allocation/open; existing views and already admitted worker grants remain usable until they physically drain.
+`WorkerGrant.drained()` is idempotent and is called only after local execution physically returns or the owning public worker pool successfully closes, never merely on a task's result/terminal status.
+A failed/uncertain pool close retains the pool and grants for retry; cleanup remains pending and does not advertise reclaimed storage.
+Windows deletion restrictions and mapped-handle/namespace errors remain pending with explicit errors until a later status/close retry succeeds.
+No automatic garbage-collection deletion or private tracker manipulation is used.
+
+Physical worker drain releases its grant independently of controller result disposition.
+Pending outputs remain until the controller accepts or rejects them, even if the pool has already closed.
+After physical drain and controller disposition, unreturned or rejected task allocations are retired while accepted outputs remain.
+Failed tasks and failed cache/return hydration request cleanup only for their new groups; bound inputs, unrelated allocations and durable assets remain untouched.
+Cache records still persist numeric values as immutable `.npy` assets under `assets/shm/`; cache hydration creates a fresh owned group and retains references after Workflow exit.
+Public return loaders accept `shared_memory_context=` or create an SDK owner retained by the returned references; whole-group hydration failure retires only newly created backing.
+References are host-local and supported by local Wetlands processing; Parsl refuses them recursively in task arguments and result containers.
+Physical resource release still requires the owning pool/controller fences; this contract is not a blanket fix for active-engine shutdown races or arbitrary process death.
 
 ---
 

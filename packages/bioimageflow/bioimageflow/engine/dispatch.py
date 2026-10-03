@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 import threading
+import uuid
+from dataclasses import replace
+
+from .shared_arrays import SharedTaskScope
 
 from bioimageflow_core import (
     ProcessingTask,
@@ -137,6 +141,26 @@ class _DispatchMixin:
         return self._backend.dispatch(self, request)
 
     def _dispatch_direct(
+        self, tool: ProcessingTool, arguments_dicts: list[dict[str, Any]],
+        workflow: Any, node_name: str, has_batch: bool,
+        row_contexts: list[ExecutionContext], batch_context: ExecutionContext,
+    ) -> list[list[Any]]:
+        scope = SharedTaskScope(workflow.shared_memory_context, uuid.uuid4().hex, arguments_dicts)
+        borrowed = scope.borrowed()
+        try:
+            with borrowed.activate():
+                arguments = borrowed.bind_value(arguments_dicts)
+                outputs = self._dispatch_direct_bound(
+                    tool, arguments, workflow, node_name, has_batch, row_contexts, batch_context,
+                )
+            return scope.accept_outputs(outputs)
+        except BaseException:
+            scope.fail()
+            raise
+        finally:
+            scope.drained()
+
+    def _dispatch_direct_bound(
         self,
         tool: ProcessingTool,
         arguments_dicts: list[dict[str, Any]],
@@ -226,6 +250,8 @@ class _DispatchMixin:
         max_workers, worker_timeout = self._resolve_worker_config(tool, workflow)
         engine_timeout = _compute_engine_timeout(worker_timeout)
         tracker = _WetlandsTaskTracker(workflow)
+        scopes: list[SharedTaskScope] = []
+        handed_off: set[int] = set()
 
         try:
             if has_batch:
@@ -256,11 +282,17 @@ class _DispatchMixin:
                     ),
                     batch_context=batch_context.to_dict(),
                 )
+                scope = SharedTaskScope(workflow.shared_memory_context, invocation_id, arguments_dicts)
+                scopes.append(scope)
+                invocation = replace(invocation, shared_memory_context=scope.wire)
+                payload = encode_processing_task(invocation)
+                handed_off.add(id(scope))
                 task = self._env_manager.submit_processing_task(
                     env_spec,
-                    encode_processing_task(invocation),
+                    payload,
                     max_workers=max_workers,
                     worker_timeout=worker_timeout,
+                    shared_memory_grant=scope,
                 )
                 tracker.register([task])
                 if workflow.cancel_requested:
@@ -299,7 +331,7 @@ class _DispatchMixin:
                 result = decode_processing_result(task.result)
                 validate_processing_result(invocation, result)
                 assert tool.Outputs is not None
-                return validate_processing_result_rows(result.rows, tool.Outputs)
+                return scope.accept_outputs(validate_processing_result_rows(result.rows, tool.Outputs))
 
             invocations = [
                 ProcessingTask(
@@ -327,9 +359,15 @@ class _DispatchMixin:
                     zip(arguments_dicts, row_contexts)
                 )
             ]
-            payloads = [
-                encode_processing_task(invocation) for invocation in invocations
-            ]
+            for index, invocation in enumerate(invocations):
+                scope = SharedTaskScope(
+                    workflow.shared_memory_context,
+                    invocation_id + invocation.task_id,
+                    [row.arguments for row in invocation.rows],
+                )
+                scopes.append(scope)
+                invocations[index] = replace(invocation, shared_memory_context=scope.wire)
+            payloads = [encode_processing_task(invocation) for invocation in invocations]
             selected_resources = (
                 resources or getattr(tool, "resources", None) or ResourceSpec()
             )
@@ -342,11 +380,13 @@ class _DispatchMixin:
                 for payload in payloads[start : start + window]:
                     if workflow.cancel_requested:
                         raise WorkflowCancelledError("Workflow cancelled by user")
+                    handed_off.add(id(scopes[len(tasks)]))
                     task = self._env_manager.submit_processing_task(
                         env_spec,
                         payload,
                         max_workers=max_workers,
                         worker_timeout=worker_timeout,
+                        shared_memory_grant=scopes[len(tasks)],
                     )
                     active.append(task)
                     tasks.append(task)
@@ -421,17 +461,22 @@ class _DispatchMixin:
                 validate_processing_result(invocations[i], result)
                 row_result = result.rows[0]
                 raw_results.extend(
-                    validate_processing_result_rows((row_result,), tool.Outputs)
+                    scopes[i].accept_outputs(validate_processing_result_rows((row_result,), tool.Outputs))
                 )
                 self._emit_progress(
                     workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
                 )
             return raw_results
         except BaseException:
+            for scope in scopes:
+                scope.fail()
             cancelled = workflow.cancel_requested
             tracker.cancel_and_drain()
             if cancelled:
                 raise WorkflowCancelledError("Workflow cancelled by user") from None
             raise
         finally:
+            for scope in scopes:
+                if id(scope) not in handed_off:
+                    scope.drained()
             tracker.close()

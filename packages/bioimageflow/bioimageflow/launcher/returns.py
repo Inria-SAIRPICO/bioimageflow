@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
+
+from bioimageflow_core import SharedMemoryContext
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -518,18 +521,54 @@ def load_public_return_from_bundle(
     bundle_root: Path,
     manifest: Mapping[str, Any],
     record_assets: Mapping[int, Path],
+    *,
+    shared_memory_context: SharedMemoryContext | None = None,
 ) -> Any:
-    """Rehydrate a verified downloaded return using explicit owned asset roots."""
+    """Rehydrate a verified return; shared references retain their explicit owner."""
     validated = validate_return_manifest_structure(manifest)
     return _rehydrate_public_return(
         Path(bundle_root),
         validated,
         storage=None,
         record_assets=record_assets,
+        shared_memory_context=shared_memory_context,
     )
 
 
 def _rehydrate_public_return(
+    asset_root: Path, manifest: Mapping[str, Any], *, storage: Storage | None,
+    record_assets: Mapping[int, Path],
+    shared_memory_context: SharedMemoryContext | None = None,
+) -> Any:
+    if not any(locator.get("shared_array") is not None for locator in manifest["locators"]):
+        return _rehydrate_public_return_bound(
+            asset_root, manifest, storage=storage, record_assets=record_assets,
+        )
+
+    owned = shared_memory_context is None
+    owner = shared_memory_context
+    if owner is None:
+        root = (storage.storage_path / ".bioimageflow" / "shared_arrays" if storage is not None
+                else Path(tempfile.gettempdir()) / "bioimageflow-return-shared")
+        owner = SharedMemoryContext(root)
+    scope = owner.task_scope("return_" + uuid.uuid4().hex)
+    try:
+        with scope.activate():
+            result = _rehydrate_public_return_bound(
+                asset_root, manifest, storage=storage, record_assets=record_assets,
+            )
+        frames = [result] if isinstance(result, pd.DataFrame) else list(result.values())
+        scope.accept_result([frame.to_numpy(dtype=object).tolist() for frame in frames])
+        scope.discard_unreturned()
+        return result
+    except BaseException:
+        scope.close()
+        if owned:
+            owner.close()
+        raise
+
+
+def _rehydrate_public_return_bound(
     asset_root: Path,
     manifest: Mapping[str, Any],
     *,
@@ -658,8 +697,10 @@ def load_public_return(
     control_dir: Path,
     storage_path: str | Path,
     run_id: str,
+    *,
+    shared_memory_context: SharedMemoryContext | None = None,
 ) -> Any:
-    """Rehydrate a successful public return without consulting current pointers."""
+    """Rehydrate immutable results; returned references keep their owner reachable."""
     storage = Storage(storage_path)
     manifest = load_return_manifest(
         control_dir,
@@ -671,4 +712,5 @@ def load_public_return(
         manifest,
         storage=storage,
         record_assets={},
+        shared_memory_context=shared_memory_context,
     )

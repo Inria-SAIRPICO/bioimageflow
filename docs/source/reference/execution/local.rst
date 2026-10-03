@@ -136,3 +136,11 @@ It is not the normal way to execute workflows whose tools declare isolated depen
 
 Direct execution is sequential within a node.
 Portable resource declarations are exposed to planning but do not allocate or constrain orchestrator resources.
+
+Shared-array owners and worker retirement
+-----------------------------------------
+
+Returned shared arrays retain their controller owner independently of worker/engine lifetime.
+Successful public pool close releases captured worker grants; failed close retains the pool and grants for retry and keeps cleanup pending.
+Task terminal/result notification alone is not a physical release fence.
+Workflow execution/context exit never closes returned-array owners; explicit owner close/release waits for existing mapped views and admitted workers.
