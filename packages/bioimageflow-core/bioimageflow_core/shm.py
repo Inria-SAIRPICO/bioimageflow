@@ -8,6 +8,16 @@ from typing import Any, Optional
 from bioimageflow_core.types import SharedArray
 
 
+def _shared_memory_dtype(value: Any) -> Any:
+    """Reject Python-object storage before creating or attaching a segment."""
+    import numpy as np
+
+    dtype = np.dtype(value)
+    if dtype.hasobject:
+        raise ValueError("Shared memory arrays cannot contain Python objects.")
+    return dtype
+
+
 @contextmanager
 def create_shared_output(data: Any, name: Optional[str] = None) -> Generator[SharedArray, None, None]:
     """
@@ -18,6 +28,7 @@ def create_shared_output(data: Any, name: Optional[str] = None) -> Generator[Sha
     from multiprocessing.shared_memory import SharedMemory
 
     arr = np.asarray(data)
+    _shared_memory_dtype(arr.dtype)
     if name is None:
         name = f"bif_{uuid.uuid4().hex[:16]}"
 
@@ -40,9 +51,10 @@ def open_shared_array(ref: SharedArray) -> Generator[Any, None, None]:
     import numpy as np
     from multiprocessing.shared_memory import SharedMemory
 
+    dtype = _shared_memory_dtype(ref.dtype)
     shm = SharedMemory(name=ref.name)
     try:
-        arr = np.ndarray(ref.shape, dtype=ref.dtype, buffer=shm.buf)
+        arr = np.ndarray(ref.shape, dtype=dtype, buffer=shm.buf)
         yield arr
     finally:
         shm.close()

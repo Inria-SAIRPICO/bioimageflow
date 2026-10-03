@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Union
 
 from bioimageflow_core.types import SharedArray
+from bioimageflow_core.shm import _shared_memory_dtype
 
 
 @contextmanager
@@ -18,9 +19,10 @@ def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[
     """
     if isinstance(source, SharedArray):
         import numpy as np
+        dtype = _shared_memory_dtype(source.dtype)
         shm = SharedMemory(name=source.name)
         try:
-            arr = np.ndarray(source.shape, dtype=source.dtype, buffer=shm.buf)
+            arr = np.ndarray(source.shape, dtype=dtype, buffer=shm.buf)
             yield arr
         finally:
             shm.close()

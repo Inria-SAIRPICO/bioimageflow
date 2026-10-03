@@ -2877,6 +2877,11 @@ def open_shared_array(ref: SharedArray) -> "Iterator[np.ndarray]":
     ...
 ```
 
+`create_shared_output()`, `open_shared_array()` and the SharedArray branch of `load_image()` reject any dtype with `numpy.dtype.hasobject`, including nested object-containing structured dtypes, before creating or attaching a shared-memory segment.
+Python object references are process-local and cannot be safely stored as raw shared-memory bytes.
+Numeric/non-object storage keeps its existing dtype/shape representation and handle ownership; Path/str image-reader dispatch is unchanged.
+This safety refusal does not add scalar/empty-array formats or certify typed worker transport merely because a descriptor is picklable.
+
 Both helpers use `numpy` and `multiprocessing.shared_memory` at runtime. NumPy is declared by `bioimageflow-core`, so shared-memory APIs work in worker environments even when an individual tool did not list NumPy explicitly.
 
 **Important: `close()` vs `unlink()`** — Both context managers **close** the local shared memory handle on exit but do **not unlink** (delete) the segment. The data persists after the `with` block ends so that downstream consumers and the engine can access it. This means `return` inside a `with create_shared_output(...)` block is correct and expected. Tool authors should never unlink shared memory themselves — only the engine does that.

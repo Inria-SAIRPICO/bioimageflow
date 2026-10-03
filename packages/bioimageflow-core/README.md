@@ -22,3 +22,6 @@ For workspace development, use the repository root:
 uv sync
 uv run pytest packages/bioimageflow-core tests/unit/test_core_package_metadata.py
 ```
+
+Shared-memory creation and attachment helpers reject object-containing NumPy dtypes before allocation or attachment.
+Numeric data and Path/str image dispatch keep their existing behavior; local handles close on context exit while segment unlinking remains with the caller/engine owner.

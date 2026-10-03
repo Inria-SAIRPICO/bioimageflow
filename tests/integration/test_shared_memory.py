@@ -170,3 +170,47 @@ class TestSharedMemoryCachePersistence:
 
         import pandas as pd
         pd.testing.assert_frame_equal(results[0], results[1])
+
+
+@pytest.mark.parametrize("entrypoint", ["create", "open", "load_image"])
+def test_object_dtype_refused_before_shared_memory(entrypoint, monkeypatch):
+    """Public helpers must refuse process-local references before any effect."""
+    import numpy as np
+    import multiprocessing.shared_memory as shared_memory
+    import bioimageflow_core.io as image_io
+    from bioimageflow_core import SharedArray
+    from bioimageflow_core.shm import create_shared_output, open_shared_array
+
+    def no_segment(*args, **kwargs):
+        raise AssertionError("SharedMemory must not create or attach object storage")
+
+    monkeypatch.setattr(shared_memory, "SharedMemory", no_segment)
+    monkeypatch.setattr(image_io, "SharedMemory", no_segment)
+    ref = SharedArray("unused_object_segment", (1,), "object")
+    if entrypoint == "create":
+        operation = create_shared_output(np.array([object()], dtype=object))
+    elif entrypoint == "open":
+        operation = open_shared_array(ref)
+    else:
+        operation = image_io.load_image(
+            ref, file_reader=lambda path: pytest.fail("SharedArray is not a Path")
+        )
+    with pytest.raises(ValueError, match="Python objects"):
+        with operation:
+            pytest.fail("Object-containing shared memory must not be yielded")
+
+
+def test_structured_object_dtype_refused_before_creation(monkeypatch):
+    """A nested object field is unsafe even when dtype.kind is not object."""
+    import numpy as np
+    import multiprocessing.shared_memory as shared_memory
+    from bioimageflow_core.shm import create_shared_output
+
+    def no_segment(*args, **kwargs):
+        raise AssertionError("SharedMemory must not create object storage")
+
+    monkeypatch.setattr(shared_memory, "SharedMemory", no_segment)
+    data = np.zeros(1, dtype=[("value", [("payload", object)])])
+    with pytest.raises(ValueError, match="Python objects"):
+        with create_shared_output(data):
+            pytest.fail("Nested object storage must not be yielded")
