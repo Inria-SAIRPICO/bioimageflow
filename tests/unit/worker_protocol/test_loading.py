@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+from pathlib import Path
+from types import ModuleType
 import sys
 
 import pytest
@@ -17,6 +19,7 @@ from bioimageflow_core import (
 from bioimageflow_core.worker_origins import (
     clear_worker_tool_instances,
     load_worker_tool,
+    worker_tool_origin_identity,
 )
 
 
@@ -213,3 +216,182 @@ def test_two_archive_origins_load_separate_instances(tmp_path) -> None:
             )
         )
     assert load_worker_tool(origins[0]) is not load_worker_tool(origins[1])
+
+
+def test_source_file_executes_the_bytes_that_were_hashed(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "admitted.py"
+    admitted = TOOL_SOURCE + "\nSameNameTool.admitted_value = 1\n"
+    source.write_text(admitted)
+    source_hash = hashlib.sha256(admitted.encode()).hexdigest()
+    original_read = Path.read_bytes
+
+    def mutate_after_read(path):
+        contents = original_read(path)
+        if path == source:
+            source.write_text(
+                admitted.replace("admitted_value = 1", "admitted_value = 9")
+            )
+        return contents
+
+    monkeypatch.setattr(Path, "read_bytes", mutate_after_read)
+    tool = load_worker_tool(
+        SourceFileOriginV1(str(source), source_hash, "SameNameTool")
+    )
+    assert tool.admitted_value == 1
+
+
+def test_source_file_refuses_foreign_reexport_before_construction(
+    tmp_path, monkeypatch
+) -> None:
+    foreign = tmp_path / "foreign.py"
+    marker = tmp_path / "constructed"
+    foreign.write_text(
+        TOOL_SOURCE.replace(
+            "self.calls = 0",
+            f"self.calls = 0; __import__('pathlib').Path({str(marker)!r}).touch()",
+        )
+    )
+    spec = importlib.util.spec_from_file_location("origin_foreign_tool", foreign)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    source = tmp_path / "selected.py"
+    source.write_text("from origin_foreign_tool import SameNameTool\n")
+    origin = SourceFileOriginV1(
+        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool"
+    )
+    with pytest.raises(ImportError, match="defining module"):
+        load_worker_tool(origin)
+    assert not marker.exists()
+    assert sys.modules[spec.name] is module
+
+
+def test_versioned_cached_root_must_match_selected_store(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "selected"
+    package = root / "checked_tools"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(TOOL_SOURCE)
+    _write_distribution_metadata(root, "checked-tools", "1.0", "checked_tools")
+    foreign = tmp_path / "foreign.py"
+    foreign.write_text(TOOL_SOURCE)
+    module = ModuleType("checked_tools__1_0")
+    module.__file__ = str(foreign)
+    exec(compile(TOOL_SOURCE, str(foreign), "exec"), module.__dict__)
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    child = ModuleType(module.__name__ + ".worker")
+    child.__file__ = str(package / "worker.py")
+    (package / "worker.py").write_text(TOOL_SOURCE)
+    exec(compile(TOOL_SOURCE, child.__file__, "exec"), child.__dict__)
+    monkeypatch.setitem(sys.modules, child.__name__, child)
+    origin = VersionedModuleOriginV1(
+        "checked-tools",
+        "checked_tools",
+        "1.0",
+        "checked_tools.worker",
+        child.__name__,
+        str(root),
+        "SameNameTool",
+    )
+    with pytest.raises(ImportError, match="root|store"):
+        load_worker_tool(origin)
+    assert sys.modules[module.__name__] is module
+
+
+def test_versioned_failed_initialization_can_retry(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "selected"
+    package = root / "retry_tools"
+    package.mkdir(parents=True)
+    marker = tmp_path / "attempted"
+    (package / "__init__.py").write_text(
+        f"from pathlib import Path\nmarker = Path({str(marker)!r})\n"
+        "if not marker.exists():\n    marker.touch()\n    raise RuntimeError('first attempt')\n"
+        + TOOL_SOURCE
+    )
+    _write_distribution_metadata(root, "retry-tools", "1.0", "retry_tools")
+    name = "retry_tools__1_0"
+    origin = VersionedModuleOriginV1(
+        "retry-tools",
+        "retry_tools",
+        "1.0",
+        "retry_tools",
+        name,
+        str(root),
+        "SameNameTool",
+    )
+    try:
+        with pytest.raises(RuntimeError, match="first attempt"):
+            load_worker_tool(origin)
+        tool = load_worker_tool(origin)
+        assert (
+            tool.process_row(
+                __import__("bioimageflow_core").Arguments(value="retained")
+            ).value
+            == "retained"
+        )
+        assert load_worker_tool(origin) is tool
+    finally:
+        sys.modules.pop(name, None)
+
+
+@pytest.mark.parametrize("kind", ["shared", "archive"])
+def test_standalone_module_origin_preserves_valid_tool(tmp_path, kind):
+    source = tmp_path / "standalone.py"
+    digest = _write_source(source)
+    origin = (
+        SharedModuleOriginV1("standalone", str(tmp_path), digest, "SameNameTool")
+        if kind == "shared"
+        else ArchiveModuleOriginV1(
+            "standalone",
+            digest,
+            "standalone",
+            "standalone",
+            str(tmp_path),
+            "SameNameTool",
+        )
+    )
+    tool = load_worker_tool(origin)
+    from bioimageflow_core import Arguments
+
+    assert tool.process_row(Arguments(value="standalone")).value == "standalone"
+
+
+def test_source_namespace_preserves_preexisting_module_and_allows_clean_retry(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "selected.py"
+    marker = tmp_path / "executed"
+    source.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n" + TOOL_SOURCE
+    )
+    origin = SourceFileOriginV1(
+        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool"
+    )
+    name = "_bioimageflow_worker_" + worker_tool_origin_identity(origin)
+    sentinel = ModuleType(name)
+    sentinel.__file__ = str(source)
+    exec(
+        compile(
+            TOOL_SOURCE + "\nSameNameTool.admitted_value = 99\n", str(source), "exec"
+        ),
+        sentinel.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, name, sentinel)
+    with pytest.raises(ImportError, match="not admitted"):
+        load_worker_tool(origin)
+    assert sys.modules[name] is sentinel
+    assert not marker.exists()
+    monkeypatch.delitem(sys.modules, name)
+    tool = load_worker_tool(origin)
+    assert marker.exists()
+    assert load_worker_tool(origin) is tool
+
+
+def test_loader_owned_source_module_supports_instance_cache_reset(tmp_path):
+    source = tmp_path / "owned.py"
+    origin = SourceFileOriginV1(str(source), _write_source(source), "SameNameTool")
+    first = load_worker_tool(origin)
+    clear_worker_tool_instances()
+    second = load_worker_tool(origin)
+    assert second is not first
+    assert type(second) is type(first)
+    assert load_worker_tool(origin) is second

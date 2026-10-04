@@ -24,7 +24,6 @@ from .metadata import (
     iter_processing_result_metadata,
 )
 from .dataframe import (
-    _dataframe_record_path,
     dataframe_lookup,
     dataframe_publish,
 )

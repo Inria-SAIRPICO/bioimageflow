@@ -233,3 +233,48 @@ class TestResolveToolClass:
             "dummy_tools", "1.0.0", "dummy_tools.loader", "LoaderTool"
         )
         assert cls.__name__ == "LoaderTool"
+
+
+def test_same_version_from_different_store_refuses_cached_root(tool_store, tmp_path):
+    import shutil
+    from bioimageflow.tool_loader import load_versioned_package
+
+    selected = load_versioned_package("dummy_tools", "1.0.0", tool_store)
+    second = tmp_path / "other_store"
+    shutil.copytree(tool_store, second)
+    with pytest.raises(ImportError, match="root|store"):
+        load_versioned_package("dummy_tools", "1.0.0", second)
+    assert load_versioned_package("dummy_tools", "1.0.0", tool_store) is selected
+
+
+def test_failed_package_preserves_preexisting_path_and_allows_retry(
+    broken_lazy_tool_store, monkeypatch
+):
+    from bioimageflow.tool_loader import load_versioned_package
+
+    version_dir = broken_lazy_tool_store / "broken_lazy_tools" / "1.0.0"
+    monkeypatch.syspath_prepend(str(version_dir))
+    with pytest.raises(RuntimeError, match="cannot load BrokenTool"):
+        load_versioned_package("broken_lazy_tools", "1.0.0", broken_lazy_tool_store)
+    assert str(version_dir) in sys.path
+    (version_dir / "broken_lazy_tools" / "__init__.py").write_text("READY = 7\n")
+    assert (
+        load_versioned_package(
+            "broken_lazy_tools", "1.0.0", broken_lazy_tool_store
+        ).READY
+        == 7
+    )
+
+
+def test_cached_namespace_subpackage_keeps_selected_root(tool_store):
+    from bioimageflow.tool_loader import load_versioned_package
+
+    package = tool_store / "dummy_tools" / "1.0.0" / "dummy_tools"
+    namespace = package / "namespace"
+    namespace.mkdir()
+    (namespace / "child.py").write_text("VALUE = 7\n")
+    init = package / "__init__.py"
+    init.write_text(init.read_text() + "\nfrom .namespace.child import VALUE\n")
+    first = load_versioned_package("dummy_tools", "1.0.0", tool_store)
+    assert first.VALUE == 7
+    assert load_versioned_package("dummy_tools", "1.0.0", tool_store) is first

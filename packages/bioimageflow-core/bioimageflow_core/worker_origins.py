@@ -140,6 +140,7 @@ _ORIGIN_TYPES: Dict[str, Tuple[Type[Any], Tuple[str, ...]]] = {
 
 _instance_lock = threading.RLock()
 _instances: Dict[str, ProcessingTool] = {}
+_source_modules: Dict[str, Any] = {}
 
 
 def _require_exact_keys(
@@ -390,6 +391,53 @@ def _require_processing_tool(module: Any, class_name: str) -> Type[ProcessingToo
     return candidate
 
 
+def _module_source(module: Any) -> Path:
+    source = getattr(module, "__file__", None)
+    if not isinstance(source, str):
+        raise ImportError(
+            f"Module {getattr(module, '__name__', None)!r} has no source file."
+        )
+    return Path(source).resolve(strict=True)
+
+
+def _require_class_root(candidate: Type[ProcessingTool], root: Path) -> None:
+    defining = sys.modules.get(candidate.__module__)
+    if defining is None or not _path_within(_module_source(defining), root):
+        raise ImportError(
+            f"Tool defining module {candidate.__module__!r} is outside selected root {root}."
+        )
+
+
+def _distribution_owns_module(
+    distribution: importlib.metadata.Distribution, module: Any
+) -> bool:
+    source = _module_source(module)
+    if any(
+        Path(str(distribution.locate_file(member))).resolve() == source
+        for member in distribution.files or ()
+    ):
+        return True
+    direct_url = distribution.read_text("direct_url.json")
+    if not direct_url:
+        return False
+    parsed = json.loads(direct_url)
+    if not parsed.get("dir_info", {}).get("editable", False):
+        return False
+    location = urlparse(parsed.get("url", ""))
+    if location.scheme != "file":
+        return False
+    root = Path(unquote(location.path))
+    parts = module.__name__.split(".")
+    return any(
+        source == candidate.resolve()
+        for source_root in (root, root / "src")
+        for candidate in (
+            source_root.joinpath(*parts).with_suffix(".py"),
+            source_root.joinpath(*parts) / "__init__.py",
+        )
+    )
+
+
 @contextmanager
 def _temporary_import_root(root: str) -> Iterator[None]:
     sys.path.insert(0, root)
@@ -406,19 +454,34 @@ def _load_source_file(origin: SourceFileOriginV1, identity: str) -> Any:
     path = Path(origin.path)
     if not path.is_file():
         raise ImportError(f"Worker source file does not exist: {path}.")
-    if _file_hash(path) != origin.source_hash:
+    contents = path.read_bytes()
+    if hashlib.sha256(contents).hexdigest() != origin.source_hash:
         raise ImportError(f"Worker source file hash mismatch: {path}.")
     module_name = f"_bioimageflow_worker_{identity}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load worker source file: {path}.")
+    previous = sys.modules.get(module_name)
+    if previous is not None and _module_source(previous) != path.resolve(strict=True):
+        raise ImportError(f"Cached source module conflicts with selected file {path}.")
+    if previous is not None:
+        if _source_modules.get(module_name) is not previous:
+            raise ImportError(
+                f"Cached source module {module_name!r} was not admitted by this loader."
+            )
+        return previous
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(module_name, None)
+        exec(compile(contents, str(path), "exec"), module.__dict__)
+    except BaseException:
+        if sys.modules.get(module_name) is module:
+            if previous is None:
+                sys.modules.pop(module_name)
+            else:
+                sys.modules[module_name] = previous
         raise
+    _source_modules[module_name] = module
     return module
 
 
@@ -438,7 +501,7 @@ def _load_shared_module(origin: SharedModuleOriginV1) -> Any:
         )
     if _file_hash(source_path) != origin.source_hash:
         raise ImportError(f"Shared module {origin.module!r} source hash mismatch.")
-    module = _isolated_import(origin.module, origin.import_root)
+    module = _isolated_import(origin.module, origin.import_root, origin.class_name)
     module_file = getattr(module, "__file__", None)
     if not isinstance(module_file, str):
         raise ImportError(f"Shared module {origin.module!r} has no source file.")
@@ -450,7 +513,7 @@ def _load_shared_module(origin: SharedModuleOriginV1) -> Any:
     return module
 
 
-def _isolated_import(module_name: str, import_root: str) -> Any:
+def _isolated_import(module_name: str, import_root: str, class_name: str) -> Any:
     top_package = module_name.split(".", 1)[0]
     previous = {
         name: module
@@ -462,6 +525,12 @@ def _isolated_import(module_name: str, import_root: str) -> Any:
     try:
         with _temporary_import_root(import_root):
             module = importlib.import_module(module_name)
+            package_root = Path(import_root) / top_package
+            if not package_root.is_dir():
+                package_root = package_root.with_suffix(".py")
+            _require_class_root(
+                _require_processing_tool(module, class_name), package_root
+            )
         return module
     finally:
         for name in [
@@ -500,6 +569,37 @@ def _load_versioned_module(origin: VersionedModuleOriginV1) -> Any:
     scoped_root = (
         origin.scoped_module[: -len(relative)] if relative else origin.scoped_module
     )
+    cached = sys.modules.get(scoped_root)
+    if cached is not None and _module_source(cached) != init_path.resolve(strict=True):
+        raise ImportError(
+            f"Versioned package {scoped_root!r} conflicts with selected store root {root}."
+        )
+    before = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == scoped_root or name.startswith(scoped_root + ".")
+    }
+    try:
+        return _import_versioned(
+            origin, init_path, package_dir, target_source, scoped_root
+        )
+    except BaseException:
+        for name, module in list(sys.modules.items()):
+            if (
+                name == scoped_root or name.startswith(scoped_root + ".")
+            ) and name not in before:
+                if sys.modules.get(name) is module:
+                    sys.modules.pop(name)
+        raise
+
+
+def _import_versioned(
+    origin: VersionedModuleOriginV1,
+    init_path: Path,
+    package_dir: Path,
+    target_source: Path,
+    scoped_root: str,
+) -> Any:
     if scoped_root not in sys.modules:
         spec = importlib.util.spec_from_file_location(
             scoped_root,
@@ -579,22 +679,23 @@ def _load_archive_module(origin: ArchiveModuleOriginV1) -> Any:
     )
     if actual_hash != origin.source_hash:
         raise ImportError(f"Archive source {origin.source_id!r} hash mismatch.")
-    return _isolated_import(origin.scoped_module, origin.materialization_root)
+    return _isolated_import(
+        origin.scoped_module, origin.materialization_root, origin.class_name
+    )
 
 
 def _load_origin_class(
     origin: WorkerToolOriginV1, identity: str
 ) -> Type[ProcessingTool]:
     with _instance_lock:
+        distribution: Optional[importlib.metadata.Distribution] = None
         if isinstance(origin, InstalledModuleOriginV1):
             _verify_distribution(origin.distribution, origin.version)
             distribution = importlib.metadata.distribution(origin.distribution)
             top_package = origin.module.split(".", 1)[0]
             if top_package not in _distribution_imports(
                 distribution
-            ) and not _editable_distribution_provides(
-                distribution, origin.module
-            ):
+            ) and not _editable_distribution_provides(distribution, origin.module):
                 raise ImportError(
                     f"Module {origin.module!r} is not provided by distribution "
                     f"{origin.distribution!r}."
@@ -608,7 +709,31 @@ def _load_origin_class(
             module = _load_source_file(origin, identity)
         else:
             module = _load_archive_module(origin)
-        return _require_processing_tool(module, origin.class_name)
+        candidate = _require_processing_tool(module, origin.class_name)
+        if isinstance(origin, InstalledModuleOriginV1):
+            assert distribution is not None
+            defining = sys.modules.get(candidate.__module__)
+            if (
+                not _distribution_owns_module(distribution, module)
+                or defining is None
+                or not _distribution_owns_module(distribution, defining)
+            ):
+                raise ImportError(
+                    f"Selected module or tool defining module is outside distribution {origin.distribution!r}."
+                )
+        elif isinstance(origin, VersionedModuleOriginV1):
+            _require_class_root(
+                candidate, Path(origin.store_root) / origin.import_package
+            )
+        elif isinstance(origin, SourceFileOriginV1):
+            defining = sys.modules.get(candidate.__module__)
+            if defining is None or _module_source(defining) != Path(
+                origin.path
+            ).resolve(strict=True):
+                raise ImportError(
+                    f"Tool defining module {candidate.__module__!r} differs from selected source file."
+                )
+        return candidate
 
 
 def load_worker_tool(origin: WorkerToolOriginV1) -> ProcessingTool:
@@ -618,7 +743,32 @@ def load_worker_tool(origin: WorkerToolOriginV1) -> ProcessingTool:
     with _instance_lock:
         instance = _instances.get(identity)
         if instance is None:
-            instance = _load_origin_class(validated, identity)()
+            prefix = (
+                f"_bioimageflow_worker_{identity}"
+                if isinstance(validated, SourceFileOriginV1)
+                else validated.scoped_module.split(".", 1)[0]
+                if isinstance(validated, VersionedModuleOriginV1)
+                else None
+            )
+            before = {
+                name: module
+                for name, module in sys.modules.items()
+                if prefix is not None
+                and (name == prefix or name.startswith(prefix + "."))
+            }
+            try:
+                instance = _load_origin_class(validated, identity)()
+            except BaseException:
+                if prefix is not None:
+                    for name in list(sys.modules):
+                        if name not in before and (
+                            name == prefix or name.startswith(prefix + ".")
+                        ):
+                            removed = sys.modules.pop(name)
+                            if _source_modules.get(name) is removed:
+                                _source_modules.pop(name)
+                    sys.modules.update(before)
+                raise
             _instances[identity] = instance
         return instance
 

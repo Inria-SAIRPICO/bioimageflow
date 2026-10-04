@@ -97,6 +97,13 @@ Exact version/source identity is a current executable-coexistence feature, indep
 Scoped package classes do not automatically isolate process-global third-party dependencies.
 Accepted target intent requires explicit conflict/refusal policy and retention of each live definition's helper/asset identity.
 
+A version-scoped namespace is bound to its selected store root, including the search paths of namespace subpackages.
+A later request for the same scoped name from another root refuses before returning the cached package; it does not replace the earlier loaded classes.
+Failed package initialization or export materialization removes only new scoped modules and the import-path entry introduced by that attempt, preserving preexisting module/path ownership.
+Worker loading also checks the actual defining module of a re-exported tool class, not only the public selected module.
+For standalone source-file origins, the worker executes the same captured bytes whose hash was admitted.
+These local checks do not seal arbitrary transitive imports or prove full content equality between different installed environments; origin-content cache proofs remain a separate requirement.
+
 This applies everywhere in the package:
 
 - ``__init__.py``

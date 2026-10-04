@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .selection import SelectedResult, selected_result
+
 from .common import (
     Any,
     CacheCorruptionError,
@@ -12,9 +14,6 @@ from .common import (
 )
 from .identity import (
     processing_result_key,
-)
-from .metadata import (
-    cache_load,
 )
 
 
@@ -224,8 +223,11 @@ def _rehydrate_processing_shared_arrays(
 
 
 def _rehydrate_processing_assets(
-    df: pd.DataFrame, record_dir: Path, path_columns: set[str],
-    shared_array_columns: set[str], outputs: list[dict[str, Any]],
+    df: pd.DataFrame,
+    record_dir: Path,
+    path_columns: set[str],
+    shared_array_columns: set[str],
+    outputs: list[dict[str, Any]],
 ) -> pd.DataFrame:
     if not shared_array_columns:
         return _rehydrate_processing_paths(df, record_dir, path_columns)
@@ -236,10 +238,19 @@ def _rehydrate_processing_assets(
     try:
         with scope.activate():
             hydrated = _rehydrate_processing_assets_bound(
-                df, record_dir, path_columns, shared_array_columns, outputs,
+                df,
+                record_dir,
+                path_columns,
+                shared_array_columns,
+                outputs,
             )
-        scope.accept_result({column: hydrated[column].tolist()
-                             for column in shared_array_columns if column in hydrated.columns})
+        scope.accept_result(
+            {
+                column: hydrated[column].tolist()
+                for column in shared_array_columns
+                if column in hydrated.columns
+            }
+        )
         scope.discard_unreturned()
         return hydrated
     except BaseException:
@@ -270,27 +281,18 @@ def processing_lookup(
     path_columns: set[str],
     shared_array_columns: set[str] | None = None,
     hydrate_assets: bool = True,
-) -> pd.DataFrame | None:
+) -> SelectedResult | None:
     """Load a ProcessingTool cache hit, or return ``None`` on miss."""
     storage = Storage(storage_path)
     result_key = processing_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
     if pointer is None:
         return None
-    manifest = storage._load_record_manifest(result_key, pointer.record_id)
-    record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
-    try:
-        df = cache_load(record_dir / "dataframe.parquet")
-    except Exception as exc:
-        raise CacheCorruptionError(
-            "Cached ProcessingTool dataframe is unreadable."
-        ) from exc
-    if not hydrate_assets:
-        return df
-    return _rehydrate_processing_assets(
-        df,
-        record_dir,
-        path_columns,
-        shared_array_columns or set(),
-        manifest.outputs,
+    return selected_result(
+        storage,
+        result_key,
+        pointer.record_id,
+        path_columns=path_columns,
+        shared_array_columns=shared_array_columns or (),
+        hydrate_assets=hydrate_assets,
     )

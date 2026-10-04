@@ -371,7 +371,7 @@ def test_concurrent_identical_dataframe_publishers_install_one_record(
     frame = pd.DataFrame({"value": [1]}, index=["row"])
     barrier = Barrier(2)
 
-    def publish(run_suffix: str) -> pd.DataFrame:
+    def publish(run_suffix: str):
         barrier.wait(timeout=5)
         return dataframe_publish(
             storage_path,
@@ -392,10 +392,14 @@ def test_concurrent_identical_dataframe_publishers_install_one_record(
             )
         ]
 
-    for result in results:
-        pd.testing.assert_frame_equal(result, frame)
     result_key = dataframe_result_key(node_name, sig_hash)
-    records_dir = Storage(storage_path).result_dir(result_key) / "records"
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    for result in results:
+        pd.testing.assert_frame_equal(result.dataframe, frame)
+        assert (result.result_key, result.record_id) == (result_key, pointer.record_id)
+    records_dir = storage.result_dir(result_key) / "records"
     records = [path for path in records_dir.iterdir() if not path.name.startswith(".")]
     assert len(records) == 1
     assert not list(records_dir.glob(".candidate.*"))
@@ -411,7 +415,7 @@ def test_concurrent_different_dataframe_publishers_use_selected_winner(
     sig_hash = "same-key"
     barrier = Barrier(2)
 
-    def publish(value: int, run_suffix: str) -> pd.DataFrame:
+    def publish(value: int, run_suffix: str):
         barrier.wait(timeout=5)
         return dataframe_publish(
             storage_path,
@@ -432,9 +436,15 @@ def test_concurrent_different_dataframe_publishers_use_selected_winner(
             )
         ]
 
-    pd.testing.assert_frame_equal(results[0], results[1])
     result_key = dataframe_result_key(node_name, sig_hash)
-    result_dir = Storage(storage_path).result_dir(result_key)
+    storage = Storage(storage_path)
+    pointer = storage.load_current(result_key)
+    assert pointer is not None
+    expected = storage.load_record_dataframe(result_key, pointer.record_id)
+    for result in results:
+        pd.testing.assert_frame_equal(result.dataframe, expected)
+        assert (result.result_key, result.record_id) == (result_key, pointer.record_id)
+    result_dir = storage.result_dir(result_key)
     records = [
         path
         for path in (result_dir / "records").iterdir()

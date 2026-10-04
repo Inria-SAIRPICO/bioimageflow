@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bioimageflow.cache.selection import SelectedResult
+
 from .common import (
     Any,
     Node,
@@ -40,6 +42,7 @@ class _ProviderExecutionResult:
     dataframe: pd.DataFrame
     signature_hash: str | None
     transient_invocation_id: str | None = None
+    selection: SelectedResult | None = None
 
 
 def _reject_reserved_source_indexes(
@@ -56,7 +59,13 @@ def _reject_reserved_source_indexes(
 
 
 class _NodeExecutionMixin:
-    def _execute_node(self, node: Node, results: dict[Node, pd.DataFrame], sig_hashes: dict[Node, str | None], workflow: Any) -> Any:
+    def _execute_node(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str | None],
+        workflow: Any,
+    ) -> Any:
         from bioimageflow.dataframe_tool import DataFrameTool
         from .shared_arrays import references
         import uuid
@@ -68,9 +77,16 @@ class _NodeExecutionMixin:
         scope = owner.task_scope("dataframe_" + uuid.uuid4().hex)
         try:
             with scope.activate():
-                dataframe, signature = self._execute_node_bound(node, results, sig_hashes, workflow)
-            scope.accept_result([ref for ref in references(dataframe.to_numpy(dtype=object).tolist())
-                                 if ref.scope_id == scope.scope_id])
+                dataframe, signature = self._execute_node_bound(
+                    node, results, sig_hashes, workflow
+                )
+            scope.accept_result(
+                [
+                    ref
+                    for ref in references(dataframe.to_numpy(dtype=object).tolist())
+                    if ref.scope_id == scope.scope_id
+                ]
+            )
             scope.discard_unreturned()
             return dataframe, signature
         except BaseException:
@@ -146,7 +162,7 @@ class _NodeExecutionMixin:
         outcome: _ProviderExecutionResult,
     ) -> None:
         context = getattr(workflow, "_active_run_context", None)
-        if context is None:
+        if context is None or context.terminal_status is not None:
             return
 
         result_key: str | None = None
@@ -157,7 +173,10 @@ class _NodeExecutionMixin:
                 raise RuntimeError(
                     f"Provider {node.name!r} has no canonical result key."
                 )
-            record_id = self._selected_record_id(workflow, result_key)
+            selection = outcome.selection
+            if selection is None or selection.result_key != result_key:
+                raise RuntimeError("Provider outcome has no matching pinned record.")
+            record_id = selection.record_id
             if record_id is None:
                 raise RuntimeError(
                     f"Provider {node.name!r} has no selected immutable record."
@@ -222,25 +241,25 @@ class _NodeExecutionMixin:
         )
 
         result_key = (
-            dataframe_result_key(node.name, sig_hash)
-            if sig_hash is not None
-            else None
+            dataframe_result_key(node.name, sig_hash) if sig_hash is not None else None
         )
         if sig_hash is not None:
             cached = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
             if cached is not None:
+                self._pin_selected_result(node, cached)
                 self._set_node_cache_hit(node, True)
                 self._emit_progress(
                     workflow,
                     node.name,
                     "cached",
                     result_key=result_key,
-                    record_id=self._selected_record_id(workflow, result_key),
+                    record_id=self._pinned_record_id(node),
                 )
-                df = self._coerce_numeric_columns(cached)
+                df = cached.dataframe
                 return _ProviderExecutionResult(
                     self._normalize_path_output_columns(df, node.tool),
                     sig_hash,
+                    selection=cached,
                 )
 
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
@@ -248,9 +267,7 @@ class _NodeExecutionMixin:
         if len(dfs) > 1:
             dfs = self._align_dataframes_for_merge(dfs)
         merged = node.tool.merge_dataframes(dfs, arguments)
-        merged = self._coerce_numeric_columns(merged)
         df = node.tool.transform(merged, arguments)
-        df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
         if not dfs:
@@ -261,38 +278,37 @@ class _NodeExecutionMixin:
 
         self._raise_if_cancelled(workflow)
         if sig_hash is not None:
-            df = self._coerce_numeric_columns(
-                dataframe_publish(
-                    workflow.storage_path,
-                    node.name,
-                    sig_hash,
-                    df,
-                    run_id=str(workflow._run_view_context["run_id"]),
-                    engine=self._effective_engine_name(workflow),
-                    tool_identity=(
-                        f"{type(node.tool).__module__}:"
-                        f"{type(node.tool).__qualname__}"
-                    ),
-                    column_kinds={
-                        column: "external_path"
-                        for column in _path_output_columns(node.tool)
-                    },
-                )
+            selection = dataframe_publish(
+                workflow.storage_path,
+                node.name,
+                sig_hash,
+                df,
+                run_id=str(workflow._run_view_context["run_id"]),
+                engine=self._effective_engine_name(workflow),
+                tool_identity=(
+                    f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
+                ),
+                column_kinds={
+                    column: "external_path"
+                    for column in _path_output_columns(node.tool)
+                },
             )
+            self._pin_selected_result(node, selection)
+            df = selection.dataframe
         self._emit_progress(
             workflow,
             node.name,
             "completed",
             result_key=result_key,
             record_id=(
-                self._selected_record_id(workflow, result_key)
-                if result_key is not None
-                else None
+                self._pinned_record_id(node) if result_key is not None else None
             ),
         )
         df = self._normalize_path_output_columns(df, node.tool)
         self._set_node_cache_hit(node, False)
-        return _ProviderExecutionResult(df, sig_hash)
+        return _ProviderExecutionResult(
+            df, sig_hash, selection=self._selected_result(node)
+        )
 
     # ── ProcessingTool execution ───────────────────────────────────────
 
@@ -337,18 +353,20 @@ class _NodeExecutionMixin:
             shared_array_columns=shared_array_output_columns,
         )
         if cached is not None:
+            self._pin_selected_result(node, cached)
             self._set_node_cache_hit(node, True)
             self._emit_progress(
                 workflow,
                 node.name,
                 "cached",
                 result_key=result_key,
-                record_id=self._selected_record_id(workflow, result_key),
+                record_id=self._pinned_record_id(node),
             )
-            df = self._coerce_numeric_columns(cached)
+            df = cached.dataframe
             return _ProviderExecutionResult(
                 self._normalize_path_output_columns(df, node.tool),
                 sig_hash,
+                selection=cached,
             )
 
         # --- Resolve arguments ---
@@ -365,8 +383,7 @@ class _NodeExecutionMixin:
                 invocation_id=invocation_id,
                 engine=self._effective_engine_name(workflow),
                 tool_identity=(
-                    f"{type(node.tool).__module__}:"
-                    f"{type(node.tool).__qualname__}"
+                    f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
                 ),
             )
         )
@@ -417,7 +434,7 @@ class _NodeExecutionMixin:
             self._raise_if_cancelled(workflow)
             owned_path_columns = _explicit_template_output_columns(node)
             declared_path_columns = set(templates)
-            df = processing_publish(
+            selection = processing_publish(
                 workflow.storage_path,
                 node.name,
                 sig_hash,
@@ -442,14 +459,14 @@ class _NodeExecutionMixin:
                     aligned_index,
                 ),
             )
+            self._pin_selected_result(node, selection)
+            df = selection.dataframe
         except BaseException as exc:
             storage.finish_cache_attempt(
                 result_key,
                 attempt_id,
                 status=(
-                    "cancelled"
-                    if isinstance(exc, WorkflowCancelledError)
-                    else "failed"
+                    "cancelled" if isinstance(exc, WorkflowCancelledError) else "failed"
                 ),
                 error_type=(
                     None
@@ -463,17 +480,18 @@ class _NodeExecutionMixin:
             attempt_id,
             status="succeeded",
         )
-        df = self._coerce_numeric_columns(df)
         df = self._normalize_path_output_columns(df, node.tool)
         self._emit_progress(
             workflow,
             node.name,
             "completed",
             result_key=result_key,
-            record_id=self._selected_record_id(workflow, result_key),
+            record_id=self._pinned_record_id(node),
         )
         self._set_node_cache_hit(node, False)
-        return _ProviderExecutionResult(df, sig_hash)
+        return _ProviderExecutionResult(
+            df, sig_hash, selection=self._selected_result(node)
+        )
 
     def _execute_processing_tool_with_column_bindings(
         self,
@@ -531,9 +549,7 @@ class _NodeExecutionMixin:
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
         result_key = (
-            processing_result_key(node.name, sig_hash)
-            if sig_hash is not None
-            else None
+            processing_result_key(node.name, sig_hash) if sig_hash is not None else None
         )
         if sig_hash is not None:
             cached = processing_lookup(
@@ -544,18 +560,20 @@ class _NodeExecutionMixin:
                 shared_array_columns=shared_array_output_columns,
             )
             if cached is not None:
+                self._pin_selected_result(node, cached)
                 self._set_node_cache_hit(node, True)
                 self._emit_progress(
                     workflow,
                     node.name,
                     "cached",
                     result_key=result_key,
-                    record_id=self._selected_record_id(workflow, result_key),
+                    record_id=self._pinned_record_id(node),
                 )
-                df = self._coerce_numeric_columns(cached)
+                df = cached.dataframe
                 return _ProviderExecutionResult(
                     self._normalize_path_output_columns(df, node.tool),
                     sig_hash,
+                    selection=cached,
                 )
 
         # --- Resolve arguments ---
@@ -585,8 +603,7 @@ class _NodeExecutionMixin:
                     invocation_id=invocation_id,
                     engine=self._effective_engine_name(workflow),
                     tool_identity=(
-                        f"{type(node.tool).__module__}:"
-                        f"{type(node.tool).__qualname__}"
+                        f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
                     ),
                 )
             )
@@ -647,7 +664,7 @@ class _NodeExecutionMixin:
                 assert attempt_id is not None
                 owned_path_columns = _explicit_template_output_columns(node)
                 declared_path_columns = set(templates)
-                df = processing_publish(
+                selection = processing_publish(
                     workflow.storage_path,
                     node.name,
                     sig_hash,
@@ -672,7 +689,8 @@ class _NodeExecutionMixin:
                         execution_index,
                     ),
                 )
-            df = self._coerce_numeric_columns(df)
+                self._pin_selected_result(node, selection)
+                df = selection.dataframe
             df = self._normalize_path_output_columns(df, node.tool)
         except BaseException as exc:
             if transient:
@@ -685,11 +703,7 @@ class _NodeExecutionMixin:
                         if isinstance(exc, WorkflowCancelledError)
                         else "failed"
                     ),
-                    error=(
-                        None
-                        if isinstance(exc, WorkflowCancelledError)
-                        else exc
-                    ),
+                    error=(None if isinstance(exc, WorkflowCancelledError) else exc),
                 )
             else:
                 assert result_key is not None
@@ -732,9 +746,7 @@ class _NodeExecutionMixin:
             "completed",
             result_key=result_key,
             record_id=(
-                self._selected_record_id(workflow, result_key)
-                if result_key is not None
-                else None
+                self._pinned_record_id(node) if result_key is not None else None
             ),
         )
         self._set_node_cache_hit(node, False)
@@ -742,6 +754,7 @@ class _NodeExecutionMixin:
             df,
             sig_hash,
             transient_invocation_id=invocation_id if transient else None,
+            selection=None if transient else self._selected_result(node),
         )
 
     # ── Argument resolution ────────────────────────────────────────────

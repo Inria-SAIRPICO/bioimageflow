@@ -48,15 +48,32 @@ def load_versioned_package(
 
     scoped_name = _scoped_name(package, version)
 
-    # Return cached if already loaded
-    if scoped_name in sys.modules:
-        return sys.modules[scoped_name]
+    # Admit every cached namespace member before exposing a selected root.
+    previous = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == scoped_name or name.startswith(scoped_name + ".")
+    }
+    for name, module in previous.items():
+        if module is None:
+            raise ImportError(f"Cached module {name!r} has no selected store owner.")
+        relative = name[len(scoped_name) :].lstrip(".").split(".")
+        target = pkg_dir.joinpath(*relative) if relative != [""] else pkg_dir
+        expected = (
+            target / "__init__.py" if target.is_dir() else target.with_suffix(".py")
+        )
+        _require_selected_root(module, expected)
+    if scoped_name in previous:
+        cached = previous[scoped_name]
+        assert cached is not None
+        return cached
 
     # Add the version directory to sys.path so transitive dependencies
     # installed alongside the package (via uv pip install --target) are
     # importable by main-process code (DataFrameTools, __init__.py, etc.)
     version_dir = str(store_path / package / version)
-    if version_dir not in sys.path:
+    added_path = version_dir not in sys.path
+    if added_path:
         sys.path.insert(0, version_dir)
 
     # Register top-level package
@@ -80,16 +97,39 @@ def load_versioned_package(
             assert spec.loader is not None
             spec.loader.exec_module(mod)
             _materialize_public_exports(mod)
-        except Exception:
-            unload_versioned_package(package, version)
+            _stamp_tool_classes(package, version)
+        except BaseException:
+            owned = {
+                name: module
+                for name, module in sys.modules.items()
+                if (name == scoped_name or name.startswith(scoped_name + "."))
+                and name not in previous
+            }
+            for name, module in owned.items():
+                if sys.modules.get(name) is module:
+                    sys.modules.pop(name)
+            if added_path and version_dir in sys.path:
+                sys.path.remove(version_dir)
             raise
     finally:
         sys.meta_path.remove(hook)
 
-    # Stamp tool classes with version metadata
-    _stamp_tool_classes(package, version)
-
     return mod
+
+
+def _require_selected_root(module: ModuleType, expected: Path) -> None:
+    source = getattr(module, "__file__", None)
+    if source is None and expected.name == "__init__.py" and not expected.exists():
+        locations: tuple[str, ...] = tuple(vars(module).get("__path__", ()))
+        if locations and all(
+            Path(location).resolve() == expected.parent.resolve()
+            for location in locations
+        ):
+            return
+    if not isinstance(source, str) or Path(source).resolve() != expected.resolve():
+        raise ImportError(
+            f"Cached module {module.__name__!r} conflicts with selected store root {expected.parent}."
+        )
 
 
 def unload_versioned_package(package: str, version: str) -> None:
@@ -102,10 +142,7 @@ def unload_versioned_package(package: str, version: str) -> None:
 
     # Remove scoped entries and collect their module objects
     scoped_mods: set[int] = set()
-    to_remove = [
-        k for k in sys.modules
-        if k == prefix or k.startswith(f"{prefix}.")
-    ]
+    to_remove = [k for k in sys.modules if k == prefix or k.startswith(f"{prefix}.")]
     for k in to_remove:
         mod = sys.modules.pop(k, None)
         if mod is not None:
@@ -113,7 +150,8 @@ def unload_versioned_package(package: str, version: str) -> None:
 
     # Remove canonical aliases (entries that point to the same module objects)
     canonical_to_remove = [
-        k for k, mod in sys.modules.items()
+        k
+        for k, mod in sys.modules.items()
         if mod is not None and id(mod) in scoped_mods
     ]
     for k in canonical_to_remove:
@@ -149,7 +187,7 @@ def resolve_tool_class(
 
     # Convert canonical module to scoped: "dummy_tools.alpha" -> "dummy_tools__1_0_0.alpha"
     if canonical_module.startswith(package):
-        relative = canonical_module[len(package):]
+        relative = canonical_module[len(package) :]
         scoped_module = scoped + relative
     else:
         scoped_module = scoped
@@ -197,7 +235,7 @@ class _ScopedImporter:
             return None
 
         # "dummy_tools__1_0_0.alpha" -> relative = "alpha"
-        relative = fullname[len(self._prefix) + 1:]
+        relative = fullname[len(self._prefix) + 1 :]
         parts = relative.split(".")
         file_path = self._pkg_dir
         for part in parts:
@@ -244,7 +282,8 @@ def _stamp_tool_classes(package: str, version: str) -> None:
 
     # Iterate all modules loaded under the scoped prefix
     scoped_modules = [
-        mod for name, mod in sys.modules.items()
+        mod
+        for name, mod in sys.modules.items()
         if (name == scoped_prefix or name.startswith(f"{scoped_prefix}."))
         and mod is not None
     ]
@@ -266,13 +305,14 @@ def _stamp_tool_classes(package: str, version: str) -> None:
             if not obj_module.startswith(scoped_prefix):
                 continue
 
-            canonical = package + obj_module[len(scoped_prefix):]
+            canonical = package + obj_module[len(scoped_prefix) :]
             setattr(obj, "_bif_package", package)
             setattr(obj, "_bif_package_version", version)
             setattr(obj, "_bif_canonical_module", canonical)
 
 
 # ── Canonical name registration ──────────────────────────────────────
+
 
 def _register_canonical_names(package: str, version: str) -> None:
     """Register scoped modules under their canonical names in sys.modules.
@@ -285,11 +325,12 @@ def _register_canonical_names(package: str, version: str) -> None:
     for scoped_key in list(sys.modules):
         if scoped_key == prefix or scoped_key.startswith(f"{prefix}."):
             # "dummy_tools__1_0_0.alpha" -> "dummy_tools.alpha"
-            canonical = package + scoped_key[len(prefix):]
+            canonical = package + scoped_key[len(prefix) :]
             sys.modules[canonical] = sys.modules[scoped_key]
 
 
 # ── PEP 723 parsing ─────────────────────────────────────────────────
+
 
 def _parse_pep723_dependencies(script_path: str | Path) -> list[tuple[str, str]]:
     """Extract ``(pypi_name, version)`` pairs from PEP 723 inline metadata.
@@ -323,7 +364,7 @@ def _parse_pep723_dependencies(script_path: str | Path) -> list[tuple[str, str]]
     # Parse the dependencies list from TOML
     # We use a lightweight regex approach to avoid requiring a TOML library
     deps_re = re.compile(
-        r'dependencies\s*=\s*\[(.*?)\]',
+        r"dependencies\s*=\s*\[(.*?)\]",
         re.DOTALL,
     )
     deps_match = deps_re.search(toml_text)
@@ -338,12 +379,12 @@ def _parse_pep723_dependencies(script_path: str | Path) -> list[tuple[str, str]]
     for dep in dep_strings:
         dep = dep.strip()
         # Parse "name==version" or "name == version"
-        pin_match = re.match(r'^([A-Za-z0-9_.-]+)\s*==\s*([A-Za-z0-9_.]+)\s*$', dep)
+        pin_match = re.match(r"^([A-Za-z0-9_.-]+)\s*==\s*([A-Za-z0-9_.]+)\s*$", dep)
         if not pin_match:
             raise ValueError(
                 f"Tool package dependency '{dep}' must use an exact pin "
                 f"(==) for reproducible workflows. "
-                f"Example: \"{dep.split()[0]}==1.0.0\""
+                f'Example: "{dep.split()[0]}==1.0.0"'
             )
         name = pin_match.group(1).strip()
         version = pin_match.group(2).strip()
@@ -361,6 +402,7 @@ def _normalize_package_name(pypi_name: str) -> str:
 
 
 # ── Auto-install ─────────────────────────────────────────────────────
+
 
 def ensure_installed(
     pkg_name: str,
@@ -399,12 +441,13 @@ def ensure_installed(
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         shutil.rmtree(target, ignore_errors=True)
-        details = exc.stderr.strip() if isinstance(
-            exc, subprocess.CalledProcessError
-        ) and exc.stderr else str(exc)
+        details = (
+            exc.stderr.strip()
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
+            else str(exc)
+        )
         raise RuntimeError(
-            f"Failed to install {pypi_name}=={version} into tool store.\n"
-            f"{details}"
+            f"Failed to install {pypi_name}=={version} into tool store.\n{details}"
         ) from exc
 
     # Verify the package appeared
@@ -418,6 +461,7 @@ def ensure_installed(
 
 
 # ── Top-level API ────────────────────────────────────────────────────
+
 
 def require_tool_packages(
     script_path: str | Path,
@@ -464,6 +508,7 @@ def require_tool_packages(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _get_tool_store_path() -> Path:
     """Return the tool store path, configurable via environment variable."""

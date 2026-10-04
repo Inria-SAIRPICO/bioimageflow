@@ -252,13 +252,3 @@ class _DataframesMixin:
         return {
             k: str(v) if isinstance(v, Path) else v for k, v in vars(outputs).items()
         }
-
-    def _coerce_numeric_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Convert string columns that look numeric to numeric dtype."""
-        for col in df.columns:
-            if pd.api.types.is_string_dtype(df[col]):
-                try:
-                    df[col] = pd.to_numeric(df[col])
-                except (ValueError, TypeError):
-                    pass
-        return df

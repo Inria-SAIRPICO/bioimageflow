@@ -20,13 +20,11 @@ def _normalize_dependency_value(value: Any) -> Any:
             str(key): _normalize_dependency_value(item)
             for key, item in sorted(value.items())
         }
-    if isinstance(value, list):
-        normalized_items = [_normalize_dependency_value(item) for item in value]
-        serialized_items = {
-            json.dumps(item, sort_keys=True, separators=(",", ":")): item
-            for item in normalized_items
-        }
-        return [serialized_items[key] for key in sorted(serialized_items)]
+    if isinstance(value, (list, tuple)):
+        return [_normalize_dependency_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_normalize_dependency_value(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
     if isinstance(value, str):
         return value.strip()
     return value
@@ -60,7 +58,12 @@ def deterministic_serialize(obj: Any) -> str:
         if isinstance(o, Enum):
             return o.value
         if isinstance(o, SharedArray):
-            return {"name": o.name, "shape": o.shape, "dtype": o.dtype, "scope_id": o.scope_id}
+            return {
+                "name": o.name,
+                "shape": o.shape,
+                "dtype": o.dtype,
+                "scope_id": o.scope_id,
+            }
         if hasattr(o, "__dataclass_fields__"):
             return {k: getattr(o, k) for k in o.__dataclass_fields__}
         raise TypeError(

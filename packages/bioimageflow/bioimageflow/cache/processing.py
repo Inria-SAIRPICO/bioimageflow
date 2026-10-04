@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .selection import SelectedResult, selected_result
+
 from .common import (
     Any,
     CacheCorruptionError,
@@ -21,11 +23,9 @@ from .metadata import (
     _file_sha256,
     _write_canonical_parquet,
     _write_processing_result_metadata,
-    cache_load,
 )
 from .processing_lookup import (
     _ensure_record_child_dir,
-    _rehydrate_processing_assets,
 )
 from .publication import create_record_candidate, install_record_candidate
 from .assets import (
@@ -50,7 +50,7 @@ def processing_publish(
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]]
     | None = None,
     declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
-) -> pd.DataFrame:
+) -> SelectedResult:
     """Publish a source ProcessingTool attempt as an immutable record."""
     storage = Storage(storage_path)
     stored_df, outputs, owned_assets, column_kinds = (
@@ -134,18 +134,11 @@ def processing_publish(
         attempt_id=attempt_id,
         run_id=run_id,
     )
-    selected_record_dir = storage.result_dir(result_key) / "records" / pointer.record_id
-    selected_manifest = storage._load_record_manifest(result_key, pointer.record_id)
-    try:
-        selected_df = cache_load(selected_record_dir / "dataframe.parquet")
-    except Exception as exc:
-        raise CacheCorruptionError(
-            "Published ProcessingTool dataframe is unreadable."
-        ) from exc
-    return _rehydrate_processing_assets(
-        selected_df,
-        selected_record_dir,
-        path_columns,
-        shared_array_columns or set(),
-        selected_manifest.outputs,
+    return selected_result(
+        storage,
+        result_key,
+        pointer.record_id,
+        path_columns=path_columns,
+        shared_array_columns=shared_array_columns or (),
+        hydrate_assets=True,
     )

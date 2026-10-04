@@ -29,6 +29,7 @@ workflow containing those reachable tools is planned or computed.
 BioImageFlow keeps this declaration worker-safe and translates ``python``, ``pip``, ``conda``, ``channels``, and local packages into an immutable local environment recipe in the orchestrator.
 When ``channels`` is absent, channel-qualified Conda values such as ``bioimageit::atlas>=0`` place their prefix channels first, in dependency order, followed by the fallback ``conda-forge`` channel. With no prefixes, only ``conda-forge`` is used. Duplicate channels are removed in first-occurrence order; earlier channels have higher priority.
 An explicit ``channels`` list keeps its declared order, followed by any prefix channels not already present. It does not gain ``conda-forge`` automatically, so declare it explicitly when desired. Wetlands requires at least one resulting channel.
+The scientific environment dependency hash preserves this list precedence (and other ordered dependency sequences); mapping keys and genuinely unordered sets are canonicalized independently.
 Wetlands 2 rejects qualified Conda dependencies, so the adapter passes the unqualified package name and a separate channel list. For example, ``bioimageit::atlas>=0`` becomes ``atlas>=0`` with channels ``("bioimageit", "conda-forge")`` when no list is declared. The prefix makes a channel available and gives it priority, but does not pin that package to the channel. True source pinning needs Wetlands support for per-package source constraints.
 
 GENERAL_ENV

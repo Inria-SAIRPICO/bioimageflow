@@ -336,6 +336,7 @@ Output fields retain `type`, `type_spec`, `required`, `nullable`, `default`, `im
 Configured node resolution joins inherited Passthrough ports with declared additions before publishing its detached projection.
 Static native declarations and configured resolver results have distinct authorities: an override's resolved type and metadata must not be replaced by the same-named raw Outputs annotation.
 Known heterogeneous Any and genuinely dynamic schemas remain valid; resolution failure is explicit, and a dynamic upstream does not become an empty known schema.
+A DataFrameTool without Outputs and without a configured resolver has dynamic Node schema `None`, independently of the absent-declaration metadata projection `{}`; an explicit resolver returning `{}` instead declares a known-empty schema and refuses named column references.
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
@@ -1594,6 +1595,11 @@ The loading mechanism:
 4. Materializes public exports declared in `__all__` by resolving each name with `getattr(package_module, name)`. This supports package-level lazy exports implemented with `__getattr__`, as long as each public export can be imported in the orchestrator process.
 5. Stamps every `BaseTool` subclass found in the loaded modules with metadata: `_bif_package`, `_bif_package_version`, `_bif_canonical_module`.
 
+A cached version-scoped namespace belongs to its selected store root; a same-name/version request from another root refuses rather than substituting or evicting the previously loaded package.
+Cached package members are admitted against their actual selected module locations before returning the package.
+Failed initialization, public-export materialization or class stamping removes only new scoped modules and the import-path entry introduced by that attempt, preserving preexisting module/path ownership and leaving the store files intact.
+Trusted package Python can have its own side effects; this cleanup is not a sandbox or a claim to undo arbitrary initializer effects.
+
 This works transparently for all tool types:
 
 - **ProcessingTools**: Loaded as real subclasses with real `process_row`/`process_batch`. `inspect.getfile()` returns the versioned path. Wetlands dispatch works unchanged.
@@ -2543,6 +2549,13 @@ Decoders reject unknown schemas or modes, missing or extra fields, malformed ori
 The independently versioned current `WorkerToolOriginV1` has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
 Every remote backend uses the same strict origin resolver and processing entry point.
 The worker caches tool instances by the SHA-256 digest of canonical JSON for the complete origin including class name, so equal class or module names from different origins cannot collide.
+Fresh standalone source-file loading reads one byte sequence, verifies its source hash, and compiles and executes those same bytes without an importlib reread or cached bytecode substitution.
+The selected module and the tool class's actual defining module must belong to the selected source file, package root or installed distribution members; a re-export does not bypass that admission.
+Single-file shared/archive origins retain exact single-file membership rather than requiring a nonexistent package directory.
+An unadmitted preexisting synthetic source namespace is not executable authority merely because its file path matches; refusal preserves that module, while any reuse must retain the exact owning loader's source admission.
+Only successful tool admission and construction publishes an instance into the worker cache; failed loading or construction removes new source/version-scoped modules without removing preexisting namespace owners.
+These bounded checks establish local source/module membership and same-byte fresh source execution, not complete controller/worker content equality or transitive dependency closure for installed, shared or versioned origins.
+Existing origin selectors and ordinary programmatic Direct tools remain supported; executable-content cache proofs remain a separate requirement.
 
 Direct invokes the shared output-normalization path locally.
 Wetlands submits the core task entry point to its selected environment.
@@ -2551,8 +2564,8 @@ Backend routing metadata is outside the worker envelope.
 
 ### 5.3 DataFrame Semantics
 
-**Accepted target — S06:** Numeric-looking index strings remain strings; canonical values retain integer signedness, dtype, precision and nonfinite meaning without generic table coercion.
-Mapped/collective input semantics are orthogonal to ordered transport groups and output cardinality.
+Numeric-looking index strings remain strings; canonical values retain integer signedness, dtype, precision and nonfinite meaning without generic table coercion.
+**Accepted target — S06 collective association:** Mapped/collective input semantics are orthogonal to ordered transport groups and output cardinality.
 Isolated collective inference, training and aggregate outputs remain supported, including configured empty-input artifacts, with explicit association to all consumed inputs and aggregate lineage.
 Do not duplicate an aggregate for each input or relocate it to the main process merely to fit row transport; its exact correlated public representation is a T/C obligation.
 Concat/CrossJoin and other explicit table reshaping define new lineage and source association; reset ordinals are not preserved provenance.
@@ -2602,6 +2615,11 @@ Result-key material includes every value that can affect logical output and cach
 - Output contract version when output schema changes affect cache compatibility.
 
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
+Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
+Adjacent large integers remain distinct even beside floating-point columns; signed and unsigned values retain the existing dtype-aware logical representation.
+Data loaded for execution keeps declared string values such as `"001"` as strings rather than implicitly converting them to numbers.
+Lists and tuples in semantic values or environment dependencies retain their declared order, including ordered channel selections; only genuinely unordered sets use canonical sorting.
+These rules preserve the existing scalar, dtype and nonfinite-value identity grammar and do not claim verified executable-content identity from a class selector or package label.
 Compilation retains provider/selector recipes without substituting workflow-boundary diagnostic signatures.
 Planning reports `PENDING_UPSTREAM` while a recipe depends on an unresolved selection.
 At runtime, if any consumed value has no selected immutable provider record, the resolver returns `None`; that node and every dependent consumer execute without reusable lookup or publication unless a later explicit contract creates a selected record.
@@ -2633,6 +2651,12 @@ If two workers publish different records for the same result key, the first vali
 Downstream execution must consume the selected current record, not a non-current candidate produced by the same run.
 Publication validates a complete private `records/.candidate.<attempt-id>.<nonce>/<record-id>/` tree before atomically renaming it into the immutable records namespace.
 Current selection uses an atomic hard-link create-if-absent operation; a losing publisher validates and loads the selected winner before continuing downstream.
+Lookup captures one current pointer, then admits the exact selected record through its manifest and record DataFrame reads without consulting the current pointer again.
+Publication binds the actual first-valid winner selected by that publication decision, including when another candidate wins.
+The loaded DataFrame, result key, record ID, detached admitted manifest metadata and exact record address travel together as one selected-result binding.
+Execution outcomes, progress events, downstream identity and provenance, run views and exports use that binding rather than recapturing a later current pointer.
+A pointer change after a record has been loaded affects later independent selections; it does not relabel the already consumed DataFrame or redirect that execution's recorded outputs.
+Binding metadata is owned by the selection, but this does not make an in-memory DataFrame or external asset backing immutable or revoke existing writable views; accepted-array publication and access ownership remain separate contracts.
 
 Each reusable record manifest stores `dataframe.logical_digest`, `dataframe.logical_schema`, and `dataframe.transport_digest`.
 Logical fields determine record identity.
@@ -2653,7 +2677,7 @@ Development mode is intended for iteration; production workflows should rely on 
 ### 6.5 Pre-execution Planning
 
 A plan is a fresh diagnostic snapshot, not a guarantee that selection cannot change before compute.
-**Accepted target — S07:** Bind the validated selected record, data, asset locators and provenance as one immutable downstream selection; a first-valid loser consumes the selected winner rather than its non-current candidate.
+Execution and publication retain the exact selected-result binding described in Section 6.2, independently of subsequent current-pointer changes.
 
 `Workflow.plan()` exposes cache status and selected-record information without executing nodes.
 Callers that need to report cache state should use `plan()` rather than reimplementing result-key composition.

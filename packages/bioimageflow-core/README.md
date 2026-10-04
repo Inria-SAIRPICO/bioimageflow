@@ -53,3 +53,14 @@ Normal reusable worker pools can retain physical grants; idle or quota-pressure 
 If safe retirement cannot reclaim enough space, finite allocation budgets must refuse clearly.
 The exact result/group API and conformance are assessed in the ordered test and causal-code review; these requirements are not a claim that an unspecified method already exists.
 See the [library specifications](../../docs/source/specs.md) for the declaration, typed-value and resource-owner contracts.
+
+
+Worker tool source admission
+----------------------------
+
+A standalone source-file origin hashes and executes one captured byte sequence, without reopening the source through importlib or using cached bytecode.
+Worker loading checks the selected module and the tool class's defining module against the selected source file, package root or installed distribution members.
+A cached version-scoped package from a different store root is refused rather than substituted or evicted.
+Failed initialization or construction does not publish a tool instance; only newly admitted source/version-scoped modules are removed on failure, preserving preexisting modules.
+These checks establish local selected-source membership; installed/versioned selectors still do not prove identical full content or transitive dependencies across controller and worker environments.
+Ordinary programmatic Direct tools and existing origin variants remain supported.

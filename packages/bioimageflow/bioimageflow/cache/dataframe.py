@@ -19,30 +19,24 @@ from .metadata import (
     _file_sha256,
     _write_canonical_parquet,
     _write_dataframe_result_metadata,
-    cache_load,
 )
 from .publication import create_record_candidate, install_record_candidate
-
-
-def _dataframe_record_path(storage: Storage, result_key: str, record_id: str) -> Path:
-    return storage.result_dir(result_key) / "records" / record_id / "dataframe.parquet"
+from .selection import SelectedResult, selected_result
 
 
 def dataframe_lookup(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
-) -> pd.DataFrame | None:
-    """Load a DataFrameTool cache hit, or return ``None`` on miss."""
+) -> SelectedResult | None:
+    """Bind one exact DataFrameTool cache selection, or return ``None`` on miss."""
     storage = Storage(storage_path)
     result_key = dataframe_result_key(node_name, sig_hash)
     pointer = storage.load_current(result_key)
     if pointer is None:
         return None
     try:
-        return cache_load(
-            _dataframe_record_path(storage, result_key, pointer.record_id)
-        )
+        return selected_result(storage, result_key, pointer.record_id)
     except Exception as exc:
         raise CacheCorruptionError("Cached dataframe is unreadable.") from exc
 
@@ -57,8 +51,8 @@ def dataframe_publish(
     engine: str,
     tool_identity: str,
     column_kinds: dict[str, str] | None = None,
-) -> pd.DataFrame:
-    """Publish a DataFrameTool result through the immutable record model."""
+) -> SelectedResult:
+    """Publish a candidate and bind the actual first-valid selected winner."""
     storage = Storage(storage_path)
     result_key = dataframe_result_key(node_name, sig_hash)
     attempt_id = storage.new_attempt_id()
@@ -126,9 +120,7 @@ def dataframe_publish(
         run_id=run_id,
     )
     try:
-        selected = cache_load(
-            _dataframe_record_path(storage, result_key, pointer.record_id)
-        )
+        selected = selected_result(storage, result_key, pointer.record_id)
     except Exception as exc:
         raise CacheCorruptionError("Published dataframe is unreadable.") from exc
     storage.finish_cache_attempt(

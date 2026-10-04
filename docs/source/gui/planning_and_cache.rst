@@ -22,7 +22,8 @@ Workflow.plan()
        print(name, entry.status, entry.final_result_key, entry.selected_record_id)
 
 It uses the direct planning path — **no Wetlands worker pools are launched** and no tool code runs.
-The plan refreshes storage-facing state but does not reserve selection through a later compute.
+The plan binds each cached dataframe to the same exact record ID used for its planning identity and reported selection.
+It refreshes storage-facing state but does not reserve that selection through a later compute; execution makes its own value-plus-record selection.
 A corrupt selection is ``CORRUPT`` with a diagnostic, not a success badge; execution remains strict.
 
 NodePlan

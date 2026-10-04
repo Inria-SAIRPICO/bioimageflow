@@ -15,7 +15,7 @@ from bioimageflow import (
     Workflow,
 )
 from bioimageflow.backends import DirectBackend, ProcessingDispatch
-from bioimageflow.storage import Storage
+from bioimageflow.storage import CacheCorruptionError, Storage
 from bioimageflow_core import (
     Arguments,
     EnvironmentSpec,
@@ -256,7 +256,7 @@ def test_reusable_processing_dispatch_correlates_invocation_and_attempt(
     assert pointer.attempt_id == request.cache_attempt_id
 
 
-def test_missing_provider_selection_propagates_non_reusable_execution(
+def test_removed_current_pointer_preserves_admitted_provider_record(
     tmp_path: Path,
 ) -> None:
     storage_path = tmp_path / "storage"
@@ -272,77 +272,44 @@ def test_missing_provider_selection_propagates_non_reusable_execution(
     result = workflow.compute(engine=engine)
 
     assert result.loc["row", "copied"] == 14
-    asset = Path(result.loc["row", "asset"])
-    assert asset.read_text() == "14"
-    invocation_dirs = list(
-        (
-            storage_path
-            / "cache"
-            / "v1"
-            / "transient"
-            / "runs"
-        ).glob("run_*/nodes/writer/inv_*")
-    )
-    assert len(invocation_dirs) == 1
-    invocation_dir = invocation_dirs[0]
-    assert asset.parent == invocation_dir / "assets"
-    invocation = json.loads((invocation_dir / "invocation.json").read_text())
-    assert invocation["status"] == "succeeded"
-    assert invocation["invocation_id"] == invocation_dir.name
-    assert invocation["node_key"] == "writer"
-    assert invocation["engine"] == "direct:parallel"
+    assert Path(result.loc["row", "asset"]).read_text() == "14"
     [request] = backend.requests
-    assert request.invocation_id == invocation["invocation_id"]
-    assert request.cache_attempt_id is None
-
-    metadata_nodes = {
-        json.loads(path.read_text())["node"]
-        for path in (
-            storage_path
-            / "cache"
-            / "v1"
-            / "results"
-        ).glob("*/*/rk_*/result.json")
-    }
-    assert consumer.name not in metadata_nodes
-    assert writer.name not in metadata_nodes
-
-    run_id = invocation["run_id"]
-    assert not (
-        storage_path
-        / "views"
-        / "runs"
-        / run_id
-        / "nodes"
-        / consumer.name
-        / "result.json"
-    ).exists()
-    assert not (
-        storage_path
-        / "views"
-        / "runs"
-        / run_id
-        / "nodes"
-        / writer.name
-        / "result.json"
-    ).exists()
-    writer_events = [event for event in events if event.node_name == writer.name]
-    assert {event.status for event in writer_events} >= {
-        "started",
-        "row_complete",
-        "completed",
-    }
-    assert all(event.result_key is None for event in writer_events)
-    assert all(event.record_id is None for event in writer_events)
-
-    plan = workflow.plan()
-    assert plan[consumer.name].status is NodePlanStatus.PENDING_UPSTREAM
-    assert plan[consumer.name].final_result_key is None
-    assert plan[writer.name].status is NodePlanStatus.PENDING_UPSTREAM
-    assert plan[writer.name].final_result_key is None
+    assert request.cache_attempt_id is not None
+    assert not (storage_path / "cache" / "v1" / "transient").exists()
+    storage = Storage(storage_path)
+    for name in (consumer.name, writer.name):
+        [completed] = [
+            e for e in events if e.node_name == name and e.status == "completed"
+        ]
+        assert completed.result_key is not None and completed.record_id is not None
+        manifest = storage.load_record_manifest(
+            completed.result_key, completed.record_id
+        )
+        assert manifest.record_id == completed.record_id
+    provider_metadata = [
+        p
+        for p in (storage.cache_root / "results").glob("*/*/rk_*/result.json")
+        if json.loads(p.read_text())["node"] == "nested/provider"
+    ]
+    assert len(provider_metadata) == 1
+    assert not (provider_metadata[0].parent / "current.json").exists()
+    [writer_event] = [
+        e for e in events if e.node_name == writer.name and e.status == "completed"
+    ]
+    assert writer_event.result_key is not None
+    attempt = json.loads(
+        (
+            storage.result_dir(writer_event.result_key)
+            / "attempts"
+            / request.cache_attempt_id
+            / "attempt.json"
+        ).read_text()
+    )
+    assert attempt["status"] == "succeeded"
+    assert attempt["invocation_id"] == request.invocation_id
 
 
-def test_failed_non_reusable_processing_marks_transient_diagnostics(
+def test_failed_processing_retains_admitted_provider_and_attempt_diagnostics(
     tmp_path: Path,
 ) -> None:
     storage_path = tmp_path / "storage"
@@ -352,29 +319,63 @@ def test_failed_non_reusable_processing_marks_transient_diagnostics(
         on_progress=events.append,
         writer_tool=FailingValueAssetWriter(),
     )
+    engine = SequentialEngine()
+    backend = CapturingDirectBackend()
+    engine._backend = backend
 
     with pytest.raises(RuntimeError, match="transient failure"):
-        workflow.compute()
+        workflow.compute(engine=engine)
 
-    [invocation_dir] = list(
-        (
-            storage_path
-            / "cache"
-            / "v1"
-            / "transient"
-            / "runs"
-        ).glob("run_*/nodes/writer/inv_*")
+    [request] = backend.requests
+    assert request.cache_attempt_id is not None
+    failed = [e for e in events if e.node_name == writer.name and e.status == "failed"]
+    assert failed and failed[-1].record_id is None
+    storage = Storage(storage_path)
+    [attempt_path] = list(
+        (storage.cache_root / "results").glob(
+            f"*/*/rk_*/attempts/{request.cache_attempt_id}/attempt.json"
+        )
     )
-    invocation = json.loads((invocation_dir / "invocation.json").read_text())
-    failure = json.loads((invocation_dir / "failed.json").read_text())
-    assert invocation["status"] == "failed"
-    assert failure["type"] == "RuntimeError"
-    assert failure["message"] == "transient failure"
-    failed = [
-        event
-        for event in events
-        if event.node_name == writer.name and event.status == "failed"
+    attempt = json.loads(attempt_path.read_text())
+    assert attempt["status"] == "failed"
+    assert attempt["error_type"] == "RuntimeError"
+    assert attempt["invocation_id"] == request.invocation_id
+    assert storage.load_current(attempt["result_key"]) is None
+    assert not (storage_path / "cache" / "v1" / "transient").exists()
+
+
+def test_missing_provider_record_refuses_before_downstream_dispatch(
+    tmp_path: Path,
+) -> None:
+    storage_path = tmp_path / "storage"
+    workflow, _whole, writer = _build_named_output_workflow(
+        storage_path, output_name="value"
+    )
+    workflow.compute(writer)
+    storage = Storage(storage_path)
+    [metadata] = [
+        p
+        for p in (storage.cache_root / "results").glob("*/*/rk_*/result.json")
+        if json.loads(p.read_text())["node"] == "nested/provider"
     ]
-    assert failed
-    assert failed[-1].result_key is None
-    assert failed[-1].record_id is None
+    pointer = json.loads((metadata.parent / "current.json").read_text())
+    record = metadata.parent / "records" / pointer["record_id"]
+    (record / "dataframe.parquet").unlink()
+    downstream_pointer = [
+        p.read_bytes()
+        for p in (storage.cache_root / "results").glob("*/*/rk_*/current.json")
+        if p.parent != metadata.parent
+    ]
+    engine = SequentialEngine()
+    backend = CapturingDirectBackend()
+    engine._backend = backend
+
+    with pytest.raises(CacheCorruptionError):
+        workflow.compute(writer, engine=engine)
+
+    assert backend.requests == []
+    assert [
+        p.read_bytes()
+        for p in (storage.cache_root / "results").glob("*/*/rk_*/current.json")
+        if p.parent != metadata.parent
+    ] == downstream_pointer

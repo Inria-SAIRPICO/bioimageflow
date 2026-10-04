@@ -142,7 +142,8 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
         path_columns={"mask"},
         owned_path_columns={"mask"},
     )
-    record_dir = Path(first.loc["0", "mask"]).parents[1]
+    record_dir = first.record_dir
+    assert Path(first.dataframe.loc["0", "mask"]).parents[1] == record_dir
     assets_record_dir = record_dir / "assets"
     import shutil
 
@@ -202,12 +203,12 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
         declared_owned_artifact_paths=[("mask", "0", source)],
     )
 
-    assert result.empty
+    assert result.dataframe.empty
     pointer = Storage(storage_path).load_current(result_key)
     assert pointer is not None
-    record_dir = (
-        Storage(storage_path).result_dir(result_key) / "records" / pointer.record_id
-    )
+    assert result.record_id == pointer.record_id
+    assert result.result_key == result_key
+    record_dir = result.record_dir
     manifest = json.loads((record_dir / "manifest.json").read_text())
     assert manifest["outputs"] == [
         {

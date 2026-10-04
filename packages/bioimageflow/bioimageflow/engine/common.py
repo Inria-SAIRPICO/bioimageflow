@@ -663,10 +663,19 @@ class NodeStep:
                     self._node.name,
                     "cached",
                     result_key=result_key,
-                    record_id=self._engine._selected_record_id(
-                        self._workflow, result_key
-                    ),
+                    record_id=self._engine._pinned_record_id(self._node),
                 )
+            from .node_execution import _ProviderExecutionResult
+
+            self._engine._record_provider_execution_outcome(
+                self._workflow,
+                self._node,
+                _ProviderExecutionResult(
+                    self._df,
+                    self._sig_hash,
+                    selection=self._engine._selected_result(self._node),
+                ),
+            )
             self._executed = True
             return self._df
         df, sig_hash = self._engine._execute_node(

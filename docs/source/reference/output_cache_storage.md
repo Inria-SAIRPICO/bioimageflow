@@ -9,6 +9,9 @@ The human-facing output tree is a derived view over the canonical cache.
 
 **Accepted target — S07/S08:** Capture each validated selected record together with its dataframe, assets and provenance as one immutable downstream binding.
 A first-valid loser consumes the selected winner; linked views are read-only projections and never another writable result authority.
+Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address once through the public exact-record storage API.
+Progress, run views, provider outcomes, downstream identity and export use that captured selection; a later current-pointer change affects a later selection, not the provenance of an already consumed frame.
+Manifest inspection returns detached metadata; this binding does not seal mutable DataFrame/array contents or establish the separately required accepted-resource access and cleanup policies.
 Automatic human-view export warns on projection failure while explicit export is strict; neither may rewrite scientific cache identity.
 
 ## Design Goals
@@ -150,7 +153,14 @@ The result key must include every value that can affect the logical result and c
 - Selected upstream record references for every cacheable upstream value consumed by this node.
 - Declared external references consumed by this node.
 - Development-mode source hash when development mode is enabled.
+
+Current tool/version and optional development source signature material still do not prove the exact executed source/dependency closure; verified executable-content identity remains a separate owning implementation gate, without disabling ordinary caching in this increment.
 - Output contract version when output schema changes affect cache compatibility.
+
+Scientific values retain their declared meaning: numeric-looking strings remain strings unless a tool explicitly converts them.
+Dataframe identity encodes scalar cells from each column independently, preserving large signed/unsigned integer values beside floats instead of promoting an entire mixed row to floating point.
+Environment mappings have canonical key order, ordered dependency/channel lists and tuples retain precedence, and only actual unordered sets are canonicalized without order.
+These rules retain the existing scalar/nonfinite/dtype encoding and do not claim a new worker wire protocol or collective aggregate representation.
 
 An upstream record reference contains the upstream node key, upstream result key, upstream record ID, and the statically declared binding or selector through which the value is consumed.
 The current layout uses the whole upstream record ID.

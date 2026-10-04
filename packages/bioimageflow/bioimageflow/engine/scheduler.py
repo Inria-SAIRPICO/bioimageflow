@@ -6,6 +6,8 @@ from collections.abc import Callable
 from contextvars import copy_context
 from typing import TYPE_CHECKING
 
+from bioimageflow.cache.selection import SelectedResult
+
 from .common import (
     Any,
     DirectBackend,
@@ -153,6 +155,7 @@ class DefaultEngine(
         self._execution_active = False
         self._compiled_ordinals: dict[Node, int] = {}
         self._node_cache_hits: dict[Node, bool] = {}
+        self._node_selected_results: dict[Node, SelectedResult] = {}
         self._external_cancellation_requested = cancellation_requested
         self._env_manager = env_manager
         if use_wetlands:
@@ -193,6 +196,8 @@ class DefaultEngine(
                     "This execution engine already has an active execution."
                 )
             self._execution_active = True
+            with self._cache_hit_lock:
+                self._node_selected_results.clear()
 
     def _end_execution(self) -> None:
         with self._lifecycle_lock:
@@ -200,10 +205,7 @@ class DefaultEngine(
 
     def _is_cancellation_requested(self, workflow: Any) -> bool:
         external = self._external_cancellation_requested
-        return bool(
-            workflow.cancel_requested
-            or (external is not None and external())
-        )
+        return bool(workflow.cancel_requested or (external is not None and external()))
 
     def _raise_if_cancelled(self, workflow: Any) -> None:
         if self._is_cancellation_requested(workflow):

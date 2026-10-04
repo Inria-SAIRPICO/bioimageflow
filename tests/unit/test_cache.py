@@ -24,9 +24,9 @@ class TestNormalizeDependencies:
         result = normalize_dependencies({"pkg": " 1.0.0 "})
         assert result["pkg"] == "1.0.0"
 
-    def test_sorts_and_strips_lists(self):
+    def test_preserves_list_order_and_strips_strings(self):
         result = normalize_dependencies({"pkgs": ["  b ", "a"]})
-        assert result["pkgs"] == ["a", "b"]
+        assert result["pkgs"] == ["b", "a"]
 
     def test_non_string_passthrough(self):
         result = normalize_dependencies({"flag": True})

@@ -9,7 +9,6 @@ from .common import (
     Any,
     Node,
     ProcessingTool,
-    Storage,
     canonical_dataframe_digest,
     cast,
     compute_env_hash,
@@ -43,13 +42,13 @@ class _IdentityRuntimeMixin:
             result_key = self._node_result_key(provider, sig_hash)
             if result_key is None:
                 return None
-            pointer = Storage(workflow.storage_path).load_current(result_key)
-            if pointer is None:
+            selection = self._selected_result(provider)
+            if selection is None or selection.result_key != result_key:
                 return None
             return {
                 "node_key": provider.name,
                 "result_key": result_key,
-                "record_id": pointer.record_id,
+                "record_id": selection.record_id,
             }
 
         identities: dict[str, Any] = {}

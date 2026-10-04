@@ -625,7 +625,10 @@ class Node:
             elif _overrides_classmethod(df_tool_cls, DataFrameTool, "resolve_outputs"):
                 schema = df_tool_cls.resolve_outputs(self._constant_bindings)
             else:
-                schema = serialize_output_schema(self.tool)
+                schema = (
+                    None if self.tool.Outputs is None
+                    else serialize_output_schema(self.tool)
+                )
             return self._schema_with_viewer_additions(schema)
 
         # ProcessingTool: static schema.

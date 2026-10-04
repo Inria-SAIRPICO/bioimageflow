@@ -16,7 +16,6 @@ from .common import (
     NodePlan,
     NodePlanStatus,
     ProcessingTool,
-    Storage,
     TopologicalSorter,
     _dataframe_has_other_current,
     _processing_has_other_current,
@@ -196,7 +195,7 @@ class _PlanningMixin:
         upstream = tuple(self._plan_upstream_names(node))
         pending_upstreams: tuple[str, ...] = ()
         final_result_key = self._plan_final_result_key(node, sig_hash)
-        selected_record_id = self._plan_selected_record_id(workflow, final_result_key)
+        selected_record_id = self._plan_selected_record_id(node, final_result_key)
         if cached_df is not None:
             status = NodePlanStatus.CACHED
         else:
@@ -238,12 +237,16 @@ class _PlanningMixin:
         return None
 
     def _plan_selected_record_id(
-        self, workflow: Any, final_result_key: str | None
+        self, node: Node, final_result_key: str | None
     ) -> str | None:
         if final_result_key is None:
             return None
-        pointer = Storage(workflow.storage_path).load_current(final_result_key)
-        return pointer.record_id if pointer is not None else None
+        selection = self._selected_result(node)
+        return (
+            selection.record_id
+            if selection is not None and selection.result_key == final_result_key
+            else None
+        )
 
     def _plan_compiled_workflow_node(
         self,

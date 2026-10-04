@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from bioimageflow.cache.selection import SelectedResult
+
 from .common import (
     Any,
     Node,
@@ -26,6 +28,18 @@ from .common import (
 
 
 class _CacheRuntimeMixin:
+    def _pin_selected_result(self, node: Node, selection: SelectedResult) -> None:
+        with self._cache_hit_lock:
+            self._node_selected_results[node] = selection
+
+    def _selected_result(self, node: Node) -> SelectedResult | None:
+        with self._cache_hit_lock:
+            return self._node_selected_results.get(node)
+
+    def _pinned_record_id(self, node: Node) -> str | None:
+        selection = self._selected_result(node)
+        return None if selection is None else selection.record_id
+
     def _set_node_cache_hit(self, node: Node, cache_hit: bool) -> None:
         with self._cache_hit_lock:
             self._node_cache_hits[node] = cache_hit
@@ -54,9 +68,9 @@ class _CacheRuntimeMixin:
         else:
             return
         storage = Storage(workflow.storage_path)
-        pointer = storage.load_current(result_key)
-        if pointer is None:
-            return
+        selection = self._selected_result(node)
+        if selection is None or selection.result_key != result_key:
+            raise RuntimeError("Executed provider has no matching pinned record.")
         run_id = str(context["run_id"])
         node_key = node.name
         provenance = self._node_output_provenance(
@@ -70,7 +84,7 @@ class _CacheRuntimeMixin:
             run_id,
             node_key,
             result_key=result_key,
-            record_id=pointer.record_id,
+            record_id=selection.record_id,
             cache_hit=cache_hit,
             provenance=provenance,
             viewers=node.get_output_viewer_specs(),
@@ -144,12 +158,6 @@ class _CacheRuntimeMixin:
             "inputs": inputs,
         }
 
-    def _selected_record_id(self, workflow: Any, result_key: str) -> str | None:
-        pointer = Storage(workflow.storage_path).load_current(result_key)
-        if pointer is None:
-            return None
-        return pointer.record_id
-
     def _node_result_key(self, node: Node, sig_hash: str) -> str | None:
         from bioimageflow.dataframe_tool import DataFrameTool
 
@@ -161,9 +169,19 @@ class _CacheRuntimeMixin:
 
     # ── Graph traversal ────────────────────────────────────────────────
 
-    def _check_node_cache(self, node: Node, results: dict[Node, pd.DataFrame], sig_hashes: dict[Node, str | None], workflow: Any, *, hydrate_assets: bool = True) -> Any:
+    def _check_node_cache(
+        self,
+        node: Node,
+        results: dict[Node, pd.DataFrame],
+        sig_hashes: dict[Node, str | None],
+        workflow: Any,
+        *,
+        hydrate_assets: bool = True,
+    ) -> Any:
         with workflow.shared_memory_context.activate():
-            return self._check_node_cache_bound(node, results, sig_hashes, workflow, hydrate_assets=hydrate_assets)
+            return self._check_node_cache_bound(
+                node, results, sig_hashes, workflow, hydrate_assets=hydrate_assets
+            )
 
     def _check_node_cache_bound(
         self,
@@ -185,6 +203,9 @@ class _CacheRuntimeMixin:
 
         if isinstance(node, WorkflowNode):
             return None, None
+
+        with self._cache_hit_lock:
+            self._node_selected_results.pop(node, None)
 
         # ── Compute signature hash ──
         if isinstance(node.tool, DataFrameTool):
@@ -236,8 +257,10 @@ class _CacheRuntimeMixin:
             df = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
             if df is None:
                 return None, sig_hash
-            df = self._coerce_numeric_columns(df)
-            return self._normalize_path_output_columns(df, node.tool), sig_hash
+            self._pin_selected_result(node, df)
+            return self._normalize_path_output_columns(
+                df.dataframe, node.tool
+            ), sig_hash
         if isinstance(node.tool, ProcessingTool):
             df = processing_lookup(
                 workflow.storage_path,
@@ -249,8 +272,10 @@ class _CacheRuntimeMixin:
             )
             if df is None:
                 return None, sig_hash
-            df = self._coerce_numeric_columns(df)
-            return self._normalize_path_output_columns(df, node.tool), sig_hash
+            self._pin_selected_result(node, df)
+            return self._normalize_path_output_columns(
+                df.dataframe, node.tool
+            ), sig_hash
         return None, sig_hash
 
     # ── Node dispatch ──────────────────────────────────────────────────

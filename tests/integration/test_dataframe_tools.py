@@ -12,9 +12,11 @@ Covers:
 """
 
 
+import pandas as pd
 import pytest
 
-from bioimageflow import ColumnNotFoundError, Workflow
+from bioimageflow import ColumnNotFoundError, DataFrameTool, Passthrough, Workflow
+from bioimageflow_core import Arguments, IOModel
 
 from tests.testkit.integration_tools import (
     ColumnRegex,
@@ -100,6 +102,19 @@ class TestFilterRows:
             assert len(df) == 3
 
 
+class NumericSlice(DataFrameTool):
+    """Explicit test-workflow conversion; identifier extraction itself stays string."""
+
+    class Inputs(IOModel):
+        pass
+
+    class Outputs(Passthrough):
+        slice: int
+
+    def transform(self, df: pd.DataFrame, arguments: Arguments) -> pd.DataFrame:
+        return df.assign(slice=pd.to_numeric(df["slice"]))
+
+
 class TestChainedDataFrameTools:
 
     def test_regex_then_filter_then_process(self, tmp_workspace_with_metadata):
@@ -116,9 +131,10 @@ class TestChainedDataFrameTools:
                 column_name="filename",
                 regex=r"(?P<patient>\w+)_(?P<slice>\d+)\.tif",
             )
-            # Keep only patientA — but FilterRows works on numeric columns;
-            # instead, filter on slice > 001
-            patient_a = filt(enriched, column_name="slice", min=2.0)
+            # Extracted identifiers remain strings; this workflow explicitly opts into numeric filtering.
+            assert set(wf.compute(enriched)["slice"]) == {"001", "002"}
+            numeric = NumericSlice()(enriched)
+            patient_a = filt(numeric, column_name="slice", min=2.0)
             masks = segment(input_image=patient_a["path"])
             df = wf.compute(masks)
             # Only patientA_002 has slice >= 2

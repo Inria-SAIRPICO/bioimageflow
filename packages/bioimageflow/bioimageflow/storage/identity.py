@@ -285,13 +285,13 @@ def canonical_dataframe_identity(
             entry["timezone"] = str(getattr(series.dtype, "tz", None) or "naive-utc")
         column_schema.append(entry)
     rows: list[dict[str, Any]] = []
-    for index, row in df.iterrows():
+    for position, index in enumerate(df.index):
         rows.append(
             {
                 "index": unicodedata.normalize("NFC", str(index)),
                 "values": {
                     name: _cell_payload(
-                        row[original],
+                        df[original].iloc[position],
                         column_kind=kinds.get(name, "scalar"),
                         dtype=str(df[original].dtype),
                     )
