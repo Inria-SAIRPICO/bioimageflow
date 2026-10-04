@@ -104,6 +104,9 @@ Optional dependencies
 ---------------------
 
 Local execution is installed with ``bioimageflow`` and does not require Parsl or PSI/J.
+
+The October 4 S/T/C milestone reviews Direct and local managed WorkerPool behavior plus shared local return/resource contracts.
+Distributed implementations and their capability tests remain delivered features outside this review; directory or import location does not exclude a shared local result API.
 Attached and submitted-local Parsl execution require ``bioimageflow[parsl]``.
 PSI/J cluster launch additionally requires ``bioimageflow[psij]`` and the site scheduler's PSI/J executor plugin in the pre-provisioned cluster environment.
 Remote submission uses the system OpenSSH ``ssh`` and ``sftp`` clients.

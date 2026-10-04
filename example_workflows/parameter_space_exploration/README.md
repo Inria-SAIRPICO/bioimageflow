@@ -22,8 +22,9 @@ The workflow:
 
 - BioImageFlow installed (both `bioimageflow-core` and `bioimageflow`)
 - `bioimageflow-common-tools` containing the tools used here.
-- The Atlas CLI tool must be available in the environment (installed via conda-forge: `conda install -c bioimageit atlas`).
-- Pillow and numpy for the Mosaic tool (installed in the main Python environment).
+- `bioimageflow-spot-tools` for `AtlasSpotDetection` and the package supplying the workflow's image I/O operations.
+- The tool-declared worker recipes provide Atlas and Mosaic execution dependencies; they are not implicit host-Python installation requirements.
+- Public input downloads, binary/model availability and scientific interpretation remain separate prerequisites from graph/schema validation.
 
 ## Running the Workflow
 

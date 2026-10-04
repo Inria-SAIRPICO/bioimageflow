@@ -20,6 +20,10 @@ A conflicting, incomplete, or corrupt destination is rejected.
 
 Record-owned and return-owned assets are copied beneath the bundle and returned DataFrame paths point there.
 Paths declared external remain external values.
+
+A bundle is self-contained for owned assets, not for those external dependencies.
+Shared-array rehydration retains an accessible controller owner independent of the temporary execution object.
+Accepted S target: callers can explicitly release the exact returned allocation group, with truthful pending views/grants and no deletion of durable bundle assets; API conformance remains a T/C obligation.
 For a local :class:`~bioimageflow.WorkflowRun`, ``run.load_result()`` reads the successful return directly from workflow storage without creating a portable bundle.
 
 Export an attached result

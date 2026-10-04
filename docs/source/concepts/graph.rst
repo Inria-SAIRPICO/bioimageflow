@@ -18,6 +18,9 @@ Every tool call creates a :class:`~bioimageflow.Node`:
        masks = segment(image=raw["image"])
        # masks is a Node, not a DataFrame
 
+Accepted target intent is in :doc:`/reference/unified_workflow_contract`; source conformance remains for T/C.
+Ordinary construction/refusal publishes a coherent node, edges, interface and name reservation or leaves prior state unchanged; diagnostic editing explicitly retains incomplete values/errors.
+
 Nodes store:
 
 - The tool that will execute
@@ -40,9 +43,11 @@ input from the ``image`` column of ``raw``'s output DataFrame."
 
 The framework validates at construction time that:
 
-- The referenced column exists in the upstream node's outputs
+- The referenced column exists when the effective static/dynamic/merge schema is known
 - The type annotations are compatible (via
   :func:`~bioimageflow_core.check_compatibility`)
+
+Unresolved dynamic DataFrame outputs remain unknown and are validated at their declared runtime boundary; they are not abstract tools or fabricated known columns.
 
 Binding rules
 -------------
@@ -106,18 +111,22 @@ Constructing a source tool with positional upstream arguments raises
 **ProcessingTool with no column references.** Useful when the loader
 itself needs an isolated environment — for example a DICOM or HDF5 reader
 that depends on a heavy native library. The tool reads from constants,
-runs in its own environment, and emits a one-row output DataFrame:
+runs in its own environment through one source invocation; it can emit zero, one or many output rows.
+The following is a partial method sketch:
 
 .. code-block:: python
 
-   class LoadDicom(ProcessingTool):
-       display_name = "Load DICOM"
-       environment = EnvironmentSpec(name="dicom", dependencies={"pydicom": "*"})
+   from bioimageflow_core import IOModel, RowConsumption
 
-       class Inputs:
+   class LoadDicom(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
+       display_name = "Load DICOM"
+       environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom=3.0.1"]})
+
+       class Inputs(IOModel):
            folder: str
 
-       class Outputs:
+       class Outputs(IOModel):
            image: Annotated[Path, ImageSpec()] = Template("out.tif")
 
        def process_row(self, arguments: Arguments) -> "LoadDicom.Outputs":
@@ -162,12 +171,12 @@ node identities or disambiguate multiple uses of the same tool:
    smooth_5 = blur(image=raw["image"], sigma=5.0, name="blur_coarse")
 
 Node names must be unique within a workflow.
+Accepted target intent reserves generated and explicit names within that containing definition; unrelated or reentrant builds cannot reset another definition's identity.
+Rebinding replaces old data edges while retaining genuine independent terminal-completion dependencies.
 
 DAG validation
 --------------
 
 Construction-time errors (cycles, missing bindings, type mismatches,
-duplicate names, ...) are reported through the validation surface; the
-full ``ValidationErrorKind`` table lives in :doc:`../reference/index`
-under the errors page once it lands. For now the exhaustive contract is
-in :doc:`../specs` §6.6.
+duplicate names, ...) are reported through the validation surface; the error catalogue lives in :doc:`../reference/errors`.
+Graph/editor diagnostics are distinct from admitting resolved scientific values at execution; neither schema compatibility nor a clean graph proves pixel or biological correctness.

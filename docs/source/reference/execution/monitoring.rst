@@ -24,6 +24,9 @@ Failed events may carry a :class:`~bioimageflow.NodeFailureDiagnostic`.
 
 Parsl futures may complete out of order, but row-complete callbacks for one node are serialized and emitted in aligned row order.
 Events from independent nodes may interleave.
+
+Accepted S target: observer exceptions do not choose the scientific outcome or mask the primary failure.
+An independently observed owner interruption follows cancellation/drain semantics; its origin cannot be inferred universally from an exception type raised inside a callback.
 A whole-node ``process_batch()`` emits no row-complete events.
 
 Submitted progress

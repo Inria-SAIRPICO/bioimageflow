@@ -44,7 +44,9 @@ Source distributions keep package docs and tests so release artifacts remain aud
 Release metadata must not expose broad extras that silently install all domain runtimes; users install the companion packages and isolated tool environments they actually need.
 Publishing uses an explicitly dispatched coordinated GitHub Actions release set of annotated package tags at one reviewed SHA, after exact-head CI and affected runtime/artifact checks.
 Current GitHub inspection found no required reviewers on the `pypi` environment and the tag ruleset disabled; no approval or tag protection is inferred.
-The supported current cohort is Core `>=0.5.0,<0.6`; DataFrame packages also require BioImageFlow `>=0.9.0,<1`.
+The source-declared current cohort is Core `>=0.5.0,<0.6`; DataFrame packages also require BioImageFlow `>=0.9.0,<1`.
+These are candidate metadata requirements, not a claim of published availability or completed exact-head/OS/runtime certification.
+The campaign pauses releases through its accepted library milestone; standing release authorization does not replace technical gates.
 All nine tool bounds must resolve and validate; the eight existing projects are the base release set, while first-time Phasor publisher admission is separate.
 The release job requires successful exact-head normal CI, builds the selected distributions with workspace sources disabled, validates their artifacts, then publishes them in dependency order.
 A manually selected affected resource suite is additionally blocking; unrelated models, downloads and binaries are not automatic release gates.
@@ -52,7 +54,10 @@ A manually selected affected resource suite is additionally blocking; unrelated 
 ## Package-Owned Documentation Contract
 
 Each package owns its README, `docs/index.md`, tool pages, workflow pages, tests, fixtures, examples, and small runtime assets.
-Every public tool and workflow should have package-local documentation and deterministic tests.
+Every public tool and workflow should have package-local documentation and meaningful deterministic tests.
+Schemas, metadata, real scientific execution and model/binary/public-data acceptance are separate evidence layers.
+A dynamic DataFrame tool can be concrete without static Outputs; worker environment, IOModel outputs and RowConsumption admission apply to ProcessingTools.
+Keep whole-batch isolated inference/training/aggregation with explicit consumed-input association; transport correlation does not require duplicated scientific results.
 The main docs include first-party package docs through generated wrapper pages, but the source of truth remains in each package directory.
 
 Custom packages can opt into local documentation builds with `[tool.bioimageflow.docs]` metadata in their `pyproject.toml`.

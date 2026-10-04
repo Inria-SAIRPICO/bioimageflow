@@ -93,6 +93,10 @@ namespaces so that multiple versions can coexist (e.g.,
 within the correct scoped namespace. Absolute imports bypass the scoping
 entirely.
 
+Exact version/source identity is a current executable-coexistence feature, independent of old DTO or graph compatibility.
+Scoped package classes do not automatically isolate process-global third-party dependencies.
+Accepted target intent requires explicit conflict/refusal policy and retention of each live definition's helper/asset identity.
+
 This applies everywhere in the package:
 
 - ``__init__.py``
@@ -106,13 +110,16 @@ Example tool package
 ProcessingTool
 ^^^^^^^^^^^^^^
 
+The declaration below uses the current public model; the method body is a processing sketch rather than a complete segmentation implementation.
+
 .. code-block:: python
 
    # my_tools/segmenter.py
-   from bioimageflow_core.tool import ProcessingTool, IOModel
-   from bioimageflow_core.environment import GENERAL_ENV
+   from bioimageflow_core import ProcessingTool, IOModel, RowConsumption
+   from bioimageflow_core import GENERAL_ENV
 
    class MySegmenter(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "My Segmenter"
        environment = GENERAL_ENV
 
@@ -175,7 +182,8 @@ Re-export tools for convenient access:
    # my_tools/__init__.py
    from .segmenter import MySegmenter
    from .loader import ImageLoader
-   from .pipeline import build_workflow
+   # Workflow factories are imported from their host-side module explicitly.
+   # Do not force a scientific worker to import bioimageflow through package initialization.
 
 Testing requirements
 --------------------
@@ -269,6 +277,9 @@ Cleanup:
 
    unload_versioned_package("my_tools", "1.0.0")
    unload_versioned_package("my_tools", "2.0.0")
+
+Accepted target intent: unload only an owner that no live definition or worker still requires.
+Canonical aliases are convenience names, never authority for existing nodes; unrelated live executable snapshots must not be purged.
 
 Tool store
 ----------

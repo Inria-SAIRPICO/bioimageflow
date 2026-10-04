@@ -33,13 +33,13 @@ performance:
    * - ``register_package(name, version)``
      - **Fast, in-process.** Loads an already-installed package via
        :func:`load_versioned_package` and indexes every BaseTool /
-       executable tool subclass it discovers. Raises
+       executable concrete tool subclass it discovers; incomplete reusable families are not runnable palette entries. Raises
        :class:`FileNotFoundError` if the package is not present in the
        store.
 
-Hot validation paths (sessions, validators, keystroke-rate previews)
-must call ``register_package`` only. Trigger ``install_package`` from
-a user-initiated action (a "Install plugin" button, an explicit dialog).
+Register packages before serving hot validation paths.
+Sessions, validators and keystroke-rate previews should use captured registry/schema facts rather than repeatedly importing packages or installing dependencies.
+Trigger ``install_package`` from an explicit user-authorized install action.
 Hosts with compatible main-process dependencies may pass
 ``install_dependencies=False`` to install only the tool distribution.
 The default installs its declared dependencies.
@@ -104,8 +104,12 @@ discovered tool class:
    * - ``tags``
      - Free-form tag tuple from the class (empty if not declared).
 
-The schemas are computed once per ``register_package`` call; subsequent
-``get_metadata`` lookups are dict reads.
+The schemas are captured during registration; later metadata lookup does not rerun scientific tool work.
+The accepted contract keeps caller-facing schema/default snapshots detached from registry authority and preserves schema failures as diagnostics rather than empty success.
+Concrete ProcessingTool admission requires an environment, IOModel outputs and explicit mapped/collective row semantics.
+DataFrameTools have no worker environment or RowConsumption requirement and may declare static, Passthrough or dynamic output schemas without an Outputs class.
+Per-tool facts such as row_consumption, accepts_upstream and dynamic_outputs are described by ``serialize_tool_metadata`` in :doc:`/specs` §2.4.
+Exact current snapshot/error API conformance remains a test/code-review obligation.
 
 Lookups
 -------
@@ -123,11 +127,9 @@ After registration, four methods drive lookups:
 Multiple versions
 -----------------
 
-The registry is a flat ``class_name → metadata`` index, but
-``load_versioned_package`` keeps versions isolated under scoped
-namespaces. When two versions of the same package register classes with
-the same name, the **last registered wins** in the registry's lookup
-table, but the underlying classes remain distinct objects:
+An unqualified class-name lookup is a convenience for the current palette; it is not executable identity.
+Package/version/module/class or captured custom-source identity addresses the exact executable declaration.
+Same-current-process versions remain distinct classes even when a palette convenience lookup selects a recent registration:
 
 .. code-block:: python
 
@@ -136,15 +138,14 @@ table, but the underlying classes remain distinct objects:
    reg.register_package("my_tools", "2.0.0")
    reg.get_class("Segmenter")          # the v2.0.0 class
 
-For an editor that needs to address both versions simultaneously, build
-two registries (one per version) or fall back to
-``resolve_tool_class("my_tools", "1.0.0", ...)`` directly.
+Use exact package/version/module/class resolution when a workflow addresses a specific executable, rather than creating a second independent registry authority.
+Scoped package names alone do not prove transitive dependency isolation; incompatible process-global dependency authority needs explicit refusal under :doc:`/specs` §3.10.
+Installed Python is trusted code: registration imports it, while cached palette lookups do not.
 
 Worked example: GUI startup populates a tool palette
 ----------------------------------------------------
 
-A host installs a curated set of packages once, then registers each on
-every startup:
+A host explicitly installs a curated set of packages, then registers each before serving the palette:
 
 .. code-block:: python
 
@@ -156,7 +157,7 @@ every startup:
    for pkg, ver in REQUIRED_TOOL_PACKAGES:
        reg.install_package(pkg, ver)
 
-   # Every startup — fast, in-process.
+   # Explicit registration — imports trusted declarations once before palette lookup.
    for pkg, ver in REQUIRED_TOOL_PACKAGES:
        reg.register_package(pkg, ver)
 

@@ -29,6 +29,10 @@ Record-owned and return-owned assets are copied beneath the destination and retu
 Downloaded ``SharedArray`` backing data is similarly owned by the bundle.
 Declared external paths preserve their original values and are never copied or reinterpreted from spelling alone.
 
+A bundle is self-contained for owned assets, not for those external dependencies.
+Shared-array rehydration retains an accessible controller owner independent of the temporary execution object.
+Accepted S target: callers can explicitly release the exact returned allocation group, with truthful pending views/grants and no deletion of durable bundle assets; API conformance remains a T/C obligation.
+
 Attached execution
 ------------------
 

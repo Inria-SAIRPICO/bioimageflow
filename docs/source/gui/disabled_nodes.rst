@@ -40,8 +40,7 @@ ancestors untouched.
 The ``enabled`` flag is **not** part of result identity
 ----------------------------------------------------------
 
-Re-enabling a previously disabled node hits the existing cache — no
-recompute. The flag affects scheduling, not the per-node identity.
+Re-enabling makes unchanged eligible records reusable; missing, invalidated or corrupt selections do not guarantee a cache hit. The flag affects scheduling, not the per-node identity.
 This is an intentional design choice: toggling visibility on a node
 should not invalidate its cached output.
 
@@ -51,12 +50,12 @@ compute_steps
 For hosts that need fine-grained control over execution
 (stepping through nodes manually, gating compute on UI events),
 :meth:`Workflow.compute_steps <bioimageflow.Workflow.compute_steps>`
-yields a :class:`~bioimageflow.engine.NodeStep` for every node in
-topological order — **including skipped ones**:
+yields real tool steps in topological order, including skipped ordinary tools.
+Recursive workflow aggregates are not tool steps, and a disabled workflow subtree is not expanded:
 
 .. code-block:: python
 
-   for step in wf.compute_steps(targets):
+   for step in wf.compute_steps(*targets):
        print(step.node_name, step.skipped)
        if not step.skipped:
            step.execute()
@@ -71,9 +70,9 @@ Each step exposes:
   when called on a skipped step. The host typically branches on
   ``step.skipped`` rather than catching the exception.
 
-Calling ``step.execute()`` is mandatory before advancing to the next
-step (the engine checks); skipping it leaves the workflow in an
-inconsistent state.
+Accepted target intent permits advancing past a skipped step without calling ``execute()``, which refuses for skipped steps.
+An admitted enabled step must complete before its dependents advance; exhaustion/close releases the execution reservation after drain.
+Actual source conformance remains for T/C; returned array ownership is not released merely by closing step iteration.
 
 How compute() handles skipped targets
 -------------------------------------

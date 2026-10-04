@@ -1,13 +1,13 @@
 Caching and Provenance
 ======================
 
-BioImageFlow caches the output of every node. When you re-run a workflow,
-only nodes whose inputs or parameters have changed are recomputed.
+BioImageFlow reuses eligible node results whose complete scientific identity selects a valid immutable record.
+Non-reusable executions have explicit outcomes without creating reusable cache artifacts; unchanged inputs alone are not a guarantee of a hit.
 
 How caching works
 -----------------
 
-Each node has a **result key** under ``storage_path/cache/v1/``.
+Each reusable node has a **result key** under ``storage_path/cache/v1/``.
 The result key identifies the reusable cache selection for the node's logical inputs, parameters, environment, and upstream cache state.
 Each successful execution publishes an immutable **record**, and ``current.json`` selects the record that cache hits must use.
 
@@ -27,7 +27,7 @@ If ``current.json`` selects a valid record for a node's final result key, the ca
 
    ``dev_mode=True`` adds the tool's source code hash to the signature, so
    editing ``process_row`` invalidates the cache. Leave it off in production —
-   only the package version should matter then. Pass it as
+   use explicit tool/source/environment identity and declared computation inputs. Pass it as
    ``wf.compute(target, dev_mode=True)`` or ``wf.plan(dev_mode=True)``.
 
 Cache location
@@ -90,7 +90,7 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
 - ``node_name`` — scoped name (``"outer/inner_1"`` for nested workflow tools)
 - ``final_result_key`` — result key when all required upstream selected records are known
 - ``selected_record_id`` — selected immutable record ID when the node is cached
-- ``status`` — one of the five
+- ``status`` — one of the six
   :class:`~bioimageflow.engine.NodePlanStatus` values below
 - ``upstream`` — scoped names of this node's direct upstreams
 - ``pending_upstreams`` — upstream nodes whose selected records must be produced before this node's final key is known
@@ -120,9 +120,11 @@ Each :class:`~bioimageflow.engine.NodePlan` carries:
        execution.
      - Struck-through / muted
 
-A workflow node aggregates its internals: it reports ``CACHED`` only when every internal entry is cached.
+A workflow node aggregates its internals: ``CACHED`` requires every executable internal entry to be cached or skipped; a corrupt internal selection remains visible as ``CORRUPT``.
 
 ``plan()`` does **not** start Wetlands worker pools.
+It is a fresh diagnostic snapshot, not a promise that mutable record selection cannot change before compute.
+Accepted S target: data, asset locators and provenance remain bound to the same validated selected immutable record throughout downstream consumption; first-valid losers use the winner, not their non-current candidate.
 It uses the direct planning path and does not run tool code.
 
 Invalidating cache when a parameter changes

@@ -1,9 +1,9 @@
 Type System
 ===========
 
-BioImageFlow uses Python's ``Annotated`` types to describe image data flowing
-through the pipeline. The type system catches incompatibilities at
-graph-construction time, before any computation runs.
+BioImageFlow uses Python's ``Annotated`` types to describe declared image data constraints.
+Graph compatibility checks compare this metadata before computation; they do not certify actual pixels, biological suitability or arbitrary runtime values.
+Portable declaration types, GUI display schemas and current numeric runtime transport are separate boundaries.
 
 ImageSpec
 ---------
@@ -20,7 +20,8 @@ constraint sets:
        dtypes: frozenset[str] = frozenset()      # numpy dtypes
        formats: frozenset[str] = frozenset()     # "memory" or file formats
 
-An empty set means **wildcard** --- any value is accepted.
+An empty consumer constraint is a wildcard; an unknown producer with a constrained consumer is accepted with a warning, as described below.
+Constraint collections form immutable declaration metadata; caller mutation must not retarget an already captured schema.
 
 Semantic
 --------
@@ -180,7 +181,7 @@ labels, and tooltips.
    from pathlib import Path
    from typing import Annotated
 
-   from bioimageflow_core import Connectable, GUIMeta, ImageSpec, Semantic, Template
+   from bioimageflow_core import Connectable, GUIMeta, IOModel, ImageSpec, Semantic, Template
 
    class Inputs(IOModel):
        image: Annotated[
@@ -211,8 +212,12 @@ Parameters:
   for ``Outputs`` fields, which always expose a pin.
 - **min** / **max** (``float | None``): numeric bounds for the widget.
 - **step** (``float | None``): step increment for spinbox or slider widgets.
-- **group** (``str | None``): logical group name for tabs or sections
-  (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).
+- **group** (``str | None``): logical group name for tabs or sections (e.g. ``"general"``, ``"advanced"``, ``"gpu"``).
+- **path_picker**: ``"file"``, ``"folder"``, ``"both"`` or absent; a picker hint, not a filesystem validation rule.
+
+DataFrameTool parameter fields are constant-only and expose no pins, regardless of a GUI hint; whole DataFrames use positional inputs.
+Requiredness follows default presence and nullability follows the annotation, so a required nullable field accepts an explicitly supplied ``None`` but cannot be omitted.
+GUIMeta supplies widgets rather than scientific value validation; schema display names never replace authoritative declarations.
 
 Fields without ``GUIMeta`` default to ``Connectable.NOT_BY_DEFAULT`` with no
 label, description, numeric bounds, or group. Data input fields (image paths)
@@ -255,4 +260,6 @@ Introspection
 Programmatic schema introspection (``get_inputs_schema``,
 ``serialize_input_schema``, ``serialize_output_schema``, the
 ``Connectable`` serialization, and the wire-format helpers) lives in
-the GUI tree — see :doc:`/gui/tool_schemas`.
+the GUI tree — see :doc:`/gui/tool_schemas` and :doc:`/specs` §2.
+The current typed worker grammar supports numeric NumPy arrays/scalars, Paths, bytes, containers and scoped SharedArray references.
+That runtime support does not admit arbitrary third-party IOModel annotation classes or silently stringify unsupported graph constants.

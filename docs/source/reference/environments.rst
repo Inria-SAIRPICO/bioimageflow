@@ -76,11 +76,16 @@ The proxy carries two supported runtime fields:
 
 - ``max_workers`` (int, default ``0`` meaning "use workflow default")
   — pool size for this environment.
-- ``worker_timeout`` (float, default ``None``) — last-resort safety
-  timeout per row dispatch.
+- ``worker_timeout`` (float, default ``None``) — IPC inactivity detection in Wetlands, with a separate orchestrator safety wait; it is not a per-row scientific duration budget.
 
 Multiple ``get_environment`` calls with the same target name return
 the **same** proxy — edits propagate.
+
+.. important::
+
+   Accepted S target: capture independent effective environment recipes and launch settings before run-visible effects and callbacks.
+   Later proxy/dependency edits affect later calls only; read-only declaration metadata must not expose mutable launch authority.
+   T/C must verify this snapshot requirement rather than infer it from a frozen dataclass.
 
 Wetlands configuration
 ----------------------
@@ -257,3 +262,8 @@ Returned shared arrays retain their controller owner independently of worker/eng
 Successful public pool close releases captured worker grants; failed close retains the pool and grants for retry and keeps cleanup pending.
 Task terminal/result notification alone is not a physical release fence.
 Workflow execution/context exit never closes returned-array owners; explicit owner close/release waits for existing mapped views and admitted workers.
+
+Accepted S target: expose an accessible public cleanup owner and an exact result/allocation-group release boundary.
+Discarded normal results need bounded cleanup, including safe idle/quota-pressure physical pool retirement when retained grants prevent reclamation.
+Refuse finite-budget exhaustion if safe reclamation cannot complete; never invalidate live views or release unrelated allocations.
+These obligations are T/C checks, not a claim that the present candidate already supplies a complete result-group API.

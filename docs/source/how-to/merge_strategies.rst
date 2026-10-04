@@ -5,12 +5,13 @@ When a tool needs data from multiple upstream nodes, the framework must combine
 their DataFrames. ``bioimageflow-common-tools`` provides several merge
 strategies as :class:`~bioimageflow.DataFrameTool` subclasses.
 
-InnerJoin (default)
+Explicit index join
 -------------------
 
-:class:`~bioimageflow_common_tools.InnerJoin` joins DataFrames on their index. This is the
-default behaviour when a ProcessingTool receives inputs from multiple upstream
-nodes.
+:class:`~bioimageflow_common_tools.InnerJoin` explicitly joins DataFrames on their index.
+ProcessingTool column consumption aligns already compatible lineage; it does not silently combine independent sources.
+Independent sources or sibling expansions require an explicit DataFrame merge with declared association/lineage.
+Accepted target intent is in :doc:`/reference/unified_workflow_contract`; source conformance remains for T/C.
 
 .. code-block:: python
 
@@ -132,7 +133,7 @@ Collect       Gather columns from multiple points in the DAG
 Construction-time column validation
 -----------------------------------
 
-When both upstream nodes have a known schema, the merged schema is also known
+When upstream declarations and merge parameters resolve the effective output schema, that schema is known
 at construction time, and ``node["col"]`` validates immediately. For example,
 :class:`~bioimageflow_common_tools.CrossJoin` of two :class:`~bioimageflow_common_tools.Generate`
 nodes resolves to the union of their declared column names:
@@ -151,3 +152,6 @@ nodes resolves to the union of their declared column names:
        # mistype the column name:
        ref = grid["sensitivity"]   # OK
        # ref = grid["sensitvity"]  # ColumnNotFoundError
+
+Unknown dynamic columns remain honestly unresolved; no-Outputs DataFrame tools are still concrete executable tools.
+New indexes produced by joins/Concat retain defined source association rather than pretending reset ordinals preserve provenance.

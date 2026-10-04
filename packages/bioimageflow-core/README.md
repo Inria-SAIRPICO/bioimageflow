@@ -8,7 +8,6 @@ It declares NumPy because shared-memory helpers expose NumPy array views at runt
 It declares `packaging` to validate portable PEP 440 viewer-package constraints without importing napari or plugin discovery code.
 The `bioimageflow` orchestrator injects a pinned published `bioimageflow-core` package into Wetlands worker environments by default.
 During source development, set `BIOIMAGEFLOW_CORE_SOURCE` to this project directory before creating worker environments to validate and inject it as an editable dependency.
-The legacy `BIOIMAGEFLOW_USE_LOCAL_CORE=1` mode requires the orchestrator environment to import this package from its editable source checkout.
 
 Install:
 
@@ -22,6 +21,12 @@ For workspace development, use the repository root:
 uv sync
 uv run pytest packages/bioimageflow-core tests/unit/test_core_package_metadata.py
 ```
+
+Core supports scientific worker Python >=3.9; the orchestrator requires Python >=3.10.
+These floors do not certify every OS, model, binary or package recipe.
+Portable IOModel declarations and GUI schema strings are distinct from runtime scientific values: current typed transport supports numeric NumPy arrays and scalars without admitting arbitrary third-party annotation classes or picklable objects.
+IOModel enforces structural fields; semantic value validation belongs to the orchestrator.
+Postponed and inherited annotations retain their metadata without importing unavailable declaration modules.
 
 Numeric creation/mapping helpers reject object-containing NumPy dtypes before backing allocation or mapping.
 Numeric data and Path/str image dispatch retain their essential behavior; explicit owners and live reader/worker grants control file lifetime.
@@ -39,3 +44,10 @@ Allocate under an explicit `SharedMemoryContext.activate()`; helper/context exit
 References carry a strong local owner excluded from equality and wire; pure typed decoding is attachment-free, and workers borrow explicit task/input descriptors.
 Controller close/release refuses new access while mapped views and admitted workers retain backing; `CleanupStatus` reports pending readers/grants/files/errors until physical drain.
 Workflow/engine completion never auto-closes returned references; no resource tracker or private unregister is involved.
+Accepted and borrowed scientific inputs are immutable to consumers by contract; mutable processing creates a separate work/output value.
+
+The accepted lifecycle target also requires public owner/status access and exact result/group release, so callers can release a discarded result without closing unrelated groups.
+Normal reusable worker pools can retain physical grants; idle or quota-pressure retirement must drain the owning pool before reclaiming backing, while live mapped views remain valid.
+If safe retirement cannot reclaim enough space, finite allocation budgets must refuse clearly.
+The exact result/group API and conformance are assessed in the ordered test and causal-code review; these requirements are not a claim that an unspecified method already exists.
+See the [library specifications](../../docs/source/specs.md) for the declaration, typed-value and resource-owner contracts.

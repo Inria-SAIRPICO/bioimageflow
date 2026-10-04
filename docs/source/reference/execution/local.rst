@@ -116,6 +116,10 @@ An externally owned manager can serve several engines:
 
 The public manager supports ``stop(name)``, ``is_running(name)``, ``running_environments()``, and idempotent ``shutdown_all()``.
 
+Strict selected pool close and named best-effort manager stopping have different outcomes.
+Accepted S target: failed physical close retains cleanup ownership and grants for retry; report pending/error instead of advertising physical retirement.
+Task writer cessation, public operation completion and physical worker-pool retirement are separate fences.
+
 Direct execution
 ----------------
 
@@ -144,3 +148,8 @@ Returned shared arrays retain their controller owner independently of worker/eng
 Successful public pool close releases captured worker grants; failed close retains the pool and grants for retry and keeps cleanup pending.
 Task terminal/result notification alone is not a physical release fence.
 Workflow execution/context exit never closes returned-array owners; explicit owner close/release waits for existing mapped views and admitted workers.
+
+Accepted S target: expose an accessible public cleanup owner and an exact result/allocation-group release boundary.
+Discarded normal results need bounded cleanup, including safe idle/quota-pressure physical pool retirement when retained grants prevent reclamation.
+Refuse finite-budget exhaustion if safe reclamation cannot complete; never invalidate live views or release unrelated allocations.
+These obligations are T/C checks, not a claim that the present candidate already supplies a complete result-group API.

@@ -8,7 +8,7 @@ workflow examples, or authoring documentation.
 - Package boundary is explicit: tools, workflows, tests, fixtures, examples,
   small assets, and docs live with the owning package.
 - Examples import from the new package name only.
-- No backward compatibility shim is added unless a maintainer explicitly asks.
+- Use one clean current design, without backward-only shims, duplicate DTOs or legacy schema readers; preserve essential scientific features and protected user data.
 - Runtime assets are small and committed only when required for behavior.
 - Heavy models, datasets, binaries, and generated outputs are downloaded,
   declared as dependencies, mocked in tests, or produced at runtime.
@@ -21,8 +21,9 @@ workflow examples, or authoring documentation.
   `bioimageflow-core` at module import time.
 - Tool-specific dependencies are imported inside `process_row` or
   `process_batch`.
-- `Inputs` and `Outputs` use serializable standard-library types and
-  BioImageFlow metadata.
+- Concrete ProcessingTools use IOModel declarations, an admitted worker environment and explicit RowConsumption; portable declared annotations differ from supported scientific runtime values.
+- DataFrameTool may expose static, Passthrough or genuinely dynamic Outputs; unknown schemas remain honest and added declared metadata is preserved.
+- Collective isolated batch inference/training/aggregation retains explicit all-consumed-input association and meaningful empty artifacts, without fabricated scientific rows.
 - Tests cover schema serialization, binding validation, one tiny successful
   execution, output template resolution, returned `Outputs`, and expected
   failure paths.
@@ -44,7 +45,8 @@ workflow examples, or authoring documentation.
 
 - Authoring docs explain package boundaries, process boundaries, imports,
   tests, and validation data.
-- Code snippets use current packages and public APIs.
+- Code snippets use current packages and public APIs; complete declarations are distinguished from partial method sketches.
+- Accepted target intent is labelled separately from demonstrated current source/runtime conformance.
 - Images live under `docs/images/` only when they clarify expected behavior,
   UI state, or workflow output.
 - Images are small PNG/WebP files from public, permissively licensed, or
@@ -54,6 +56,7 @@ workflow examples, or authoring documentation.
 
 ## Reviewer Checklist
 
+- First review and accept specification intent, then assess the whole applicable test suite/oracles, then trace main and secondary causal code paths before global findings unlock fixes.
 - Confirm the change stays inside the claimed ownership area.
 - Confirm every new or changed public tool/workflow has tests. Public tools
   are classes re-exported from a package `__init__.py`, classes documented in
@@ -65,8 +68,8 @@ workflow examples, or authoring documentation.
 - Confirm examples use new package imports and no migration shim was added.
 - Confirm package ownership by checking the package README, its
   `pyproject.toml`, and the changed imports in example workflows.
-- Run the specific tests added or changed by the branch, plus the closest
-  existing package tests under `tests/unit/` and `tests/integration/`.
+- After review unlocks implementation, run exact changed/failing selectors and the smallest mapped completion lane; do not stack subsumed checks.
+- Pure-model, real storage, actual local managed-worker and optional external scientific proofs are distinct; neither mocks nor documentation checks certify omitted runtime capabilities.
 - Run `uv run ruff check <changed package/test paths>`.
 - Run `uv run sphinx-build docs/source docs/_build/html` when docs changed,
   or document why it could not run.

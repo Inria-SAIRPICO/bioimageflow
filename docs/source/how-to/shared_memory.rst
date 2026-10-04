@@ -8,7 +8,9 @@ This storage contract does not promise a measured speedup over ordinary files.
 Overview
 --------
 
-Instead of saving an image to a file and loading it in the next tool, you can:
+Mapped numeric backing shares one admitted NPY2 file rather than repeatedly encoding an image format.
+It still uses files and performs an initial copy; zero-copy views do not imply an observed latency gain.
+You can:
 
 1. Write a numpy array to shared memory with
    :func:`~bioimageflow_core.shm.create_shared_output`
@@ -27,12 +29,14 @@ Producing shared arrays
 
    from bioimageflow_core import (
        ProcessingTool, IOModel, GENERAL_ENV, ImageShared, ImageSpec, Arguments, Template,
+       RowConsumption,
    )
    from bioimageflow_core.shm import create_shared_output
 
    class Preprocess(ProcessingTool):
        display_name = "Preprocess"
        environment = GENERAL_ENV
+       row_consumption = RowConsumption.MAPPED
 
        class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
@@ -63,7 +67,8 @@ Consuming shared arrays
 
    class Segment(ProcessingTool):
        display_name = "Segment"
-       environment = EnvironmentSpec(name="cellpose", dependencies={})
+       environment = GENERAL_ENV
+       row_consumption = RowConsumption.MAPPED
 
        class Inputs(IOModel):
            image: ImageShared()
@@ -74,6 +79,7 @@ Consuming shared arrays
            )
 
        def process_row(self, arguments: Arguments) -> "Segment.Outputs":
+           # Method sketch: supply the scientific run_segmentation implementation.
            with load_image(arguments.image, file_reader=None) as arr:
                # arr is a zero-copy numpy view of the shared memory
                mask = run_segmentation(arr)
@@ -91,6 +97,7 @@ Wiring it together
 
 .. code-block:: python
 
+   # Workflow and loader are supplied by the containing workflow example.
    preprocess = Preprocess()
    segment = Segment()
 
@@ -136,6 +143,7 @@ Explicit ownership and cleanup
 
 Workflow execution establishes a controller scope automatically; standalone helper calls require an explicit scope.
 Returned DataFrames retain their reference owners even when a temporary Workflow is collected.
+Output-only producers still need an admitted output allocation namespace; a task with no shared capability needs no such scope.
 Workflow/context exit and execution completion do not close returned arrays.
 
 .. code-block:: python
@@ -155,3 +163,12 @@ Already admitted workers and existing base/slice/asarray views retain backing un
 ``CleanupStatus`` reports pending readers, grants, files and errors; Windows deletion failures stay pending for retry.
 Workers borrow scopes and never own deletion; public pool close releases grants only after successful physical drain.
 No resource tracker, private unregister or automatic context-exit unlink is used.
+GC does not initiate accepted-result or whole-owner release; final-reader drainage may finish a previously requested explicit cleanup.
+Borrowed and accepted scientific inputs are immutable to consumers by contract; allocate a separate work/output value before modifying pixels.
+
+The accepted lifecycle target requires accessible public owner/status information and exact result/group release, including results callers discard between repeated runs.
+Releasing one result must not close unrelated groups.
+A reused worker pool can retain physical grants: idle or quota-pressure retirement must physically drain its pool before reclamation, without forcing live mapped views closed.
+Finite quota exhaustion refuses clearly if enough space cannot safely be reclaimed.
+The exact result/group API and these conformance obligations remain subject to the ordered test and code review; this guide does not invent a cleanup method.
+See :doc:`/specs` §8 for the normative ownership and admission contract.

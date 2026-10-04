@@ -1,6 +1,9 @@
 Live Validation
 ===============
 
+Accepted S intent distinguishes declaration, partial editor diagnostics and resolved execution admission.
+Actual source conformance remains a T/C obligation; see :doc:`/reference/unified_workflow_contract`.
+
 Three entry points cover the host's needs at three different
 granularities — whole graph, single node, single field. Picking the
 right one keeps keystroke latency low.
@@ -8,8 +11,8 @@ right one keeps keystroke latency low.
 Workflow.validate()
 -------------------
 
-:meth:`Workflow.validate <bioimageflow.Workflow.validate>` runs **five
-checks**, in order, on a fully-constructed workflow:
+:meth:`Workflow.validate <bioimageflow.Workflow.validate>` reports current definition and binding diagnostics without executing scientific tools or implicitly installing heavy dependencies.
+Its responsibilities include:
 
 1. Cycle detection (one error per cycle).
 2. Type compatibility on every column binding.
@@ -18,16 +21,12 @@ checks**, in order, on a fully-constructed workflow:
 5. Recursive validation of workflow nodes; ``ValidationError.path`` is
    prefixed with the parent's node name.
 
-The method is **non-raising** — it always returns
-``list[ValidationError]``, deduplicated and sorted by
-``(path, node, field, kind)``. Construction-time errors (steps 1–3) are
-already enforced by ``Node.__init__`` for graphs built via the
-context-manager API, but ``validate()`` re-runs them so a graph built
-via :meth:`from_dict` (or mutated in a session) can be re-checked
-after the fact. Step 4 (constant Pydantic validation) only runs in
-``validate()`` — it is intentionally not performed at construction
-time, so a host editing one field at a time does not need every other
-field to be valid yet.
+Ordinary graph diagnostics return structured errors with scoped node/field/edge identity.
+Construction admission, editable incomplete values and resolved runtime validation are separate phases; a list of graph diagnostics is not execution certification.
+Unknown schema stays explicitly unknown; declarations, GUI hints and scientific value constraints are not interchangeable.
+Only declared meaning-preserving conversions are admitted; unsupported scientific constants are not silently stringified.
+Correcting an edit refreshes affected errors and schemas.
+Owner interruption and setup failures must not be disguised as an empty successful diagnostic list.
 
 .. code-block:: python
 
@@ -54,9 +53,9 @@ construction pass:
    # errors: list[ValidationError] with both failures
 
 Nested blocks push their own list; the outer list is restored on exit.
-Best-effort node registration: a node that *partially* constructed —
-e.g., one binding failed but the others succeeded — is still attached
-to the workflow so subsequent edits and validations can address it.
+Diagnostic mode can deliberately retain an incomplete node and scoped errors so later editing can address it.
+This differs from ordinary mutation refusal, whose accepted target is all-or-nothing publication of graph/interface/edge/name state.
+An incomplete diagnostic node is never advertised as executable success.
 
 The relationship to ``validate()``:
 

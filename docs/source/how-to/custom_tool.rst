@@ -108,19 +108,20 @@ Minimal example
    from pathlib import Path
    from typing import Annotated
    from bioimageflow_core import (
-       ProcessingTool, GENERAL_ENV, GUIMeta, Connectable, ImageSpec, Arguments,
-       Template,
+       ProcessingTool, EnvironmentSpec, GENERAL_ENV, GUIMeta, Connectable, ImageSpec, Arguments,
+       Template, IOModel, RowConsumption,
    )
 
    class GaussianBlur(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Gaussian Blur"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
            sigma: Annotated[float, GUIMeta(min=0.1, max=50.0, step=0.1)] = 1.0
 
-       class Outputs:
+       class Outputs(IOModel):
            blurred: Annotated[Path, ImageSpec()] = Template("{image.stem}_blur.tif")
 
        def process_row(self, arguments: Arguments) -> "GaussianBlur.Outputs":
@@ -160,13 +161,14 @@ Outputs aren't limited to file paths. Return scalars for measurements:
 .. code-block:: python
 
    class MeasureIntensity(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Measure Intensity"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            mean: float
            std: float
 
@@ -180,19 +182,24 @@ Outputs aren't limited to file paths. Return scalars for measurements:
 Batch processing
 ^^^^^^^^^^^^^^^^
 
-Override ``process_batch`` instead of ``process_row`` when you need to process
-all rows at once (e.g., for GPU batching):
+A mapped tool can use ``process_batch`` to vectorize independent aligned rows.
+Collective input meaning also preserves isolated whole-batch inference, training and aggregation with explicit all-consumed-input association and truthful aggregate lineage.
+Ordered transport correlation does not require duplicated scientific aggregate rows or moving aggregation into pandas.
+The accepted association contract is reviewed against the current API in T/C.
+
+The following mapped GPU-inference method is a partial sketch; declare its real model dependencies and initialization separately:
 
 .. code-block:: python
 
    class BatchClassifier(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Batch Classifier"
        environment = EnvironmentSpec(name="torch", dependencies={})
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            label: str
            confidence: float
 
@@ -219,14 +226,15 @@ single input row. This is useful for tiling or splitting:
 .. code-block:: python
 
    class TileImage(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Tile"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
            tile_size: int = 256
 
-       class Outputs:
+       class Outputs(IOModel):
            tile: Annotated[Path, ImageSpec()] = Template(
                "{image.stem}_tile_{row_index}.tif"
            )
@@ -272,11 +280,13 @@ Source tool (no upstream)
 
    import pandas as pd
    from bioimageflow import DataFrameTool
+   from bioimageflow_core import IOModel
 
    class CSVSource(DataFrameTool):
+       accepts_upstream = False
        display_name = "Csv Source"
 
-       class Inputs:
+       class Inputs(IOModel):
            path: str
 
        def transform(self, df, arguments):
@@ -290,11 +300,11 @@ Transform tool (with upstream)
    class FilterByArea(DataFrameTool):
        display_name = "Filter By Area"
 
-       class Inputs:
+       class Inputs(IOModel):
            min_area: float = 100.0
 
        def transform(self, df, arguments):
-           return df[df["area"] >= arguments.min_area].reset_index(drop=True)
+           return df[df["area"] >= arguments.min_area]
 
 Use it in a pipeline:
 
@@ -412,6 +422,7 @@ To introspect a tool's schema programmatically:
 
    from bioimageflow import get_inputs_schema
 
+   # Partial inspection example: supply the concrete tool being inspected.
    schema = get_inputs_schema(my_tool)
    for name, info in schema.items():
        print(f"{name}: connectable={info['connectable']}, type={info['type']}")
@@ -429,11 +440,13 @@ Multiple tools can share the same environment:
    )
 
    class ToolA(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Tool A"
        environment = importbio_env
        # ...
 
    class ToolB(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Tool B"
        environment = importbio_env
        # ...

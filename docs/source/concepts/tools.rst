@@ -1,7 +1,9 @@
 Tools
 =====
 
-BioImageFlow has two tool types, each suited to different kinds of operations.
+BioImageFlow has two tool types with distinct process and declaration contracts.
+Concrete ProcessingTools require an environment, IOModel outputs and explicit row-consumption semantics.
+DataFrameTools require no worker environment or RowConsumption and may expose static, Passthrough or dynamic outputs without an Outputs declaration.
 
 Process boundaries
 ------------------
@@ -33,23 +35,30 @@ measurement --- anything that operates on individual images or arrays.
    from pathlib import Path
    from typing import Annotated
 
-   from bioimageflow_core import GENERAL_ENV, ImageSpec, Template
+   from bioimageflow_core import (
+       Arguments, GENERAL_ENV, IOModel, ImageSpec, ProcessingTool, RowConsumption, Template,
+   )
 
    class MyTool(ProcessingTool):
        display_name = "My Tool"
        environment = GENERAL_ENV  # or a custom EnvironmentSpec for specialized deps
+       row_consumption = RowConsumption.MAPPED
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
            threshold: float = 0.5
 
-       class Outputs:
+       class Outputs(IOModel):
            mask: Annotated[Path, ImageSpec(semantics={"binary"})] = Template(
                "{image.stem}_mask.tif"
            )
 
        def process_row(self, arguments: Arguments) -> "MyTool.Outputs":
-           ...
+           from skimage.io import imread, imsave
+
+           mask = imread(arguments.image) > arguments.threshold
+           imsave(str(arguments.mask), mask.astype("uint8"))
+           return self.Outputs(mask=arguments.mask)
 
 Key properties:
 
@@ -64,6 +73,9 @@ Key properties:
 - **Row-level parallelism**: ``process_row`` is called once per row, enabling
   future parallel execution.
 - **Batch mode**: override ``process_batch`` for GPU-batched operations.
+- **Row meaning**: ``RowConsumption.MAPPED`` means independent input rows; ``COLLECTIVE`` means whole-batch input semantics, independently of scheduling or output cardinality.
+  Isolated collective inference, training and aggregation retain all-consumed-input association and aggregate lineage; they do not require repeated aggregate rows or relocation into a DataFrameTool.
+  The exact correlated aggregate representation is a test/code-review obligation, not an additional mode introduced by this guide.
 - **Explosion**: return a list from ``process_row`` to produce multiple output
   rows (e.g., tiling).
 
@@ -78,10 +90,13 @@ results, computing aggregate statistics.
 
 .. code-block:: python
 
+   from bioimageflow import DataFrameTool
+   from bioimageflow_core import IOModel
+
    class MyTransform(DataFrameTool):
        display_name = "My Transform"
 
-       class Inputs:
+       class Inputs(IOModel):
            min_area: float = 100.0
 
        def transform(self, df, arguments):
@@ -92,8 +107,8 @@ Key properties:
 - **Main-process only**: has access to the full pandas DataFrame.
 - **Merge control**: override ``merge_dataframes`` to customize how multiple
   upstream DataFrames are combined.
-- **Passthrough**: use :class:`~bioimageflow.Passthrough` outputs to signal
-  that input columns are preserved.
+- **Passthrough**: use :class:`~bioimageflow.Passthrough` outputs to signal that input columns are preserved.
+  Additional declared output fields retain their type, image and viewer metadata; a marker must not erase them.
 - **Source tools**: set ``accepts_upstream = False`` on tools that produce a
   DataFrame from constants alone (e.g. ``Files``, ``Generate``). Constructing
   a source tool with positional upstream arguments raises
@@ -136,7 +151,9 @@ IOModel
 
 :class:`~bioimageflow_core.IOModel` is the lightweight base class for
 ``Inputs`` and ``Outputs``. It's not pydantic --- it's a simple namespace with
-type annotations and validation.
+type annotations and structural field checks.
+It rejects missing required or unknown constructor fields; semantic type/value validation belongs to the orchestrator.
+Resolved inherited/postponed annotations preserve metadata, and unavailable names are actionable declaration errors rather than invented unknown types.
 
 .. code-block:: python
 
@@ -146,8 +163,11 @@ type annotations and validation.
 
 - Fields without defaults are **required** (must be bound to upstream columns
   or constants).
-- Fields with defaults are **optional parameters**.
-- Annotations are used for type checking and template resolution.
+- Fields with defaults may be omitted; nullability is independent.
+  A nullable field with no default remains required, and explicitly supplied ``None`` is distinct from a missing value.
+- Portable annotations describe graph validation and template resolution; schema display strings are not authoritative Python types.
+  Numeric NumPy runtime values may cross current typed transport without allowing arbitrary third-party annotation classes.
+- GUI bounds and picker choices are display hints, not validation of actual image pixels, biological meaning or filesystem existence.
 - Attach :class:`~bioimageflow_core.GUIMeta` to provide GUI hints (see
   :doc:`type_system`).
 

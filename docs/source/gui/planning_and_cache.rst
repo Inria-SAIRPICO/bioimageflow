@@ -22,6 +22,8 @@ Workflow.plan()
        print(name, entry.status, entry.final_result_key, entry.selected_record_id)
 
 It uses the direct planning path — **no Wetlands worker pools are launched** and no tool code runs.
+The plan refreshes storage-facing state but does not reserve selection through a later compute.
+A corrupt selection is ``CORRUPT`` with a diagnostic, not a success badge; execution remains strict.
 
 NodePlan
 --------
@@ -68,8 +70,7 @@ NodePlanStatus → UI mapping
      - Meaning
      - Suggested affordance
    * - ``CACHED``
-     - The planned result key has a selected current record; ``compute()``
-       would short-circuit.
+     - The planned result key selects a valid record at this snapshot; reuse depends on consuming the same upstream selection at execution.
      - Green / "up to date"
    * - ``PRIOR_SELECTION_MISS``
      - The planned result key has no selected record, but the same node has

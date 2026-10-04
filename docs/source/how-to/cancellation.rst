@@ -24,6 +24,10 @@ requests cancellation of every unfinished submitted task, drains those tasks,
 and raises :class:`~bioimageflow.engine.WorkflowCancelledError` from the
 in-flight ``compute()`` call. Results arriving after cancellation are ignored.
 
+Accepted S target: setup/reservation failure leaves no running binding, and a submitted writer cannot publish after its owner is released.
+Task writer cessation, operation completion and physical pool retirement remain distinct; array grants release only at their physical boundary.
+Cleanup errors do not mask the admitted primary failure, and uncertain physical close retains retryable ownership.
+
 In-flight rows
 --------------
 
@@ -44,21 +48,24 @@ points in its loop:
 
 .. code-block:: python
 
+   # Partial method sketch: imports, complete dependency recipe and tool methods omitted.
    class SlowSegment(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Slow Segment"
        environment = EnvironmentSpec(name="torch", dependencies={...})
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            mask: Annotated[Path, ImageSpec()] = Template("{image.stem}_mask.tif")
 
        def process_row(self, arguments, *, task=None):
            img = self._load(arguments.image)
            for i, tile in enumerate(self._tiles(img)):
                if task is not None and task.cancel_requested:
-                   raise RuntimeError("cancelled")
+                   task.cancel()  # acknowledge the cooperative cancellation request
+                   return
                self._process_tile(tile)
            ...
 

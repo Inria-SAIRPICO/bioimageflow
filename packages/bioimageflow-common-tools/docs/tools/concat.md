@@ -5,7 +5,9 @@ from alternative branches that produce compatible result columns.
 
 The tool has no inputs. It returns the union of columns; missing values are
 represented by pandas as nulls. If row indexes collide, the result is reset to
-a dense integer index to preserve lineage without duplicate index ambiguity.
+a dense integer index to remove duplicate index ambiguity.
+Accepted S target: reset ordinals do not preserve source ancestry; the result retains explicit association to its source tables/rows and defines a new lineage.
+Exact lineage representation remains a T/C obligation.
 
 Use `Concat` for stacking equivalent measurements, not for joining different
 measurements for the same objects.

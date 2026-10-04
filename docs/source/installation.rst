@@ -8,6 +8,8 @@ Requirements
 
 BioImageFlow's deterministic CI test matrix runs full fast coverage on Python 3.10 and 3.12, plus Python 3.11 compatibility smoke on every pipeline.
 Full deterministic Python 3.11 validation is manually available before tagging and rerun as a required release gate.
+These configured lanes are not proof that the present candidate passed them.
+Core Python3.9 annotation resolution and numeric mapped-array lifetime on Windows/Linux/Python3.9 with NumPy1.26 remain explicit capability gates; a Mac/Python3.12 artifact proof does not certify them.
 The worker-safe ``bioimageflow-core`` package supports Python >= 3.9 because it is installed into isolated Wetlands worker environments, including external-binary environments whose dependencies require Python 3.9.
 
 Install from PyPI
@@ -61,11 +63,8 @@ The complete technical contract is in :doc:`/reference/execution/index`, and :do
 Companion tool packages
 -----------------------
 
-The documentation imports source and processing tools (``Files``, ``Generate``,
-``Mosaic``, ``LabelOverlaps``, the merge tools, ...) from a layered
-companion package, ``bioimageflow-common-tools``. Installing it alongside the
-core library lets every example in the docs run without copy-pasting helper
-classes:
+``bioimageflow-common-tools`` supplies source/table/glue and merge tools such as ``Files`` and ``Generate``.
+Examples using image IO, segmentation, measurements, mosaics or other domain operations also require the explicitly imported companion packages; installing common alone does not supply every example dependency.
 
 .. code-block:: bash
 

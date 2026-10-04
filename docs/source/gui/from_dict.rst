@@ -1,90 +1,26 @@
 Loading: from_dict
 ==================
 
-:meth:`Workflow.from_dict <bioimageflow.Workflow.from_dict>` is the host's
-entry point for materializing a workflow from a wire-format dict. Two
-flags drive its behaviour:
+:meth:`Workflow.from_dict <bioimageflow.Workflow.from_dict>` materializes a current recursive graph or portable source archive with explicit runtime storage.
+The normative grammar, origin and effect boundaries are in :doc:`/reference/unified_workflow_contract`.
 
-- ``validate_only`` — drives the **return type**.
-- ``partial`` — drives **error suppression / continuation**.
+Accepted target intent
+----------------------
 
-Their combinations give four modes:
+Strict materialization either returns a coherent admitted workflow or refuses before publishing a successful result.
+Diagnostic editor materialization may retain unavailable or incomplete nodes with current scoped errors; an incomplete workflow is never represented as executable success.
+This is accepted S intent; actual ``2cd79a2`` behavior and the current flags' conformance remain T/C obligations.
+The essential distinction is strict use versus diagnostic editing, not every existing flag combination or variable return shape.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 25 25 50
+Admission checks include required fields, node/edge/port identities, binding kinds and exact source/package identity.
+Custom archives admit their complete captured source table before custom-source writes or imports.
+Outer ZIP paths and extraction destinations have a separate ownership boundary.
+Embedded Python remains trusted executable code; contained staging is not a sandbox.
 
-   * - ``validate_only``
-     - ``partial``
-     - Behaviour
-   * - ``False`` (default)
-     - ``False`` (default)
-     - **Strict load.** Returns a fully wired ``Workflow``. The first
-       error during construction raises immediately. Use for
-       ``Workflow.load(path, storage_path=results)``-style runs.
-   * - ``False``
-     - ``True``
-     - **Best-effort load.** Per-node failures are captured. After all
-       nodes are processed, the aggregated errors are raised as a single
-       ``ValueError``. Rarely the right choice; prefer one of the
-       ``validate_only=True`` modes.
-   * - ``True``
-     - ``False``
-     - **Fail-fast diagnostic.** Returns ``(workflow, errors)``; the
-       errors list contains at most one entry — the first construction
-       failure. Useful for "is this graph loadable?" checks.
-   * - ``True``
-     - ``True``
-     - **Editor mode.** Returns ``(workflow, errors)``; *every*
-       per-node failure is captured. The returned workflow may be
-       partial — some nodes may be missing or replaced with stubs —
-       and ``wf.is_partial`` is ``True``. This is the mode
-       :class:`~bioimageflow.WorkflowSession` uses internally.
+Current public diagnostic example
+----------------------------------
 
-Inspecting build-time state
----------------------------
-
-After a ``partial`` or ``validate_only`` load, three properties on the
-returned ``Workflow`` expose what happened:
-
-- ``wf.errors`` — the full list of :class:`ValidationError` accumulated
-  during construction. Same content as the ``errors`` element of the
-  returned tuple in ``validate_only=True`` modes; useful when the host
-  drops the tuple and just keeps the workflow.
-- ``wf.failed_nodes`` — ``dict[node_name, ValidationError]`` mapping
-  each node that could not be constructed (e.g. an unknown tool class)
-  to the error that prevented it.
-- ``wf.is_partial`` — convenience boolean: ``True`` whenever
-  ``failed_nodes`` is non-empty.
-
-These properties are populated during ``from_dict`` and persist on the
-workflow afterwards, so a later ``wf.validate()`` call does **not**
-clobber them.
-
-Other parameters
-----------------
-
-- ``auto_install`` (default ``True``) — when ``True``, missing versioned
-  packages are installed automatically. **Set to** ``False`` **on hot
-  paths** (sessions, validators) to keep keystroke latency low; an
-  unknown tool then surfaces as an ``unknown_tool`` error rather than a
-  network round-trip.
-- ``storage_path`` — required runtime storage for cache records,
-  provenance, run views, transient workspaces, and materialized outputs.
-  It is not read from or written to the workflow dictionary.
-- ``on_progress`` / ``engine`` / ``execution`` / ``wetlands_config`` — passed
-  through to the constructed :class:`Workflow`. ``None`` means "use the
-  values from ``data['config']`` (or defaults)".
-
-``Workflow.load(path, storage_path=results)`` is a thin wrapper around the strict mode
-(``partial=False, validate_only=False``).
-
-Worked example: GUI loading a graph with an unavailable package
----------------------------------------------------------------
-
-A user opens a workflow file that references a package not installed in the
-current tool store. The host wants to surface the failure inline rather than
-crash:
+The existing public API exposes ``validate_only`` and ``partial`` flags:
 
 .. code-block:: python
 
@@ -95,19 +31,22 @@ crash:
        storage_path=workflow_directory / "results",
        validate_only=True,
        partial=True,
-       auto_install=False,        # don't try to install on the hot path
+       auto_install=False,
    )
 
-   if wf.is_partial:
-       for name, err in wf.failed_nodes.items():
-           print(f"{name}: {err.kind}: {err.message}")
+   for error in errors:
+       print(error.kind, error.path, error.node, error.field, error.edge_id)
 
-   for e in errors:
-       # render with .edge_id for arrow highlighting, .field for the
-       # input pin, .path for recursive workflow scoping
-       ...
+``auto_install=False`` keeps editor/validation paths from implicitly installing missing packages.
+Package installation is a separate explicit operation; absent tools produce honest unavailable-tool diagnostics.
+Build diagnostics, failed nodes and validation results identify their actual phase and are refreshed when a correcting edit changes the relevant facts.
+A later validation must not keep stale build errors as current failures.
 
-The workflow returned has every loadable node wired correctly; the
-broken node is recorded in ``failed_nodes`` and skipped from execution.
-Editing the dict to point at the new package name and re-loading
-produces a clean workflow.
+Runtime configuration
+----------------------
+
+``storage_path`` is required runtime state for records, provenance, run views and owned outputs; it never enters the graph or archive.
+Loading a definition is distinct from selecting a live execution engine, manager, cancellation context or callback.
+An execution captures its effective inputs, targets and per-environment configuration before effects; later edits apply to later calls.
+``Workflow.load(path, storage_path=...)`` is the strict file-oriented entry point.
+Current schema version, diagnostic flags and viewer/Core DTO versions describe different contracts and must not be substituted by analogy.

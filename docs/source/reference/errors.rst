@@ -49,7 +49,7 @@ either raises one of the domain exceptions (see below) or appends a
 ValidationErrorKind
 -------------------
 
-The full set of kinds, drawn from :data:`bioimageflow.validation.ValidationErrorKind`:
+The declaration/graph-validation kinds listed below are drawn from :data:`bioimageflow.validation.ValidationErrorKind`; this page is not a complete catalog of runtime, source, storage or ownership exceptions.
 
 .. list-table::
    :header-rows: 1
@@ -62,8 +62,7 @@ The full set of kinds, drawn from :data:`bioimageflow.validation.ValidationError
      - The graph contains a directed cycle (specs.md §6.5).
      - ``message``
    * - ``type_mismatch``
-     - A column binding's producer ``ImageSpec`` is incompatible with
-       the consumer's input ``ImageSpec``.
+     - Accepted S target: a binding has incompatible portable declared type/nullability or ``ImageSpec`` metadata. Exact supported representation and conformance remain T/C obligations; this retains the existing error kind.
      - ``node``, ``field``, ``edge``, ``edge_id``
    * - ``missing_input``
      - A required input has neither a column binding, a constant, nor

@@ -2,19 +2,24 @@
 
 This document defines the on-disk layout for BioImageFlow workflow outputs and cache storage.
 `docs/source/specs.md` summarizes the same public contract.
+Accepted S requirements describe the intended current design; marked targets remain T/C verification obligations, not blanket implementation certification at `2cd79a24`.
 
 The canonical cache is the source of truth.
 The human-facing output tree is a derived view over the canonical cache.
+
+**Accepted target — S07/S08:** Capture each validated selected record together with its dataframe, assets and provenance as one immutable downstream binding.
+A first-valid loser consumes the selected winner; linked views are read-only projections and never another writable result authority.
+Automatic human-view export warns on projection failure while explicit export is strict; neither may rewrite scientific cache identity.
 
 ## Design Goals
 
 - A partially written node result must never be reused as a cache hit.
 - Concurrent workers may compute the same logical result without writing into the same mutable directory.
-- Cache identity must not depend on runtime-only details such as hostnames, process IDs, temporary paths, scheduler job IDs, or shared-memory segment names.
+- Cache identity must not depend on runtime-only details such as hostnames, process IDs, temporary paths, scheduler job IDs, or runtime mapped-array tokens.
 - Cache records are immutable once visible to readers.
 - Human-friendly paths may be mutable, but cache lookup must never depend on them.
 - The storage policy surface must stay small: one current-record policy, no background garbage collector, no automatic deletion of records, and no rich retention system.
-- The layout must be versioned so incompatible future formats can coexist.
+- The layout has an explicit current version and refuses unsupported formats; retaining historical incompatible readers is not a feature requirement.
 
 ## Top-Level Layout
 
@@ -161,7 +166,7 @@ The result key must not include:
 - Process IDs.
 - Scheduler job IDs.
 - Absolute attempt paths.
-- Shared-memory segment names.
+- Runtime mapped-array tokens.
 - Human-facing output symlink paths.
 
 If any consumed upstream value has no selected immutable record, the downstream node cannot produce a reusable result key for reusable caching.
@@ -768,7 +773,7 @@ Scheduler state and native ID remain secondary metadata and never extend the lau
 
 `submission.workflow` contains exactly `kind`, `digest`, and `payload`.
 The payload is the canonical recursive graph-v2 object or archive-v2 envelope.
-Legacy graph-v1 and archive-v1 documents are accepted at import and normalize to graph-v2 before identity or hashing operations.
+The accepted shared definition boundary uses the one current strict graph/archive grammar; retirement of historical import adapters is a C task, not distributed capability certification.
 `storage_root` is the normalized absolute runtime root assigned by the launcher and is deliberately outside the workflow payload.
 It never enters a recursive graph or portable archive, and the orchestrator supplies it explicitly when materializing the workflow.
 `canonical_view` is the confined relative path `views/runs/<run-id>`.
@@ -879,7 +884,7 @@ Only `owned_asset` manifest entries create output pointer files; `external_path`
 Run-node validation resolves and validates the exact immutable record named by `result.json`.
 It does not require that record to remain selected by `current.json`.
 Version-2 run-node views strictly retain portable per-output viewer metadata beside provenance, and `Storage.read_run_node_result()` returns both through typed public values.
-Legacy version-1 views remain readable with an empty viewer mapping; unknown fields are never silently discarded.
+The accepted target uses the current version-2 run-node view; unknown fields or unsupported schemas are refused, and remaining historical readers are a C retirement task.
 
 Example:
 
@@ -1105,11 +1110,13 @@ For example:
 }
 ```
 
-When the engine loads the cache hit for runtime execution, it may recreate a fresh `SharedArray` with a new node-local shared-memory name from the durable asset.
-The shared-memory name created during reload is runtime state and is not part of the result key or record ID.
+Cache hydration recreates a fresh controller-owned numeric file/mmap allocation group from durable `.npy` assets and binds returned `SharedArray` references to that owner.
+Allocation tokens, scope roots and handles are runtime state, not result-key or record-ID material.
+Failure retires only newly hydrated allocations after their readers/grants drain; durable records and unrelated input allocations remain untouched.
 
 This rule does not require every shared-memory value to be eagerly copied to disk during active in-memory pipelines.
-It only requires that a reusable cache record not depend on a node-local shared-memory handle.
+It requires that a reusable cache record not depend on a live process-local mapping or ephemeral controller namespace.
+Accepted S target: hydration retains exact dtype, shape, signedness, precision and nonfinite values; accepted/borrowed data is immutable, and mutable scientific work allocates separate outputs.
 
 ## Repair
 

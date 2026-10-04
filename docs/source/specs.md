@@ -1,5 +1,11 @@
 # BioImageFlow Library Specifications
 
+These are the accepted current-design requirements from the October 4 specification review (S), including local primary and secondary features.
+The review baseline is source `2cd79a24`; acceptance of intent is not a claim that this candidate implements every requirement.
+Clauses marked **Accepted target** require test-oracle review (T) and causal implementation review (C) before conformance or a behavior change is accepted.
+Within-machine Direct and managed WorkerPool execution, scientific tools and local result export are in scope; distributed implementation and capability certification remain outside this review.
+Current graph, worker, cache and result formats have independent version identities; their version numbers are not interchangeable.
+
 ## 1. Introduction and Scope
 
 **BioImageFlow** is a Python library for orchestrating bioimage analysis workflows. Users chain discrete processing steps (**Tools**) into a Directed Acyclic Graph (**DAG**) where data flows between tools via DataFrames.
@@ -7,8 +13,8 @@
 BioImageFlow addresses three challenges in bioimage analysis:
 
 1. **Environment Isolation:** Tools often require conflicting dependencies (e.g., different Python versions, conflicting CUDA libraries). `ProcessingTool` classes declare `EnvironmentSpec` objects and run in isolated Conda environments when workflows use the Wetlands engine.
-2. **Data Provenance:** Every execution is hashed and cached, making it possible to trace exactly which parameters and logic produced a specific result.
-3. **Type Safety:** A rich typing system prevents wiring errors such as feeding a CSV file to a tool that expects a segmentation mask.
+2. **Data Provenance:** Reusable computation has a complete scientific identity and immutable selected records; non-reusable executions retain their own explicit outcome and provenance without pretending to be cacheable.
+3. **Type Safety:** Declared types and image metadata detect incompatible wiring and scoped validation errors; they do not certify actual pixel contents or biological suitability.
 
 ### 1.0 Baseline Contract
 
@@ -322,13 +328,16 @@ The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offer
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None, "viewer": dict | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. When `Outputs` is a `Passthrough` subclass (see §3.5 `DataFrameTool`), `serialize_output_schema` returns the marker `{"_passthrough": True}` — GUIs should render this as "inherits upstream columns".
+Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None, "viewer": dict | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. For a `Passthrough` subclass (see §3.5 `DataFrameTool`), schema inspection represents inherited upstream columns and retains any added declared output fields and their type/image/viewer metadata.
+**Accepted target — S05:** A marker-only schema is insufficient when the subclass adds fields; unresolved upstream columns remain unknown, and the exact public representation must be checked in T/C rather than invented here.
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
 ### 2.5 Interface Type Constraints
 
-`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, `ViewerSpec`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Third-party types (NumPy arrays, PIL images, etc.) are **not** allowed in the interface — they cannot cross the serialization boundary. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
+`Inputs` and `Outputs` models must use only standard-library types and `bioimageflow-core` metadata types such as `ImageSpec`, `GUIMeta`, `ViewerSpec`, and `ImageShared`. File-based image fields use `Annotated[Path, ImageSpec(...)]`. Arbitrary third-party classes are not portable interface declarations.
+This annotation restriction does not prohibit supported scientific runtime values: the current typed task/result grammar in §5.2 transports numeric NumPy arrays and scalars, paths and scoped array references.
+PIL images and arbitrary object instances do not gain transport support from picklability. `Outputs` is required on `ProcessingTool` (defines the serialization contract and output templates). On `DataFrameTool`, `Outputs` is optional — when declared, it enables construction-time validation of downstream column references (see [Section 3.5](#35-dataframetool)).
 
 **Runtime type resolution contract:** File-based image annotations and `ImageShared` are distinct for graph-level compatibility checking (`check_compatibility`), while their common image-dispatch validation contract admits `Union[Path, str, SharedArray]`.
 This permissive validation supports `load_image()` without changing the declared graph interface.
@@ -347,6 +356,9 @@ BioImageFlow provides two kinds of tools with distinct data-flow contracts:
 Both inherit from `BaseTool`, which provides shared metadata attributes (`display_name`, `documentation`, `category`, `tags`, `Inputs`) and graph wiring via `__call__`.
 
 ### 3.1 EnvironmentSpec
+
+**Accepted target — S03:** Execution captures an independent validated effective recipe and per-environment configuration before callbacks or run-visible effects; later edits affect later calls only.
+Read-only/frozen metadata must not expose mutable dependency authority to callers.
 
 *Module: `bioimageflow_core.environment`*
 
@@ -390,7 +402,7 @@ Multiple tools can reference the same `EnvironmentSpec`. BioImageFlow validates 
 
 BioImageFlow owns the worker-side `bioimageflow-core` dependency. A tool may declare a compatible version constraint, but the environment recipe uses the orchestrator's authoritative exact published version or configured local checkout. A constraint or direct/local reference that would select a different core produces an `environment_incompatible` workflow validation error and is rejected again at provisioning time if validation was skipped.
 
-The default authoritative dependency is `bioimageflow-core==<installed version>`. `BIOIMAGEFLOW_CORE_SOURCE` selects an explicit local project without requiring it to be installed editably in the orchestrator environment; BioImageFlow resolves the path and validates its `pyproject.toml` project name, version, and `bioimageflow_core` package before constructing a Wetlands editable local dependency. The `BIOIMAGEFLOW_USE_LOCAL_CORE=1` setting instead discovers the project from the imported `bioimageflow_core` package and therefore requires an editable orchestrator installation. An invalid explicit source is a configuration error and never silently falls back to the published core.
+The default authoritative dependency is `bioimageflow-core==<installed version>`. `BIOIMAGEFLOW_CORE_SOURCE` selects an explicit local project without requiring it to be installed editably in the orchestrator environment; BioImageFlow resolves the path and validates its `pyproject.toml` project name, version, and `bioimageflow_core` package before constructing a Wetlands editable local dependency. The accepted current configuration uses this explicit project path rather than a historical import-derived source flag; retirement of any remaining alias is a C task. An invalid explicit source is a configuration error and never silently falls back to the published core.
 
 `WetlandsEnvManager.inspect_environment()` reports whether the augmented requested recipe is missing, current, or stale without provisioning it.
 `recreate(...)` and the `get_or_create(..., replace_existing=True)` entry point explicitly rebuild one Wetlands-managed processing environment, including the current recipe.
@@ -613,9 +625,12 @@ class ProcessingTool(BaseTool):
         Override for batch processing (e.g., GPU inference, training).
 
         Returns:
-            - list[list[Outputs]]: one inner list per input row (supports 1-to-N).
-            - list[Outputs]: shorthand for 1-to-1 batch tools (one output per row).
-              The engine auto-wraps each element in a singleton list.
+            - MAPPED list[list[Outputs]]: one inner list per input row (supports 1-to-N).
+            - MAPPED list[Outputs]: shorthand for 1-to-1 batch tools (one output per row).
+              Each element represents one correlated input position.
+            - COLLECTIVE: preserve full-consumed-input association and aggregate lineage.
+              The exact public representation is a T/C obligation; no duplicated
+              per-input aggregate or main-process relocation is required.
 
         If not overridden, the engine falls back to per-row processing
         via process_row. The engine detects overrides using:
@@ -798,6 +813,9 @@ Model caches should be bounded and keyed by every argument that changes model co
 Inference-only arguments should not invalidate weights.
 
 ### 3.5 DataFrameTool
+
+**Accepted target — S05:** Concrete DataFrame tools have kind-specific admission, not ProcessingTool worker requirements.
+Genuinely dynamic tools without `Outputs` remain supported; discovery reports unresolved schemas honestly and execution validates the actual result at its declared boundary.
 
 *Module: `bioimageflow.dataframe_tool`*
 
@@ -1104,7 +1122,8 @@ export = save(
 
 *Module: `bioimageflow_core.tool`*
 
-`Inputs` and `Outputs` are declared as inner classes extending `IOModel`, a lightweight pure-Python base class provided by `bioimageflow-core`. `IOModel` supports field declarations via annotations, default values, and construction from keyword arguments — but performs **no validation itself**. Validation is handled by the orchestrator using Pydantic (see below).
+`Inputs` and `Outputs` are declared as inner classes extending `IOModel`, a lightweight pure-Python base class provided by `bioimageflow-core`. `IOModel` supports annotated fields/defaults and keyword construction with structural field admission (including unknown/missing fields).
+It does not perform the orchestrator's declaration/editor or resolved scientific value validation; those are separate phases described below.
 
 ```python
 class IOModel:
@@ -1154,8 +1173,14 @@ class IOModel:
 - **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. Path outputs without a `Template(...)` default use the built-in default template. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
 
 Both models use only standard-library types and `bioimageflow-core` types.
+**Accepted target — S04:** IOModel construction performs structural field admission; editor/declaration validation and resolved runtime scientific validation remain distinct phases.
+Requiredness, explicit None, class defaults and MISSING are independent; fan-out fallback must satisfy every required target, not merely one target with a default.
+Graph constants use a finite faithful reversible grammar or explicit refusal; live arrays/owners and arbitrary objects are not silently stringified into portable definitions.
+Supported Python3.9 annotation resolution includes postponed and inherited declarations and retained Annotated metadata; parsing source syntax alone is not capability proof.
 
-**Orchestrator-side validation:** The orchestrator (`bioimageflow` package) automatically builds Pydantic models from `IOModel` declarations for full validation during column resolution. This is transparent to tool authors:
+**Orchestrator-side validation:** The orchestrator derives validation models from the admitted IOModel declaration.
+Editor/declaration diagnostics check current bindings/constants without execution; execution validates resolved values at the dispatch/output boundary.
+These phases share declaration meaning without treating editor success as scientific data certification.
 
 `IOModel` annotation introspection resolves postponed annotations in their defining module and class namespaces, including inherited fields, and preserves `Annotated` metadata.
 Validation, GUI schema serialization, and execution use that same resolved declaration; unresolved names produce an actionable declaration error rather than silently degrading the field schema.
@@ -1590,6 +1615,9 @@ The `get_tool_version()` function (used by the cache system) checks `_bif_packag
 
 #### Transitive Dependencies
 
+**Accepted target — S11:** Scoped tool classes do not imply that conflicting ordinary third-party dependencies are independently isolated in the orchestrator.
+Admit a coherent host dependency set or refuse conflicts explicitly, while preserving trusted Python relative imports/helpers/assets.
+
 When a versioned package is loaded, its version directory (e.g., `~/.bioimageflow/tool_packages/simpleitk_tools/1.0.0/`) is prepended to `sys.path`. This makes third-party libraries installed alongside the package by default importable by main-process code. With `install_dependencies=False`, `DataFrameTool` classes and package import code instead use dependencies supplied by the host. The entry is removed on `unload_versioned_package`.
 
 #### Shareable Workflow Scripts (PEP 723)
@@ -1681,6 +1709,8 @@ Registration is optional discovery, not a replacement for a node's explicit pack
 Hosts may serialize metadata from the actual resolved node class without adding that class to a shared catalog.
 Name-only lookups return the most recently registered matching class; use package/version and, when necessary, module qualifiers to select an exact registered identity.
 Same-named source-bound nodes must retain their explicit source identity independently of catalog lookup.
+**Accepted target — S05:** Registration validates each concrete tool kind without provisioning models or optional runtimes.
+Failed declaration introspection reports unavailable/invalid schema rather than successful empty inputs/outputs; returned metadata/default snapshots do not expose mutable registry authority.
 
 `ToolMetadata` is a frozen dataclass:
 
@@ -1756,6 +1786,10 @@ Export behavior:
 ## 4. Workflow Definition and Graph Engine
 
 ### 4.1 Workflow Construction
+
+**Accepted target — S02/S03:** Definition mutation and live execution have separate authorities.
+Capture effective definition, sources, selected targets, inputs and per-environment configuration before execution effects; a rejected ordinary construction leaves no partial interface, dependency or name reservation.
+Explicit diagnostic editing may retain incomplete state with scoped errors.
 
 Users build workflows by calling tools as functions. Each call returns a **Node** — a lazy promise of future computation. Nodes form a DAG implicitly through their data dependencies. The calling convention differs by tool type: `ProcessingTool` takes keyword arguments (column references, node shorthand, or constants); `DataFrameTool` takes positional arguments (upstream nodes) and keyword arguments (parameters).
 
@@ -1968,7 +2002,9 @@ results.compute()
 Diagnostic signatures are separate debug values and are not cache identities.
 For a cache miss, `"started"` may include `result_key` while `record_id` remains `None` until the result is published and selected.
 For non-reusable execution, both identities remain `None`.
-Row/chunk `row_complete` events are emitted once per row in aligned position order even when remote futures finish out of order; whole-node batch emits no row-complete events.
+Row/chunk `row_complete` events are emitted once per row in aligned position order even when worker futures finish out of order; whole-node batch emits no row-complete events.
+**Accepted target — S09:** Observational callback failure must not select a scientific outcome or mask its primary error.
+An independently observed owner cancellation/interruption follows the drain contract; exception type alone cannot universally distinguish that event from an exception raised inside a callback.
 
 When using branch-level parallelism, progress events from concurrent nodes may interleave. The engine serializes all `on_progress` callback invocations via an internal lock, so the callback does not need to be thread-safe.
 
@@ -2013,6 +2049,9 @@ Parsl applies it to DFK and executor ownership.
 An injected Wetlands manager or Parsl DFK requires `"external"`, and `"external"` requires the corresponding injected resource.
 
 Every engine exposes idempotent `close()`, `__enter__`, and `__exit__`; executing a closed engine raises `RuntimeError`.
+**Accepted target — S09:** Idempotency does not excuse a failed physical close: retain cleanup ownership and grants for retry, report pending/error honestly, and release no caller-owned engine or manager.
+Task outcome and cessation of task writers, public operation completion, and physical pool retirement are distinct fences.
+One execution reservation releases once on every setup, success, failure, cancellation and iterator-close exit; setup refusal leaves no running binding or view claim.
 Closing or exhausting a steps generator applies its cleanup policy after submitted work drains.
 
 `Workflow.create_engine()` is the only engine factory:
@@ -2115,7 +2154,7 @@ Its keyword arguments are finite JSON-safe values and its optional secret refere
 Literal credentials must not be supplied, secret-looking field names are rejected, and arbitrary callables, pickle payloads, Config, DFK, executor, and provider objects are rejected.
 
 The submitted workflow definition is exactly the canonical recursive graph-v2 payload or archive-v2 envelope.
-Strict legacy graph-v1 and archive-v1 definitions remain loadable and normalize to version 2 before submission identity is computed.
+The shared local definition boundary uses the one current strict graph/archive grammar before submission identity is computed; distributed implementation conformance is excluded from S/T/C.
 Runtime storage stays outside that definition: `workflow.storage_path` is normalized into launcher metadata and passed explicitly to `Workflow.from_dict(..., storage_path=...)` in the detached process.
 Partial workflows, unresolved tools, invalid routes, unsupported launch backends, and unavailable secret references fail before allocation or process launch as applicable.
 
@@ -2332,8 +2371,13 @@ The `enabled` flag is persisted in the JSON export. When `enabled` is `False`, t
 
 ### 4.7 WorkflowSession (Incremental Editing API)
 
+See §4.6 for ordinary versus diagnostic admission; session caching is an optimization and must not retain stale validation after meaning changes.
+
 `WorkflowSession` is a **dict-backed** editing API for clients that choose to edit the library's portable graph format incrementally.
-Its dictionary owns editable state within that session; a `Workflow` is materialized on demand and cached across edits, with selective rebuilds triggered only by structural changes.
+**Accepted target — S02:** The session dictionary is its one edit authority; a materialized Workflow is a derived projection.
+Ordinary mutation either publishes a coherent change or leaves prior node, edge, interface and name ownership unchanged; explicit diagnostic editing may retain incomplete values with current scoped errors.
+Validation and planning facts follow meaning changes, including constants, defaults and enabled state, rather than only an edit's structural label.
+Its dictionary owns editable state within that session; a `Workflow` is materialized on demand and may be reused only while its derived definition, schema and diagnostics remain current.
 It does not prescribe host persistence, draft ownership, or revision protocols.
 The BioImageFlow platform instead owns its canonical recursive `GraphState`, saved envelopes, and revisioned root drafts/nested snapshots, translating accepted graphs into library objects in memory.
 
@@ -2371,15 +2415,15 @@ s.failed_nodes # dict[str, ValidationError] from the last to_workflow() build
 
 # Materialization
 data = s.to_dict()                     # snapshot of the wire format
-wf = s.to_workflow()                   # cached; rebuilt only on structural edits
-errs = s.validate()                    # cached across non-structural edits
+wf = s.to_workflow()                   # materialized projection, not edit authority
+errs = s.validate()                    # current meaning must govern diagnostics
 plan = s.plan()                        # refreshes storage-facing cache state
 ```
 
 **Edit semantics.** Edits are split into two categories:
 
 - **Structural edits** (`add_node`, `remove_node`, `add_edge`, `remove_edge`) invalidate the cached `Workflow` — the next `to_workflow()` call rebuilds.
-- **Non-structural edits** (`set_constant`, `set_enabled`) update the cached `Workflow`'s node fields **in place**. A `set_constant` followed by `validate()` or `plan()` does not re-resolve any tool class — this is the contract that makes the session viable for keystroke-rate validation.
+- **Non-structural edits** (`set_constant`, `set_enabled`) update the cached `Workflow`'s node fields **in place**. an edit may reuse an already resolved class, but validation/schema facts must reflect the changed meaning; this optimization is not permission to reuse stale diagnostics.
 
 `to_workflow()` always uses `Workflow.from_dict(storage_path=s.storage_path, validate_only=True, partial=True, auto_install=False)`, so per-node failures surface in `wf.failed_nodes` rather than raising. Callers should treat `s.failed_nodes` and `s.is_partial` (via the cached workflow) as part of normal operation, not as exceptional state.
 
@@ -2416,7 +2460,7 @@ The system has an orchestrator context and optional isolated processing workers.
 
 When `node.compute()` is called:
 
-1. **Graph Traversal:** Topological sort determines execution order. Only nodes in the dependency chain of the requested node are executed.
+1. **Graph Traversal:** Topological sort resolves requested data dependencies. Recursive workflow invocation also completes its enabled internal terminals (§14), including detached completion-only branches, without adding those branches to unrelated scientific identity.
 
 1b. **Disabled-Node Filtering:** After topological sort, the engine walks the ordered list and removes disabled nodes and any node whose upstream includes a disabled node (see [Section 4.6a](#46a-enabling-and-disabling-nodes)). This is O(V) since upstreams are already classified by the time each node is visited.
 
@@ -2426,7 +2470,7 @@ When `node.compute()` is called:
 
    1. **Collect Upstream DataFrames:** Gather the output DataFrames from all positional upstream nodes.
    2. **Resolve Arguments:** Resolve `Inputs` parameters into a single `Arguments` object (all constants, validated via Pydantic). Path-typed values are converted to absolute runtime paths before `merge_dataframes()` or `transform()` is called.
-   3. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, root DataFrame logical digests, and selected upstream provider/selector record references. If the key exists and `current.json` selects a valid reusable record, load it and skip to step 6.
+   3. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, root DataFrame logical digests, and selected upstream provider/selector record references. If the key exists and `current.json` selects a valid reusable record, load that exact selected record and refresh its derived run view without publishing another record.
    4. **Merge:** Call `tool.merge_dataframes(dfs, arguments)`. Default: inner join on index.
    5. **Transform:** Call `tool.transform(df, arguments)`. Returns a (potentially different) DataFrame. Default: identity (passthrough).
    6. **Caching:** When reusable, publish the result as an immutable cache record under `storage_path/cache/v1/` and update the run view from the selected record. When identity is unavailable, return the in-memory DataFrame without creating cache or view artifacts.
@@ -2438,11 +2482,13 @@ When `node.compute()` is called:
    3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The orchestrator resolves paths before dispatch beneath the selected reusable-attempt or transient invocation `assets/` directory.
    4. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, and selected provider/selector record references. A valid selected record is loaded immediately. When the resolver returns `None`, execution uses the run-scoped transient path and creates no reusable cache state.
    5. **Execution Context:** Allocate a required invocation ID. Reusable work uses `cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/`; non-reusable work uses `cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/`. Build one `ExecutionContext` per input row and one batch context with shared `assets/`, `work/`, and `rows/` roots plus private row/batch directories.
-   6. **Serialization:** Encode each remote call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
+   6. **Serialization:** Encode each worker-boundary call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
    7. **Backend Preparation:** Direct acquires no remote resource. Wetlands prepares the selected environment. Parsl completes route validation, archive materialization, DFK acquisition, and executor preflight before processing submission.
    8. **Dispatch:** If `process_batch` was overridden, call one whole-node batch operation. Otherwise, dispatch row calls or explicit row chunks. Wetlands and Parsl use the same core protocol, origin resolver, worker entry point, and worker-instance cache. Parsl submission is bounded and results are collected by aligned position rather than completion order.
-   8b. **Output Validation:** The shared orchestrator validator reconstructs returned dictionaries in declared field order, rejects missing/extra fields and invalid types or paths, normalizes row and batch returns to `list[list[Outputs]]`, and enforces exact batch cardinality for direct, Wetlands, and Parsl.
-   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). The index is preserved from the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
+   8b. **Output Validation:** The shared orchestrator validator reconstructs returned dictionaries in declared field order, rejects missing/extra fields and invalid types or paths, normalizes row and batch returns to `list[list[Outputs]]`, and enforces correlated ordered groups for the admitted batch contract.
+   **Accepted target — S06:** Mapped per-row returns retain exact input-position correspondence; collective results retain explicit association to all consumed inputs and aggregate lineage, including configured empty-input artifacts.
+   Exact collective representation is a T/C obligation; no forced aggregate duplication or main-process relocation is permitted.
+   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). Mapped outputs preserve the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). Collective aggregates retain explicit all-consumed-input association and their aggregate lineage; exact representation remains a T/C obligation. This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
    10. **Caching:** Reusable work publishes the canonical logical dataframe and assets as an immutable record, selects through `first-valid`, and updates views from the selected record. Non-reusable work returns transient outputs without a record, pointer, latest view, or output projection.
 
 #### ProcessingTool Backend Interaction (ProcessingTool Steps 6-10)
@@ -2450,7 +2496,7 @@ When `node.compute()` is called:
 The immutable backend dispatch request contains resolved arguments and contexts, ordered aligned positions, the scoped node, active run context, required invocation identity, and optional reusable-attempt identity.
 The scheduler owns cache lookup, publication, dataframe construction, progress, cancellation, and failure semantics around this request.
 
-Remote backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v2`.
+Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v2`.
 The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v2`.
 Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, mode, row positions, and row-index strings exactly.
 The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ProcessingTaskResult`, and `RowResult`; there are no historical task/result DTO aliases or wire fallbacks.
@@ -2462,7 +2508,8 @@ Every dictionary is encoded as a dictionary node, so a user dictionary resemblin
 Paths encode as `{kind: "path", value: string}`.
 A `SharedArray` encodes as `{kind: "shared_array", name: token, shape: [nonnegative_integer, ...], dtype: string, scope_id: token}`; decoding validates the reference and constructs an unbound `SharedArray` without allocating, attaching, reading, registering an owner or deleting storage.
 Allocation names use `[a-zA-Z0-9_-]{1,96}`; actual scope identities are controller-generated UUID tokens.
-Each task has `shared_memory_context`, either null for tasks without shared references or exactly `{output: descriptor, inputs: [descriptor, ...]}`.
+Each task has `shared_memory_context`, either null when it has neither shared inputs nor permission to allocate shared outputs, or exactly `{output: descriptor, inputs: [descriptor, ...]}`.
+**Accepted target — S10:** An output-only shared-array producer receives an admitted output namespace even when no input reference exists; pure decoding never creates that owner.
 Each descriptor contains exactly `scope_id`, `root`, `root_identity`, `owner_id`, `owner_root`, `owner_root_identity`, `max_bytes`, and `max_header_bytes`; identities are captured `[st_dev, st_ino]` pairs and budgets are finite positive integers.
 Descriptor validation and typed decoding are pure; the canonical worker explicitly borrows these admitted scopes and binds input references before invoking trusted tool code.
 The controller checks task/result correlation and declared output fields before binding outputs; only the task output scope or the exact admitted input references may return.
@@ -2473,7 +2520,7 @@ These codecs apply identically to input arguments and output values; they do not
 Parsl refuses host-local `SharedArray` references anywhere in task input or result output containers, even though the same references are supported between workers on a shared local host.
 Decoders reject unknown schemas or modes, missing or extra fields, malformed origins and paths, invalid scalar types, booleans in integer fields, duplicate positions, and mismatched result correlation.
 
-`WorkerToolOriginV1` has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
+The independently versioned current `WorkerToolOriginV1` has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
 Every remote backend uses the same strict origin resolver and processing entry point.
 The worker caches tool instances by the SHA-256 digest of canonical JSON for the complete origin including class name, so equal class or module names from different origins cannot collide.
 
@@ -2484,10 +2531,16 @@ Backend routing metadata is outside the worker envelope.
 
 ### 5.3 DataFrame Semantics
 
+**Accepted target — S06:** Numeric-looking index strings remain strings; canonical values retain integer signedness, dtype, precision and nonfinite meaning without generic table coercion.
+Mapped/collective input semantics are orthogonal to ordered transport groups and output cardinality.
+Isolated collective inference, training and aggregate outputs remain supported, including configured empty-input artifacts, with explicit association to all consumed inputs and aggregate lineage.
+Do not duplicate an aggregate for each input or relocate it to the main process merely to fit row transport; its exact correlated public representation is a T/C obligation.
+Concat/CrossJoin and other explicit table reshaping define new lineage and source association; reset ordinals are not preserved provenance.
+
 - **No column carry-forward (ProcessingTool):** A ProcessingTool's output DataFrame contains **only** the columns declared in its `Outputs` class, plus the row index. Upstream columns are not carried forward. Downstream tools that need upstream data reference the originating node directly (e.g., `raw["path"]`). This makes output schemas deterministic — a node's output depends only on its own `Outputs` declaration, never on what happens upstream.
 - **DataFrameTool output:** A DataFrameTool's output DataFrame is whatever `transform()` returns. The tool author decides which columns to include. This is where intentional carry-forward happens — tools like `FilterRows` naturally preserve all input columns, while tools like `CountLabelOverlaps` may produce entirely new schemas.
 - **Transport:** Pandas DataFrames remain on the orchestrator side; ProcessingTool tasks/results carry ordered row DTOs with logical argument/output dictionaries encoded through the current Core typed-value protocol.
-- **Index:** The DataFrame index represents a unique identifier for each data item (e.g., image ID). It is preserved across nodes. DataFrameTools that intentionally change the data granularity (e.g., aggregation) may produce a new index.
+- **Index:** A mapped result preserves its input data-item identity, with explicit child indices for expansion. DataFrame transforms and collectively computed aggregates may define a new lineage while retaining explicit association to the consumed source rows; aggregate identity must not masquerade as one arbitrarily selected input parent.
 - **Index alignment:** When a ProcessingTool references columns from multiple upstream nodes via ColumnRefs, the engine aligns values by index. If one upstream has a finer-grained index (due to explosion), the coarser index is expanded using parent-index lookup. For example, if `raw` has index `[0, 1, 2]` and `tiles` has index `[0::0, 0::1, 1::0, 1::1, 2::0, 2::1]`, referencing both aligns `raw[0]` with `tiles[0::0]` and `tiles[0::1]`, etc. If upstream indices have no common lineage (e.g., two independent `load_images` calls), the engine raises `IndexAlignmentError`. **Divergent sibling explosions** (same parent row exploded differently by two sibling nodes, e.g., Node A produces `0::0, 0::1` and Node B produces `0::0, 0::1, 0::2`) also raise `IndexAlignmentError` — the user must insert a merge DataFrameTool (e.g., `CrossJoin`) to explicitly define the combination.
 - **Explosion and the `::` separator:** When `process_row` returns multiple outputs for a single row, the engine extends the index using `::` as the explosion separator: `"<parent>::0"`, `"<parent>::1"`, etc. Successive explosions nest naturally: `"img_001::0::2"` means "image img_001, first split, third tile." The `::` sequence is **reserved** — source nodes must not produce indices containing `::`. For `ProcessingTool` sources, the engine controls index assignment. For `DataFrameTool` sources, the engine validates the returned DataFrame's index at execution time.
 
@@ -2579,6 +2632,9 @@ Development mode is intended for iteration; production workflows should rely on 
 
 ### 6.5 Pre-execution Planning
 
+A plan is a fresh diagnostic snapshot, not a guarantee that selection cannot change before compute.
+**Accepted target — S07:** Bind the validated selected record, data, asset locators and provenance as one immutable downstream selection; a first-valid loser consumes the selected winner rather than its non-current candidate.
+
 `Workflow.plan()` exposes cache status and selected-record information without executing nodes.
 Callers that need to report cache state should use `plan()` rather than reimplementing result-key composition.
 
@@ -2618,7 +2674,7 @@ It raises `CycleInWorkflowError` (a `ValueError` subclass exposing `.nodes: list
 - `Workflow.capture_errors()` — for construction-time errors when the context is active.
 - `Workflow.from_dict(data, storage_path=..., partial=True)` — for tool-resolution and per-node construction failures during deserialization (also accessible via `wf.errors` and `wf.failed_nodes` after the call).
 - `Workflow.validate()` — for post-construction checks.
-- `WorkflowSession.validate()` — same as `Workflow.validate()` but cached across non-structural session edits.
+- `WorkflowSession.validate()` — same validation intent as `Workflow.validate()`; reuse must not retain stale errors after a meaning-changing session edit.
 
 ```python
 from bioimageflow import ValidationError, ValidationErrorKind
@@ -2691,7 +2747,10 @@ BioImageFlow enforces structured file naming to prevent overwrites and maintain 
 | `{column:<column_name>}`  | Value from the named DataFrame column for this row     |
 | `{timestamp}`             | Execution timestamp                                    |
 
-`<input_field>` must be the name of an `Inputs` field typed as a path (e.g., `input_image`).
+Path attributes (`.name`, `.stem`, `.ext`, `.exts`) require a Path-based `Inputs` field.
+Bare `{<input_field>}` may use an admitted scalar field without granting path attributes.
+**Accepted target — S08:** Known missing variables and unsafe paths refuse before effects; deferred values resolve before the affected dispatch.
+Capture timestamp and template inputs once for the invocation, reject overlapping writers/colliding resolved outputs, and keep zero-row assets or scalar facts in manifests without fabricating dataframe rows.
 
 **Default template:** Path outputs without a `Template(...)` default use `{node_name}_{row_index}{ext}` when the tool has exactly one path input, otherwise `{node_name}_{row_index}`.
 
@@ -2923,7 +2982,15 @@ Explicit close/release refuses new controller allocation/open; existing views an
 `WorkerGrant.drained()` is idempotent and is called only after local execution physically returns or the owning public worker pool successfully closes, never merely on a task's result/terminal status.
 A failed/uncertain pool close retains the pool and grants for retry; cleanup remains pending and does not advertise reclaimed storage.
 Windows deletion restrictions and mapped-handle/namespace errors remain pending with explicit errors until a later status/close retry succeeds.
-No automatic garbage-collection deletion or private tracker manipulation is used.
+Garbage collection never initiates release of an accepted array owner; final-reader drain may finish an already explicit pending release.
+No private tracker manipulation is used.
+
+**Accepted target — S10:** Returned results expose an accessible cleanup owner and an exact result/allocation-group release boundary; no new method signature is prescribed here.
+Accepted or borrowed scientific input allocations are immutable; tools needing mutable work allocate independent outputs.
+Normal success with discarded results has a bounded cleanup path as well as failed/rejected/unreturned work.
+A reusable pool may retain physical grants, so idle or quota-pressure retirement must close the owning pool safely before reclaiming those groups, without invalidating live views or releasing unrelated allocations.
+Finite quota admission refuses clearly if safe retirement cannot reclaim enough; lexical unbinding, task completion and Workflow collection are not permission to close an accepted owner.
+These result-group and normal-run obligations require T/C verification; earlier targeted mmap proofs do not establish their complete implementation.
 
 Physical worker drain releases its grant independently of controller result disposition.
 Pending outputs remain until the controller accepts or rejects them, even if the pool has already closed.
@@ -2941,7 +3008,7 @@ Physical resource release still requires the owning pool/controller fences; this
 - **Binding errors** (`BindingError`): Raised at graph construction time when a required input field has no source (no column reference, no constant, no default). Lists the missing field and available sources.
 - **Column not found** (`ColumnNotFoundError`): Raised at graph construction time when a column reference (`node["col"]` or node shorthand) refers to a column that does not exist in the upstream node's output schema. Includes available columns and close-match suggestions. For DataFrameTool upstreams without `Outputs`, this check is deferred to execution time.
 - **Index alignment errors** (`IndexAlignmentError`): Raised at execution time when a ProcessingTool references columns from upstream nodes whose indices have no common lineage. The user must insert a merge DataFrameTool to combine the data explicitly.
-- **Template errors**: Raised at graph construction time if a ProcessingTool output template references undefined variables or input fields.
+- **Template errors**: Known invalid variables refuse at graph construction; deferred values and path/collision checks refuse before the affected processing dispatch.
 - **Worker exceptions:** Remote exceptions are raised as `WorkerTaskError`; Parsl uses the public `ParslTaskError` subtype. Errors include scoped node, tool origin, route, task ID, invocation ID, optional cache attempt ID, row position/range, original type/message, and remote traceback when available.
 - **DataFrameTool exceptions:** Exceptions raised in `merge_dataframes` or `transform` propagate directly since they run in the main process.
 - **Disabled node errors** (`DisabledNodeError`): Raised at execution time when all requested target nodes are disabled or have disabled upstream dependencies. When only some targets are disabled in a multi-target `compute()` call, the disabled targets are silently omitted from the result dict.
@@ -2951,6 +3018,7 @@ Compilation assigns stable real-tool ordinals by deterministic topological order
 After observing a failure, the scheduler stops new task submission and drains already submitted work.
 For worker task failures, it chooses the public primary failure among failures from tasks actually submitted, ordered by `(compiled node ordinal, first input position, task ID)`.
 Completion timing does not choose the primary error among those submitted failures.
+**Accepted target — S09:** Cleanup, callback and later secondary failures must not mask this admitted primary error; pending cleanup remains explicitly reportable.
 A ready node whose task was not submitted before stopping does not contribute a hypothetical failure; the scheduler does not launch additional work solely to obtain an earlier-ordered error.
 For example, if only node `second` was submitted before it failed, that failure is reported; if both `first` and `second` were submitted and failed, `first` is primary according to their compiled order regardless of which failure completed first.
 
@@ -3001,6 +3069,9 @@ BioImageFlow does not assign environment variables such as `CUDA_VISIBLE_DEVICES
 ---
 
 ## 11. Logging
+
+Logging is observational and scoped to actual execution identity; it cannot change cache selection, scientific values or primary failure.
+
 
 BioImageFlow uses Python's standard `logging` module with node-specific logger names. Engine and workflow construction do not attach console handlers; console logging is an explicit host/application concern.
 
@@ -3118,6 +3189,9 @@ Exhausting or explicitly closing the iterator detaches the context and applies c
 
 ## Import Cheat Sheet
 
+This is a curated public import guide, not an `undoc-members` support promise.
+Supported external-command helpers require explicit declaration of return/error/cancellation/working-directory semantics; no new helper signature is introduced by S.
+
 ```python
 # === bioimageflow-core (available in all environments) ===
 from bioimageflow_core import (
@@ -3227,12 +3301,13 @@ A zero-output workflow executes its terminals and returns a zero-row, zero-colum
 
 ### 14.3 Strict recursive graph and archive formats
 
-`Workflow.to_dict()` emits `schema_version: 2`; `Workflow.from_dict()` and `Workflow.load()` accept strict version-1 legacy graphs and strict version-2 graphs, normalizing loaded version 1 to version 2.
+`Workflow.to_dict()` emits the current strict graph grammar, `schema_version: 2`.
+**Accepted target — S01:** Public import/export uses this one current grammar; historical graph/archive adapters are not requirements and any remaining implementation is assessed in C.
 A recursive node has `"type": "workflow"`, an inline `workflow` graph, and constant `bindings` keyed by stable child-input IDs.
 Tool nodes use `"type": "tool"`.
 Edges have explicit `"column"` or `"dataframe"` variants and stable IDs.
 Version 2 adds only portable `viewer_additions` on tool/workflow nodes and `viewer_addition` on public workflow outputs.
-Unknown variants, extra fields (including version-2 fields claimed by version 1), malformed endpoints, duplicate IDs, and unversioned graphs are errors.
+Unknown variants, extra fields, unsupported schemas, malformed endpoints, duplicate IDs, and unversioned graphs are errors.
 
 `PackageRequirement` preserves an author's Python distribution spelling, exposes its PEP 503 `normalized_name`, and validates its optional PEP 440 `version` constraint.
 `NapariRequirement` contains required and recommended package lists, an optional PEP 440 `napari_version`, and an optional opaque `reader_id`.
@@ -3261,11 +3336,13 @@ Portable source paths reject colon, backslash and Windows reserved device compon
 Staging consumes captured immutable bytes and paths; invalid later records cannot cause earlier custom sources to execute or partially stage.
 Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
 Embedded Python remains trusted executable code; contained staging is not a Python sandbox.
+**Accepted target — S11:** Admit the complete outer archive destination and entry set before writes, refuse symlink/traversal/foreign-destination conflicts, and retire only owned partial staging on failure.
+Captured source roots stay valid for all live compiled owners and relative helper/asset reads; eager staging deletion is not permitted merely because initial import finished.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
 `Workflow.to_archive_dict()` and ZIP export produce this artifact form, while `Workflow.to_dict()` remains the editable graph boundary.
 JSON export likewise remains an editable graph when no custom sources exist and becomes an artifact envelope when embedded custom sources require one.
-Version-1 archive envelopes load with no viewer declarations and normalize to version 2; both versions reject fields not declared by that version.
+**Accepted target — S01:** Archive import uses the one current strict envelope and refuses unsupported schemas or undeclared fields; historical conversion is not a current feature requirement.
 Exports never include local viewer environments, selections, paths, discovery/enabled state, credentials, executable install commands, or process state.
 Export serializes the already-materialized graph and never calls a factory again.
 
@@ -3280,8 +3357,8 @@ The normative host-facing grammar, identifiers, status rules, and golden fixture
 
 ## Appendix A: Wetlands API
 
-BioImageFlow requires Wetlands 2.
-Wetlands 2 separates manager construction, observable provisioning, managed environments, worker pools, and execution tasks.
+BioImageFlow requires Wetlands `>=2.5.0,<3`.
+Wetlands separates manager construction, observable provisioning, managed environments, worker pools, and execution tasks.
 BioImageFlow uses its public top-level imports only.
 
 ### A.1 Environment Manager
@@ -3306,14 +3383,15 @@ from wetlands import EnvironmentSpec
 spec = EnvironmentSpec(
     python="3.12.*",
     conda=("cellpose==3.1.0",),
-    pypi=("bioimageflow-core>=0.1.0",),
+    pypi=("bioimageflow-core>=0.5.0,<0.6",),
 )
 environment = manager.provision("cellpose_env", spec).wait_for()
 ```
 
 BioImageFlow translates its own immutable environment declaration into this Wetlands 2 value and includes its authoritative `bioimageflow-core` dependency.
 Provisioning is lazy on the first uncached node that needs the environment unless an application explicitly inspects and warms a managed processing environment.
-The observable provisioning operation is always awaited through `wait_for()`.
+Provisioning uses `wait_for()` for its stored result or failure.
+`wait_for_completion()` observes public operation completion independently of that stored outcome; neither method alone proves physical pool retirement.
 
 ### A.3 Start a Worker Pool
 
@@ -3346,8 +3424,9 @@ Cancellation requests stop new work, cancel outstanding Wetlands tasks where sup
 
 ```python
 pool.close()
-manager.close()
 ```
 
-Cleanup is idempotent through `WetlandsEnvManager.stop()` and `close()`.
+A successful public pool close is the physical grant-retirement fence.
+Strict selected recreation retains pool/cache/grant ownership after close failure for explicit retry.
+The adapter's `stop()` and `shutdown_all()` are named best-effort operations and must not be described as unconditional physical cleanup certification.
 BioImageFlow never uses Wetlands private environment storage or transport internals.

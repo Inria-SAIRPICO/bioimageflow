@@ -25,7 +25,7 @@ Execution pipeline
 5. **Tool execution**:
 
    - **DataFrameTool**: call ``merge_dataframes`` (if multiple upstreams),
-     then ``transform``. Runs in the main process.
+     then ``transform``. Runs in the main process, including genuinely dynamic tools with no declared ``Outputs``.
    - **ProcessingTool**: call ``process_row`` for each row (or
      ``process_batch`` for all rows). Runs in the tool's declared environment.
 
@@ -37,11 +37,17 @@ Execution pipeline
 
 Published cache records are retained until an explicit storage maintenance operation prunes them.
 
+Accepted S target: capture the effective definition, source bytes, targets, inputs and environment configuration before run-visible effects.
+A recursive invocation completes enabled internal terminals; completion-only dependencies do not change unrelated data identity.
+Collective batch processing keeps isolated training/inference/aggregates, including configured empty-input artifacts, with explicit association to all consumed inputs.
+Ordered transport groups must preserve that meaning without duplicating aggregate rows or moving the algorithm into the orchestrator; exact representation is a T/C obligation.
+
 Index alignment
 ---------------
 
 When a ProcessingTool receives inputs from multiple upstream nodes, the engine
-aligns rows by index. Row 0 of node A matches row 0 of node B.
+aligns rows by shared lineage and explicit parent/child index rules.
+Equal ordinal positions from independent sources or sibling expansions do not establish alignment; use an explicit merge tool.
 
 For explosion tools (one-to-many), child indices use ``::`` separators:
 

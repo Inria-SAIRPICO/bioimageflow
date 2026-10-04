@@ -31,9 +31,8 @@ Use explicit project-local paths while learning:
    with Workflow(storage_path="./results") as wf:
        ...
 
-``configure_wetlands()`` must run before Wetlands is first initialized:
-that means before ``Workflow.compute()``, ``Workflow.load()``, or
-``require_tool_packages()``. If it is omitted, BioImageFlow uses
+``configure_wetlands()`` selects local worker runtime configuration before first managed execution.
+Tool-store installation and definition loading are separate effects; they do not themselves certify or provision a tool runtime. If it is omitted, BioImageFlow uses
 ``BIOIMAGEFLOW_WETLANDS``, then ``BIOIMAGEFLOW_HOME / "wetlands"``,
 then ``~/.bioimageflow/wetlands``.
 
@@ -50,15 +49,16 @@ workflow mechanics:
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, EnvironmentSpec, GENERAL_ENV, ImageSpec, Arguments, Template,
+       ProcessingTool, EnvironmentSpec, GENERAL_ENV, ImageSpec, Arguments, Template, IOModel, RowConsumption,
    )
    from bioimageflow import DataFrameTool
 
    class LoadImages(DataFrameTool):
        """Scan a folder for TIFF files."""
+       accepts_upstream = False
        display_name = "Load Images"
 
-       class Inputs:
+       class Inputs(IOModel):
            folder: str
 
        def transform(self, df, arguments):
@@ -73,13 +73,14 @@ workflow mechanics:
 
    class Segment(ProcessingTool):
        """Segment cells using Cellpose."""
+       row_consumption = RowConsumption.MAPPED
        display_name = "Segment"
        environment = cellpose_env
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
                "{image.stem}_seg.tif"
            )
@@ -97,13 +98,14 @@ workflow mechanics:
 
    class Measure(ProcessingTool):
        """Measure region properties from a label mask."""
+       row_consumption = RowConsumption.MAPPED
        display_name = "Measure"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            mask: Annotated[Path, ImageSpec(semantics={"label"})]
 
-       class Outputs:
+       class Outputs(IOModel):
            cell_count: int
            mean_area: float
 
@@ -139,9 +141,8 @@ Wire the tools together in a :class:`~bioimageflow.Workflow`:
        result = wf.compute(stats)
 
    print(result)
-   #    cell_count  mean_area
-   # 0          42     156.3
-   # 1          38     162.1
+   # A DataFrame with cell_count and mean_area columns.
+   # The stub segmentation above writes all-background masks, not validated biological results.
 
 The pipeline forms a linear chain:
 
@@ -174,7 +175,7 @@ targets to get a dictionary:
        stats = measure(mask=masks["mask"])
 
        results = wf.compute(masks, stats)
-       # results is a dict: {"segment": DataFrame, "measure": DataFrame}
+       # results maps the actual requested node names to their DataFrames.
 
 Progress monitoring
 -------------------

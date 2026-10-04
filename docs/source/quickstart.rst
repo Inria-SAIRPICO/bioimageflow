@@ -15,8 +15,7 @@ state. There are three separate locations:
 - ``configure_wetlands(root=...)`` stores local execution state: logs,
   debug port metadata, the bundled Pixi or
   Micromamba installation, and the isolated tool environments. Call it
-  before ``Workflow.compute()``, ``Workflow.load()``, or
-  ``require_tool_packages()``.
+  before first managed execution; tool-store installation and definition loading are separate effects.
 - The tool store holds versioned tool packages installed by
   ``require_tool_packages()`` or ``Workflow.load()``. It defaults to
   ``~/.bioimageflow/tool_packages`` unless ``BIOIMAGEFLOW_HOME`` is set.
@@ -103,17 +102,18 @@ Declare its inputs, outputs, and the environment it needs:
    from typing import Annotated
 
    from bioimageflow_core import (
-       ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template,
+       ProcessingTool, GENERAL_ENV, ImageSpec, Arguments, Template, IOModel, RowConsumption,
    )
 
    class InvertImage(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Invert"
        environment = GENERAL_ENV
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            inverted: Annotated[Path, ImageSpec()] = Template("{image.stem}_inv.tif")
 
        def process_row(self, arguments: Arguments) -> "InvertImage.Outputs":
@@ -172,11 +172,12 @@ you also want browseable files under ``./results/outputs/latest/``.
 ``invalidate()``. Wetlands environments for this run are kept under
 ``./wetlands`` because the script called ``configure_wetlands()``.
 
-Re-running is free
-------------------
+Eligible cache reuse
+--------------------
 
-Run the same workflow again and it completes instantly --- the cache recognises
-that input references, parameters, and tool versions haven't changed:
+Unchanged scientific inputs, parameters, exact tool/source identity and valid selected records can avoid recomputation.
+Lookup, validation and storage work still occur; missing, invalidated or corrupt records do not guarantee a hit.
+Changes to an external file at the same path require explicit invalidation or a declared captured fingerprint.
 
 .. code-block:: python
 

@@ -27,7 +27,9 @@ Put the definition in a ``build_workflow(storage_path=...)`` factory so each mat
            workflow.output("mask", masks["mask"], id="output-mask")
        return workflow
 
-Calling a workflow inside a distinct active parent captures an independent :class:`~bioimageflow.WorkflowNode`:
+Calling a workflow inside a distinct active parent captures an independent :class:`~bioimageflow.WorkflowNode`.
+The definition is editable, while a run captures immutable effective inputs, targets, exact origins and per-environment configuration before effects; later edits apply to later runs.
+This is accepted target intent from :doc:`/reference/unified_workflow_contract`, with source conformance assessed in T/C:
 
 .. code-block:: python
 
@@ -41,6 +43,9 @@ Calling a workflow inside a distinct active parent captures an independent :clas
 Root callers pass interface values with ``compute(inputs={...})``.
 Nested tools execute under scoped paths such as ``segment-images/segment`` and keep their own cache entries.
 The workflow boundary succeeds only after every enabled internal terminal, including detached branches, succeeds or hits cache.
+Completion-only obligations do not change unrelated downstream scientific identity.
+Required defaults resolve for every fan-out target; supplied None is distinct from missing when its declaration allows it.
+Wrong-kind, unknown or missing bindings refuse ordinary invocation transactionally; diagnostic editing remains a separate deliberate mode.
 
 Use :meth:`~bioimageflow.Workflow.from_python` only for trusted Python definitions.
 Portable exports contain the materialized recursive graph and never need to run the factory again.
@@ -79,3 +84,6 @@ Portable archives can be loaded temporarily with ``Workflow.load()`` or extracte
    )
 
 The workflow file or archive describes the graph, while ``storage_path`` belongs to this execution environment and is never serialized.
+Inner source-table and outer ZIP/destination containment are separate admission boundaries.
+Captured helpers/assets must remain available to the live definition; failed imports retire only owned staging, never user-owned destination data or another live snapshot.
+Embedded Python remains trusted code, so staging rollback cannot undo arbitrary Python effects.

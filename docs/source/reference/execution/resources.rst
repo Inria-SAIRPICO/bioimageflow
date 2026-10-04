@@ -67,6 +67,9 @@ Node overrides round-trip in public workflow graph serialization at every nested
 They affect placement and submission pressure, but do not change result keys or cache record identities.
 Changing a resource request can move or resize execution without claiming that the scientific result changed.
 
+Accepted S target: capture effective requirements before dispatch and keep quota/allocation admission separate from scientific cache identity.
+A declared memory requirement is not proof of local OS reservation; shared numeric allocation scopes have their own finite budget and refuse unsafe admission.
+
 Engine guarantees
 -----------------
 

@@ -48,6 +48,7 @@ Node and workflow additions
 
 ``viewer_additions`` adds portable hard or recommended requirements to a configured tool output or a nested workflow's public output ID.
 An addition intersects repeated version constraints, promotes a repeated recommendation to required when needed, and cannot remove the tool declaration.
+Valid individual specifiers do not certify that their intersection or a complete viewer environment can be resolved.
 
 .. code-block:: python
 
@@ -77,14 +78,16 @@ Graph, artifact, and retained-result boundaries
 ``Workflow.to_archive_dict()`` emits a strict archive-version-2 portable artifact with ``custom_sources`` and a derived ``viewing_requirements`` snapshot keyed by scoped output identity.
 ZIP export always writes that artifact form.
 JSON export preserves the existing editable-graph boundary when no custom sources exist and writes the artifact envelope when custom sources require it.
-Version-1 graphs and archives load as legacy declarations with no portable additions and serialize back as version 2.
-Unknown fields are rejected according to their declared version.
+Use the single current graph/archive contract; unknown fields refuse rather than invoke historical schema adapters.
+Independently versioned viewer, worker and graph metadata need not share a version number.
 
 ``Workflow.inspect_viewing_requirements(...)`` and :func:`bioimageflow.inspect_viewing_requirements` read the derived archive snapshot without importing or installing tool packages.
 The snapshot records ``known`` versus ``unknown`` entries and overall completeness; it is diagnostic export state, not an editable second source of truth.
 
 Run-node ``result.json`` files use ``bioimageflow.run.node_result.v2`` and retain effective viewer metadata beside computation provenance.
 ``Storage.read_run_node_result(run_id, node_key)`` returns a typed :class:`bioimageflow.storage.RunNodeResult` with typed per-output viewer values.
-Version-1 run-node files remain readable as having no retained viewer metadata.
+Retained viewer metadata belongs to the captured accepted result, not a later registry selection or the latest per-node projection.
+Backward-only run-file loading is not a requirement of the current contract; protected existing data is not deleted by this clarification.
 
 Portable contracts contain no local viewer environment names, IDs, paths, preferences, credentials, process state, install commands, napari manifests, or plugin enabled/discovery state.
+Current schema/refusal and retained-result binding are accepted target semantics assessed by the ordered test/code review, not implementation certification from this guide.

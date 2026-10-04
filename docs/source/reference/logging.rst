@@ -66,3 +66,6 @@ attach a custom handler to the ``wetlands`` logger and pump records
 onto a dispatch queue.
 
 Specs.md §11 covers the contract end-to-end.
+
+Logging is observational and tied to actual scoped execution identity; handler failures must not change scientific values, cache selection or the admitted primary error.
+This accepted S error-boundary requirement remains a T/C verification obligation.

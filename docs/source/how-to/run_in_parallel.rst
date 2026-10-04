@@ -15,7 +15,7 @@ There are two useful kinds of parallel work:
 - **Rows of one processing step.** If a source finds 100 images, a :class:`~bioimageflow_core.ProcessingTool` can process several image rows at once.
 - **Independent branches.** If two processing steps depend only on the same source, BioImageFlow can run both branches while workers are available.
 
-:class:`~bioimageflow_core.DataFrameTool` operations are small graph-shaping operations and run in the orchestrator process.
+:class:`~bioimageflow_core.DataFrameTool` operations run in the orchestrator process; they may perform substantial table work and are not assumed cheap or interruptible.
 Their rows are not sent to workers.
 
 Choose a local worker count

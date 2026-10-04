@@ -4,6 +4,10 @@ This document is the normative library-to-host contract for recursive BioImageFl
 It details [§14 of the library specification](../specs.md#14-unified-recursive-workflows); host persistence, UI state, and security adaptation remain owned by each host.
 The golden examples are `tests/fixtures/unified_workflow_graph.json` and `tests/fixtures/unified_workflow_archive.json`.
 
+**Accepted target intent (S):** the clauses below define the coherent current design accepted by specification review.
+Conformance of owning revision `2cd79a2`, existing examples and golden fixtures is assessed next in test review (T) and causal code review (C); this clarification supplies no implementation or runtime certification.
+Behavior-changing requirements, including legacy retirement, transactional refusal and execution snapshots, remain explicit global-review findings before source repair.
+
 ## Public Python API
 
 ```python
@@ -112,9 +116,11 @@ Root callers use `compute(inputs={...})`.
 Invocation and root input mappings are keyed by interface names, while serialized bindings and workflow edges use stable IDs.
 The input name `name` is reserved for assigning the structural invocation name.
 
-Each call takes an independent structural snapshot.
+Each invocation takes an independent structural snapshot.
 The snapshot contains graph structure, interface definitions, defaults, constants, templates, enabled state, definition metadata, and tool-class references.
 It does not copy callbacks, cancellation state, execution engines, environment managers, run views, or validation caches.
+The editable invocation definition and the immutable effective definition used by one execution are separate authorities.
+A root call captures its effective definition, inputs, targets, exact executable origin and per-environment configuration before run-visible effects; later edits affect later calls only.
 
 ## Binding rules
 
@@ -124,12 +130,18 @@ When a field input ultimately targets a DataFrameTool parameter, it accepts cons
 Complete upstream DataFrames still use positional DataFrameTool ports.
 A symbolic reference can fan out to multiple compatible targets.
 The library rejects references used outside their owning active workflow, kind mismatches, a target already carrying an internal data edge, duplicate targets owned by different inputs, missing required values, and unknown invocation keys.
+Ordinary construction, invocation, expose/rebind and deletion publish one coherent change or leave prior node, edge, interface and name ownership unchanged.
+Diagnostic editing may deliberately retain incomplete values with current scoped errors; it never labels a partial result executable.
+Replacing a binding removes its old data dependency without erasing genuine independent terminal-completion obligations.
 
 At root execution, field inputs receive ordinary values and DataFrame inputs receive complete DataFrames.
 At nested invocation, field inputs receive constants or `ColumnRef` values and DataFrame inputs receive upstream nodes as complete results.
 During parent construction, either kind can receive a compatible symbolic input from the parent.
 
-Resolution precedence is explicit invocation or root value, interface default, local constant or tool default, then `missing_input`.
+Resolution precedence is explicit invocation or root value, interface default, applicable target-local constant or tool default, then `missing_input`.
+A supplied `None` is a value when the declaration admits it; it is distinct from `MISSING`.
+Every required fan-out target must resolve compatibly; a default on one target does not satisfy another required target.
+Portable interface type, GUI and default metadata survives materialization; unresolved dynamic schemas remain explicitly unknown rather than fabricated `Any` success.
 Invocation bindings never mutate interface defaults.
 
 ## Recursive graph grammar
@@ -138,7 +150,7 @@ Every graph has exactly these top-level fields:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schema_version` | integer | Emitted as `2`; strict legacy `1` is accepted and normalized. |
+| `schema_version` | integer | The one current recursive graph grammar is `2`. |
 | `name` | string | Stable definition identity. |
 | `display_name` | string | Editable presentation metadata. |
 | `interface` | object | Exactly `inputs` and `outputs`. |
@@ -146,7 +158,9 @@ Every graph has exactly these top-level fields:
 | `edges` | array | Immediate column and DataFrame edges. |
 | `config` | object | Root-capable definition metadata. |
 
-Unknown fields and unversioned graphs are rejected according to the declared version; version-1 data cannot carry version-2 viewer fields.
+Unknown fields, missing required fields and unversioned or unsupported graphs are rejected.
+Graph/archive format versions are independent of viewer-manifest and Core task/result schema versions.
+No old-format adapter or guessed endpoint is an accepted target requirement.
 
 An input record contains `id`, `name`, `kind`, optional `schema`, optional serialized `default`, and `targets`.
 Target records have `node` and `port`.
@@ -214,7 +228,9 @@ A column edge has exactly:
 ```
 
 A DataFrame edge has `type`, `id`, `source_node`, and `target_node`, plus exactly one of `target_position` for a tool or `target_input` for a child workflow port.
-Edge IDs are unique and stable.
+Edge IDs are non-empty strings, unique and stable within their definition.
+Positional indexes are non-negative integers; boolean values are not positional indexes.
+Names and generated reservations belong to the containing definition, not process-global construction state.
 Unknown variants and malformed endpoint combinations are rejected.
 
 `config` accepts `engine`, `execution`, and `output_view`.
@@ -252,7 +268,11 @@ Public `from_dict()`, `load()` and `import_archive()` capture and admit the comp
 IDs and single-file names must be safe path components; bundle files may use safe relative nested paths, including helper modules and assets, with content hashes computed and supplied hashes verified under the existing contract before staging.
 Path components exclude colon, backslash and Windows reserved device names even on POSIX hosts.
 Captured bytes and paths remain fixed during staging even when trusted embedded Python executes.
-This containment does not sandbox that Python or change the owned extraction of the outer ZIP archive.
+This containment does not sandbox that Python.
+Outer ZIP member paths and destination ownership are admitted separately, including preexisting ancestors, before extraction, overwrite or custom-code execution.
+Invalid later members leave no outside write or partially installed public destination.
+Temporary capture roots have explicit owners and budgets; failed import retires only task-owned staging, and live definitions retain needed helpers/assets until owner release.
+Trusted Python may cause arbitrary effects that staging rollback cannot undo.
 Two source IDs can therefore export the same class name without shadowing one another.
 
 `to_dict()` returns the editable graph, and `to_dict(include_custom_tools=True)` returns an envelope when custom sources exist.
@@ -260,7 +280,7 @@ Two source IDs can therefore export the same class name without shadowing one an
 JSON `export()` preserves the editable graph form when no custom sources exist and emits the artifact envelope when custom sources require one.
 The derived viewing manifest is keyed by scoped output identity, records completeness explicitly, and can be inspected before any tool package is loaded.
 It is an export snapshot; tool annotations and graph additions remain authoritative.
-Strict version-1 graphs and three-field archives load with no viewer additions and normalize to version 2.
+The current archive envelope and graph grammar are the only target load formats; historical normalization is not retained for backward compatibility.
 `from_dict()` and `load()` preserve source references and viewer additions recursively.
 
 Viewer metadata uses worker-safe `ViewerSpec`, `NapariRequirement`, and `PackageRequirement` values.
@@ -279,7 +299,9 @@ The factory may provide a file-local storage default for standalone convenience,
 `from_python()` executes only that exact symbol and calls it once.
 It rejects absent, non-callable, tuple-returning, and non-`Workflow` factories.
 Installed-module imports use normal Python import semantics.
-File imports first capture the entry directory's Python source bytes, copy that snapshot to a fresh import context, purge stale local modules for the materialization, execute the entry, and capture recursive custom sources before releasing the context.
+File imports capture the entry source and admitted local helpers/assets before materialization, execute the entry in an independent import context, and retain captured custom-source identity for the resulting definition.
+Fresh loading must not purge executable identities still owned by other live definitions.
+Installed-package aliases and transitive dependency conflicts have explicit authority/refusal rules; one pinned version in a script does not prove process-global dependency isolation.
 Export uses the resulting object and never reruns the factory.
 
 ## Compilation and execution identifiers
@@ -322,12 +344,15 @@ Root `compute(inputs=...)` validates values, while nested invocation requires ev
 
 Nested errors use `ValidationError.path` from root workflow node to leaf scope and keep the leaf `node`, `field`, `edge`, and `edge_id` identifiers.
 `from_dict(validate_only=True, partial=True)` may return an incomplete editor graph and structured errors.
-It performs only the explicitly supported strict version-1 to version-2 graph/archive normalization; it never guesses endpoints, coerces an unknown schema, or discards unknown fields.
+Diagnostic parsing retains the same current grammar and endpoint admission; it never guesses endpoints, coerces an unknown schema or discards unknown fields.
+Correcting an edit invalidates affected diagnostics, schemas and plans.
+A cached session Workflow is a projection of canonical editable state, not an independently mutable authority.
+Graph constants have a finite faithfully reversible grammar or explicit refusal; unsupported values are not silently stringified.
 
 ## Deliberately unsupported operations
 
 - No second workflow-definition class, workflow registry, or workflow decorator.
 - No alternate factory symbol or module-level shared workflow convention.
 - No portable dependency on Python factories after materialization.
-- No compatibility flag, deprecated alias, or unversioned dictionary loader; the only legacy normalization is the specified version-1 to version-2 load path.
+- No compatibility flag, deprecated alias, old-schema normalization or unversioned dictionary loader.
 - No unknown node/edge/config variants or best-effort endpoint guessing.

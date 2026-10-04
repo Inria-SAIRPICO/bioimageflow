@@ -11,17 +11,24 @@ Basic templates
 
 .. code-block:: python
 
+   from bioimageflow_core import IOModel, RowConsumption
+
+   # Partial tool sketch; provide process_row and the actual admitted runtime.
    class Segment(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Segment"
        environment = EnvironmentSpec(name="cellpose", dependencies={})
 
-       class Inputs:
+       class Inputs(IOModel):
            image: Annotated[Path, ImageSpec()]
 
-       class Outputs:
+       class Outputs(IOModel):
            mask: Annotated[Path, ImageSpec(semantics={"label"})] = Template(
                "{image.stem}_mask.tif"
            )
+
+This is a base-name example, not a guarantee that duplicate input basenames cannot collide.
+Accepted target intent rejects missing variables, invalid path accessors and owned-output collisions before affected dispatch; T/C assesses conformance.
 
 The template ``{image.stem}_mask.tif`` resolves using the ``image`` input path:
 
@@ -42,7 +49,7 @@ Available variables
    * - ``{row_index}``
      - Current row index (string)
    * - ``{timestamp}``
-     - Unix timestamp of execution
+     - Execution timestamp; not scientific identity or a guarantee of unique paths
    * - ``{<input>.stem}``
      - Stem of an input path (filename without extension)
    * - ``{<input>.name}``
@@ -67,12 +74,12 @@ and ``.exts``:
 
 .. code-block:: python
 
-   class Outputs:
+   class Outputs(IOModel):
        # Given image = "cells.ome.tif"
        result: Annotated[Path, ImageSpec()] = Template(
            "{image.stem}_result{image.exts}"
        )
-       # → "cells_result.ome.tif"
+       # → "cells.ome_result.ome.tif"
 
 Column references
 -----------------
@@ -81,26 +88,28 @@ Access values from the upstream DataFrame with ``{column:<name>}``:
 
 .. code-block:: python
 
-   class Outputs:
+   class Outputs(IOModel):
        report: Path = Template("{column:sample_id}_report.csv")
 
 Row index
 ---------
 
-``{row_index}`` is especially useful for one-to-many (explosion) tools where
-a single input row produces multiple outputs:
+``{row_index}`` identifies the admitted input row when the engine resolves a base path.
+A one-to-many tool generates distinct child paths beneath that base path's owned asset directory; exploded output indexes are not available before execution:
 
 .. code-block:: python
 
    class TileImage(ProcessingTool):
+       row_consumption = RowConsumption.MAPPED
        display_name = "Tile"
        # ...
 
-       class Outputs:
+       class Outputs(IOModel):
            tile: Annotated[Path, ImageSpec()] = Template(
                "{image.stem}_tile_{row_index}.tif"
            )
-           # → "cell_001_tile_0::0.tif", "cell_001_tile_0::1.tif", ...
+           # Base path for input row 0: "cell_001_tile_0.tif".
+           # process_row derives unique child filenames before writing.
 
 Resolution order
 ----------------
@@ -116,3 +125,12 @@ this path and returns it in the ``Outputs``.
        # arguments.mask is already a resolved Path
        imsave(str(arguments.mask), mask_array)
        return self.Outputs(mask=arguments.mask)
+
+Ownership and refusal
+----------------------
+
+Bare declared scalar input values may interpolate without path accessors; ``.name/.stem/.ext/.exts`` require a path input.
+Unknown fields/columns and unresolved expressions refuse instead of being written as literal placeholder text.
+Tool-returned paths must identify admitted owned assets or explicit external values; string or URL spelling alone does not confer ownership.
+Distinct output fields, rows, runs and child outputs need collision-safe owned destinations.
+Accepted collective and empty-input aggregate artifacts retain explicit input association without fabricated object rows.

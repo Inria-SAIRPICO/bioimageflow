@@ -13,7 +13,7 @@ BioImageFlow lets you declare image-processing tools, wire them into directed ac
 - **Shared memory** — scoped numeric file-backed array sharing via `SharedArray`, with zero-copy mapped views after the initial copy
 - **Companion merge strategies** — inner join, cross join, concat, and collect tools from `bioimageflow-common-tools`
 - **Output templating** — declarative output path patterns with `{input.stem}`, `{row_index}`, etc.
-- **Environment isolation** — each tool declares its own `EnvironmentSpec` so dependencies never conflict
+- **Environment isolation** — ProcessingTools declare isolated recipes; reachable tools sharing an environment name must agree on dependencies or refuse
 
 ## Requirements
 
@@ -60,6 +60,7 @@ from bioimageflow import Workflow, DataFrameTool
 
 # 1. Define a source tool (DataFrameTool produces a DataFrame)
 class FileLoader(DataFrameTool):
+    accepts_upstream = False
     display_name = "File Loader"
 
     class Inputs(IOModel):
@@ -256,7 +257,7 @@ open build/html/index.html
 ## Exporting Results
 
 Every reusable node record stores its complete DataFrame and declared assets.
-To create a self-contained copy of the latest human-facing results after a workflow has run:
+To copy the latest human-facing results and their owned assets after a workflow has run:
 
 ```bash
 bioimageflow export-outputs ./results
@@ -272,8 +273,11 @@ paths = export_outputs("./results", mode="copy", scope="latest")
 
 Each node directory includes the declared assets, canonical `dataframe.parquet`, readable `dataframe.csv` and `dataframe.json` exports, and a `provenance.json` explanation containing the tool/version, parameters, selected upstream records, cache identities, and run metadata.
 Use `--scope runs --run-id <run-id>` to export a particular run, or `--scope both` to export both the latest node view and a run view.
+Declared external paths remain external dependencies, so an output tree is self-contained only for its owned assets.
+Latest node views can come from different executions; they are not one complete immutable workflow return.
+Use the attached/submitted result-bundle APIs for a captured run-specific public return.
 
-To install a self-contained output tree outside workflow storage, pass an explicit destination:
+To install an output tree outside workflow storage, pass an explicit destination:
 
 ```bash
 bioimageflow export-outputs ./results --destination ./shared-results
@@ -348,7 +352,8 @@ uv run python scripts/package_status.py
 
 Package-specific releases use annotated tags such as `bioimageflow-core-v0.5.0` and an explicitly dispatched coordinated GitHub Actions publication workflow after exact-head CI and selected runtime validation.
 `scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
-The current tested cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.5.0,<3`; first-party tools declare that current SDK cohort.
+The declared current candidate cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.5.0,<3`; first-party tools declare those bounds.
+Selected local artifact proofs do not certify all supported OS/interpreter/scientific recipes or establish current candidate availability on PyPI; the deep S/T/C library milestone precedes publication.
 See the [release operator guide](docs/source/reference/releasing.md) for setup, actual deployment controls and release steps.
 
 ## FAQ

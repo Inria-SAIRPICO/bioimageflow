@@ -52,7 +52,9 @@ Processing tools should import only the standard library and ``bioimageflow-core
 Import worker-only libraries such as scikit-image, TensorFlow, PyTorch, or native command wrappers inside ``process_row`` or ``process_batch``.
 This keeps schema discovery, documentation builds, and workflow loading independent from heavy runtime environments.
 
-Always use relative imports inside the package:
+Always use relative imports inside the package.
+Keep host-only workflow factories out of worker-imported eager initialization; workers must not import the orchestrator merely to reach one ProcessingTool.
+Exact versioned class identity does not imply process-global third-party dependency isolation:
 
 .. code-block:: python
 
@@ -106,7 +108,8 @@ For each public tool, cover:
 - output template resolution and returned ``Outputs`` instances;
 - expected failures for invalid parameters, missing files, unsupported layouts, or missing external resources.
 
-For each public workflow, cover graph construction, declared outputs, serialization round trips when supported, and one end-to-end execution on tiny public or synthetic data.
+For each public workflow, cover graph construction, declared outputs, current-format serialization round trips when supported, and one end-to-end execution on tiny public or synthetic data.
+Assess existing oracles against accepted specification intent before adding tests; preserve distinct storage, real managed-worker and pure-model proof rather than deleting coverage because titles overlap.
 Network-dependent or external-binary tests should not be the only proof for a tool; add deterministic tests around parsing, planning, command generation, and error handling first.
 
 Run package-local tests directly during development:

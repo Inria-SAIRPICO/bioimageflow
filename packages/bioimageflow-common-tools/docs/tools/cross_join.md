@@ -10,8 +10,8 @@ count is the product of upstream row counts, so this tool can create very large
 tables if used with large inputs.
 
 Expected result: two images crossed with three thresholds produce six rows.
-Failure mode: empty upstream input produces an empty table or the remaining
-single table, depending on the number of upstream tables.
+Accepted S target: an empty factor in a Cartesian product produces zero rows; a one-table call preserves that table.
+Actual empty-factor behavior is a T/C verification obligation, not a reason to discard the declared scientific product semantics.
 
 ## Dependencies and Core Libraries
 

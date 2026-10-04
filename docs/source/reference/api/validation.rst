@@ -26,8 +26,8 @@ Error types
 
    Raised by :func:`serialize_input_schema` /
    :func:`serialize_output_schema` when the tool class cannot be
-   inspected (typically when ``Inputs`` / ``Outputs`` cannot be
-   instantiated).
+   inspected.
+   Serializers inspect resolved class declarations without instantiating the tool; unavailable annotations must remain actionable diagnostics.
 
 Single-node and single-field helpers
 ------------------------------------
@@ -67,7 +67,7 @@ Schema serialization
 
    Return a JSON-safe input schema for ``tool_class``. One entry per
    field declared on ``Inputs``, with ``type`` (display string),
-   ``required``, ``connectable``, ``default``, ``min``/``max``/``step``,
+   ``required``, ``nullable``, ``connectable``, ``default``, ``min``/``max``/``step``, ``path_picker``,
    ``choices``, ``image_spec``, and the GUIMeta strings. Returns
    ``{}`` when the tool has no ``Inputs``. See :doc:`/gui/tool_schemas`
    for the per-field shape.
@@ -81,10 +81,10 @@ Schema serialization
 .. py:function:: serialize_output_schema(tool_class)
 
    Return a JSON-safe output schema for ``tool_class``. Per-field
-   shape ``{"type": str, "default": Any | None, "image_spec": dict | None}``.
-   Returns ``{}`` when the tool has no ``Outputs``, or
-   ``{"_passthrough": True}`` when ``Outputs`` is (or subclasses)
-   :class:`~bioimageflow.Passthrough`.
+   fields follow the complete catalogue in :doc:`/specs` §2.4, including template/viewer metadata.
+   No static Outputs declaration produces an empty static schema, not a claim that a dynamic DataFrameTool has no runtime columns.
+   A Passthrough marker denotes inherited columns; added declarations must preserve their type/image/viewer metadata.
+   Added-field and unavailable-schema conformance remain explicit test/code-review obligations.
 
    .. code-block:: python
 
@@ -130,8 +130,10 @@ Constants
 
    Wrap a Python scalar/list/tuple in the wire-format envelope
    ``{"__type__": ..., "value": ...}``. Recognised types: ``bool``,
-   ``int``, ``float``, ``str``, ``list``, ``tuple``. Anything else is
-   serialized lossily via ``str(value)`` with ``"__type__": "str"``.
+   ``int``, ``float``, ``str``, ``list``, ``tuple``.
+   The accepted portable-constant contract is faithful round-trip for supported values and explicit refusal for unsupported values; silent stringification is not scientific data preservation.
+   The exact supported nested grammar and implementation conformance are assessed during test/code review.
+   Owner-bound runtime references and invocation-only values are not portable graph constants merely because current worker transport supports them.
 
    .. code-block:: python
 
@@ -142,8 +144,8 @@ Constants
 
 .. py:function:: deserialize_constant(data)
 
-   Inverse of :func:`serialize_constant`. Reconstructs the Python value
-   from the envelope.
+   Reconstruct the supported portable value from its admitted envelope.
+   Inverse/round-trip claims apply only to the explicitly supported constant grammar, not arbitrary values converted to strings.
 
    .. code-block:: python
 

@@ -4,7 +4,8 @@ Tool Schemas
 Hosts that render inline form widgets — pin lists, parameter editors,
 output channel previews — need a JSON-safe description of every tool's
 inputs and outputs. The :mod:`bioimageflow.validation` module provides
-two serializers and two helpers tuned for that use case.
+class-based serializers and configured-node resolution for that use case.
+The complete field catalogue and type-display rules are authoritative in :doc:`/specs` §2.4; this guide explains their use.
 
 Input schema
 ------------
@@ -24,7 +25,7 @@ entry per field:
    #         "connectable": "by_default", "default": None,
    #         "display_name": "Input image", "description": "...",
    #         "group": None, "min": None, "max": None, "step": None,
-   #         "choices": None,
+   #         "path_picker": None, "choices": None,
    #         "image_spec": {"semantics": ["intensity"], "layouts": [], ...},
    #     },
    #     "sigma": {
@@ -61,9 +62,10 @@ Per-field keys:
        ``None`` when absent.
    * - ``min``, ``max``, ``step``
      - Numeric widget bounds from ``GUIMeta``; ``None`` when absent.
+   * - ``path_picker``
+     - ``"file"``, ``"folder"``, ``"both"`` or ``None``; a GUI-only path-selection hint.
    * - ``choices``
-     - List of strings for ``Literal[...]`` / :class:`enum.Enum`
-       fields; ``None`` otherwise.
+     - JSON-safe declared choices for ``Literal[...]`` / :class:`enum.Enum` fields; ``None`` otherwise.
    * - ``image_spec``
      - Dict produced by :func:`serialize_image_spec` (see below);
        ``None`` when the field is not a typed image.
@@ -98,6 +100,10 @@ The ``connectable`` field surfaces the
      - ``Connectable.BY_DEFAULT``
      - Pin visible; data input.
 
+DataFrameTool parameter fields always serialize ``connectable="never"``; positional upstream DataFrames are separate from these fields.
+Required, nullable and default are orthogonal: a nullable field without a default still requires a supplied value.
+Schema type strings are display metadata, not replacement Python annotations.
+
 For ``Outputs``, ``connectable`` is ignored by the runtime because outputs
 always expose a pin. When an output carries ``GUIMeta``, the serializer still
 emits the string value so frontends can preserve the full metadata object.
@@ -118,6 +124,7 @@ keys only when the output annotation carries
            "default": "{input_image.stem}_mask{ext}",
            "image_spec": {...},
            "template": "{input_image.stem}_mask{ext}",
+           "viewer": None,
            "connectable": "not_by_default",
            "display_name": "Segmentation mask",
            "description": "Label image.",
@@ -131,15 +138,17 @@ keys only when the output annotation carries
 Two special cases:
 
 - ``{}`` when the tool has no ``Outputs`` class.
-- ``{"_passthrough": True}`` when ``Outputs`` is — or subclasses —
-  :class:`~bioimageflow.Passthrough`. GUIs should render this as
-  "inherits upstream columns".
+- The ``_passthrough`` marker means upstream columns are inherited.
+  Added declared fields must retain their type/image/viewer metadata; the marker is not a substitute for those fields.
 
 For tools with **dynamic** output columns (``Generate``, the merge
 tools), the static schema only covers fields declared on ``Outputs``.
 The actually-resolved schema for a configured node is available via
 :func:`~bioimageflow.validation.serialize_resolved_outputs(node)` —
 useful for rendering per-column output pins.
+Concrete dynamic DataFrameTools need no Outputs declaration or worker environment.
+Unknown or unresolved schemas stay explicitly unresolved; do not invent available columns or treat an empty static schema as complete configured-node knowledge.
+Passthrough added-field preservation and truthful unresolved diagnostics are accepted target contracts assessed by later test/code review, not conformance proved by this guide.
 
 serialize_image_spec
 --------------------
@@ -187,8 +196,7 @@ SchemaSerializationError
 ------------------------
 
 :class:`~bioimageflow.validation.SchemaSerializationError` is raised
-when the serializers cannot produce a wire-format schema — typically
-because the tool class could not be instantiated for introspection.
-:class:`~bioimageflow.ToolRegistry` swallows the error and falls back
-to ``{}`` so a single broken class does not block the rest of a tool
-package; direct callers should catch it and surface the failure.
+when declaration inspection cannot produce a wire-format schema; inspection does not require tool instantiation.
+Direct callers should surface the declaration failure.
+Registry discovery may continue for other classes, but the accepted contract preserves an unavailable/invalid schema diagnostic instead of advertising an empty successful schema.
+The exact current error representation is assessed during test/code review; no additional exception or status field is introduced here.
