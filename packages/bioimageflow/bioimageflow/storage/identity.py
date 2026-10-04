@@ -284,6 +284,8 @@ def canonical_dataframe_identity(
         if pd.api.types.is_datetime64_any_dtype(series.dtype):
             entry["timezone"] = str(getattr(series.dtype, "tz", None) or "naive-utc")
         column_schema.append(entry)
+    # Column arrays preserve scalar dtype without repeated pandas indexing.
+    values = [(name, df[column].array, str(df[column].dtype)) for name, column in columns.items()]
     rows: list[dict[str, Any]] = []
     for position, index in enumerate(df.index):
         rows.append(
@@ -291,11 +293,11 @@ def canonical_dataframe_identity(
                 "index": unicodedata.normalize("NFC", str(index)),
                 "values": {
                     name: _cell_payload(
-                        df[original].iloc[position],
+                        array[position],
                         column_kind=kinds.get(name, "scalar"),
-                        dtype=str(df[original].dtype),
+                        dtype=dtype,
                     )
-                    for name, original in columns.items()
+                    for name, array, dtype in values
                 },
             }
         )

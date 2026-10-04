@@ -246,8 +246,7 @@ class RenderSpots(ProcessingTool):
     category = Category.SPOT_DETECTION
     tags = ["spots", "render", "labels"]
     environment = GENERAL_ENV
-    run_empty_batch = True
-    empty_batch_anchor_inputs = ("reference_image",)
+    collective_reference_inputs = ("reference_image",)
 
     class Inputs(IOModel):
         spot_id: Annotated[int, GUIMeta("Spot ID", connectable=Connectable.BY_DEFAULT)]
@@ -280,46 +279,40 @@ class RenderSpots(ProcessingTool):
         *,
         context: Any = None,
     ) -> Any:
-        if not arguments_list:
-            return []
-        if not any(_has_spot_coordinate(arguments) for arguments in arguments_list):
-            return [
-                _blank_rendered_spots_output(self, arguments)
-                for arguments in arguments_list
-            ]
-
-        grouped_positions: dict[Path | None, list[int]] = {}
-        for position, arguments in enumerate(arguments_list):
-            reference = getattr(arguments, "reference_image", None)
+        references = [Arguments(**reference.arguments) for reference in getattr(context, "reference_rows", ())]
+        rows_by_source: dict[Path | None, list[Arguments]] = {}
+        for row in arguments_list:
+            reference = getattr(row, "reference_image", None)
             source = Path(reference) if reference is not None else None
-            grouped_positions.setdefault(source, []).append(position)
+            rows_by_source.setdefault(source, []).append(row)
+        observations_by_source = {source: list(rows) for source, rows in rows_by_source.items()}
+        for row in references:
+            reference = getattr(row, "reference_image", None)
+            source = Path(reference) if reference is not None else None
+            rows_by_source.setdefault(source, []).append(row)
+        if not rows_by_source:
+            batch = getattr(context, "batch_arguments", None)
+            if batch is None:
+                return []
+            rows_by_source[None] = [batch]
 
         output_sources: dict[Path, Path | None] = {}
-        rendered: list[list[Any]] = [[] for _ in arguments_list]
-        for source, positions in grouped_positions.items():
-            rows = [arguments_list[position] for position in positions]
-            outputs = {Path(arguments.output_image) for arguments in rows}
+        plans: list[tuple[list[Arguments], Arguments]] = []
+        for source, rows in rows_by_source.items():
+            outputs = {Path(row.output_image) for row in rows}
             if len(outputs) != 1:
-                raise ValueError(
-                    "RenderSpots rows for one reference_image must reference the "
-                    "same output_image."
-                )
+                raise ValueError("RenderSpots rows for one reference_image must reference the same output_image.")
             output = next(iter(outputs))
-            previous_source = output_sources.setdefault(output, source)
-            if previous_source != source:
+            if output in output_sources and output_sources[output] != source:
                 raise ValueError(
-                    "RenderSpots cannot write multiple reference images to the "
-                    "same output_image. Use an output template containing "
-                    "{reference_image.stem}."
+                    "RenderSpots cannot write multiple reference images to the same output_image. "
+                    "Use an output template containing {reference_image.stem}."
                 )
-
-            coordinate_rows = [row for row in rows if _has_spot_coordinate(row)]
-            if coordinate_rows:
-                group_output = self._render_group(coordinate_rows)
-            else:
-                group_output = _blank_rendered_spots_output(self, rows[0])
-            for position in positions:
-                rendered[position] = group_output
+            output_sources[output] = source
+            plans.append(([row for row in observations_by_source.get(source, ()) if _has_spot_coordinate(row)], rows[0]))
+        rendered: list[Any] = []
+        for observations, reference in plans:
+            rendered.extend(self._render_group(observations) if observations else _blank_rendered_spots_output(self, reference))
         return rendered
 
     def _render_group(self, rows: list[Arguments]) -> list[Any]:
@@ -427,7 +420,6 @@ class SpotsToLabels(ProcessingTool):
     category = Category.SPOT_DETECTION
     tags = ["spots", "labels", "coordinates"]
     environment = GENERAL_ENV
-    run_empty_batch = True
 
     class Inputs(IOModel):
         spot_id: Annotated[
@@ -472,9 +464,9 @@ class SpotsToLabels(ProcessingTool):
         import imageio.v3 as iio
         import numpy as np
 
-        if not arguments_list:
-            return []
-        arguments = arguments_list[0]
+        arguments = arguments_list[0] if arguments_list else getattr(context, "batch_arguments", None)
+        if arguments is None:
+            raise ValueError("An empty SpotsToLabels batch requires admitted batch arguments.")
         shape = _parse_shape(getattr(arguments, "image_shape", "256,256"))
         radius = integral_value(getattr(arguments, "radius", 0), "radius", minimum=0)
         output = Path(arguments.label_image)
@@ -497,8 +489,7 @@ class SpotsToLabels(ProcessingTool):
             if _has_spot_coordinate(row_arguments)
         ]
         if not rows:
-            blank_output = self._blank_coordinate_output(arguments)
-            return [blank_output for _ in arguments_list]
+            return self._blank_coordinate_output(arguments)
         labels = np.zeros(shape, dtype=np.uint32)
         for index, row_arguments in enumerate(rows, start=1):
             spot_id = getattr(row_arguments, "spot_id", None)
@@ -515,10 +506,7 @@ class SpotsToLabels(ProcessingTool):
 
         output.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output, labels)
-        return [
-            [self.Outputs(label_image=output, label_count=label_count)]
-            for _ in arguments_list
-        ]
+        return [self.Outputs(label_image=output, label_count=label_count)]
 
 
 class SpotColocalization(DataFrameTool):

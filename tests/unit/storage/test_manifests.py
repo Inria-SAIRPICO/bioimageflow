@@ -37,6 +37,7 @@ from bioimageflow.storage import (
 from tests.testkit.storage import (
     _file_digest,
     _record_id_for,
+    _record_relation,
     _write_test_dataframe,
 )
 
@@ -72,6 +73,7 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=schema,
         outputs=[output],
+        row_relation=_record_relation(result_key),
     )
 
     with pytest.raises(CacheCorruptionError, match="digest"):
@@ -102,6 +104,7 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
         ),
         dataframe_logical_schema=schema,
         outputs=[valid_output],
+        row_relation=_record_relation(result_key),
     )
     manifest.validate(record_dir)
 
@@ -129,6 +132,7 @@ def test_record_manifest_validation_checks_files_and_digest(tmp_path: Path) -> N
             (bad_record_dir / "dataframe.parquet").read_bytes()
         ),
         dataframe_logical_schema=schema,
+        row_relation=_record_relation(result_key),
         outputs=[
             {
                 "path": "../escape.tif",
@@ -166,6 +170,7 @@ def test_record_manifest_validation_accepts_scalar_outputs(tmp_path: Path) -> No
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=schema,
         outputs=[output],
+        row_relation=_record_relation(result_key),
     )
 
     manifest.validate(record_dir)
@@ -227,6 +232,7 @@ def test_record_manifest_validation_rejects_invalid_scalar_outputs(
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=schema,
         outputs=[output],
+        row_relation=_record_relation(result_key),
     )
 
     with pytest.raises(CacheCorruptionError):
@@ -282,6 +288,7 @@ def test_record_manifest_validation_rejects_symlink_escape(
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=schema,
         outputs=outputs,
+        row_relation=_record_relation(result_key),
     )
 
     with pytest.raises(CacheCorruptionError, match=expected_match):
@@ -305,6 +312,7 @@ def test_record_manifest_validation_checks_declared_dataframe_file_digest(
         dataframe_transport_digest=_file_digest(b"expected"),
         dataframe_logical_schema=schema,
         outputs=[],
+        row_relation=_record_relation(result_key),
     )
 
     with pytest.raises(CacheCorruptionError, match="digest"):
@@ -314,7 +322,7 @@ def test_record_manifest_validation_checks_declared_dataframe_file_digest(
 def test_record_manifest_from_dict_rejects_non_mapping_and_unknown_fields() -> None:
     result_key = make_result_key({"node": "segment"})
     manifest = {
-        "schema": "bioimageflow.cache.record.v1",
+        "schema": "bioimageflow.cache.record.v2",
         "result_key": result_key,
         "record_id": _record_id_for(result_key, "sha256:" + "1" * 64, []),
         "dataframe": {

@@ -189,6 +189,37 @@ class CrossJoin(DataFrameTool):
         return result
 
 
+def _nullable_join_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Preserve exact integral values when a join can add missing rows."""
+    columns = {}
+    for name in frame.columns:
+        values = frame[name].array
+        dtype = frame[name].dtype
+        if pd.api.types.is_integer_dtype(dtype) and not isinstance(dtype, pd.api.extensions.ExtensionDtype):
+            nullable_dtype = str(dtype).replace("uint", "UInt", 1).replace("int", "Int", 1)
+            values = pd.array(values, dtype=nullable_dtype)
+        elif pd.api.types.is_bool_dtype(dtype):
+            values = pd.array(values, dtype="boolean")
+        columns[name] = values
+    return pd.DataFrame(columns, index=frame.index)
+
+
+def _nullable_join_schema(schema: dict[str, dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
+    """Add nullability only to optional-side fields, retaining other metadata."""
+    from bioimageflow.validation.resolved import ResolvedSchema
+
+    normalized = ResolvedSchema.from_columns(schema).to_wire()
+    assert normalized is not None
+    result = {}
+    for name, entry in normalized.items():
+        field = dict(entry)
+        if name != key and not field.get("nullable", False):
+            field["nullable"] = True
+            field["type_spec"] = {"kind": "union", "members": [field["type_spec"], {"kind": "none"}]}
+        result[name] = field
+    return result
+
+
 class JoinOnColumn(DataFrameTool):
     """Join upstream DataFrames on a named column."""
     display_name = "Join On Column"
@@ -240,8 +271,10 @@ class JoinOnColumn(DataFrameTool):
                 suffixes=_suffixes_for_step(suffixes, step),
                 shared_columns={join_column},
             )
-            result = result.rename(columns=left_rename).merge(
-                df.rename(columns=right_rename),
+            left_frame = _nullable_join_frame(result) if arguments.how in {"right", "outer"} else result
+            right_frame = _nullable_join_frame(df) if arguments.how in {"left", "outer"} else df
+            result = left_frame.rename(columns=left_rename).merge(
+                right_frame.rename(columns=right_rename),
                 on=join_column,
                 how=arguments.how,
             )
@@ -270,9 +303,11 @@ class JoinOnColumn(DataFrameTool):
                 suffixes=_suffixes_for_step(suffixes, step),
                 shared_columns={join_column},
             )
+            left_schema = _nullable_join_schema(result, join_column) if how in {"right", "outer"} else result
+            right_schema = _nullable_join_schema(schema, join_column) if how in {"left", "outer"} else schema
             result = _planned_schema(
-                result,
-                schema,
+                left_schema,
+                right_schema,
                 left_rename,
                 right_rename,
                 output,

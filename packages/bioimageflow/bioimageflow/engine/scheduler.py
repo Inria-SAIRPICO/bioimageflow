@@ -156,6 +156,7 @@ class DefaultEngine(
         self._compiled_ordinals: dict[Node, int] = {}
         self._node_cache_hits: dict[Node, bool] = {}
         self._node_selected_results: dict[Node, SelectedResult] = {}
+        self._node_result_relations: dict[Node, Any] = {}
         self._external_cancellation_requested = cancellation_requested
         self._env_manager = env_manager
         if use_wetlands:
@@ -198,6 +199,7 @@ class DefaultEngine(
             self._execution_active = True
             with self._cache_hit_lock:
                 self._node_selected_results.clear()
+                self._node_result_relations.clear()
 
     def _end_execution(self) -> None:
         with self._lifecycle_lock:

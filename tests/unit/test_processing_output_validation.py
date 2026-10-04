@@ -13,7 +13,7 @@ from bioimageflow.engine.output_validation import (
     validate_processing_result_rows,
 )
 from bioimageflow_core import IOModel, SharedArray
-from bioimageflow_core.worker_protocol import RowResult
+from bioimageflow_core.worker_protocol import ConsumedRow, OutputGroup
 
 
 class Outputs(IOModel):
@@ -119,9 +119,8 @@ def test_batch_outputs_require_exact_flat_or_nested_cardinality() -> None:
 
 def test_plain_result_rows_share_the_same_validator() -> None:
     rows = (
-        RowResult(
-            position=0,
-            row_index="row",
+        OutputGroup(
+            consumed_rows=(ConsumedRow(0, "row"),),
             outputs=(
                 {
                     "path": "/shared/mask.tif",

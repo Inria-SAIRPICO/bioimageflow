@@ -31,7 +31,7 @@ import pandas as pd
 
 CACHE_SCHEMA_VERSION = "bioimageflow.cache.v1"
 CURRENT_SCHEMA = "bioimageflow.cache.current.v1"
-RECORD_SCHEMA = "bioimageflow.cache.record.v1"
+RECORD_SCHEMA = "bioimageflow.cache.record.v2"
 LINK_SCHEMA = "bioimageflow.link.v1"
 RUN_SCHEMA = "bioimageflow.run.v1"
 LEGACY_RUN_NODE_RESULT_SCHEMA = "bioimageflow.run.node_result.v1"
@@ -52,6 +52,6 @@ _SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _INTEGER_RE = re.compile(r"^-?[0-9]+$")
 _UNSIGNED_INTEGER_RE = re.compile(r"^[0-9]+$")
 _RECORD_MANIFEST_FIELDS = frozenset(
-    {"schema", "result_key", "record_id", "dataframe", "outputs"}
+    {"schema", "result_key", "record_id", "dataframe", "outputs", "row_relation"}
 )
 _OUTPUT_VIEW_MODES = frozenset({"none", "pointer", "symlink", "copy", "hardlink"})

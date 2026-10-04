@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
+
+from bioimageflow_core.worker_protocol import ConsumedRow, OutputGroup
+
+from bioimageflow.row_relation import AssembledResult, ResultRelation, RowAssociation
 
 from .common import (
     Any,
@@ -24,36 +28,54 @@ if TYPE_CHECKING:
 class _DataframesMixin:
     def _build_output_dataframe(
         self,
-        raw_results: list[list[Any]],
+        groups: Sequence[OutputGroup],
         aligned_index: list[Any],
         tool: ProcessingTool,
-    ) -> pd.DataFrame:
-        """Build output DataFrame from tool results with index explosion."""
+        *,
+        row_consumption: str,
+        node_name: str,
+        result_key: str | None,
+        input_domain: str | None = None,
+        input_domain_kind: str | None = None,
+    ) -> AssembledResult:
+        """Assemble output rows without conflating row identity and consumption."""
+        expected = tuple(ConsumedRow(position, str(index)) for position, index in enumerate(aligned_index))
+        if row_consumption == "collective":
+            if len(groups) != 1 or groups[0].consumed_rows != expected:
+                raise ValueError("A collective result must associate one group with the whole actual input batch.")
+            domain = f"aggregate::{node_name}::{result_key or node_name}"
+            domain_kind = "aggregate"
+        elif row_consumption == "mapped":
+            if len(groups) != len(expected) or any(
+                group.consumed_rows != (row,) for group, row in zip(groups, expected, strict=True)
+            ):
+                raise ValueError("Mapped result groups must match the exact ordered input rows.")
+            domain = input_domain or f"source::{node_name}::{result_key or node_name}"
+            domain_kind = input_domain_kind or "source"
+        else:
+            raise ValueError("Unknown processing row consumption.")
+
         expanded: list[tuple[str, dict[str, Any]]] = []
-        for i, row_outputs in enumerate(raw_results):
-            parent_idx = aligned_index[i]
-            if len(row_outputs) == 1:
-                expanded.append(
-                    (str(parent_idx), self._outputs_to_dict(row_outputs[0]))
-                )
-            else:
-                for j, output in enumerate(row_outputs):
-                    expanded.append(
-                        (f"{parent_idx}::{j}", self._outputs_to_dict(output))
-                    )
+        associations: list[RowAssociation] = []
+        for group in groups:
+            indices: list[str] = []
+            for ordinal, output in enumerate(group.outputs):
+                if row_consumption == "collective":
+                    index = f"{domain}::{ordinal}"
+                else:
+                    parent = group.consumed_rows[0].row_index
+                    index = parent if len(group.outputs) == 1 else f"{parent}::{ordinal}"
+                indices.append(index)
+                expanded.append((index, self._outputs_to_dict(output)))
+            associations.append(RowAssociation(group.consumed_rows, tuple(indices)))
 
         if expanded:
-            df = pd.DataFrame(
-                [d for _, d in expanded],
-                index=pd.Index([idx for idx, _ in expanded]),
-            )
+            dataframe = pd.DataFrame([values for _, values in expanded], index=pd.Index([index for index, _ in expanded]))
         else:
             assert tool.Outputs is not None
-            output_annotations = tool.Outputs._get_all_annotations()
-            df = pd.DataFrame(columns=pd.Index(list(output_annotations.keys())))
-
-        df.index = df.index.astype(str)
-        return df
+            dataframe = pd.DataFrame(columns=pd.Index(list(tool.Outputs._get_all_annotations())))
+        relation = ResultRelation(row_consumption, domain, domain_kind, tuple(associations))
+        return AssembledResult(dataframe, relation)
 
     # ── Recursive workflow execution ───────────────────────────────────
 
@@ -128,28 +150,32 @@ class _DataframesMixin:
             if i == finest_idx:
                 aligned.append(df)
                 continue
-            if set(df.index) == set(finest_index):
+            if df.index.equals(finest_index):
                 aligned.append(df)
                 continue
-            # Parent-index expansion
-            df_idx_set = set(str(j) for j in df.index)
-            expanded_rows: list[Any] = []
-            expanded_indices: list[Any] = []
-            for idx in finest_index:
-                if idx in df_idx_set:
-                    expanded_rows.append(df.loc[idx])
-                    expanded_indices.append(idx)
-                else:
-                    parent = self._find_parent_index(idx, df_idx_set)
-                    if parent is not None:
-                        expanded_rows.append(df.loc[parent])
-                        expanded_indices.append(idx)
-            if expanded_rows:
-                expanded_df = pd.DataFrame(
-                    expanded_rows, index=pd.Index(expanded_indices)
+            # Select each column independently: a mixed numeric Series would
+            # round large integers and rebuilding rows repeats pandas work.
+            if not df.index.is_unique:
+                raise IndexAlignmentError("Cannot align a table with duplicate row identities.")
+            positions_by_index = {str(index): position for position, index in enumerate(df.index)}
+            available = set(positions_by_index)
+            positions: list[int] = []
+            indices: list[Any] = []
+            for index in finest_index:
+                source = str(index) if str(index) in available else self._find_parent_index(index, available)
+                if source is not None:
+                    positions.append(positions_by_index[source])
+                    indices.append(index)
+            if positions:
+                values = pd.DataFrame(df, copy=False)
+                expanded = pd.DataFrame(
+                    {position: values.iloc[:, position].array.take(positions) for position in range(len(df.columns))},
+                    index=pd.Index(indices),
                 )
-                expanded_df.columns = df.columns
-                aligned.append(expanded_df)
+                expanded.columns = df.columns
+                # No attrs authority/copy: scientific values (including bound
+                # SharedArray references) retain their own identities.
+                aligned.append(expanded)
             else:
                 aligned.append(df)
 
@@ -165,35 +191,34 @@ class _DataframesMixin:
         if not upstream_nodes:
             return [], {}
 
-        lineage_cache: dict[str, set[str]] = {}
-        for up_node in upstream_nodes.values():
-            self._compute_lineage(up_node, lineage_cache, results)
-
         upstream_list = list(upstream_nodes.values())
-        if len(upstream_list) > 1:
-            common_roots: set[str] | None = None
-            for up_node in upstream_list:
-                roots = lineage_cache.get(up_node.name, {up_node.name})
-                if common_roots is None:
-                    common_roots = roots
-                else:
-                    common_roots = common_roots & roots
+        relations = [self._result_relation(upstream) for upstream in upstream_list]
+        if any(relation is not None and relation.domain_kind == "aggregate" for relation in relations):
+            domains = {relation.output_domain for relation in relations if relation is not None}
+            if any(relation is None for relation in relations) or len(domains) != 1:
+                raise IndexAlignmentError(
+                    "Aggregate output rows have an independent domain. Insert an explicit merge DataFrameTool "
+                    "(e.g., CrossJoin) to combine aggregate/model outputs with observation rows."
+                )
+        elif len(upstream_list) > 1:
+            lineage_cache: dict[str, set[str]] = {}
+            for upstream in upstream_list:
+                self._compute_lineage(upstream, lineage_cache, results)
+            common_roots = set.intersection(*(lineage_cache[upstream.name] for upstream in upstream_list))
             if not common_roots:
                 raise IndexAlignmentError(
-                    f"Index alignment error: upstream nodes "
-                    f"{[n.name for n in upstream_list]} have no common lineage. "
-                    f"Insert a merge DataFrameTool (e.g., CrossJoin) to combine them."
+                    f"Index alignment error: upstream nodes {[node.name for node in upstream_list]} "
+                    "have no common lineage. Insert a merge DataFrameTool (e.g., CrossJoin) to combine them."
                 )
 
         def _max_depth(idx_set: set[Any]) -> int:
             return max((str(i).count("::") for i in idx_set), default=0)
 
-        all_indices = [set(results[n].index) for n in upstream_nodes.values()]
-        if any(not indices for indices in all_indices):
-            return [], {n.name: results[n] for n in upstream_nodes.values()}
-        finest_index = max(all_indices, key=lambda s: (_max_depth(s), len(s)))
-        aligned = sorted(finest_index, key=str)
-        return aligned, {n.name: results[n] for n in upstream_nodes.values()}
+        all_indices = [results[upstream].index for upstream in upstream_list]
+        if any(len(index) == 0 for index in all_indices):
+            return [], {upstream.name: results[upstream] for upstream in upstream_list}
+        finest_index = max(all_indices, key=lambda index: (_max_depth(set(index)), len(index)))
+        return list(finest_index), {upstream.name: results[upstream] for upstream in upstream_list}
 
     def _compute_lineage(
         self,
@@ -241,6 +266,8 @@ class _DataframesMixin:
 
     def _outputs_to_dict(self, outputs: Any) -> dict[str, Any]:
         """Convert an Outputs instance to a dict."""
+        if isinstance(outputs, dict):
+            return {key: str(value) if isinstance(value, Path) else value for key, value in outputs.items()}
         if hasattr(outputs, "_get_all_annotations"):
             d: dict[str, Any] = {}
             for k in outputs._get_all_annotations():

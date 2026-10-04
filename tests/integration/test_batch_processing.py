@@ -104,9 +104,8 @@ class EmptyBatchProbe(ProcessingTool):
 
 
 class EmptyBatchReducer(ProcessingTool):
-    row_consumption = RowConsumption.MAPPED
+    row_consumption = RowConsumption.COLLECTIVE
     environment = StubBatchProcessor.environment
-    run_empty_batch = True
 
     class Inputs(IOModel):
         value: int
@@ -116,18 +115,18 @@ class EmptyBatchReducer(ProcessingTool):
         count: int
 
     def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
-        assert len(arguments_list) == 1
-        output = Path(arguments_list[0].output)
+        assert arguments_list == []
+        assert context is not None
+        output = Path(context.batch_arguments.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("empty")
-        return [[self.Outputs(output=output, count=0)]]
+        return [self.Outputs(output=output, count=0)]
 
 
-class AnchoredEmptyBatchReducer(ProcessingTool):
-    row_consumption = RowConsumption.MAPPED
+class ReferencedBatchReducer(ProcessingTool):
+    row_consumption = RowConsumption.COLLECTIVE
     environment = StubBatchProcessor.environment
-    run_empty_batch = True
-    empty_batch_anchor_inputs = ("path",)
+    collective_reference_inputs = ("path",)
 
     class Inputs(IOModel):
         value: int
@@ -139,11 +138,13 @@ class AnchoredEmptyBatchReducer(ProcessingTool):
 
     def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
         rows = []
-        for arguments in arguments_list:
+        assert context is not None
+        for reference in context.reference_rows:
+            arguments = Arguments(**reference.arguments)
             output = Path(arguments.output)
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(Path(arguments.path).name)
-            rows.append([self.Outputs(output=output, source_name=Path(arguments.path).name)])
+            rows.append(self.Outputs(output=output, source_name=Path(arguments.path).name))
         return rows
 
 
@@ -217,7 +218,7 @@ class TestEmptyBatchExecution:
         assert df.empty
         assert list(df.columns) == ["output"]
 
-    def test_run_empty_batch_tool_runs_once_for_empty_upstream(self, tmp_workspace):
+    def test_collective_tool_runs_once_for_actual_empty_upstream(self, tmp_workspace):
         with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             empty = EmptySource()(name="empty")
             reduced = EmptyBatchReducer()(value=empty["value"], name="reduce_empty")
@@ -227,14 +228,14 @@ class TestEmptyBatchExecution:
         assert int(df.iloc[0]["count"]) == 0
         assert Path(df.iloc[0]["output"]).read_text() == "empty"
 
-    def test_run_empty_batch_anchor_uses_non_empty_bound_input(self, tmp_workspace):
+    def test_collective_empty_uses_actual_auxiliary_reference(self, tmp_workspace):
         source_path = tmp_workspace / "source.tif"
         source_path.write_text("source")
 
         with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             source = SinglePathSource()(path=source_path, name="source")
             empty = EmptyChild()(source, name="empty")
-            reduced = AnchoredEmptyBatchReducer()(
+            reduced = ReferencedBatchReducer()(
                 value=empty["value"],
                 path=source["path"],
                 name="anchored",
@@ -245,7 +246,7 @@ class TestEmptyBatchExecution:
         assert df.iloc[0]["source_name"] == "source.tif"
         assert Path(df.iloc[0]["output"]).read_text() == "source.tif"
 
-    def test_empty_batch_anchor_fills_partially_empty_parent_groups(
+    def test_collective_references_include_partially_empty_sources(
         self, tmp_workspace
     ):
         populated_path = tmp_workspace / "populated.tif"
@@ -260,7 +261,7 @@ class TestEmptyBatchExecution:
                 name="sources",
             )
             children = PartiallyEmptyChild()(path=sources["path"], name="children")
-            reduced = AnchoredEmptyBatchReducer()(
+            reduced = ReferencedBatchReducer()(
                 value=children["value"],
                 path=sources["path"],
                 name="anchored",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from bioimageflow.env_manager import WetlandsEnvManager
 from bioimageflow_core import EnvironmentSpec
 
@@ -19,6 +21,7 @@ class _Pool:
 
 def _manager(environment: _Pool) -> WetlandsEnvManager:
     manager = object.__new__(WetlandsEnvManager)
+    manager._lock = threading.RLock()
     manager.get_or_create = lambda *args, **kwargs: environment
     return manager
 
@@ -26,7 +29,7 @@ def _manager(environment: _Pool) -> WetlandsEnvManager:
 def test_wetlands_submits_the_canonical_processing_entry_point() -> None:
     environment = _Pool()
     manager = _manager(environment)
-    payload = {"schema": "bioimageflow.processing_task.v2"}
+    payload = {"schema": "bioimageflow.processing_task.v3"}
 
     result = manager.submit_processing_task(
         EnvironmentSpec(name="worker", dependencies={}),
@@ -45,8 +48,8 @@ def test_wetlands_maps_the_same_canonical_processing_entry_point() -> None:
     environment = _Pool()
     manager = _manager(environment)
     payloads = [
-        {"schema": "bioimageflow.processing_task.v2", "task_id": "task_0"},
-        {"schema": "bioimageflow.processing_task.v2", "task_id": "task_1"},
+        {"schema": "bioimageflow.processing_task.v3", "task_id": "task_0"},
+        {"schema": "bioimageflow.processing_task.v3", "task_id": "task_1"},
     ]
 
     result = manager.map_processing_tasks(

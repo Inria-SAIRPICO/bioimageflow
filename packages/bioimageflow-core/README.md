@@ -33,7 +33,13 @@ Postponed and inherited annotations retain their metadata without importing unav
 Numeric creation/mapping helpers reject object-containing NumPy dtypes before backing allocation or mapping.
 Numeric data and Path/str image dispatch retain their essential behavior; explicit owners and live reader/worker grants control file lifetime.
 
-Current processing transport uses `ProcessingTask`, `RowInvocation`, `ProcessingTaskResult`, and `RowResult` with explicit task/result v2 envelopes.
+Current processing transport uses `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup`, and `ProcessingTaskResult` with explicit task/result v3 envelopes.
+Physical task `mode` is separate from required `row_consumption`: mapped groups consume exactly one ordered input each and can emit zero, one or many outputs; a collective batch emits one group consuming the complete ordered input, including an empty input.
+Collective `process_batch` returns a flat list of Outputs, without repeating an aggregate for each consumed row.
+`ExecutionContext.batch_arguments` exposes admitted constants/defaults and resolved output paths as `Arguments`; `reference_rows` holds actual auxiliary `ReferenceRow(position, row_index, arguments)` records separately from consumed observation rows.
+These values use the task's existing scoped reference grants; decoding and context construction do not open arrays.
+Filesystem context serialization remains separate from batch values.
+A SharedArray in any task value requires explicit scope admission; a missing scope is refused before importing tool code, while ordinary scalar tasks need no shared scope.
 The public task/result codecs use the same typed grammar for arguments and outputs: primitive leaves, explicit dictionary/list/tuple nodes, Paths, SharedArray references, NumPy arrays, and dtype-preserving numeric NumPy scalars.
 Literal dictionaries cannot collide with typed descriptors, and SharedArray decoding never allocates or attaches memory.
 Unsupported objects, cyclic containers, object-containing dtypes, and malformed descriptors are refused; picklability alone is not sufficient.

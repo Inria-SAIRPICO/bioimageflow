@@ -23,14 +23,16 @@ RenderSpots().process_batch([
 ## Expected Results
 
 The output image marks each spot coordinate.
-Every input row receives the same aggregate image path and count so the collective tool preserves BioImageFlow batch cardinality.
+The collective result contains one output row per rendered reference image, associated with the complete consumed observation batch.
+The aggregate is not repeated for each spot.
 When `reference_image` is connected, rows are grouped by reference image and rendered independently.
 Use an output template containing `{reference_image.stem}` when a batch contains multiple reference images so that groups cannot overwrite one another.
 Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows overwrite earlier rows where disks overlap.
 With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
 In label mode, `spot_count` is the number of distinct positive labels visible in the final image.
 With `label_mode=False`, the output is a `uint8` binary mask with values `{0, 1}`.
-When the upstream spot table is empty, `RenderSpots` still writes a blank image from `image_shape` or `reference_image` and reports `spot_count=0`.
+When the upstream spot table is empty, `RenderSpots` receives `arguments_list=[]`; admitted `context.batch_arguments` retain image shape and output settings.
+Genuine selected reference images are supplied separately in `context.reference_rows`, so each reference can still produce a blank artifact with `spot_count=0` without inventing spot observations.
 
 ## Failure Modes
 

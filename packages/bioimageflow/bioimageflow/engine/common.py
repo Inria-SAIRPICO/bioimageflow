@@ -259,7 +259,7 @@ def _declared_owned_artifact_paths(
 
 def _declared_zero_row_scalar_outputs(
     tool: ProcessingTool,
-    raw_results: list[list[Any]],
+    raw_results: Any,
     execution_index: list[Any],
 ) -> list[tuple[str, Any, Any]]:
     declared_values = getattr(tool, "zero_row_scalar_outputs", {})
@@ -285,7 +285,8 @@ def _declared_zero_row_scalar_outputs(
             raise ValueError(
                 f"{type(tool).__name__}.zero_row_scalar_outputs column {column_name!r} must be scalar."
             )
-        for row_index, row_outputs in zip(execution_index, raw_results):
+        for row_index, group in zip(execution_index, raw_results):
+            row_outputs = group.outputs
             if len(row_outputs) == 0:
                 entries.append((column_name, row_index, value))
     return entries

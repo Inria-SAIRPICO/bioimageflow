@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import threading
 from typing import Any
 
@@ -11,6 +12,7 @@ from bioimageflow.engine.output_validation import validate_processing_result_row
 from bioimageflow.parsl.routing import RoutingPlan
 from bioimageflow.storage import Storage
 from bioimageflow_core import (
+    OutputGroup,
     ProcessingTask,
     RowInvocation,
     encode_processing_task,
@@ -38,7 +40,7 @@ class PlannedCacheBackend:
         self,
         engine: Any,
         request: ProcessingDispatch,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         del engine
         raise RuntimeError(
             f"Planned Parsl cache selection for node {request.node_name!r} "
@@ -98,7 +100,7 @@ class ParslBackend:
         self,
         engine: Any,
         request: ProcessingDispatch,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         route = self._routing.route_for_node(request.node_name)
         if (
             request.has_batch
@@ -206,11 +208,10 @@ class ParslBackend:
         )
         rows_result = collector.run(tasks)
         assert request.tool.Outputs is not None
-        return validate_processing_result_rows(
-            rows_result,
-            request.tool.Outputs,
-            reject_shared_array=True,
+        outputs = validate_processing_result_rows(
+            rows_result, request.tool.Outputs, reject_shared_array=True,
         )
+        return [replace(group, outputs=tuple(values)) for group, values in zip(rows_result, outputs, strict=True)]
 
     def cleanup_execution(self, engine: Any) -> None:
         del engine

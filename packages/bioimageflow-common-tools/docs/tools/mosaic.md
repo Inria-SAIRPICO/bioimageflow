@@ -19,7 +19,7 @@ BioImageFlow core batch-processing APIs and Pillow.
 ## Assumptions
 
 All input rows must share the same column and resize settings.
-An empty batch returns no output rows because there is no row from which to resolve an output path.
+An empty batch returns no output rows because there are no images to compose.
 
 ## Minimal Example
 
@@ -31,7 +31,8 @@ mosaic = Mosaic()(input_image=images["path"], columns=5, name="qc_mosaic")
 
 ## Expected Results
 
-Every input row receives the same `mosaic_path`, and `image_count` equals the number of input images.
+The collective batch produces one output row containing `mosaic_path`; `image_count` equals the number of consumed input images.
+The result retains association to all input images without duplicating the mosaic for each input.
 
 ## Failure Modes
 

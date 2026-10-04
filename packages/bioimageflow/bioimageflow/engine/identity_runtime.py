@@ -91,6 +91,12 @@ class _IdentityRuntimeMixin:
         """Compute the logical digest for any node type."""
         tool_version = get_tool_version(node.tool)
         source_hash = get_source_hash(type(node.tool)) if workflow._dev_mode else None
+        if isinstance(node.tool, ProcessingTool):
+            resolved_params = {
+                "arguments": resolved_params,
+                "row_consumption": node.tool.row_consumption.value,
+                "collective_reference_inputs": list(node.tool.collective_reference_inputs),
+            }
         return compute_signature_hash(
             type(node.tool).__name__,
             tool_version,

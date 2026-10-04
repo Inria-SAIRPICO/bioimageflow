@@ -39,6 +39,7 @@ from bioimageflow.storage import (
 from tests.testkit.storage import (
     _file_digest,
     _record_id_for,
+    _record_relation,
     _write_record,
 )
 
@@ -132,7 +133,7 @@ def test_select_current_record_rejects_invalid_manifest(tmp_path: Path) -> None:
     result_key = make_result_key({"node": "segment"})
     record_id = make_record_id(
         {
-            "schema": "bioimageflow.cache.record.v1",
+            "schema": "bioimageflow.cache.record.v2",
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
@@ -173,6 +174,7 @@ def test_select_current_record_rejects_symlinked_record_directory(
         dataframe_transport_digest=_file_digest(b"parquet"),
         dataframe_logical_schema=[],
         outputs=[],
+        row_relation=_record_relation(result_key),
     )
     (outside_record / "manifest.json").write_text(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True)

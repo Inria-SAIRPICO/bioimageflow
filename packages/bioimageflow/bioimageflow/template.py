@@ -21,7 +21,8 @@ def get_output_templates(
 ) -> dict[str, str]:
     """Extract templates from explicit Template defaults.
 
-    Path outputs without a Template default use the built-in default template.
+    New Path outputs without a Template default use the built-in default template.
+    A same-named input is preserved unless an explicit Template or override supplies a destination.
     Non-path outputs may not declare Template defaults.
     """
     templates: dict[str, str] = {}
@@ -42,6 +43,14 @@ def get_output_templates(
         default = getattr(outputs_cls, name, None)
         if isinstance(default, Template):
             templates[name] = default.pattern
+        elif (
+            name in input_annotations
+            and is_path_type(input_annotations[name])
+            and not (
+                overrides and isinstance(overrides.get(name), str) and overrides[name]
+            )
+        ):
+            continue
         else:
             # Default template
             if len(path_input_fields) == 1:

@@ -11,7 +11,9 @@ from bioimageflow_core import (
     ProcessingTaskResult,
     ProcessingTask,
     RowInvocation,
-    RowResult,
+    ConsumedRow,
+    OutputGroup,
+    ReferenceRow,
     SharedModuleOriginV1,
     SourceFileOriginV1,
     VersionedModuleOriginV1,
@@ -57,6 +59,7 @@ def _task(tmp_path) -> ProcessingTask:
         cache_attempt_id=f"att_{'2' * 32}",
         task_retry=0,
         mode="row_chunk",
+        row_consumption="mapped",
         tool=_source_origin(tmp_path),
         rows=(
             RowInvocation(
@@ -77,10 +80,10 @@ def _result(task: ProcessingTask) -> ProcessingTaskResult:
         cache_attempt_id=task.cache_attempt_id,
         task_retry=task.task_retry,
         mode=task.mode,
-        rows=(
-            RowResult(
-                position=0,
-                row_index="sample",
+        row_consumption=task.row_consumption,
+        groups=(
+            OutputGroup(
+                consumed_rows=(ConsumedRow(0, "sample"),),
                 outputs=({"value": 4},),
             ),
         ),
@@ -125,7 +128,7 @@ def test_processing_result_has_exact_round_trip(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_task.v3"),
+        lambda payload: payload.update(schema="bioimageflow.processing_task.v4"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_id="task_1"),
         lambda payload: payload.update(invocation_id="run_" + "1" * 32),
@@ -156,14 +159,14 @@ def test_batch_requires_batch_context(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_result.v3"),
+        lambda payload: payload.update(schema="bioimageflow.processing_result.v4"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_retry=True),
         lambda payload: payload.update(extra=True),
-        lambda payload: payload.pop("rows"),
-        lambda payload: payload["rows"].append(dict(payload["rows"][0])),
-        lambda payload: payload["rows"][0].update(position=True),
-        lambda payload: payload["rows"][0].update(outputs=[3]),
+        lambda payload: payload.pop("groups"),
+        lambda payload: payload["groups"].append(dict(payload["groups"][0])),
+        lambda payload: payload["groups"][0]["consumed_rows"][0].update(position=True),
+        lambda payload: payload["groups"][0].update(outputs=[3]),
     ],
 )
 def test_processing_result_malformed_payloads_fail_closed(tmp_path, mutate) -> None:
@@ -187,7 +190,7 @@ def test_result_correlation_must_match_exactly(tmp_path) -> None:
             task,
             replace(
                 result,
-                rows=(replace(result.rows[0], row_index="different"),),
+                groups=(replace(result.groups[0], consumed_rows=(ConsumedRow(0,"different"),)),),
             ),
         )
 
@@ -283,10 +286,10 @@ def test_shared_array_descriptor_round_trip_preserves_typed_values(
         actual = decoded.rows[0].arguments
     else:
         result = _result(task)
-        result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+        result = replace(result, groups=(replace(result.groups[0], outputs=(values,)),))
         decoded = decode_processing_result(encode_processing_result(result))
         validate_processing_result(task, decoded)
-        actual = decoded.rows[0].outputs[0]
+        actual = decoded.groups[0].outputs[0]
     assert isinstance(actual["shared"], SharedArray)
     assert actual["shared"] == ref
     assert isinstance(actual["nested"], list)
@@ -319,9 +322,9 @@ def test_processing_numeric_values_keep_dtype_precision_and_container_identity(
         actual = decode_processing_task(payload).rows[0].arguments
     else:
         result = _result(task)
-        result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+        result = replace(result, groups=(replace(result.groups[0], outputs=(values,)),))
         payload = encode_processing_result(result)
-        actual = decode_processing_result(payload).rows[0].outputs[0]
+        actual = decode_processing_result(payload).groups[0].outputs[0]
     assert actual["array"].dtype == values["array"].dtype
     np.testing.assert_array_equal(actual["array"], values["array"])
     assert not np.shares_memory(actual["array"], values["array"])
@@ -354,7 +357,7 @@ def test_object_array_is_refused_before_any_transport_send(tmp_path, direction):
             send(encode_processing_task(task))
         else:
             result = _result(task)
-            result = replace(result, rows=(replace(result.rows[0], outputs=(values,)),))
+            result = replace(result, groups=(replace(result.groups[0], outputs=(values,)),))
             send(encode_processing_result(result))
     assert sent == []
 
@@ -416,3 +419,39 @@ def test_scope_descriptors_roundtrip_without_allocating_or_binding(tmp_path, mon
     decoded = decode_processing_task(payload)
     assert decoded.shared_memory_context == task.shared_memory_context
     assert list(tmp_path.rglob("*.npy")) == []
+
+
+@pytest.mark.parametrize("values", [(2, 5), ()])
+def test_collective_result_requires_exact_complete_consumption(tmp_path, values):
+    task = replace(
+        _task(tmp_path), mode="process_batch", row_consumption="collective",
+        rows=tuple(RowInvocation(i, f"sample-{i}", {"value": value}, None)
+                   for i, value in enumerate(values)),
+        batch_context=_context(tmp_path, row=False),
+    )
+    consumed = tuple(ConsumedRow(row.position, row.row_index) for row in task.rows)
+    result = replace(_result(task), groups=(OutputGroup(consumed, ({"sum": sum(values)},)),))
+    actual = decode_processing_result(encode_processing_result(result))
+    validate_processing_result(task, actual)
+    for groups in ((), (OutputGroup(consumed, ()), OutputGroup(consumed, ()))):
+        with pytest.raises(ValueError, match="one output group"):
+            decode_processing_result(encode_processing_result(replace(result, groups=groups)))
+    wrong = (ConsumedRow(99, "foreign"),) if not consumed else consumed[:-1]
+    with pytest.raises(ValueError, match="rows"):
+        validate_processing_result(task, replace(result, groups=(OutputGroup(wrong, ()),)))
+
+
+def test_batch_context_values_are_typed_and_separate_from_observations(tmp_path):
+    from pathlib import Path
+    from bioimageflow_core import SharedArray
+    task = replace(_task(tmp_path), mode="process_batch", row_consumption="collective",
+                   rows=(), batch_context=_context(tmp_path, row=False),
+                   batch_arguments={"output": Path(tmp_path) / "sum.npy", "literal": {"kind": "path"}},
+                   reference_rows=(ReferenceRow(0, "reference", {"ref": SharedArray("image", (2,), "u1", "a" * 32)}),))
+    decoded = decode_processing_task(encode_processing_task(task))
+    assert decoded == task
+    assert decoded.rows == ()
+    assert isinstance(decoded.reference_rows[0].arguments["ref"], SharedArray)
+    assert decoded.reference_rows[0].arguments["ref"]._owner is None
+    with pytest.raises(ValueError, match="Collective"):
+        decode_processing_task(encode_processing_task(replace(task, mode="row_chunk")))

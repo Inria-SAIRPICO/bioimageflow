@@ -154,8 +154,7 @@ class ProcessingTool(BaseTool):
     environment: ClassVar[Any]
     Outputs: ClassVar[Optional[type[IOModel]]]
     resources: ClassVar[Any] = None
-    run_empty_batch: ClassVar[bool] = False
-    empty_batch_anchor_inputs: ClassVar[tuple[str, ...]] = ()
+    collective_reference_inputs: ClassVar[tuple[str, ...]] = ()
     zero_row_scalar_outputs: ClassVar[dict[str, Any]] = {}
     row_consumption: ClassVar[RowConsumption]
 

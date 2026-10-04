@@ -40,6 +40,13 @@ def _file_digest(content: bytes) -> str:
     return f"sha256:{hashlib.sha256(content).hexdigest()}"
 
 
+def _record_relation(result_key: str, indices: tuple[str, ...] = ("row",)) -> dict[str, object]:
+    return {
+        "row_consumption": "dataframe", "output_domain": f"source::fixture::{result_key}",
+        "domain_kind": "source", "groups": [{"consumed_rows": [], "output_indices": list(indices)}],
+    }
+
+
 def _record_id_for(
     result_key: str,
     dataframe_digest: str,
@@ -49,7 +56,7 @@ def _record_id_for(
 ) -> str:
     return make_record_id(
         {
-            "schema": "bioimageflow.cache.record.v1",
+            "schema": "bioimageflow.cache.record.v2",
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
@@ -59,6 +66,7 @@ def _record_id_for(
                 "transport_digest": "sha256:" + "0" * 64,
             },
             "outputs": outputs,
+            "row_relation": _record_relation(result_key),
         }
     )
 
@@ -118,6 +126,7 @@ def _write_record(
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=logical_schema,
         outputs=outputs,
+        row_relation=_record_relation(result_key),
     )
     (record_dir / "manifest.json").write_text(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True)

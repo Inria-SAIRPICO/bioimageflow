@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from bioimageflow.cache.selection import SelectedResult
+from bioimageflow.row_relation import ResultRelation
 
 from .common import (
     Any,
@@ -28,6 +29,23 @@ from .common import (
 
 
 class _CacheRuntimeMixin:
+    def _result_relation(self, node: Node) -> ResultRelation | None:
+        from bioimageflow.workflow_node import WorkflowNode
+
+        with self._cache_hit_lock:
+            selection = self._node_selected_results.get(node)
+            if selection is not None:
+                return ResultRelation.from_dict(selection.manifest.row_relation)
+            relation = self._node_result_relations.get(node)
+        if relation is not None:
+            return relation
+        if isinstance(node, WorkflowNode):
+            relations = [self._result_relation(reference.node) for reference in node._published_outputs.values()]
+            admitted = [value for value in relations if value is not None]
+            if admitted and len(admitted) == len(relations) and len({value.output_domain for value in admitted}) == 1:
+                return admitted[0]
+        return None
+
     def _pin_selected_result(self, node: Node, selection: SelectedResult) -> None:
         with self._cache_hit_lock:
             self._node_selected_results[node] = selection
@@ -206,6 +224,7 @@ class _CacheRuntimeMixin:
 
         with self._cache_hit_lock:
             self._node_selected_results.pop(node, None)
+            self._node_result_relations.pop(node, None)
 
         # ── Compute signature hash ──
         if isinstance(node.tool, DataFrameTool):

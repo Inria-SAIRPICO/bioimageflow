@@ -135,6 +135,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
         sig_hash,
         df,
         result_key=result_key,
+        row_relation={"row_consumption": "mapped", "output_domain": f"source::fixture::{result_key}", "domain_kind": "source", "groups": [{"consumed_rows": [{"position": 0, "row_index": "0"}], "output_indices": [str(index) for index in df.index]}]},
         attempt_id=attempt_id,
         run_id="run_0123456789abcdef0123456789abcdef",
         staging_dir=staging_dir,
@@ -159,6 +160,7 @@ def test_processing_tool_publish_rejects_symlinked_record_assets_before_writing(
             sig_hash,
             df,
             result_key=result_key,
+            row_relation={'row_consumption': 'mapped', 'output_domain': 'fixture', 'domain_kind': 'source', 'groups': [{'consumed_rows': [{'position': 0, 'row_index': '0'}], 'output_indices': ['0']}]},
             attempt_id=attempt_id,
             run_id="run_0123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
@@ -194,6 +196,7 @@ def test_processing_tool_publish_accepts_declared_zero_row_owned_asset(
         sig_hash,
         df,
         result_key=result_key,
+        row_relation={"row_consumption": "mapped", "output_domain": f"source::fixture::{result_key}", "domain_kind": "source", "groups": [{"consumed_rows": [{"position": 0, "row_index": "0"}], "output_indices": [str(index) for index in df.index]}]},
         attempt_id=attempt_id,
         run_id="run_0123456789abcdef0123456789abcdef",
         staging_dir=staging_dir,
@@ -256,6 +259,7 @@ def test_processing_tool_publish_rejects_work_paths_as_external_outputs(
             sig_hash,
             df,
             result_key=result_key,
+            row_relation={'row_consumption': 'mapped', 'output_domain': 'fixture', 'domain_kind': 'source', 'groups': [{'consumed_rows': [{'position': 0, 'row_index': '0'}], 'output_indices': ['0']}]},
             attempt_id=attempt_id,
             run_id="run_0123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
@@ -299,6 +303,7 @@ def test_processing_tool_publish_rejects_overlapping_directory_and_child_assets(
             sig_hash,
             df,
             result_key=result_key,
+            row_relation={'row_consumption': 'mapped', 'output_domain': 'fixture', 'domain_kind': 'source', 'groups': [{'consumed_rows': [{'position': 0, 'row_index': '0'}], 'output_indices': ['0']}]},
             attempt_id=attempt_id,
             run_id="run_0123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
@@ -327,6 +332,7 @@ def test_processing_tool_publish_rejects_relative_external_path(tmp_path: Path) 
             "sig",
             pd.DataFrame({"output": ["relative.txt"]}, index=["0"]),
             result_key=result_key,
+            row_relation={'row_consumption': 'mapped', 'output_domain': 'fixture', 'domain_kind': 'source', 'groups': [{'consumed_rows': [{'position': 0, 'row_index': '0'}], 'output_indices': ['0']}]},
             attempt_id=attempt_id,
             run_id="run_4123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
@@ -362,6 +368,7 @@ def test_processing_tool_publish_rejects_mixed_path_ownership(tmp_path: Path) ->
                 index=["0", "1"],
             ),
             result_key=result_key,
+            row_relation={'row_consumption': 'mapped', 'output_domain': 'fixture', 'domain_kind': 'source', 'groups': [{'consumed_rows': [{'position': 0, 'row_index': '0'}], 'output_indices': ['0']}, {'consumed_rows': [{'position': 1, 'row_index': '1'}], 'output_indices': ['1']}]},
             attempt_id=attempt_id,
             run_id="run_5123456789abcdef0123456789abcdef",
             staging_dir=staging_dir,
@@ -369,3 +376,30 @@ def test_processing_tool_publish_rejects_mixed_path_ownership(tmp_path: Path) ->
             path_columns={"output"},
             owned_path_columns=set(),
         )
+
+
+@pytest.mark.parametrize("foreign_index", [True, False])
+def test_processing_publication_refuses_bad_relation_before_staged_writes(tmp_path: Path, foreign_index: bool) -> None:
+    root = tmp_path / "results"
+    key, attempt, staging, assets = processing_prepare_attempt(
+        root, "source", "sig", run_id="run_" + "0" * 32,
+        invocation_id="inv_" + "0" * 32, engine="direct", tool_identity="test:source",
+    )
+    sentinel = assets / "owned.txt"
+    sentinel.write_text("owned")
+    relation = {
+        "row_consumption": "collective", "output_domain": "aggregate::source",
+        "domain_kind": "aggregate", "groups": [{"consumed_rows": [], "output_indices": ["foreign" if foreign_index else "actual"]}],
+    }
+    if not foreign_index:
+        relation["groups"] = []
+    with pytest.raises(ValueError):
+        processing_publish(
+            root, "source", "sig", pd.DataFrame({"value": [1]}, index=["actual"]),
+            result_key=key, row_relation=relation, attempt_id=attempt, run_id="run_" + "0" * 32,
+            staging_dir=staging, staging_assets_dir=assets, path_columns=set(), owned_path_columns=set(),
+        )
+    assert not (staging / "dataframe.parquet").exists()
+    assert sentinel.read_text() == "owned"
+    assert not (Storage(root).result_dir(key) / "records").exists()
+    assert Storage(root).load_current(key) is None

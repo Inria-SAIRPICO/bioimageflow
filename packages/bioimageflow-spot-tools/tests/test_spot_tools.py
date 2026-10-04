@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import imageio.v3 as iio
 import numpy as np
@@ -8,7 +9,7 @@ import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_input_schema, serialize_output_schema
-from bioimageflow_core import Arguments
+from bioimageflow_core import Arguments, ReferenceRow
 from bioimageflow_common_tools import Files
 import bioimageflow_spot_tools.detection as spot_detection
 from bioimageflow_spot_tools import (
@@ -25,6 +26,13 @@ from bioimageflow_spot_tools import (
 )
 
 pytestmark = pytest.mark.package_tools
+
+
+def _collective_context(*, batch: Arguments | None = None, references: tuple[Arguments, ...] = ()) -> SimpleNamespace:
+    return SimpleNamespace(
+        batch_arguments=batch,
+        reference_rows=tuple(ReferenceRow(position, str(position), dict(vars(arguments))) for position, arguments in enumerate(references)),
+    )
 
 
 def _index(values: list[str]) -> pd.Index:
@@ -391,10 +399,10 @@ def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) ->
             Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")
             for spot in spots
         ]
-    )[0][0]
+    )[0]
     labels = SpotsToLabels().process_batch(
         [Arguments(**vars(spot), label_image=tmp_path / "labels.tif") for spot in spots]
-    )[0][0]
+    )[0]
 
     rendered_image = iio.imread(rendered.output_image)
     label_image = iio.imread(labels.label_image)
@@ -404,7 +412,7 @@ def test_render_spots_and_spots_to_labels_create_label_images(tmp_path: Path) ->
     assert labels.label_count == 2
 
 
-def test_collective_spot_renderers_preserve_workflow_batch_cardinality(
+def test_collective_spot_renderers_publish_one_output_for_the_batch(
     tmp_path: Path,
 ) -> None:
     image = _spot_image(tmp_path / "puncta.tif")
@@ -428,11 +436,11 @@ def test_collective_spot_renderers_preserve_workflow_batch_cardinality(
         rendered_result = wf.compute(rendered)
         labels_result = wf.compute(labels)
 
-    assert len(rendered_result) == len(labels_result) == 3
+    assert len(rendered_result) == len(labels_result) == 1
     assert rendered_result["output_image"].nunique() == 1
     assert labels_result["label_image"].nunique() == 1
-    assert rendered_result["spot_count"].tolist() == [3, 3, 3]
-    assert labels_result["label_count"].tolist() == [3, 3, 3]
+    assert rendered_result["spot_count"].tolist() == [3]
+    assert labels_result["label_count"].tolist() == [3]
     assert int(iio.imread(rendered_result.iloc[0]["output_image"]).max()) == 3
     assert int(iio.imread(labels_result.iloc[0]["label_image"]).max()) == 3
 
@@ -535,22 +543,14 @@ def test_spots_to_labels_rejects_conflicting_collective_configuration(
         )
 
 
-def test_spots_to_labels_all_empty_rows_share_one_collective_output(
-    tmp_path: Path,
-) -> None:
+def test_spots_to_labels_empty_batch_publishes_one_collective_output(tmp_path: Path) -> None:
     output = tmp_path / "labels.tif"
-
     results = SpotsToLabels().process_batch(
-        [
-            Arguments(image_shape="16,16", radius=1, label_image=output),
-            Arguments(image_shape="16,16", radius=1, label_image=output),
-        ]
+        [], context=_collective_context(batch=Arguments(image_shape="16,16", radius=1, label_image=output))
     )
-
-    assert len(results) == 2
-    assert all(len(row) == 1 for row in results)
-    assert {Path(row[0].label_image) for row in results} == {output}
-    assert {row[0].label_count for row in results} == {0}
+    assert len(results) == 1
+    assert Path(results[0].label_image) == output
+    assert results[0].label_count == 0
     assert int(iio.imread(output).max()) == 0
 
 
@@ -567,7 +567,7 @@ def test_render_spots_label_mode_false_writes_binary_uint8_mask(tmp_path: Path) 
                 output_image=tmp_path / "mask.tif",
             )
         ]
-    )[0][0]
+    )[0]
 
     mask = iio.imread(result.output_image)
     assert mask.dtype == np.uint8
@@ -608,15 +608,11 @@ def test_spot_label_renderers_zero_rows_preserve_artifact_and_count(
 ) -> None:
     output_path = tmp_path / f"{output_name}.tif"
     result = tool.process_batch(
-        [
-            Arguments(
-                image_shape="16,16",
-                radius=1,
-                **extra_arguments,
-                **{output_name: output_path},
-            )
-        ]
-    )[0][0]
+        [],
+        context=_collective_context(batch=Arguments(
+            image_shape="16,16", radius=1, **extra_arguments, **{output_name: output_path}
+        )),
+    )[0]
 
     labels = iio.imread(getattr(result, output_name))
     assert labels.dtype == np.uint32
@@ -625,22 +621,16 @@ def test_spot_label_renderers_zero_rows_preserve_artifact_and_count(
     assert getattr(result, count_name) == 0
 
 
-def test_render_spots_zero_rows_writes_one_artifact_per_anchor(tmp_path: Path) -> None:
-    results = RenderSpots().process_batch(
-        [
-            Arguments(
-                image_shape="16,16",
-                radius=1,
-                label_mode=True,
-                output_image=tmp_path / f"rendered_{index}.tif",
-            )
-            for index in range(2)
-        ]
-    )
-
+def test_render_spots_empty_batch_writes_one_artifact_per_selected_reference(tmp_path: Path) -> None:
+    references = []
+    for index in range(2):
+        reference = tmp_path / f"reference_{index}.tif"
+        iio.imwrite(reference, np.zeros((16, 16), dtype=np.float32))
+        references.append(Arguments(reference_image=reference, image_shape="16,16", radius=1,
+                                    label_mode=True, output_image=tmp_path / f"rendered_{index}.tif"))
+    results = RenderSpots().process_batch([], context=_collective_context(references=tuple(references)))
     assert len(results) == 2
-    for row in results:
-        result = row[0]
+    for result in results:
         labels = iio.imread(result.output_image)
         assert labels.dtype == np.uint32
         assert labels.shape == (16, 16)
@@ -758,10 +748,10 @@ def test_spot_label_renderers_preserve_ids_above_uint16(tmp_path: Path) -> None:
 
     rendered = RenderSpots().process_batch(
         [Arguments(**vars(spot), output_image=tmp_path / "rendered.tif")]
-    )[0][0]
+    )[0]
     labels = SpotsToLabels().process_batch(
         [Arguments(**vars(spot), label_image=tmp_path / "labels.tif")]
-    )[0][0]
+    )[0]
 
     rendered_image = iio.imread(rendered.output_image)
     label_image = iio.imread(labels.label_image)
@@ -784,7 +774,7 @@ def test_spot_label_renderers_accept_integer_like_label_ids(tmp_path: Path) -> N
                 output_image=tmp_path / "rendered.tif",
             )
         ]
-    )[0][0]
+    )[0]
     labels = SpotsToLabels().process_batch(
         [
             Arguments(
@@ -796,7 +786,7 @@ def test_spot_label_renderers_accept_integer_like_label_ids(tmp_path: Path) -> N
                 label_image=tmp_path / "labels.tif",
             )
         ]
-    )[0][0]
+    )[0]
 
     assert int(iio.imread(rendered.output_image)[4, 5]) == 1
     assert int(iio.imread(labels.label_image)[4, 5]) == 1
@@ -824,7 +814,7 @@ def test_spots_to_labels_rounds_half_up_and_counts_visible_labels(
                 label_image=tmp_path / "labels.tif",
             ),
         ]
-    )[0][0]
+    )[0]
 
     labels = iio.imread(result.label_image)
     assert labels[4, 5] == 2

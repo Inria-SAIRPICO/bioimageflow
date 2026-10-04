@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from bioimageflow_core import ExecutionContext, ProcessingTool, ResourceSpec
+from bioimageflow_core import ExecutionContext, ProcessingTool, ResourceSpec, OutputGroup
 
 if TYPE_CHECKING:
     from bioimageflow.engine import DefaultEngine
@@ -55,7 +55,7 @@ class ProcessingBackend(Protocol):
         self,
         engine: "DefaultEngine",
         request: ProcessingDispatch,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         """Execute one completely resolved processing request."""
         ...
 
@@ -83,7 +83,7 @@ class DirectBackend:
         self,
         engine: "DefaultEngine",
         request: ProcessingDispatch,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         return engine._dispatch_direct(
             request.tool,
             list(request.arguments),
@@ -129,7 +129,7 @@ class WetlandsBackend:
         self,
         engine: "DefaultEngine",
         request: ProcessingDispatch,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         return engine._dispatch_via_wetlands(
             request.tool,
             list(request.arguments),

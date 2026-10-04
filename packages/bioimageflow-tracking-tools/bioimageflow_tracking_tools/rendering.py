@@ -30,8 +30,7 @@ class TracksToLabels(ProcessingTool):
     category = Category.TRACKING
     tags = ["tracking", "labels", "render"]
     environment = GENERAL_ENV
-    run_empty_batch = True
-    empty_batch_anchor_inputs = ("label_image",)
+    collective_reference_inputs = ("label_image",)
 
     class Inputs(IOModel):
         track_id: Annotated[
@@ -48,6 +47,7 @@ class TracksToLabels(ProcessingTool):
         ]
 
     class Outputs(IOModel):
+        source_label_image: Annotated[Path, GUIMeta("Source labels")]
         output_label_image: Annotated[
             Path,
             ImageSpec(
@@ -68,75 +68,33 @@ class TracksToLabels(ProcessingTool):
         import imageio.v3 as iio
         import numpy as np
 
-        if not arguments_list:
-            return []
-
-        track_arguments: list[Arguments] = []
-        anchor_arguments: list[Arguments] = []
-        track_positions: list[int] = []
-        anchor_positions: list[int] = []
-        for position, row in enumerate(arguments_list):
-            present = [hasattr(row, field) for field in ("track_id", "frame", "label")]
-            if any(present):
-                if not all(present):
-                    missing = next(
-                        field
-                        for field, exists in zip(
-                            ("track_id", "frame", "label"), present, strict=True
-                        )
-                        if not exists
-                    )
-                    raise ValueError(
-                        f"Track mapping row is missing required column {missing!r}."
-                    )
-                track_arguments.append(row)
-                track_positions.append(position)
-            else:
-                anchor_arguments.append(row)
-                anchor_positions.append(position)
-
-        rows_by_source: dict[Path, list[tuple[int, Arguments]]] = {}
+        references = [Arguments(**reference.arguments) for reference in getattr(context, "reference_rows", ())]
+        batch = getattr(context, "batch_arguments", None)
+        if batch is not None and hasattr(batch, "label_image"):
+            references.append(batch)
+        rows_by_source: dict[Path, list[Arguments]] = {}
         output_by_source: dict[Path, Path] = {}
         source_by_output: dict[Path, Path] = {}
-        for position, row in zip(track_positions, track_arguments, strict=True):
-            source_path = Path(row.label_image)
-            output_path = Path(row.output_label_image)
-            previous_output = output_by_source.setdefault(source_path, output_path)
-            if output_path != previous_output:
-                raise ValueError(
-                    "TracksToLabels rows for one label_image must reference the same output_label_image."
-                )
-            previous_source = source_by_output.setdefault(output_path, source_path)
-            if source_path != previous_source:
-                raise ValueError(
-                    "TracksToLabels cannot write multiple source images to the same output_label_image."
-                )
-            rows_by_source.setdefault(source_path, []).append((position, row))
-
-        rendered: list[list[Any]] = [[] for _ in arguments_list]
-        for rows in rows_by_source.values():
-            rendered[rows[0][0]] = self._render_tracks(
-                [row for _, row in rows], iio=iio, np=np
-            )
-        rendered_sources = set(rows_by_source)
-        rendered_outputs = set(source_by_output)
-        for position, row in zip(anchor_positions, anchor_arguments, strict=True):
-            source_path = Path(row.label_image)
-            output_path = Path(row.output_label_image)
-            if source_path in rendered_sources:
-                if output_by_source[source_path] != output_path:
-                    raise ValueError(
-                        "TracksToLabels rows for one label_image must reference the same output_label_image."
-                    )
-                continue
-            if output_path in rendered_outputs:
-                raise ValueError(
-                    "TracksToLabels cannot write multiple source images to the same output_label_image."
-                )
-            rendered[position] = self._render_empty(row, iio=iio, np=np)
-            rendered_sources.add(source_path)
-            rendered_outputs.add(output_path)
-            output_by_source[source_path] = output_path
+        reference_by_source: dict[Path, Arguments] = {}
+        for row in [*arguments_list, *references]:
+            source = Path(row.label_image)
+            output = Path(row.output_label_image)
+            previous_output = output_by_source.setdefault(source, output)
+            if output != previous_output:
+                raise ValueError("TracksToLabels rows for one label_image must reference the same output_label_image.")
+            previous_source = source_by_output.setdefault(output, source)
+            if source != previous_source:
+                raise ValueError("TracksToLabels cannot write multiple source images to the same output_label_image.")
+            reference_by_source.setdefault(source, row)
+        for row in arguments_list:
+            for field in ("track_id", "frame", "label"):
+                if not hasattr(row, field):
+                    raise ValueError(f"Track mapping row is missing required column {field!r}.")
+            rows_by_source.setdefault(Path(row.label_image), []).append(row)
+        rendered: list[Any] = []
+        for source, reference in reference_by_source.items():
+            rows = rows_by_source.get(source, [])
+            rendered.extend(self._render_tracks(rows, iio=iio, np=np) if rows else self._render_empty(reference, iio=iio, np=np))
         return rendered
 
     def _render_tracks(
@@ -218,6 +176,7 @@ class TracksToLabels(ProcessingTool):
         rendered_track_count = int(np.unique(output_image[output_image > 0]).size)
         return [
             self.Outputs(
+                source_label_image=source_path,
                 output_label_image=output_path,
                 track_count=rendered_track_count,
             )
@@ -232,4 +191,4 @@ class TracksToLabels(ProcessingTool):
         output_path = Path(arguments.output_label_image)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         iio.imwrite(output_path, output_image, photometric="minisblack")
-        return [self.Outputs(output_label_image=output_path, track_count=0)]
+        return [self.Outputs(source_label_image=Path(arguments.label_image), output_label_image=output_path, track_count=0)]

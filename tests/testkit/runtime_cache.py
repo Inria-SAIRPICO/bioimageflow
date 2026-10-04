@@ -542,7 +542,7 @@ def _write_manual_dataframe_record(
     logical_schema, logical_digest = canonical_dataframe_identity(df)
     record_id = make_record_id(
         {
-            "schema": "bioimageflow.cache.record.v1",
+            "schema": "bioimageflow.cache.record.v2",
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
@@ -552,6 +552,7 @@ def _write_manual_dataframe_record(
                 "logical_schema": logical_schema,
             },
             "outputs": [],
+            "row_relation": {"row_consumption": "dataframe", "output_domain": f"source::fixture::{result_key}", "domain_kind": "source", "groups": [{"consumed_rows": [], "output_indices": [str(index) for index in df.index]}]},
         }
     )
     record_dir = storage.result_dir(result_key) / "records" / record_id
@@ -564,6 +565,7 @@ def _write_manual_dataframe_record(
         dataframe_transport_digest=dataframe_digest,
         dataframe_logical_schema=logical_schema,
         outputs=[],
+        row_relation={"row_consumption": "dataframe", "output_domain": f"source::fixture::{result_key}", "domain_kind": "source", "groups": [{"consumed_rows": [], "output_indices": [str(index) for index in df.index]}]},
     )
     (record_dir / "manifest.json").write_text(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True)

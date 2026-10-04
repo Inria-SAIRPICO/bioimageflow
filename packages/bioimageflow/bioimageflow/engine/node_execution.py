@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from bioimageflow_core import Arguments, ConsumedRow
+from bioimageflow.row_relation import ResultRelation, RowAssociation
 
 from bioimageflow.cache.selection import SelectedResult
 
@@ -276,6 +278,12 @@ class _NodeExecutionMixin:
                 source=f"Source DataFrameTool {node.name!r}",
             )
 
+        consumed = tuple(ConsumedRow(position, str(index)) for position, index in enumerate(merged.index))
+        relation = ResultRelation(
+            "dataframe", f"{'merge' if dfs else 'source'}::{node.name}::{result_key or node.name}",
+            "merge" if dfs else "source", (RowAssociation(consumed, tuple(str(index) for index in df.index)),),
+        )
+        self._node_result_relations[node] = relation
         self._raise_if_cancelled(workflow)
         if sig_hash is not None:
             selection = dataframe_publish(
@@ -288,6 +296,7 @@ class _NodeExecutionMixin:
                 tool_identity=(
                     f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
                 ),
+                row_relation=relation.to_dict(),
                 column_kinds={
                     column: "external_path"
                     for column in _path_output_columns(node.tool)
@@ -330,7 +339,8 @@ class _NodeExecutionMixin:
             node.output_templates,
         )
 
-        aligned_index: list[Any] = ["0"]
+        collective = node.tool.row_consumption.value == "collective"
+        aligned_index: list[Any] = [] if collective else ["0"]
 
         env_hash = compute_env_hash(node.tool.environment.dependencies)
         sig_hash = self._compute_sig_hash(
@@ -408,7 +418,8 @@ class _NodeExecutionMixin:
                 row_args[out_field] = _resolve_staged_output_path(
                     real_assets_dir, template, context
                 )
-            arguments_dicts = [row_args]
+            arguments_dicts = [] if collective else [row_args]
+            batch_values, reference_rows = row_args, ()
 
             # --- Dispatch & build output ---
             row_contexts, batch_context = self._build_execution_contexts(
@@ -416,6 +427,7 @@ class _NodeExecutionMixin:
                 real_assets_dir,
                 aligned_index,
             )
+            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows)
             raw_results = self._dispatch_tool(
                 node.tool,
                 arguments_dicts,
@@ -426,11 +438,12 @@ class _NodeExecutionMixin:
                 invocation_id=invocation_id,
                 cache_attempt_id=attempt_id,
             )
-            df = self._build_output_dataframe(
-                raw_results,
-                aligned_index,
-                node.tool,
+            assembled = self._build_output_dataframe(
+                raw_results, aligned_index, node.tool, row_consumption=node.tool.row_consumption.value,
+                node_name=node.name, result_key=result_key,
             )
+            df = assembled.dataframe
+            self._node_result_relations[node] = assembled.relation
             self._raise_if_cancelled(workflow)
             owned_path_columns = _explicit_template_output_columns(node)
             declared_path_columns = set(templates)
@@ -453,6 +466,7 @@ class _NodeExecutionMixin:
                     df,
                     declared_path_columns,
                 ),
+                row_relation=assembled.relation.to_dict(),
                 declared_scalar_outputs=_declared_zero_row_scalar_outputs(
                     node.tool,
                     raw_results,
@@ -514,26 +528,13 @@ class _NodeExecutionMixin:
         upstream_nodes = {
             cr.node.name: cr.node for cr in node._column_bindings.values()
         }
-        aligned_index, _ = self._align_indices(node, upstream_nodes, results)
-        has_batch = type(node.tool).process_batch is not ProcessingTool.process_batch
-        run_empty_batch = has_batch and getattr(node.tool, "run_empty_batch", False)
-        anchor_inputs = (
-            set(getattr(node.tool, "empty_batch_anchor_inputs", ()))
-            if run_empty_batch
-            else set()
-        )
-        if anchor_inputs:
-            driving_upstream_nodes = {
-                column_ref.node.name: column_ref.node
-                for field, column_ref in node._column_bindings.items()
-                if field not in anchor_inputs
-            }
-            if driving_upstream_nodes:
-                aligned_index, _ = self._align_indices(
-                    node,
-                    driving_upstream_nodes,
-                    results,
-                )
+        collective = node.tool.row_consumption.value == "collective"
+        reference_inputs = set(getattr(node.tool, "collective_reference_inputs", ())) if collective else set()
+        driving_upstream_nodes = {
+            reference.node.name: reference.node for field, reference in node._column_bindings.items()
+            if field not in reference_inputs
+        }
+        aligned_index, _ = self._align_indices(node, driving_upstream_nodes, results)
         self._validate_column_bindings(node, results)
 
         # --- Signature hash ---
@@ -623,18 +624,9 @@ class _NodeExecutionMixin:
                 path_input_fields,
                 real_assets_dir,
             )
-            if run_empty_batch:
-                anchor_index, anchor_arguments = self._resolve_empty_batch_arguments(
-                    node,
-                    results,
-                    input_annotations,
-                    templates,
-                    path_input_fields,
-                    real_assets_dir,
-                    represented_indices=aligned_index,
-                )
-                execution_index = [*aligned_index, *anchor_index]
-                arguments_dicts.extend(anchor_arguments)
+            batch_values, reference_rows = self._resolve_collective_context(
+                node, results, input_annotations, templates, path_input_fields, real_assets_dir,
+            ) if collective else ({}, ())
 
             # --- Dispatch & build output ---
             row_contexts, batch_context = self._build_execution_contexts(
@@ -642,6 +634,7 @@ class _NodeExecutionMixin:
                 real_assets_dir,
                 execution_index,
             )
+            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows)
             raw_results = self._dispatch_tool(
                 node.tool,
                 arguments_dicts,
@@ -652,11 +645,16 @@ class _NodeExecutionMixin:
                 invocation_id=invocation_id,
                 cache_attempt_id=attempt_id,
             )
-            df = self._build_output_dataframe(
-                raw_results,
-                execution_index,
-                node.tool,
+            input_relations = [self._result_relation(provider) for provider in upstream_nodes.values()]
+            input_relation = next((relation for relation in input_relations if relation is not None), None)
+            assembled = self._build_output_dataframe(
+                raw_results, execution_index, node.tool, row_consumption=node.tool.row_consumption.value,
+                node_name=node.name, result_key=result_key,
+                input_domain=None if input_relation is None else input_relation.output_domain,
+                input_domain_kind=None if input_relation is None else input_relation.domain_kind,
             )
+            df = assembled.dataframe
+            self._node_result_relations[node] = assembled.relation
             self._raise_if_cancelled(workflow)
             if not transient:
                 assert sig_hash is not None
@@ -683,7 +681,8 @@ class _NodeExecutionMixin:
                         df,
                         declared_path_columns,
                     ),
-                    declared_scalar_outputs=_declared_zero_row_scalar_outputs(
+                    row_relation=assembled.relation.to_dict(),
+                declared_scalar_outputs=_declared_zero_row_scalar_outputs(
                         node.tool,
                         raw_results,
                         execution_index,

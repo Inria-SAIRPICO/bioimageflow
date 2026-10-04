@@ -8,10 +8,14 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import replace
+from typing import cast
 
 from .shared_arrays import SharedTaskScope
 
 from bioimageflow_core import (
+    ConsumedRow,
+    OutputGroup,
+    ReferenceRow,
     ProcessingTask,
     ResourceSpec,
     RowInvocation,
@@ -105,7 +109,7 @@ class _DispatchMixin:
         *,
         invocation_id: str,
         cache_attempt_id: str | None,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
         has_batch = type(tool).process_batch is not ProcessingTool.process_batch
         compiled_node, compiled_node_ordinal = next(
@@ -144,16 +148,19 @@ class _DispatchMixin:
         self, tool: ProcessingTool, arguments_dicts: list[dict[str, Any]],
         workflow: Any, node_name: str, has_batch: bool,
         row_contexts: list[ExecutionContext], batch_context: ExecutionContext,
-    ) -> list[list[Any]]:
-        scope = SharedTaskScope(workflow.shared_memory_context, uuid.uuid4().hex, arguments_dicts)
+    ) -> list[OutputGroup]:
+        payload_values = [arguments_dicts, vars(batch_context.batch_arguments) if batch_context.batch_arguments is not None else {}, [row.arguments for row in batch_context.reference_rows]]
+        scope = SharedTaskScope(workflow.shared_memory_context, uuid.uuid4().hex, payload_values)
         borrowed = scope.borrowed()
         try:
             with borrowed.activate():
-                arguments = borrowed.bind_value(arguments_dicts)
+                arguments, batch_values, reference_values = borrowed.bind_value(payload_values)
+                bound_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=tuple(ReferenceRow(row.position, row.row_index, values) for row, values in zip(batch_context.reference_rows, reference_values, strict=True)))
                 outputs = self._dispatch_direct_bound(
-                    tool, arguments, workflow, node_name, has_batch, row_contexts, batch_context,
+                    tool, arguments, workflow, node_name, has_batch, row_contexts, bound_context,
                 )
-            return scope.accept_outputs(outputs)
+            bound = scope.accept_outputs([list(group.outputs) for group in outputs])
+            return [replace(group, outputs=tuple({field: getattr(output, field) for field in output._get_all_annotations()} for output in values)) for group, values in zip(outputs, bound, strict=True)]
         except BaseException:
             scope.fail()
             raise
@@ -169,10 +176,10 @@ class _DispatchMixin:
         has_batch: bool,
         row_contexts: list[ExecutionContext],
         batch_context: ExecutionContext,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         """Direct dispatch — tool runs in the main process."""
         if has_batch:
-            if not arguments_dicts and not getattr(tool, "run_empty_batch", False):
+            if not arguments_dicts and tool.row_consumption.value == "mapped":
                 return []
             args_list = [Arguments(**d) for d in arguments_dicts]
             kwargs = {}
@@ -180,19 +187,24 @@ class _DispatchMixin:
                 kwargs["context"] = batch_context
             raw_results = tool.process_batch(args_list, **kwargs)
             assert tool.Outputs is not None
-            return normalize_processing_batch_outputs(
+            normalized = normalize_processing_batch_outputs(
                 raw_results,
                 tool.Outputs,
                 expected_rows=len(arguments_dicts),
+                row_consumption=tool.row_consumption.value,
             )
+            consumed = tuple(ConsumedRow(position, str(context.row_index)) for position, context in enumerate(row_contexts))
+            if tool.row_consumption.value == "collective":
+                return [OutputGroup(consumed, cast(Any, tuple(normalized[0])))]
+            return [OutputGroup((row,), cast(Any, tuple(outputs))) for row, outputs in zip(consumed, normalized, strict=True)]
 
-        raw_results: list[list[Any]] = []
+        raw_results: list[OutputGroup] = []
         accepts_context = _accepts_context(tool.process_row)
         for i, (args_dict, context) in enumerate(zip(arguments_dicts, row_contexts)):
             kwargs = {"context": context} if accepts_context else {}
             result = tool.process_row(Arguments(**args_dict), **kwargs)
             assert tool.Outputs is not None
-            raw_results.append(normalize_processing_row_outputs(result, tool.Outputs))
+            raw_results.append(OutputGroup((ConsumedRow(i, str(context.row_index)),), cast(Any, tuple(normalize_processing_row_outputs(result, tool.Outputs)))))
             self._emit_progress(
                 workflow,
                 node_name,
@@ -233,7 +245,7 @@ class _DispatchMixin:
         invocation_id: str,
         cache_attempt_id: str | None,
         resources: ResourceSpec | None = None,
-    ) -> list[list[Any]]:
+    ) -> list[OutputGroup]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from bioimageflow.worker_origins import resolve_worker_tool_origin
         from wetlands import ExecutionEventKind, ExecutionState
@@ -242,7 +254,7 @@ class _DispatchMixin:
         if (
             has_batch
             and not arguments_dicts
-            and not getattr(tool, "run_empty_batch", False)
+            and tool.row_consumption.value == "mapped"
         ):
             return []
         env_spec = tool.environment
@@ -264,6 +276,7 @@ class _DispatchMixin:
                     cache_attempt_id=cache_attempt_id,
                     task_retry=0,
                     mode="process_batch",
+                    row_consumption=tool.row_consumption.value,
                     tool=origin,
                     rows=tuple(
                         RowInvocation(
@@ -281,8 +294,10 @@ class _DispatchMixin:
                         )
                     ),
                     batch_context=batch_context.to_dict(),
+                    batch_arguments=vars(batch_context.batch_arguments) if batch_context.batch_arguments is not None else {},
+                    reference_rows=batch_context.reference_rows,
                 )
-                scope = SharedTaskScope(workflow.shared_memory_context, invocation_id, arguments_dicts)
+                scope = SharedTaskScope(workflow.shared_memory_context, invocation_id, [arguments_dicts, invocation.batch_arguments, [row.arguments for row in invocation.reference_rows]])
                 scopes.append(scope)
                 invocation = replace(invocation, shared_memory_context=scope.wire)
                 payload = encode_processing_task(invocation)
@@ -331,7 +346,9 @@ class _DispatchMixin:
                 result = decode_processing_result(task.result)
                 validate_processing_result(invocation, result)
                 assert tool.Outputs is not None
-                return scope.accept_outputs(validate_processing_result_rows(result.rows, tool.Outputs))
+                validated = validate_processing_result_rows(result.groups, tool.Outputs)
+                bound = scope.accept_outputs(validated)
+                return [replace(group, outputs=tuple({field: getattr(output, field) for field in output._get_all_annotations()} for output in values)) for group, values in zip(result.groups, bound, strict=True)]
 
             invocations = [
                 ProcessingTask(
@@ -341,6 +358,7 @@ class _DispatchMixin:
                     cache_attempt_id=cache_attempt_id,
                     task_retry=0,
                     mode="row_chunk",
+                    row_consumption=tool.row_consumption.value,
                     tool=origin,
                     rows=(
                         RowInvocation(
@@ -452,17 +470,16 @@ class _DispatchMixin:
                         raise WorkflowCancelledError("Workflow cancelled by user")
 
             # Collect results in submission order only while cancellation has not won.
-            raw_results: list[list[Any]] = []
+            raw_results: list[OutputGroup] = []
             assert tool.Outputs is not None
             for i, task in enumerate(tasks):
                 if workflow.cancel_requested or task.state == ExecutionState.CANCELED:
                     raise WorkflowCancelledError("Workflow cancelled by user")
                 result = decode_processing_result(task.result)
                 validate_processing_result(invocations[i], result)
-                row_result = result.rows[0]
-                raw_results.extend(
-                    scopes[i].accept_outputs(validate_processing_result_rows((row_result,), tool.Outputs))
-                )
+                row_result = result.groups[0]
+                values = scopes[i].accept_outputs(validate_processing_result_rows((row_result,), tool.Outputs))[0]
+                raw_results.append(replace(row_result, outputs=tuple({field: getattr(output, field) for field in output._get_all_annotations()} for output in values)))
                 self._emit_progress(
                     workflow, node_name, "row_complete", row=i, total_rows=len(tasks)
                 )

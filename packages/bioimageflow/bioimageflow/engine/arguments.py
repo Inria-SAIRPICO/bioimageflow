@@ -133,75 +133,36 @@ class _ArgumentsMixin:
             arguments_dicts.append(row_args)
         return arguments_dicts
 
-    def _resolve_empty_batch_arguments(
-        self,
-        node: Node,
-        results: dict[Node, pd.DataFrame],
-        input_annotations: dict[str, Any],
-        templates: dict[str, str],
-        path_input_fields: list[str],
-        assets_dir: Path,
-        represented_indices: list[Any] | None = None,
-    ) -> tuple[list[Any], list[dict[str, Any]]]:
-        """Resolve constants/defaults and output templates for an empty batch."""
-        anchor_inputs = tuple(getattr(node.tool, "empty_batch_anchor_inputs", ()))
-        anchor_bindings = [
-            (field, node._column_bindings[field])
-            for field in anchor_inputs
-            if field in node._column_bindings
-            and node._column_bindings[field].node in results
-            and not results[node._column_bindings[field].node].empty
-        ]
-        if anchor_bindings:
-            anchor_df = results[anchor_bindings[0][1].node]
-            execution_index = sorted(anchor_df.index, key=str)
-            if represented_indices:
-                represented = tuple(str(index) for index in represented_indices)
-                execution_index = [
-                    index
-                    for index in execution_index
-                    if not any(
-                        normal == str(index) or normal.startswith(f"{index}::")
-                        for normal in represented
-                    )
-                ]
-        elif represented_indices:
-            execution_index = []
-        else:
-            execution_index = ["0"]
+    def _resolve_collective_context(
+        self, node: Node, results: dict[Node, pd.DataFrame],
+        input_annotations: dict[str, Any], templates: dict[str, str],
+        path_input_fields: list[str], assets_dir: Path,
+    ) -> tuple[dict[str, Any], tuple[Any, ...]]:
+        """Resolve batch facts and actual auxiliary records without observation anchors."""
+        from bioimageflow_core import ReferenceRow
 
-        arguments_dicts: list[dict[str, Any]] = []
-        for idx in execution_index:
-            row_args = self._resolve_defaults(node, input_annotations)
-            for field, col_ref in anchor_bindings:
-                up_df = results[col_ref.node]
-                idx_set = set(str(i) for i in up_df.index)
-                resolved_idx = (
-                    idx
-                    if str(idx) in idx_set
-                    else self._find_parent_index(idx, idx_set)
-                )
-                if resolved_idx is None:
-                    continue
-                row_args[field] = _to_python(
-                    up_df.at[resolved_idx, self._column_label(col_ref)]
-                )
-            self._normalize_path_arguments(row_args, input_annotations)
-            context = self._build_template_context(
-                node.name,
-                str(idx),
-                row_args,
-                path_input_fields,
-                {},
-                results,
-                idx,
-            )
-            for out_field, template in templates.items():
-                row_args[out_field] = _resolve_staged_output_path(
-                    assets_dir, template, context
-                )
-            arguments_dicts.append(row_args)
-        return execution_index, arguments_dicts
+        values = self._resolve_defaults(node, input_annotations)
+        context = self._build_template_context(node.name, "batch", values, path_input_fields, {}, results, "batch")
+        for field, template in templates.items():
+            values[field] = _resolve_staged_output_path(assets_dir, template, context)
+        selected: dict[tuple[Node, str], dict[str, Any]] = {}
+        for field in getattr(node.tool, "collective_reference_inputs", ()):
+            reference = node._column_bindings.get(field)
+            if reference is None:
+                continue
+            frame = results[reference.node]
+            column = self._column_label(reference)
+            for index, value in zip(frame.index, frame[column].array, strict=True):
+                key = (reference.node, str(index))
+                selected.setdefault(key, dict(values))[field] = _to_python(value)
+        rows = []
+        for position, ((_, index), arguments) in enumerate(selected.items()):
+            self._normalize_path_arguments(arguments, input_annotations)
+            reference_context = self._build_template_context(node.name, index, arguments, path_input_fields, {}, results, index)
+            for field, template in templates.items():
+                arguments[field] = _resolve_staged_output_path(assets_dir, template, reference_context)
+            rows.append(ReferenceRow(position, index, arguments))
+        return values, tuple(rows)
 
     def _resolve_single_row(
         self,

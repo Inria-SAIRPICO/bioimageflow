@@ -7,6 +7,15 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True)
+class ReferenceRow:
+    """One actual auxiliary record, separate from consumed observation rows."""
+
+    position: int
+    row_index: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ExecutionContext:
     """Per-execution filesystem context for ProcessingTool runtime scratch."""
 
@@ -17,6 +26,8 @@ class ExecutionContext:
     row_dir: Optional[Path] = None
     batch_dir: Optional[Path] = None
     row_index: Optional[str] = None
+    batch_arguments: Optional["Arguments"] = None
+    reference_rows: tuple[ReferenceRow, ...] = ()
 
     def __post_init__(self) -> None:
         expected_work_dir = self.run_dir / "work"

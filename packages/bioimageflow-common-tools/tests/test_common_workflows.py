@@ -15,6 +15,7 @@ from PIL import Image
 
 from bioimageflow_core import (
     Arguments,
+    GUIMeta,
     EnvironmentSpec,
     IOModel,
     ImageSpec,
@@ -363,6 +364,7 @@ class TestMosaic:
         ]
 
         result = Mosaic().process_batch(arguments)
+        assert len(result) == 1
 
         with Image.open(result[0].mosaic_path) as mosaic:
             assert mosaic.mode == "L"
@@ -471,3 +473,34 @@ class TestMosaic:
 
         with pytest.raises(ValueError, match=message):
             Mosaic().process_batch([Arguments(**values)])
+
+
+@pytest.mark.parametrize("dtype,value", [("int64", 2**53 + 1), ("uint64", 2**63 + 1)])
+def test_retained_side_join_preserves_large_ids_and_nullable_metadata(dtype: str, value: int) -> None:
+    from types import SimpleNamespace
+    from bioimageflow_common_tools import JoinOnColumn
+    from bioimageflow.validation import serialize_output_schema
+
+    class ImageRow(IOModel):
+        source_label_image: Path
+        output_label_image: Path
+
+    class TrackRow(IOModel):
+        source_label_image: Path
+        track_id: Annotated[int, GUIMeta("Track ID")]
+
+    left = pd.DataFrame({"source_label_image": ["a", "b"], "output_label_image": ["a-out", "b-out"]})
+    right = pd.DataFrame({"source_label_image": ["a"], "track_id": pd.Series([value], dtype=dtype)})
+    arguments = Arguments(join_column="source_label_image", how="left", suffixes=("_left", "_right"))
+    result = JoinOnColumn().merge_dataframes([left, right], arguments)
+    assert int(result.loc[0, "track_id"]) == value
+    assert pd.isna(result.loc[1, "track_id"])
+    assert str(result["track_id"].dtype) == ("UInt64" if dtype == "uint64" else "Int64")
+    schema = JoinOnColumn.resolve_merge_schema(
+        [serialize_output_schema(SimpleNamespace(Outputs=ImageRow)), serialize_output_schema(SimpleNamespace(Outputs=TrackRow))], vars(arguments))
+    assert schema is not None
+    assert schema["track_id"]["nullable"] is True
+    assert schema["track_id"]["required"] is True
+    assert schema["track_id"]["display_name"] == "Track ID"
+    assert schema["track_id"]["type_spec"] == {"kind": "union", "members": [{"kind": "int"}, {"kind": "none"}]}
+    assert schema["output_label_image"]["nullable"] is False

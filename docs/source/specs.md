@@ -581,8 +581,7 @@ class ProcessingTool(BaseTool):
     """
     environment: EnvironmentSpec    # Required — defines the Wetlands environment
     row_consumption: RowConsumption # Required — mapped or collective row semantics
-    run_empty_batch: bool = False   # Opt-in reducer/artifact behavior for zero rows
-    empty_batch_anchor_inputs: tuple[str, ...] = ()
+    collective_reference_inputs: tuple[str, ...] = ()  # Selected auxiliary records, not observations
 
     class Outputs(IOModel): ...     # Declared by each concrete tool
 
@@ -635,9 +634,10 @@ class ProcessingTool(BaseTool):
             - MAPPED list[list[Outputs]]: one inner list per input row (supports 1-to-N).
             - MAPPED list[Outputs]: shorthand for 1-to-1 batch tools (one output per row).
               Each element represents one correlated input position.
-            - COLLECTIVE: preserve full-consumed-input association and aggregate lineage.
-              The exact public representation is a T/C obligation; no duplicated
-              per-input aggregate or main-process relocation is required.
+            - COLLECTIVE list[Outputs]: zero, one, or many outputs for one operation
+              consuming the entire actual input batch, including an empty batch.
+              The runtime associates the whole ordered consumed batch with this
+              single output group, without per-input aggregate duplication.
 
         If not overridden, the engine falls back to per-row processing
         via process_row. The engine detects overrides using:
@@ -648,7 +648,13 @@ class ProcessingTool(BaseTool):
 
 Concrete `ProcessingTool` subclasses must override at least one of `process_row` or `process_batch` and must explicitly declare `row_consumption` with a `RowConsumption` enum value. The framework validates these requirements via `__init_subclass__` and raises `TypeError` at class definition time for missing or invalid declarations. `RowConsumption.MAPPED` means aligned input rows are logically independent; it is valid with `process_row` or with a vectorized `process_batch`. `RowConsumption.COLLECTIVE` means one batch operation may combine aligned rows into a collective result and therefore requires a `process_batch` override. This metadata describes input-row meaning, not concurrency or output cardinality.
 
-Batch tools are not called when their row-aligned upstream inputs are empty by default; the engine publishes an empty output dataframe with the declared output columns. Reducer or artifact-rendering batch tools that can produce a meaningful aggregate output for zero rows may set `run_empty_batch = True`. In that case the engine calls `process_batch` with synthetic argument rows built from constants, defaults, output templates, and any `empty_batch_anchor_inputs` bound to non-empty upstream columns. Without anchors, the engine supplies one synthetic argument row only when the whole aligned batch is empty. With anchors, non-anchor inputs drive normal row alignment and the engine additionally supplies one synthetic row for every anchor index that has no matching normal row or descendant. This preserves artifacts for partially empty parent groups as well as wholly empty batches. Anchor inputs are for non-row context such as a source label image used to render an all-background output; they must not be used to create fake object or spot rows.
+Mapped tools are not called when their aligned observations are empty; the result has the declared output columns and no rows.
+A collective tool is called exactly once with the complete ordered observation list, including `[]`; overriding `process_batch` alone does not make a mapped tool collective.
+`context.batch_arguments` is an `Arguments` namespace containing the admitted constants, omitted defaults and resolved collective output paths independently of observations.
+A collective tool may declare `collective_reference_inputs` for genuine selected auxiliary records, such as reference images that must still produce blank label artifacts when no spots or tracks exist.
+The runtime supplies these records separately as `context.reference_rows`, an ordered tuple of `ReferenceRow(position, row_index, arguments)` whose `arguments` is a dictionary of resolved fields and output paths.
+Reference records participate in selected-provider provenance and scientific identity; they are never fabricated observation rows or members of the consumed-observation count.
+Tools such as Mosaic may return no outputs for an empty image collection, while a reducer or blank-artifact renderer may return a meaningful output using batch arguments and actual selected references.
 
 **Progress reporting:** `process_row` may declare an optional keyword parameter `task` to receive a `RemoteTaskHandle` for sub-row progress reporting. When present, Wetlands injects the handle automatically. Tools that don't declare `task` are unaffected.
 
@@ -684,6 +690,8 @@ class ExecutionContext:
     row_dir: Path | None = None    # private process_row scratch directory
     batch_dir: Path | None = None  # private process_batch scratch directory
     row_index: str | None = None  # original input row index for process_row
+    batch_arguments: Arguments | None = None
+    reference_rows: tuple[ReferenceRow, ...] = ()
 ```
 
 `context.work_dir` is shared by every call for the node and always points to `run_dir/work/`. `context.rows_dir` is the shared row scratch parent, `run_dir/work/rows/`. For `process_row`, `context.row_dir` is the private scratch directory for that row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.batch_dir` is the private batch scratch directory: `run_dir/work/batch/`.
@@ -788,8 +796,7 @@ class SomeOtherTool(ProcessingTool):
 | `tags`          | `list[str]`        | Searchable tags                                    |
 | `environment`   | `EnvironmentSpec`  | Wetlands environment specification (shared object) |
 | `row_consumption` | `RowConsumption` | Required explicit `MAPPED` or `COLLECTIVE` declaration on every concrete processing class. |
-| `run_empty_batch` | `bool` | Opt in to the empty-batch behavior described above; defaults to `False`. |
-| `empty_batch_anchor_inputs` | `tuple[str, ...]` | Non-row context fields used to preserve empty-group artifacts. |
+| `collective_reference_inputs` | `tuple[str, ...]` | Selected auxiliary input fields supplied separately from actual collective observations, including empty batches. |
 | `resources`     | `ResourceSpec`     | Optional resource requirements (GPU, memory, concurrency). See [Section 10](#10-resource-constraints). |
 
 **Worker state warning:** With Wetlands or Parsl dispatch, worker-side tool reconstruction does not carry state set on `self` during orchestrator graph construction.
@@ -1180,7 +1187,8 @@ class IOModel:
 ```
 
 - **`Inputs`**: Declared on both `ProcessingTool` and `DataFrameTool`. Fields typed as `Annotated[Path, ImageSpec(...)]` or `ImageShared` represent data dependencies; scalar fields represent parameters. Default values are supported.
-- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. Path outputs without a `Template(...)` default use the built-in default template. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
+- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. New path outputs without a `Template(...)` default use the built-in default template.
+A same-named Path input/output without an explicit `Template(...)` or configured output-template override preserves the admitted input path rather than replacing it with a generated destination. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
 
 Both models use only standard-library types and `bioimageflow-core` types.
 **Accepted target — S04:** IOModel construction performs structural field admission; editor/declaration validation and resolved runtime scientific validation remain distinct phases.
@@ -1941,7 +1949,7 @@ registered = register(
   Ordinary construction links new nodes to existing upstream nodes; editor mutation and loaded graphs must still use explicit validation before execution.
 - **Source nodes** are simply nodes with no upstream data dependencies — they are not a separate tool type or code path. Both tool types can act as source nodes:
   - A **DataFrameTool** with no positional arguments receives an empty `dfs` list in `merge_dataframes` and produces the initial DataFrame (e.g., by listing files in a directory).
-  - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, the engine uses a single-row index (`["0"]`), builds arguments from constants and defaults only, and dispatches to `process_row`/`process_batch` as usual. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
+  - A **ProcessingTool** with no `ColumnRef` or `Node` arguments (only constants or defaults) is executed through the same code path as any other ProcessingTool. With no column bindings, a mapped tool uses one configuration invocation with index `["0"]`; a collective tool has no observations and receives constants/defaults through batch arguments. Both use the same admitted processing and result-association contract. This is useful when listing or loading files requires specialized libraries (e.g., reading HDF5 headers, DICOM metadata, OME-TIFF pyramids) that should not pollute the main process.
 
 **Wire-format edge entries.** In `Workflow.to_dict() / from_dict()` every edge has an opaque stable `id` and one explicit variant.
 A `column` edge carries `source_node`, `source_output`, `target_node`, and `target_input`.
@@ -2511,10 +2519,10 @@ When `node.compute()` is called:
    6. **Serialization:** Encode each worker-boundary call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
    7. **Backend Preparation:** Direct acquires no remote resource. Wetlands prepares the selected environment. Parsl completes route validation, archive materialization, DFK acquisition, and executor preflight before processing submission.
    8. **Dispatch:** If `process_batch` was overridden, call one whole-node batch operation. Otherwise, dispatch row calls or explicit row chunks. Wetlands and Parsl use the same core protocol, origin resolver, worker entry point, and worker-instance cache. Parsl submission is bounded and results are collected by aligned position rather than completion order.
-   8b. **Output Validation:** The shared orchestrator validator reconstructs returned dictionaries in declared field order, rejects missing/extra fields and invalid types or paths, normalizes row and batch returns to `list[list[Outputs]]`, and enforces correlated ordered groups for the admitted batch contract.
+   8b. **Output Validation:** The shared orchestrator validator reconstructs returned dictionaries in declared field order, rejects missing/extra fields and invalid types or paths, normalizes mapped row and mapped batch returns to per-input output groups and collective batch returns to one flat output list, and enforces correlated ordered groups for the admitted batch contract.
    **Accepted target — S06:** Mapped per-row returns retain exact input-position correspondence; collective results retain explicit association to all consumed inputs and aggregate lineage, including configured empty-input artifacts.
-   Exact collective representation is a T/C obligation; no forced aggregate duplication or main-process relocation is permitted.
-   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). Mapped outputs preserve the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). Collective aggregates retain explicit all-consumed-input association and their aggregate lineage; exact representation remains a T/C obligation. This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
+   The current all-consumed output-group contract applies to collective dispatch; no forced aggregate duplication or main-process relocation is permitted.
+   9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). Mapped outputs preserve the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). Collective aggregates use one group containing the ordered actual consumed rows and a separate node/result-key-qualified aggregate output domain, including an empty consumed association. This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
    10. **Caching:** Reusable work publishes the canonical logical dataframe and assets as an immutable record, selects through `first-valid`, and updates views from the selected record. Non-reusable work returns transient outputs without a record, pointer, latest view, or output projection.
 
 #### ProcessingTool Backend Interaction (ProcessingTool Steps 6-10)
@@ -2522,12 +2530,17 @@ When `node.compute()` is called:
 The immutable backend dispatch request contains resolved arguments and contexts, ordered aligned positions, the scoped node, active run context, required invocation identity, and optional reusable-attempt identity.
 The scheduler owns cache lookup, publication, dataframe construction, progress, cancellation, and failure semantics around this request.
 
-Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v2`.
-The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v2`.
-Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, mode, row positions, and row-index strings exactly.
-The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ProcessingTaskResult`, and `RowResult`; there are no historical task/result DTO aliases or wire fallbacks.
+Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v3`.
+The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v3`.
+Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, physical mode and logical `row_consumption` exactly.
+The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup` and `ProcessingTaskResult`; there are no historical task/result DTO aliases or wire fallbacks.
+A task contains the actual ordered observation `rows`, a separate typed `batch_arguments` dictionary and ordered genuine `reference_rows`; its filesystem `batch_context` remains a path-only projection.
+A result contains `groups`, each with ordered `consumed_rows` entries `(position, row_index)` and an output tuple.
+Mapped results contain exactly one group per task observation with its exact singleton consumed identity, permitting zero, one or many outputs.
+Collective execution requires `process_batch` physical mode and returns exactly one group associated with all actual task observations in order; an empty task has one group with `consumed_rows=()` and may still return outputs.
+Result admission checks consumption associations against the task before exposing outputs; it does not infer association from completion order or aggregate row indices.
 
-Task arguments and result outputs use one recursive typed-value grammar.
+Observation arguments, batch arguments, reference arguments and result outputs use one recursive typed-value grammar.
 `None`, `bool`, `int`, `float`, `str`, and `bytes` are bare leaves.
 Plain dictionaries encode as `{kind: "dict", items: [[key, encoded_value], ...]}` with primitive keys; lists and tuples encode as `{kind: "list" | "tuple", items: [...]}` and preserve their container type and order.
 Every dictionary is encoded as a dictionary node, so a user dictionary resembling a typed descriptor remains a dictionary.
@@ -2537,7 +2550,7 @@ Allocation names use `[a-zA-Z0-9_-]{1,96}`; actual scope identities are controll
 Each task has `shared_memory_context`, either null when it has neither shared inputs nor permission to allocate shared outputs, or exactly `{output: descriptor, inputs: [descriptor, ...]}`.
 **Accepted target — S10:** An output-only shared-array producer receives an admitted output namespace even when no input reference exists; pure decoding never creates that owner.
 Each descriptor contains exactly `scope_id`, `root`, `root_identity`, `owner_id`, `owner_root`, `owner_root_identity`, `max_bytes`, and `max_header_bytes`; identities are captured `[st_dev, st_ino]` pairs and budgets are finite positive integers.
-Descriptor validation and typed decoding are pure; the canonical worker explicitly borrows these admitted scopes and binds input references before invoking trusted tool code.
+Descriptor validation and typed decoding are pure; the canonical worker explicitly borrows these admitted scopes and binds all observation, batch and auxiliary input references before invoking trusted tool code.
 The controller checks task/result correlation and declared output fields before binding outputs; only the task output scope or the exact admitted input references may return.
 NumPy arrays encode as `{kind: "ndarray", value: ndarray}` through Wetlands' public numeric-array transport.
 NumPy boolean, signed/unsigned integer, floating, and complex scalars encode as `{kind: "numpy_scalar", value: zero_dimensional_ndarray}` and retain dtype, precision, and nonfinite values; NumPy string/bytes scalars normalize to the corresponding bare leaves.
@@ -2565,10 +2578,16 @@ Backend routing metadata is outside the worker envelope.
 ### 5.3 DataFrame Semantics
 
 Numeric-looking index strings remain strings; canonical values retain integer signedness, dtype, precision and nonfinite meaning without generic table coercion.
-**Accepted target — S06 collective association:** Mapped/collective input semantics are orthogonal to ordered transport groups and output cardinality.
-Isolated collective inference, training and aggregate outputs remain supported, including configured empty-input artifacts, with explicit association to all consumed inputs and aggregate lineage.
-Do not duplicate an aggregate for each input or relocate it to the main process merely to fit row transport; its exact correlated public representation is a T/C obligation.
-Concat/CrossJoin and other explicit table reshaping define new lineage and source association; reset ordinals are not preserved provenance.
+Mapped/collective input semantics are orthogonal to physical batching and output cardinality.
+Isolated collective inference, training and aggregate outputs use one all-consumed output group, including empty-input artifacts, without aggregate replication or relocation to the main process.
+Each assembled/persisted result retains a separate `row_relation`: logical `row_consumption`, explicit `output_domain`, `domain_kind` (`source`, `aggregate` or `merge`) and compact group associations containing ordered consumed rows and output indices.
+A collective relation stores its whole consumed batch once, even when it has many outputs; auxiliary selected references remain separate provenance inputs.
+Collective output indices use a stable scoped-node/result-key-qualified aggregate domain and output ordinal, not a selected input parent, record ID or random invocation identity.
+Mapped descendants inherit their admitted input domain, including aggregate-derived domains; each mapped group retains its exact input identity and expansion children.
+Alignment reads the pinned/live admitted relation, never DataFrame attributes or a later current-pointer lookup; aggregate and observation domains require an explicit merge such as CrossJoin, even if coarse graph ancestry overlaps.
+An explicit CrossJoin combines a selected model/aggregate record with training images or a different prediction dataset; the model remains one selected record and consumer rows are the explicitly requested Cartesian product.
+DataFrame transforms/explicit merges may define a new domain with conservative whole-input selected-record association; arbitrary custom index equality or reset ordinals do not prove exact row lineage.
+These relation guarantees do not seal mutable DataFrames or published numeric backing; accepted-value immutability and exact group release remain separate ownership requirements.
 
 - **No column carry-forward (ProcessingTool):** A ProcessingTool's output DataFrame contains **only** the columns declared in its `Outputs` class, plus the row index. Upstream columns are not carried forward. Downstream tools that need upstream data reference the originating node directly (e.g., `raw["path"]`). This makes output schemas deterministic — a node's output depends only on its own `Outputs` declaration, never on what happens upstream.
 - **DataFrameTool output:** A DataFrameTool's output DataFrame is whatever `transform()` returns. The tool author decides which columns to include. This is where intentional carry-forward happens — tools like `FilterRows` naturally preserve all input columns, while tools like `CountLabelOverlaps` may produce entirely new schemas.
@@ -2796,7 +2815,8 @@ Bare `{<input_field>}` may use an admitted scalar field without granting path at
 **Accepted target — S08:** Known missing variables and unsafe paths refuse before effects; deferred values resolve before the affected dispatch.
 Capture timestamp and template inputs once for the invocation, reject overlapping writers/colliding resolved outputs, and keep zero-row assets or scalar facts in manifests without fabricating dataframe rows.
 
-**Default template:** Path outputs without a `Template(...)` default use `{node_name}_{row_index}{ext}` when the tool has exactly one path input, otherwise `{node_name}_{row_index}`.
+**Default template:** New Path output fields without a `Template(...)` default use `{node_name}_{row_index}{ext}` when the tool has exactly one path input, otherwise `{node_name}_{row_index}`.
+A same-named Path input/output without an explicit template or configured override preserves the actual admitted input path; explicit `Template(...)` defaults and output-template overrides remain destination declarations.
 
 **`{ext}` resolution:** If the tool has exactly one input path field, `{ext}` resolves to its extension. Otherwise (zero or multiple input paths), `{ext}` resolves to an empty string — the tool author must specify the extension explicitly in the template (e.g., `.tif` or `{input_image.ext}`).
 
@@ -3477,3 +3497,11 @@ A successful public pool close is the physical grant-retirement fence.
 Strict selected recreation retains pool/cache/grant ownership after close failure for explicit retry.
 The adapter's `stop()` and `shutdown_all()` are named best-effort operations and must not be described as unconditional physical cleanup certification.
 BioImageFlow never uses Wetlands private environment storage or transport internals.
+
+#### Retained-side keyed joins for collective outputs
+
+`JoinOnColumn` explicitly combines independent aggregate and observation tables by their declared key.
+Left/right/outer joins mark fields from the optional side nullable while preserving requiredness and image/GUI metadata; integral values use matching signed or unsigned nullable storage rather than conversion through floating point.
+The cell-lineage example retains rendered images on the left and joins actual tracks by `source_label_image`; an empty track table yields an image row with missing track fields, never a fabricated track identity.
+A genuine constant auxiliary label image remains available in collective `batch_arguments` when the observation batch is empty.
+Dataframe publication admits the complete row relation and exact output-index membership before any attempt or staging write.

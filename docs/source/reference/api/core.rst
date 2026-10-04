@@ -27,8 +27,14 @@ Environment
 Current processing contracts
 ----------------------------
 
-The public logical DTOs are ``ProcessingTask``, ``RowInvocation``, ``ProcessingTaskResult`` and ``RowResult``.
-Task/result codecs preserve one current typed grammar and exact correlation; decode is pure and cannot attach, allocate or register owners.
+The public logical DTOs are ``ProcessingTask``, ``RowInvocation``, ``ConsumedRow``, ``OutputGroup`` and ``ProcessingTaskResult``.
+Task/result v3 codecs preserve one current typed grammar and exact correlation, including row consumption and the ordered consumed-row identities;
+decode is pure and cannot attach, allocate or register owners.
+Physical ``mode`` chooses row-chunk or batch execution independently of mapped or collective input meaning.
+Mapped results have one singleton-consumption group per input and retain zero/one/many output expansion.
+Collective results have exactly one group containing every consumed input identity; an empty batch has an empty consumed tuple and may still produce outputs.
+Batch constants/output paths are available as ``ExecutionContext.batch_arguments``; genuine auxiliary selected records use ``reference_rows`` and never become synthetic observation rows.
+``ReferenceRow.arguments`` is a dictionary of current typed values.
 Portable IOModel annotations are distinct from runtime numeric arrays/scalars, Paths, bytes, literal dictionaries and scoped references.
 See :doc:`/specs` §5.2 for the grammar and refusal rules; no historical DTO aliases or wire fallbacks are required.
 

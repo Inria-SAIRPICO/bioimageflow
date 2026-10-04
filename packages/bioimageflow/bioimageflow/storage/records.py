@@ -23,6 +23,17 @@ class _ExactRecordsMixin:
         return self._load_record_manifest(result_key, record_id)
 
     def load_record_dataframe(
+        self, result_key: str, record_id: str, *,
+        path_columns: Iterable[str] = (), shared_array_columns: Iterable[str] = (),
+        hydrate_assets: bool = False,
+    ) -> pd.DataFrame:
+        """Read a validated exact record dataframe without reselecting current."""
+        return self.load_record(
+            result_key, record_id, path_columns=path_columns,
+            shared_array_columns=shared_array_columns, hydrate_assets=hydrate_assets,
+        )[1]
+
+    def load_record(
         self,
         result_key: str,
         record_id: str,
@@ -30,15 +41,13 @@ class _ExactRecordsMixin:
         path_columns: Iterable[str] = (),
         shared_array_columns: Iterable[str] = (),
         hydrate_assets: bool = False,
-    ) -> pd.DataFrame:
-        """Load one exact immutable record without consulting ``current.json``."""
-        manifest = self._load_record_manifest(result_key, record_id)
-        record_dir = self.result_dir(result_key) / "records" / record_id
-        dataframe_path = record_dir / "dataframe.parquet"
-        try:
-            dataframe = pd.read_parquet(dataframe_path)
-        except Exception as exc:
-            raise CacheCorruptionError("Exact record dataframe is unreadable.") from exc
+    ) -> tuple[RecordManifest, pd.DataFrame, Path]:
+        """Admit one exact record, returning its manifest, frame and owned address.
+
+        Transport/logical identity, assets and path containment are validated
+        together, with one parquet read and no current-pointer consultation.
+        """
+        manifest, dataframe, record_dir = self._admit_record(result_key, record_id)
 
         declared_path_columns = self._normalize_record_columns(
             path_columns,
@@ -55,15 +64,17 @@ class _ExactRecordsMixin:
             shared_array_columns=declared_shared_array_columns,
         )
         if not hydrate_assets:
-            return dataframe
+            return manifest, dataframe, record_dir
 
-        return self._rehydrate_record_assets(
+        dataframe = self._rehydrate_record_assets(
             dataframe,
             record_dir,
             manifest,
             path_columns=declared_path_columns,
             shared_array_columns=declared_shared_array_columns,
         )
+
+        return manifest, dataframe, record_dir
 
     def resolve_record_asset(
         self,

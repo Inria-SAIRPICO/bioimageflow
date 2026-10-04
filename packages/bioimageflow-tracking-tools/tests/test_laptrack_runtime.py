@@ -35,7 +35,7 @@ def test_real_laptrack_links_two_deterministic_tracks() -> None:
         ]
     ]
 
-    outputs = [group[0] for group in LapTrackLink().process_batch(rows)]
+    outputs = LapTrackLink().process_batch(rows)
 
     assert [output.track_id for output in outputs] == [1, 2, 1, 2]
     assert {output.track_count for output in outputs} == {2}

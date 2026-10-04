@@ -60,7 +60,7 @@ def artifact_identity(wheel: Path, source_root: Path, expected_version: str) -> 
     dist = distribution("bioimageflow-core")
     module = Path(core.__file__).resolve()
     assert dist.version == expected_version, (dist.version, expected_version)
-    assert module == Path(dist.locate_file("bioimageflow_core/__init__.py")).resolve()
+    assert module == Path(str(dist.locate_file("bioimageflow_core/__init__.py"))).resolve()
     source_packages = (source_root / "packages", source_root / "bioimageflow_core")
     assert not any(module.is_relative_to(source) for source in source_packages), (module, source_root)
     assert not Path.cwd().resolve().is_relative_to(source_root), Path.cwd()
@@ -71,7 +71,7 @@ def artifact_identity(wheel: Path, source_root: Path, expected_version: str) -> 
     with zipfile.ZipFile(wheel) as archive:
         for name in archive.namelist():
             if name.startswith("bioimageflow_core/") and (name.endswith(".py") or name.endswith("/py.typed")):
-                installed = Path(dist.locate_file(name)).resolve()
+                installed = Path(str(dist.locate_file(name))).resolve()
                 assert not any(installed.is_relative_to(source) for source in source_packages), installed
                 content = archive.read(name)
                 assert installed.read_bytes() == content, name
@@ -144,7 +144,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
     task = ProcessingTask(
         task_id="task_0000000000000001", node_name="array-lifetime",
         invocation_id="inv_00000000000000000000000000000001",
-        cache_attempt_id=None, task_retry=0, mode="row_chunk",
+        cache_attempt_id=None, task_retry=0, mode="row_chunk", row_consumption="mapped",
         tool=SourceFileOriginV1(path=str(source), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
                               class_name="ArrayLifetimeTool"),
         rows=(RowInvocation(position=0, row_index="sample",
@@ -171,7 +171,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
         else:
             value = decode_processing_result(decoded["result"])
             validate_processing_result(task, value)
-            accepted = task_scope.accept_result(value.rows[0].outputs[0])
+            accepted = task_scope.accept_result(value.groups[0].outputs[0])
             assert accepted["total"] == 115
             output = accepted["reference"]
     finally:
@@ -196,7 +196,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
 
 def capability_checks(args: argparse.Namespace) -> list:
     import numpy as np
-    from bioimageflow_core import SharedMemoryContext
+    from bioimageflow_core import SharedArray, SharedMemoryContext
     from bioimageflow_core.shm import create_shared_output, open_shared_array
 
     owner = SharedMemoryContext(args.root / "owned", max_bytes=1024 * 1024)
@@ -211,6 +211,7 @@ def capability_checks(args: argparse.Namespace) -> list:
         source = args.root / "array_tool.py"
         source.write_text(TOOL_SOURCE, encoding="utf-8")
         output, child_receipt = transport_case(args, owner, ref, source, fail=False)
+        assert isinstance(output, SharedArray)
         with open_shared_array(ref) as array:
             np.testing.assert_array_equal(array, [[100, 1, 2], [3, 4, 5]])
         del array

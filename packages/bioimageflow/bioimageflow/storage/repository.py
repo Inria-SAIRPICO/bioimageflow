@@ -7,6 +7,7 @@ from .common import (
     datetime,
     json,
     os,
+    pd,
     re,
     timezone,
     uuid,
@@ -546,6 +547,10 @@ class _RepositoryMixin:
             candidate_path.unlink(missing_ok=True)
 
     def _load_record_manifest(self, result_key: str, record_id: str) -> RecordManifest:
+        manifest, _frame, _address = self._admit_record(result_key, record_id)
+        return manifest
+
+    def _admit_record(self, result_key: str, record_id: str) -> tuple[RecordManifest, pd.DataFrame, Path]:
         record_id = _validate_record_id(record_id)
         result_dir = self.result_dir(result_key)
         records_dir = result_dir / "records"
@@ -573,8 +578,8 @@ class _RepositoryMixin:
             manifest = RecordManifest.from_dict(json.loads(manifest_path.read_text()))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise CacheCorruptionError("Invalid record manifest JSON.") from exc
-        manifest.validate(record_dir, expected_result_key=result_key)
-        return manifest
+        frame = manifest.validate(record_dir, expected_result_key=result_key)
+        return manifest, frame, record_dir
 
     def _write_conflict(
         self,

@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 
+from bioimageflow_common_tools import JoinOnColumn
 from bioimageflow import Workflow
 from bioimageflow_tracking_tools import (
     LabelsToObjects,
@@ -54,14 +55,15 @@ def build_workflow(
             track_id=tracks["track_id"],
             frame=tracks["frame"],
             label=tracks["label"],
-            label_image=tracks["source_label_image"],
+            label_image=labels,
             name="render_lineage_labels",
         )
-        wf.output("track_id", tracks["track_id"], id="output-track-id")
-        wf.output("lineage_id", tracks["lineage_id"], id="output-lineage-id")
-        wf.output("parent_track_id", tracks["parent_track_id"], id="output-parent-track-id")
-        wf.output("generation", tracks["generation"], id="output-generation")
-        wf.output("track_labels", rendered["output_label_image"], id="output-track-labels")
+        published = JoinOnColumn()(rendered, tracks, join_column="source_label_image", how="left", name="rendered_lineages")
+        wf.output("track_id", published["track_id"], id="output-track-id")
+        wf.output("lineage_id", published["lineage_id"], id="output-lineage-id")
+        wf.output("parent_track_id", published["parent_track_id"], id="output-parent-track-id")
+        wf.output("generation", published["generation"], id="output-generation")
+        wf.output("track_labels", published["output_label_image"], id="output-track-labels")
     return wf
 
 

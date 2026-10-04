@@ -14,7 +14,7 @@ from bioimageflow_core import (
     ProcessingTaskResult,
     ProcessingTask,
     RowInvocation,
-    RowResult,
+    OutputGroup,
     decode_processing_result,
     validate_processing_result,
 )
@@ -77,6 +77,7 @@ def iter_row_tasks(
             cache_attempt_id=cache_attempt_id,
             task_retry=0,
             mode="row_chunk",
+            row_consumption="mapped",
             tool=tool,
             rows=tuple(chunk),
         )
@@ -90,6 +91,7 @@ def iter_row_tasks(
             cache_attempt_id=cache_attempt_id,
             task_retry=0,
             mode="row_chunk",
+            row_consumption="mapped",
             tool=tool,
             rows=tuple(chunk),
         )
@@ -112,6 +114,7 @@ def make_batch_task(
         cache_attempt_id=cache_attempt_id,
         task_retry=0,
         mode="process_batch",
+        row_consumption="mapped",
         tool=tool,
         rows=tuple(rows),
         batch_context=batch_context,
@@ -189,11 +192,11 @@ class BoundedParslCollector:
         self._failure_observed = failure_observed
         self._stopped_error = stopped_error
 
-    def run(self, tasks: Iterable[ProcessingTask]) -> tuple[RowResult, ...]:
+    def run(self, tasks: Iterable[ProcessingTask]) -> tuple[OutputGroup, ...]:
         """Submit lazily, accept by position, and drain every submitted future."""
         task_iterator = iter(tasks)
         active: dict[ParslFuture, ProcessingTask] = {}
-        accepted: dict[int, RowResult] = {}
+        accepted: dict[int, OutputGroup] = {}
         failures: list[ParslTaskError] = []
         stopped = False
         cancelled = False
@@ -296,16 +299,16 @@ class BoundedParslCollector:
                     )
                     validate_processing_result(task, result)
                     terminal_status = "succeeded"
-                    for row in result.rows:
-                        if row.position in accepted:
+                    for row in result.groups:
+                        if row.consumed_rows[0].position in accepted:
                             raise ValueError(
-                                f"Duplicate accepted row position {row.position}."
+                                f"Duplicate accepted row position {row.consumed_rows[0].position}."
                             )
-                        accepted[row.position] = row
+                        accepted[row.consumed_rows[0].position] = row
                     if task.mode == "row_chunk":
                         while next_row_complete in accepted:
                             row = accepted[next_row_complete]
-                            self._row_complete(row.position, row.row_index)
+                            self._row_complete(row.consumed_rows[0].position, row.consumed_rows[0].row_index)
                             next_row_complete += 1
                 except concurrent.futures.CancelledError:
                     terminal_status = "cancelled"

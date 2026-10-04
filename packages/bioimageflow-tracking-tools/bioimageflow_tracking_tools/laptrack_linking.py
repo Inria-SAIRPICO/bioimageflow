@@ -273,7 +273,7 @@ class LapTrackLink(ProcessingTool):
 
         if set(output_by_position) != set(range(len(arguments_list))):
             raise RuntimeError("LapTrack did not return exactly one row per input object.")
-        return [[output_by_position[position]] for position in range(len(arguments_list))]
+        return [output_by_position[position] for position in range(len(arguments_list))]
 
 
 def _finite(value: Any, name: str) -> float:

@@ -300,7 +300,7 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
     parquet_content = b"PAR1"
     record_id = make_record_id(
         {
-            "schema": "bioimageflow.cache.record.v1",
+            "schema": "bioimageflow.cache.record.v2",
             "result_key": result_key,
             "dataframe": {
                 "path": "dataframe.parquet",
@@ -310,6 +310,7 @@ def test_dataframe_tool_publish_rejects_symlinked_record_directory_before_writin
                 "transport_digest": transport_digest,
             },
             "outputs": [],
+            "row_relation": {"row_consumption": "dataframe", "output_domain": f"source::{node_name}::{result_key}", "domain_kind": "source", "groups": [{"consumed_rows": [], "output_indices": ["0"]}]},
         }
     )
     records_dir = Storage(storage_path).result_dir(result_key) / "records"

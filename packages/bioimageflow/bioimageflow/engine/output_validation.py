@@ -11,7 +11,7 @@ from pydantic import ConfigDict, PydanticUserError, TypeAdapter, ValidationError
 from bioimageflow.validation import is_path_type
 from bioimageflow_core import IOModel
 from bioimageflow_core.types import SharedArray
-from bioimageflow_core.worker_protocol import RowResult
+from bioimageflow_core.worker_protocol import OutputGroup
 
 
 def _contains_shared_array(value: Any) -> bool:
@@ -111,11 +111,16 @@ def normalize_processing_batch_outputs(
     output_type: type[IOModel],
     *,
     expected_rows: int,
+    row_consumption: str = "mapped",
     reject_shared_array: bool = False,
 ) -> list[list[IOModel]]:
     """Normalize a process_batch return and enforce exact input cardinality."""
     if not isinstance(result, list):
         raise TypeError("process_batch must return a list.")
+    if row_consumption == "collective":
+        if any(isinstance(output, list) for output in result):
+            raise TypeError("Collective process_batch returns one flat output list.")
+        return [[validate_processing_output(output, output_type, reject_shared_array=reject_shared_array) for output in result]]
     if result and isinstance(result[0], list):
         if not all(isinstance(group, list) for group in result):
             raise TypeError(
@@ -147,7 +152,7 @@ def normalize_processing_batch_outputs(
 
 
 def validate_processing_result_rows(
-    rows: Sequence[RowResult],
+    rows: Sequence[OutputGroup],
     output_type: type[IOModel],
     *,
     reject_shared_array: bool = False,

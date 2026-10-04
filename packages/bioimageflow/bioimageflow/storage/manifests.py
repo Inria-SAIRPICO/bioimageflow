@@ -41,6 +41,7 @@ class RecordManifest:
     dataframe_transport_digest: str
     dataframe_logical_schema: list[dict[str, Any]]
     outputs: list[dict[str, Any]]
+    row_relation: dict[str, Any]
     schema: str = RECORD_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class RecordManifest:
                 "logical_schema": list(self.dataframe_logical_schema),
             },
             "outputs": list(self.outputs),
+            "row_relation": self.row_relation,
         }
 
     @classmethod
@@ -98,7 +100,10 @@ class RecordManifest:
         outputs = value.get("outputs")
         if not isinstance(outputs, list):
             raise CacheCorruptionError("Record manifest outputs must be a list.")
+        from bioimageflow.row_relation import ResultRelation
+
         try:
+            relation = ResultRelation.from_dict(value["row_relation"]).to_dict()
             return cls(
                 result_key=str(value["result_key"]),
                 record_id=str(value["record_id"]),
@@ -106,6 +111,7 @@ class RecordManifest:
                 dataframe_transport_digest=str(dataframe["transport_digest"]),
                 dataframe_logical_schema=[dict(column) for column in logical_schema],
                 outputs=[dict(output) for output in outputs],
+                row_relation=relation,
                 schema=str(value["schema"]),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -113,7 +119,7 @@ class RecordManifest:
 
     def validate(
         self, record_dir: Path, *, expected_result_key: str | None = None
-    ) -> None:
+    ) -> pd.DataFrame:
         if self.schema != RECORD_SCHEMA:
             raise CacheCorruptionError("Invalid record manifest schema.")
         try:
@@ -145,7 +151,8 @@ class RecordManifest:
         if _file_sha256(dataframe) != self.dataframe_transport_digest:
             raise CacheCorruptionError("Record dataframe transport digest mismatch.")
         try:
-            frame = pd.read_parquet(dataframe)
+            admitted_frame = pd.read_parquet(dataframe)
+            frame = admitted_frame.copy(deep=False)
             for column in self.dataframe_logical_schema:
                 name = str(column["name"])
                 dtype = str(column["dtype"])
@@ -180,12 +187,23 @@ class RecordManifest:
             raise CacheCorruptionError("Record dataframe logical schema mismatch.")
         if logical_digest != self.dataframe_logical_digest:
             raise CacheCorruptionError("Record dataframe logical digest mismatch.")
+        from bioimageflow.row_relation import ResultRelation
+
+        try:
+            relation = ResultRelation.from_dict(self.row_relation)
+            represented = [index for group in relation.row_associations for index in group.output_indices]
+            if represented != [str(index) for index in admitted_frame.index]:
+                raise ValueError("Result relation does not identify the admitted dataframe rows.")
+        except (TypeError, ValueError) as exc:
+            raise CacheCorruptionError("Invalid record row relation.") from exc
         for output in self.outputs:
             self._validate_output(record_dir, output)
         if make_record_id(self.to_dict()) != self.record_id:
             raise CacheCorruptionError(
                 "Record ID does not match record manifest content."
             )
+
+        return admitted_frame
 
     def _validate_output(self, record_dir: Path, output: dict[str, Any]) -> None:
         kind = output.get("kind")

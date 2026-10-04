@@ -9,7 +9,8 @@ The human-facing output tree is a derived view over the canonical cache.
 
 **Accepted target — S07/S08:** Capture each validated selected record together with its dataframe, assets and provenance as one immutable downstream binding.
 A first-valid loser consumes the selected winner; linked views are read-only projections and never another writable result authority.
-Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address once through the public exact-record storage API.
+Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address once through `Storage.load_record(result_key, record_id)`, which returns the admitted manifest, dataframe and record directory.
+This public exact-record admission validates path containment, Parquet transport and logical identity, declared assets and the result relation together, reading the Parquet file once; manifest/dataframe accessors use the same admission boundary.
 Progress, run views, provider outcomes, downstream identity and export use that captured selection; a later current-pointer change affects a later selection, not the provenance of an already consumed frame.
 Manifest inspection returns detached metadata; this binding does not seal mutable DataFrame/array contents or establish the separately required accepted-resource access and cleanup policies.
 Automatic human-view export warns on projection failure while explicit export is strict; neither may rewrite scientific cache identity.
@@ -248,7 +249,7 @@ The content manifest used for the record hash includes:
 - The result key.
 - The canonical dataframe logical schema and logical digest.
 - Declared output asset paths, sizes, and digests.
-- Content-affecting metadata required to interpret the outputs.
+- Content-affecting metadata required to interpret the outputs, including the explicit `row_relation`.
 
 The content manifest used for the record hash excludes:
 
@@ -394,11 +395,13 @@ Cross-process cleanup requires external coordination or a lease mechanism; age a
 A record is valid only if all of the following hold:
 
 - The record directory is under `records/<record-id>/`.
-- `manifest.json` exists and has schema `bioimageflow.cache.record.v1`.
+- `manifest.json` exists and has schema `bioimageflow.cache.record.v2`.
 - `manifest.json` names the enclosing result key and record ID.
 - `dataframe.parquet` exists and is the canonical dataframe.
 - The Parquet byte digest matches `dataframe.transport_digest`.
 - The dataframe's recomputed canonical logical schema and digest match `dataframe.logical_schema` and `dataframe.logical_digest`.
+- Mandatory `row_relation` identifies its row consumption, output domain/kind and ordered consumed-row/output-index groups.
+- The relation output indices exactly match the admitted dataframe index; collective records contain one all-consumed group, including an empty group for genuinely empty input.
 - Every declared asset listed in the manifest exists.
 - Every owned asset declares `asset_type`, and its file or complete directory-tree size and digest match.
 - Manifest paths are normalized relative POSIX paths.

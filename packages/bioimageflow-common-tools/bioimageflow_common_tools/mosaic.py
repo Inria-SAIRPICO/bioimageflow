@@ -23,14 +23,14 @@ class Mosaic(ProcessingTool):
     """Create a mosaic (grid) from all input images.
 
     Uses ``process_batch`` to collect every row's image and assemble them
-    into a single composite grid.  Each input row receives the same output
+    into a single composite grid.  The collective batch produces one output
     (the mosaic path and total image count).
     """
     row_consumption = RowConsumption.COLLECTIVE
     display_name = "Mosaic"
     documentation = (
         "Aggregates images into a single mosaic image arranged in a grid. "
-        "Each input row receives the mosaic path and the total image count."
+        "One output describes the mosaic and the total consumed image count."
     )
     category = Category.UTILITIES
     tags = ["visualization", "aggregation"]
@@ -151,11 +151,7 @@ class Mosaic(ProcessingTool):
             for image in images:
                 image.close()
 
-        # Every input row maps to the same mosaic output (1-to-1).
-        return [
-            self.Outputs(mosaic_path=output_path, image_count=len(images))
-            for _ in arguments_list
-        ]
+        return [self.Outputs(mosaic_path=output_path, image_count=len(images))]
 
 
 def _mosaic_mode(images: list[Any]) -> str:

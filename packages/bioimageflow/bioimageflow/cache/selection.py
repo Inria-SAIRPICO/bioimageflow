@@ -38,8 +38,7 @@ def selected_result(
     hydrate_assets: bool = False,
 ) -> SelectedResult:
     """Read an exact admitted record; never consult the current pointer."""
-    manifest = storage.load_record_manifest(result_key, record_id)
-    dataframe = storage.load_record_dataframe(
+    manifest, dataframe, record_dir = storage.load_record(
         result_key,
         record_id,
         path_columns=path_columns,
@@ -50,6 +49,6 @@ def selected_result(
         dataframe=dataframe,
         result_key=result_key,
         record_id=record_id,
-        record_dir=storage.result_dir(result_key) / "records" / record_id,
+        record_dir=record_dir,
         _manifest_json=json.dumps(manifest.to_dict(), sort_keys=True),
     )

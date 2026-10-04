@@ -185,7 +185,11 @@ Batch processing
 A mapped tool can use ``process_batch`` to vectorize independent aligned rows.
 Collective input meaning also preserves isolated whole-batch inference, training and aggregation with explicit all-consumed-input association and truthful aggregate lineage.
 Ordered transport correlation does not require duplicated scientific aggregate rows or moving aggregation into pandas.
-The accepted association contract is reviewed against the current API in T/C.
+Declare ``RowConsumption.COLLECTIVE`` for a genuine aggregate and return a flat list of ``self.Outputs`` from ``process_batch``.
+The entire batch executes once and its one output group records every consumed input; returning an empty list records an empty aggregate result without losing consumption lineage.
+A true empty batch passes ``arguments_list=[]``.
+Use ``context.batch_arguments`` for admitted constants/defaults and resolved output paths, and ``context.reference_rows`` for genuine auxiliary reference records whose ``arguments`` dictionaries are separate from observation rows.
+The runtime must admit the selected reference records and their identity before dispatch; do not invent an anchor observation or duplicate the aggregate for each input.
 
 The following mapped GPU-inference method is a partial sketch; declare its real model dependencies and initialization separately:
 

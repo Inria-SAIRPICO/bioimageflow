@@ -21,6 +21,8 @@ Execution pipeline
 
 4. **Input resolution**: for each row, resolve column bindings and constants
    into concrete values. Output path templates are resolved at this stage.
+   A same-named Path input/output without an explicit Template or configured
+   override retains its input path; new output fields receive generated destinations.
 
 5. **Tool execution**:
 
@@ -40,7 +42,12 @@ Published cache records are retained until an explicit storage maintenance opera
 Accepted S target: capture the effective definition, source bytes, targets, inputs and environment configuration before run-visible effects.
 A recursive invocation completes enabled internal terminals; completion-only dependencies do not change unrelated data identity.
 Collective batch processing keeps isolated training/inference/aggregates, including configured empty-input artifacts, with explicit association to all consumed inputs.
-Ordered transport groups must preserve that meaning without duplicating aggregate rows or moving the algorithm into the orchestrator; exact representation is a T/C obligation.
+The current task/result v3 protocol separates physical execution mode from mapped or collective row consumption.
+Mapped groups associate one actual input row with zero, one or multiple outputs.
+A collective group associates the complete ordered input batch, including zero observations, with its output list without duplicating aggregates or moving their algorithm into the orchestrator.
+Captured batch constants/output paths and actual auxiliary reference records are separate from consumed observations.
+Aggregate output indices belong to an explicit independent domain; use an explicit merge such as CrossJoin to apply a trained model to prediction observations.
+The exact relation is persisted with the selected record and carried through downstream identity/provenance; displayed index spelling alone does not establish aggregate lineage.
 
 Index alignment
 ---------------

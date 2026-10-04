@@ -172,3 +172,74 @@ class TestGetOutputTemplates:
 
         templates = get_output_templates(Out, Inp)
         assert "count" not in templates
+
+@pytest.mark.parametrize("consumption", ["mapped", "collective"])
+def test_input_path_echo_preserves_source_and_generates_declared_destinations(tmp_path, consumption):
+    from bioimageflow import Workflow
+    from bioimageflow_core import GENERAL_ENV, ProcessingTool, RowConsumption
+
+    source = tmp_path / "source.txt"
+    source.write_text("original sentinel")
+    supplied = tmp_path / "supplied.txt"
+    supplied.write_text("supplied sentinel")
+
+    class Echo(ProcessingTool):
+        accepts_upstream = False
+        environment = GENERAL_ENV
+        row_consumption = RowConsumption(consumption)
+
+        class Inputs(IOModel):
+            source: Path
+            explicit: Path
+
+        class Outputs(IOModel):
+            source: Path
+            explicit: Path = Template("explicit.txt")
+            generated: Path
+
+        def process(self, arguments, *, context=None):
+            assert Path(arguments.source) == source
+            assert Path(arguments.source).read_text() == "original sentinel"
+            assert Path(arguments.explicit) != supplied
+            assert Path(arguments.generated) not in (source, supplied)
+            Path(arguments.explicit).write_text("explicit destination")
+            Path(arguments.generated).write_text("generated destination")
+            return self.Outputs(source=arguments.source, explicit=arguments.explicit,
+                                generated=arguments.generated)
+
+        def process_batch(self, arguments_list, *, context=None):
+            if consumption == "mapped":
+                return [self.process(arguments, context=context) for arguments in arguments_list]
+            assert arguments_list == []
+            return [self.process(context.batch_arguments, context=context)]
+
+    with Workflow(engine="direct", storage_path=tmp_path / "results") as workflow:
+        node = Echo()(source=source, explicit=supplied)
+        result = workflow.compute(node)
+    assert [Path(value) for value in result["source"]] == [source]
+    assert Path(result.iloc[0]["explicit"]).read_text() == "explicit destination"
+    assert Path(result.iloc[0]["generated"]).read_text() == "generated destination"
+    assert source.read_text() == "original sentinel"
+    assert supplied.read_text() == "supplied sentinel"
+
+
+def test_nullable_path_echo_keeps_default_and_allows_explicit_override():
+    class Inp(IOModel):
+        source: Path | None = None
+
+    class Out(IOModel):
+        source: Path | None
+        generated: Path
+
+    assert get_output_templates(Out, Inp) == {"generated": "{node_name}_{row_index}{ext}"}
+    assert get_output_templates(Out, Inp, {"source": "copied.txt"})["source"] == "copied.txt"
+
+
+def test_scalar_input_name_does_not_suppress_path_destination():
+    class Inp(IOModel):
+        result: str
+
+    class Out(IOModel):
+        result: Path
+
+    assert "result" in get_output_templates(Out, Inp)

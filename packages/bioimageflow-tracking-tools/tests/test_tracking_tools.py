@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import imageio.v3 as iio
 import numpy as np
@@ -7,7 +8,7 @@ import pytest
 
 from bioimageflow import Workflow
 from bioimageflow.validation import serialize_output_schema
-from bioimageflow_core import Arguments
+from bioimageflow_core import Arguments, ReferenceRow
 from bioimageflow_common_tools import Files
 from bioimageflow_tracking_tools import (
     FilterObjects,
@@ -20,6 +21,13 @@ from bioimageflow_tracking_tools import (
 )
 
 pytestmark = pytest.mark.package_tools
+
+
+def _collective_context(*, batch: Arguments | None = None, references: tuple[Arguments, ...] = ()) -> SimpleNamespace:
+    return SimpleNamespace(
+        batch_arguments=batch,
+        reference_rows=tuple(ReferenceRow(position, str(position), dict(vars(arguments))) for position, arguments in enumerate(references)),
+    )
 
 
 def _moving_labels(path: Path) -> Path:
@@ -369,7 +377,7 @@ def test_tracks_to_labels_renders_track_ids_into_label_stack(tmp_path: Path) -> 
                 output_label_image=tmp_path / "track_labels.tif",
             ),
         ]
-    )[0][0]
+    )[0]
 
     labels = iio.imread(result.output_label_image)
     assert labels[0, 6, 6] == 5
@@ -383,13 +391,8 @@ def test_tracks_to_labels_zero_tracks_preserves_artifact_and_count(
     label_path = _moving_labels(tmp_path / "labels.tif")
 
     result = TracksToLabels().process_batch(
-        [
-            Arguments(
-                label_image=label_path,
-                output_label_image=tmp_path / "track_labels.tif",
-            ),
-        ]
-    )[0][0]
+        [], context=_collective_context(references=(Arguments(label_image=label_path, output_label_image=tmp_path / "track_labels.tif"),))
+    )[0]
 
     labels = iio.imread(result.output_label_image)
     assert labels.dtype == np.uint32
@@ -398,22 +401,14 @@ def test_tracks_to_labels_zero_tracks_preserves_artifact_and_count(
     assert result.track_count == 0
 
 
-def test_tracks_to_labels_coalesces_repeated_empty_anchors(tmp_path: Path) -> None:
+def test_tracks_to_labels_coalesces_repeated_selected_references(tmp_path: Path) -> None:
     label_path = _moving_labels(tmp_path / "labels.tif")
     output = tmp_path / "track_labels.tif"
-
-    results = TracksToLabels().process_batch(
-        [
-            Arguments(label_image=label_path, output_label_image=output),
-            Arguments(label_image=label_path, output_label_image=output),
-        ]
-    )
-
-    assert len(results) == 2
-    assert len(results[0]) == 1
-    assert results[1] == []
-    assert Path(results[0][0].output_label_image) == output
-    assert results[0][0].track_count == 0
+    reference = Arguments(label_image=label_path, output_label_image=output)
+    results = TracksToLabels().process_batch([], context=_collective_context(references=(reference, reference)))
+    assert len(results) == 1
+    assert Path(results[0].output_label_image) == output
+    assert results[0].track_count == 0
 
 
 def test_tracking_workflow_all_background_writes_zero_track_artifact(
@@ -575,7 +570,7 @@ def test_tracks_to_labels_preserves_track_ids_above_uint16(tmp_path: Path) -> No
                 output_label_image=tmp_path / "track_labels.tif",
             ),
         ]
-    )[0][0]
+    )[0]
 
     labels = iio.imread(result.output_label_image)
     assert labels.dtype == np.uint32
@@ -596,7 +591,7 @@ def test_tracks_to_labels_accepts_integer_like_track_ids(tmp_path: Path) -> None
                 output_label_image=tmp_path / "track_labels.tif",
             ),
         ]
-    )[0][0]
+    )[0]
 
     labels = iio.imread(result.output_label_image)
     assert labels.dtype == np.uint32
@@ -829,3 +824,44 @@ def test_metrics_quality_and_validation_keep_source_stacks_independent() -> None
             "error_count": 0,
         }
     ]
+
+
+@pytest.mark.parametrize("has_tracks", [False, True])
+def test_cell_lineage_example_preserves_blank_image_without_fake_tracks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_tracks: bool) -> None:
+    import runpy
+    from bioimageflow_tracking_tools import LapTrackLink
+
+    source = tmp_path / "blank-labels.tif"
+    labels = np.zeros((2, 8, 8), dtype=np.uint16)
+    if has_tracks:
+        labels[0, 2:4, 2:4] = 1
+    iio.imwrite(source, labels, photometric="minisblack")
+    invoked = []
+
+    def empty_tracks(self, arguments_list, *, context=None):
+        invoked.append(tuple(arguments_list))
+        if not has_tracks:
+            assert arguments_list == []
+            return []
+        return [self.Outputs(source_label_image=row.source_label_image, frame=row.frame, label=row.label,
+                             y=row.y, x=row.x, area=row.area, track_id=7, lineage_id=7, parent_track_id=None,
+                             generation=0, track_count=1, division_count=0) for row in arguments_list]
+
+    monkeypatch.setattr(LapTrackLink, "process_batch", empty_tracks)
+    example = runpy.run_path(str(Path(__file__).resolve().parents[3] / "example_workflows/cell_lineage_tracking/workflow.py"))
+    workflow = example["build_workflow"](storage_path=tmp_path / "results", engine="direct")
+    result = workflow.compute(inputs={"label_image": source})
+    assert len(invoked) == 1
+    assert len(invoked[0]) == (1 if has_tracks else 0)
+    assert len(result) == 1
+    for field in ("track_id", "lineage_id", "parent_track_id", "generation"):
+        if not has_tracks or field == "parent_track_id":
+            assert pd.isna(result.iloc[0][field])
+        else:
+            assert result.iloc[0][field] == (0 if field == "generation" else 7)
+        port = next(port for port in workflow.to_dict()["interface"]["outputs"] if port["name"] == field)
+        assert port["schema"]["nullable"] is True
+    rendered = iio.imread(result.iloc[0]["track_labels"])
+    assert rendered.shape == (2, 8, 8)
+    assert rendered.dtype == np.uint32
+    assert np.array_equal(rendered, np.where(labels == 1, 7, 0).astype(np.uint32))

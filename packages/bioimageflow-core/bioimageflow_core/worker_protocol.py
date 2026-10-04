@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple, cast
 
-from bioimageflow_core.arguments import ExecutionContext
+from bioimageflow_core.arguments import ExecutionContext, ReferenceRow
 from bioimageflow_core.shared_memory import validate_scope_descriptor
 from bioimageflow_core._processing_values import (
     decode_processing_value,
@@ -22,8 +22,8 @@ from bioimageflow_core.worker_origins import (
 )
 
 
-TASK_SCHEMA = "bioimageflow.processing_task.v2"
-RESULT_SCHEMA = "bioimageflow.processing_result.v2"
+TASK_SCHEMA = "bioimageflow.processing_task.v3"
+RESULT_SCHEMA = "bioimageflow.processing_result.v3"
 _TASK_ID_RE = re.compile(r"^task_[0-9a-f]{16}$")
 _INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
 _ATTEMPT_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
@@ -55,19 +55,27 @@ class ProcessingTask:
     cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
+    row_consumption: Literal["mapped", "collective"]
     tool: WorkerToolOriginV1
     rows: Tuple[RowInvocation, ...]
     batch_context: Optional[Dict[str, Any]] = None
+    batch_arguments: Dict[str, Any] = field(default_factory=dict)
+    reference_rows: Tuple[ReferenceRow, ...] = ()
     shared_memory_context: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_task.v2"] = field(
+    schema: Literal["bioimageflow.processing_task.v3"] = field(
         default=TASK_SCHEMA, init=False
     )
 
 
 @dataclass(frozen=True)
-class RowResult:
+class ConsumedRow:
     position: int
     row_index: str
+
+
+@dataclass(frozen=True)
+class OutputGroup:
+    consumed_rows: Tuple[ConsumedRow, ...]
     outputs: Tuple[Dict[str, Any], ...]
 
 
@@ -79,9 +87,10 @@ class ProcessingTaskResult:
     cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
-    rows: Tuple[RowResult, ...]
+    row_consumption: Literal["mapped", "collective"]
+    groups: Tuple[OutputGroup, ...]
     metrics: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_result.v2"] = field(
+    schema: Literal["bioimageflow.processing_result.v3"] = field(
         default=RESULT_SCHEMA, init=False
     )
 
@@ -135,6 +144,17 @@ def _require_mode(value: Any) -> Literal["row_chunk", "process_batch"]:
     if not isinstance(value, str) or value not in _MODES:
         raise ValueError(f"Unsupported processing mode: {value!r}.")
     return cast(Literal["row_chunk", "process_batch"], value)
+
+
+def _require_consumption(value: Any) -> Literal["mapped", "collective"]:
+    if not isinstance(value, str) or value not in ("mapped", "collective"):
+        raise ValueError(f"Unsupported row_consumption: {value!r}.")
+    return cast(Literal["mapped", "collective"], value)
+
+
+def _require_consumption_mode(mode: str, consumption: str) -> None:
+    if consumption == "collective" and mode != "process_batch":
+        raise ValueError("Collective tasks require process_batch mode.")
 
 
 def _require_plain_dict(value: Any, label: str) -> Dict[str, Any]:
@@ -225,6 +245,7 @@ def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
         "cache_attempt_id": task.cache_attempt_id,
         "task_retry": task.task_retry,
         "mode": task.mode,
+        "row_consumption": task.row_consumption,
         "tool": encode_worker_tool_origin(task.tool),
         "rows": [
             {
@@ -236,6 +257,12 @@ def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
             for row in task.rows
         ],
         "batch_context": deepcopy(task.batch_context),
+        "batch_arguments": encode_processing_value(task.batch_arguments),
+        "reference_rows": [
+            {"position": row.position, "row_index": row.row_index,
+             "arguments": encode_processing_value(row.arguments)}
+            for row in task.reference_rows
+        ],
         "shared_memory_context": _decode_shared_memory_context(task.shared_memory_context),
     }
 
@@ -251,9 +278,12 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         "cache_attempt_id",
         "task_retry",
         "mode",
+        "row_consumption",
         "tool",
         "rows",
         "batch_context",
+        "batch_arguments",
+        "reference_rows",
         "shared_memory_context",
     }
     _require_exact_keys(task, expected, "processing task")
@@ -263,12 +293,20 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
     if retry != 0:
         raise ValueError("task_retry must be zero.")
     mode = _require_mode(task["mode"])
+    consumption = _require_consumption(task["row_consumption"])
+    _require_consumption_mode(mode, consumption)
     rows = _decode_rows(task["rows"], _decode_row_invocation, "task rows")
     batch_context = _decode_context(task["batch_context"], "batch context")
     if mode == "row_chunk" and batch_context is not None:
         raise ValueError("row_chunk tasks must not define batch_context.")
     if mode == "process_batch" and batch_context is None:
         raise ValueError("process_batch tasks require batch_context.")
+    batch_arguments = _require_plain_dict(
+        decode_processing_value(task["batch_arguments"]), "batch arguments"
+    )
+    reference_rows = _decode_rows(task["reference_rows"], _decode_reference_row, "reference rows")
+    if mode == "row_chunk" and (batch_arguments or reference_rows):
+        raise ValueError("row_chunk tasks must not define batch arguments or references.")
     return ProcessingTask(
         task_id=_require_identifier(task["task_id"], _TASK_ID_RE, "task_id"),
         node_name=_require_text(task["node_name"], "node_name"),
@@ -278,27 +316,44 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         cache_attempt_id=_require_optional_attempt_id(task["cache_attempt_id"]),
         task_retry=retry,
         mode=mode,
+        row_consumption=consumption,
         tool=decode_worker_tool_origin(task["tool"]),
         rows=rows,
         batch_context=batch_context,
+        batch_arguments=batch_arguments,
+        reference_rows=reference_rows,
         shared_memory_context=_decode_shared_memory_context(task["shared_memory_context"]),
     )
 
 
-def _decode_row_result(payload: Any) -> RowResult:
-    row = _require_plain_dict(payload, "row result")
-    _require_exact_keys(row, {"position", "row_index", "outputs"}, "row result")
-    outputs_value = row["outputs"]
-    if type(outputs_value) is not list:
-        raise ValueError("row outputs must be an array.")
-    outputs = tuple(
-        _require_plain_dict(decode_processing_value(output), "row output")
-        for output in outputs_value
+def _decode_reference_row(payload: Any) -> ReferenceRow:
+    row = _require_plain_dict(payload, "reference row")
+    _require_exact_keys(row, {"position", "row_index", "arguments"}, "reference row")
+    return ReferenceRow(
+        position=_require_integer(row["position"], "reference position"),
+        row_index=_require_row_index(row["row_index"], "reference row_index"),
+        arguments=_require_plain_dict(decode_processing_value(row["arguments"]), "reference arguments"),
     )
-    return RowResult(
-        position=_require_integer(row["position"], "row position"),
-        row_index=_require_row_index(row["row_index"], "row_index"),
-        outputs=outputs,
+
+
+def _decode_consumed_row(payload: Any) -> ConsumedRow:
+    row = _require_plain_dict(payload, "consumed row")
+    _require_exact_keys(row, {"position", "row_index"}, "consumed row")
+    return ConsumedRow(
+        position=_require_integer(row["position"], "consumed position"),
+        row_index=_require_row_index(row["row_index"], "consumed row_index"),
+    )
+
+
+def _decode_output_group(payload: Any) -> OutputGroup:
+    group = _require_plain_dict(payload, "output group")
+    _require_exact_keys(group, {"consumed_rows", "outputs"}, "output group")
+    if type(group["outputs"]) is not list:
+        raise ValueError("Group outputs must be an array.")
+    return OutputGroup(
+        consumed_rows=_decode_rows(group["consumed_rows"], _decode_consumed_row, "consumed rows"),
+        outputs=tuple(_require_plain_dict(decode_processing_value(output), "group output")
+                      for output in group["outputs"]),
     )
 
 
@@ -314,13 +369,13 @@ def encode_processing_result(result: ProcessingTaskResult) -> Dict[str, Any]:
         "cache_attempt_id": result.cache_attempt_id,
         "task_retry": result.task_retry,
         "mode": result.mode,
-        "rows": [
-            {
-                "position": row.position,
-                "row_index": row.row_index,
-                "outputs": [encode_processing_value(output) for output in row.outputs],
-            }
-            for row in result.rows
+        "row_consumption": result.row_consumption,
+        "groups": [
+            {"consumed_rows": [
+                {"position": row.position, "row_index": row.row_index}
+                for row in group.consumed_rows
+             ], "outputs": [encode_processing_value(output) for output in group.outputs]}
+            for group in result.groups
         ],
         "metrics": deepcopy(result.metrics),
     }
@@ -337,7 +392,8 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
         "cache_attempt_id",
         "task_retry",
         "mode",
-        "rows",
+        "row_consumption",
+        "groups",
         "metrics",
     }
     _require_exact_keys(result, expected, "processing result")
@@ -349,6 +405,21 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
     metrics = result["metrics"]
     if metrics is not None:
         metrics = _require_plain_dict(metrics, "result metrics")
+    mode = _require_mode(result["mode"])
+    consumption = _require_consumption(result["row_consumption"])
+    _require_consumption_mode(mode, consumption)
+    if type(result["groups"]) is not list:
+        raise ValueError("Result groups must be an array.")
+    groups = tuple(_decode_output_group(group) for group in result["groups"])
+    if consumption == "collective":
+        if len(groups) != 1:
+            raise ValueError("Collective results require exactly one output group.")
+    else:
+        if any(len(group.consumed_rows) != 1 for group in groups):
+            raise ValueError("Mapped output groups require one consumed row each.")
+        positions = [group.consumed_rows[0].position for group in groups]
+        if positions != sorted(set(positions)):
+            raise ValueError("Mapped group rows must have unique increasing positions.")
     return ProcessingTaskResult(
         task_id=_require_identifier(result["task_id"], _TASK_ID_RE, "task_id"),
         node_name=_require_text(result["node_name"], "node_name"),
@@ -357,8 +428,9 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
         ),
         cache_attempt_id=_require_optional_attempt_id(result["cache_attempt_id"]),
         task_retry=retry,
-        mode=_require_mode(result["mode"]),
-        rows=_decode_rows(result["rows"], _decode_row_result, "result rows"),
+        mode=mode,
+        row_consumption=consumption,
+        groups=groups,
         metrics=metrics,
     )
 
@@ -374,6 +446,7 @@ def validate_processing_result(
         task.cache_attempt_id,
         task.task_retry,
         task.mode,
+        task.row_consumption,
     )
     result_fields = (
         result.task_id,
@@ -382,10 +455,15 @@ def validate_processing_result(
         result.cache_attempt_id,
         result.task_retry,
         result.mode,
+        result.row_consumption,
     )
     if task_fields != result_fields:
         raise ValueError("Processing result correlation does not match its task.")
     task_rows = tuple((row.position, row.row_index) for row in task.rows)
-    result_rows = tuple((row.position, row.row_index) for row in result.rows)
-    if task_rows != result_rows:
+    result_rows = tuple(
+        tuple((row.position, row.row_index) for row in group.consumed_rows)
+        for group in result.groups
+    )
+    expected = (task_rows,) if task.row_consumption == "collective" else tuple((row,) for row in task_rows)
+    if expected != result_rows:
         raise ValueError("Processing result rows do not match their task.")

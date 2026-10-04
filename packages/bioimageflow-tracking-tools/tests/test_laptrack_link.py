@@ -79,8 +79,7 @@ def test_laptrack_normalizes_division_lineage_and_restores_input_order(
         ),
     ]
 
-    nested = LapTrackLink().process_batch(rows)
-    outputs = [group[0] for group in nested]
+    outputs = LapTrackLink().process_batch(rows)
 
     assert [output.label for output in outputs] == [3, 1, 2]
     assert [output.track_id for output in outputs] == [3, 1, 2]
