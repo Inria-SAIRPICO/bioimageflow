@@ -222,3 +222,31 @@ def test_common_tool_image_fields_use_imagefile_without_converting_plain_paths()
 def test_schema_serialization_error_exists() -> None:
     assert issubclass(SchemaSerializationError, Exception)
 
+
+def test_passthrough_keeps_declared_extra_ports():
+    class Transform(DataFrameTool):
+        class Outputs(Passthrough):
+            score: float
+
+    schema = serialize_output_schema(Transform)
+    assert schema["_passthrough"] is True
+    assert schema["score"]["type"] == "float"
+    assert Transform.resolve_outputs() == schema
+
+
+def test_optional_annotated_viewer_keeps_public_and_portable_metadata():
+    from bioimageflow_core.viewer import (
+        ViewerSpec,
+        NapariRequirement,
+        extract_viewer_spec,
+    )
+
+    viewer = ViewerSpec(napari=NapariRequirement(required_packages=("reader",)))
+    annotation = Optional[Annotated[Path, viewer]]
+    assert extract_viewer_spec(annotation) == viewer
+
+    class Transform(DataFrameTool):
+        class Outputs(IOModel):
+            image: annotation
+
+    assert serialize_output_schema(Transform)["image"]["viewer"] == viewer.to_dict()

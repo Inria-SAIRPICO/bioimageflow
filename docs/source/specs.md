@@ -286,7 +286,8 @@ unless the consumer explicitly declares a set containing `BINARY`.
 
 **Wire-shape serialization:** `bioimageflow.validation.serialize_image_spec(spec) -> dict | None` returns a JSON-friendly representation of an `ImageSpec` — `{"semantics": [...], "layouts": [...], "dtypes": [...], "formats": [...]}` with enum value strings (e.g. `"intensity"`, `"YX"`). This is the canonical shape for callers (GUIs, linters, documentation generators) that need to expose type information over the wire. `get_inputs_schema(tool)` includes it alongside the raw `ImageSpec` object under `image_spec_serialized`.
 
-**Tool-level wire-shape serialization:** For a full per-field wire-format schema, callers should use `bioimageflow.validation.serialize_input_schema(tool_class) -> dict[str, dict]` and `serialize_output_schema(tool_class) -> dict[str, dict]`. Both accept the tool *class* (no instantiation is required) and return a fully JSON-serializable dict; both return `{}` when the tool has no `Inputs` / `Outputs` class attribute.
+**Tool-level wire-shape serialization:** For a full per-field wire-format schema, callers should use `bioimageflow.validation.serialize_input_schema(tool_class) -> dict[str, dict]` and `serialize_output_schema(tool_class) -> dict[str, dict]`. Both accept tool classes without instantiation; configured output serialization also accepts the admitted tool instance so its captured declaration facade remains authoritative.
+They return fully JSON-serializable projections and `{}` when the respective declaration is absent; unsupported declarations or default projections raise instead of becoming empty schema success.
 
 For per-tool (not per-field) facts, callers use `bioimageflow.validation.serialize_tool_metadata(tool_class) -> dict[str, Any]`. Returned keys: `tool_type` (`"ProcessingTool"` | `"DataFrameTool"`), `accepts_upstream` (bool — `True` for `ProcessingTool`; for `DataFrameTool` reflects the class attribute), `dynamic_outputs` (bool — `True` when the tool overrides `DataFrameTool.resolve_outputs` or `resolve_merge_schema`), `dataframe_output` (bool — `True` when the node exposes its full result DataFrame as a graph-level output), and `row_consumption` (`"mapped"` or `"collective"` for a `ProcessingTool`, `None` for a `DataFrameTool`). GUIs use this to suppress the upstream pin on source DataFrameTools, render full-DataFrame output pins, communicate row semantics, and know whether to call `serialize_resolved_outputs(node)` for per-column output pins.
 
@@ -297,6 +298,7 @@ For inputs, each field entry has exactly these keys:
 ```python
 {
     "type": "float",                 # display-name string (see rules below)
+    "type_spec": {"kind": "float"},   # finite semantic annotation descriptor
     "required": True,                # bool; True iff no class-level default
     "nullable": False,               # bool; True iff the type admits None
     "connectable": "not_by_default", # "never" | "not_by_default" | "by_default"
@@ -314,6 +316,8 @@ For inputs, each field entry has exactly these keys:
 ```
 
 The `type` display name follows deterministic rules: bare Python types use `__name__` (`"int"`, `"float"`, `"str"`, `"bool"`, `"Path"`); `list` / `dict` / `tuple` generics collapse to `"list"` / `"dict"` / `"tuple"`; `Literal[...]` uses the type of the first literal (the enumeration is carried by `choices`, not `type`); `Enum` subclasses become `"str"`; `Annotated[X, ...]` unwraps to `X`; `Optional[X]` / `X | None` uses the display name of `X` (None-ness is expressed by `nullable`, not by `type`); `Annotated[Path, ImageSpec(...)]` and `ImageShared(...)` emit `"ImageFile"` and `"ImageShared"` respectively.
+The finite `type_spec` preserves primitive, Path, scoped-reference/array, union, collection and choice structure without evaluating Python expressions.
+Image, GUI and viewer metadata remain explicit and survive either ordering of Optional and Annotated wrappers.
 The reserved value `"any"` denotes a column whose runtime type is unknown — emitted by `resolve_outputs` / `resolve_merge_schema` for dynamic columns whose name (but not concrete type) is known at graph-construction time, and by `Concat.resolve_merge_schema` when two upstream schemas declare the same column with conflicting types.
 
 The `connectable` field uses three-state strings: `"never"` (no pin, no toggle), `"not_by_default"` (pin hidden by default, a GUI checkbox reveals it), and `"by_default"` (pin visible by default, a GUI checkbox can hide it). Callers that only care whether a field has a pin should treat both `"not_by_default"` and `"by_default"` as connectable.
@@ -328,8 +332,10 @@ The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offer
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields are simpler: `{"type": str, "default": Any | None, "image_spec": dict | None, "template": str | None, "viewer": dict | None}`. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. For a `Passthrough` subclass (see §3.5 `DataFrameTool`), schema inspection represents inherited upstream columns and retains any added declared output fields and their type/image/viewer metadata.
-**Accepted target — S05:** A marker-only schema is insufficient when the subclass adds fields; unresolved upstream columns remain unknown, and the exact public representation must be checked in T/C rather than invented here.
+Output fields retain `type`, `type_spec`, `required`, `nullable`, `default`, `image_spec` and optional template/viewer metadata; requiredness and nullability remain independent just as for inputs. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. For a `Passthrough` subclass (see §3.5 `DataFrameTool`), schema inspection represents inherited upstream columns and retains any added declared output fields and their type/image/viewer metadata.
+Configured node resolution joins inherited Passthrough ports with declared additions before publishing its detached projection.
+Static native declarations and configured resolver results have distinct authorities: an override's resolved type and metadata must not be replaced by the same-named raw Outputs annotation.
+Known heterogeneous Any and genuinely dynamic schemas remain valid; resolution failure is explicit, and a dynamic upstream does not become an empty known schema.
 
 Callers that want the Python-facing objects (raw `type`, raw `Connectable`) should keep using `get_inputs_schema(tool)` instead; the two APIs are complementary.
 
@@ -1124,6 +1130,8 @@ export = save(
 
 `Inputs` and `Outputs` are declared as inner classes extending `IOModel`, a lightweight pure-Python base class provided by `bioimageflow-core`. `IOModel` supports annotated fields/defaults and keyword construction with structural field admission (including unknown/missing fields).
 It does not perform the orchestrator's declaration/editor or resolved scientific value validation; those are separate phases described below.
+Omitted defaults are detached per IOModel instance, while explicitly supplied values retain caller identity.
+`IOModel.capture_defaults()` returns owned declared defaults, preserving missing fields versus explicit None; bound SharedArray references retain their exact local owner rather than copying runtime locks or leases.
 
 ```python
 class IOModel:
@@ -1160,7 +1168,8 @@ class IOModel:
             if name in kwargs:
                 setattr(self, name, kwargs[name])
             elif hasattr(self.__class__, name):
-                setattr(self, name, getattr(self.__class__, name))
+                from bioimageflow_core.defaults import snapshot_value
+                setattr(self, name, snapshot_value(getattr(self.__class__, name)))
             else:
                 raise TypeError(f"Missing required field: '{name}'")
 
@@ -1709,7 +1718,10 @@ Registration is optional discovery, not a replacement for a node's explicit pack
 Hosts may serialize metadata from the actual resolved node class without adding that class to a shared catalog.
 Name-only lookups return the most recently registered matching class; use package/version and, when necessary, module qualifiers to select an exact registered identity.
 Same-named source-bound nodes must retain their explicit source identity independently of catalog lookup.
-**Accepted target — S05:** Registration validates each concrete tool kind without provisioning models or optional runtimes.
+Registration validates each concrete tool kind without provisioning models or optional runtimes.
+Abstract ProcessingTool families are excluded, while concrete dynamic DataFrameTools without Outputs remain discoverable.
+All metadata for a registration is staged before publication; a malformed schema publishes none of that registration.
+`ToolMetadata.outputs_state` distinguishes known declarations from dynamic output schemas, and returned nested metadata/default values are detached from registry authority.
 Failed declaration introspection reports unavailable/invalid schema rather than successful empty inputs/outputs; returned metadata/default snapshots do not expose mutable registry authority.
 
 `ToolMetadata` is a frozen dataclass:
@@ -1788,8 +1800,14 @@ Export behavior:
 ### 4.1 Workflow Construction
 
 **Accepted target — S02/S03:** Definition mutation and live execution have separate authorities.
-Capture effective definition, sources, selected targets, inputs and per-environment configuration before execution effects; a rejected ordinary construction leaves no partial interface, dependency or name reservation.
-Explicit diagnostic editing may retain incomplete state with scoped errors.
+Callable invocation captures its independent definition, omitted defaults and per-environment configuration before the invocation escapes.
+Root compute, explicit-target compute and compute_steps additionally capture one effective execution definition before setup or run-visible effects; supplied values and selected targets are mapped into that capture, while callbacks, cancellation, engine reservations, managers and result owners remain separately bound runtime authority.
+The same captured effective defaults feed validation, arguments and scientific parameter identity; later class-default, binding or configuration changes affect later admissions only.
+Captured Inputs/Outputs facades detach their declaration mapping and omitted defaults on the tool instance; they do not replace its executable class.
+Semantic value capture preserves bound references and their owners without opening array storage or copying runtime locks.
+The carried tool class/origin selector remains the original executable identity; independently copied environment recipes do not turn that selector into verified executable-content closure.
+A rejected ordinary construction stages names, registration, symbolic targets and dependency replacement without publishing any of them.
+Explicit diagnostic editing may retain incomplete state with scoped errors, but unresolved construction diagnostics refuse execution before effects.
 
 Users build workflows by calling tools as functions. Each call returns a **Node** — a lazy promise of future computation. Nodes form a DAG implicitly through their data dependencies. The calling convention differs by tool type: `ProcessingTool` takes keyword arguments (column references, node shorthand, or constants); `DataFrameTool` takes positional arguments (upstream nodes) and keyword arguments (parameters).
 
@@ -2420,10 +2438,12 @@ errs = s.validate()                    # current meaning must govern diagnostics
 plan = s.plan()                        # refreshes storage-facing cache state
 ```
 
-**Edit semantics.** Edits are split into two categories:
-
-- **Structural edits** (`add_node`, `remove_node`, `add_edge`, `remove_edge`) invalidate the cached `Workflow` — the next `to_workflow()` call rebuilds.
-- **Non-structural edits** (`set_constant`, `set_enabled`) update the cached `Workflow`'s node fields **in place**. an edit may reuse an already resolved class, but validation/schema facts must reflect the changed meaning; this optimization is not permission to reuse stale diagnostics.
+**Edit semantics.** Every edit constructs an owned candidate current graph and admits its structural endpoints, values and declaration bindings before replacing the session authority.
+`set_constant` removes the competing incoming edge for that exact field in the same candidate; removing a node also removes its interface sources/targets and inputs with no surviving targets.
+A refused edit leaves the previous graph and materialization unchanged.
+Accepted edits, including constants and enabled flags, replace the derived materialization rather than mutating a previously returned Workflow in place.
+A later session storage-root assignment invalidates its materialization; previously returned definitions retain their prior runtime root.
+Validation facts belong only to the current session revision, while incomplete diagnostic graphs expose current scoped errors and cannot execute.
 
 `to_workflow()` always uses `Workflow.from_dict(storage_path=s.storage_path, validate_only=True, partial=True, auto_install=False)`, so per-node failures surface in `wf.failed_nodes` rather than raising. Callers should treat `s.failed_nodes` and `s.is_partial` (via the cached workflow) as part of normal operation, not as exceptional state.
 
@@ -3284,6 +3304,7 @@ The name `name` is reserved for invocation node naming and cannot be an input na
 
 `workflow(name=None, **bindings)` validates names and kinds, snapshots the definition, registers one `WorkflowNode` in the parent, and never executes a factory.
 `workflow_node.workflow` is the editable definition for that invocation; editing it does not affect its source or siblings.
+Its omitted defaults and per-environment configuration are captured when it is invoked; every later execution admission captures that instance's effective bindings/configuration again, before effects.
 `workflow_node["output_name"]` resolves the name to the stable output-port ID.
 
 Root values use `workflow.compute(inputs={...})`.
@@ -3302,7 +3323,9 @@ A zero-output workflow executes its terminals and returns a zero-row, zero-colum
 ### 14.3 Strict recursive graph and archive formats
 
 `Workflow.to_dict()` emits the current strict graph grammar, `schema_version: 2`.
-**Accepted target — S01:** Public import/export uses this one current grammar; historical graph/archive adapters are not requirements and any remaining implementation is assessed in C.
+Public graph import uses this one current recursive grammar, independently of archive-envelope and Core task/result versions.
+Whole-graph admission captures the manifest and validates all nested record shapes, strict constant envelopes, unique endpoint ownership and edge-versus-constant conflicts before executable tool resolution or materialization.
+Source/archive executable admission and outer ZIP destination publication remain separately owned contracts; graph admission does not certify those later effects.
 A recursive node has `"type": "workflow"`, an inline `workflow` graph, and constant `bindings` keyed by stable child-input IDs.
 Tool nodes use `"type": "tool"`.
 Edges have explicit `"column"` or `"dataframe"` variants and stable IDs.

@@ -47,6 +47,13 @@ Viewer Requirements
    :undoc-members:
    :show-inheritance:
 
+Definition values
+-----------------
+
+``IOModel.capture_defaults()`` returns detached declared defaults with missing fields distinct from explicit None.
+``bioimageflow_core.defaults.snapshot_value`` detaches supported semantic containers/numeric values without cloning scoped resource owners.
+Constructor-supplied values retain caller identity; omitted mutable defaults do not share declaration storage.
+
 Tool Base Classes
 -----------------
 

@@ -82,6 +82,7 @@ class WorkflowNode(Node):
         self._input_dataframe_bindings: dict[str, Any] = {}
         self._input_constant_bindings: dict[str, Any] = {}
         self._workflow_input_bindings: dict[str, Any] = {}
+        self._pending_interface_targets: list[tuple[Any, dict[str, Any]]] = []
         self._is_root_boundary = False
         self._input_column_binding_edge_ids: dict[str, str | None] = {}
         self._input_dataframe_binding_edge_ids: dict[str, str | None] = {}
@@ -135,7 +136,14 @@ class WorkflowNode(Node):
         for key, value in self.__dict__.items():
             if key in {"workflow", "tool"}:
                 continue
-            setattr(clone, key, copy.deepcopy(value, memo))
+            if key in {"_input_constant_bindings", "_input_dataframe_bindings", "_constant_bindings"}:
+                from bioimageflow.workflow.capture import capture_value
+                setattr(clone, key, {
+                    name: copy.deepcopy(item, memo) if isinstance(item, Node) else capture_value(item)
+                    for name, item in value.items()
+                })
+            else:
+                setattr(clone, key, copy.deepcopy(value, memo))
         return clone
 
     @property
@@ -151,6 +159,15 @@ class WorkflowNode(Node):
             )
             for port in self.workflow._interface_outputs.values()
         }
+
+    def get_resolved_output_schema(self) -> Any:
+        from bioimageflow.validation.resolved import ResolvedSchema
+        ports = self.workflow._interface_outputs.values()
+        known = ResolvedSchema.from_columns(
+            {port.id: port.schema for port in ports if port.schema is not None},
+            annotations={port.id: port.annotation for port in ports if port.schema is not None},
+        )
+        return ResolvedSchema("dynamic", tuple(known.ports.items())) if any(port.schema is None for port in ports) else known
 
     def get_output_viewer_spec(self, output: str) -> ViewerSpec | None:
         """Return recursively inherited requirements plus invocation additions."""
@@ -218,10 +235,9 @@ class WorkflowNode(Node):
                 value = value[port.name]
             if isinstance(value, ColumnRef):
                 self._check_input_column_binding(port_id)
-                self._input_column_bindings[port_id] = value
-                self._upstream_nodes.add(value.node)
+                self.workflow._check_interface_binding(port_id, value)
             else:
-                self._input_constant_bindings[port_id] = value
+                self.workflow._check_interface_binding(port_id, value)
         else:
             import pandas as pd
 
@@ -232,11 +248,22 @@ class WorkflowNode(Node):
                 raise BindingError(
                     f"DataFrame workflow input '{port.name}' requires an upstream Node."
                 )
-            self._input_dataframe_bindings[port_id] = value
-            if isinstance(value, Node):
-                self._upstream_nodes.add(value)
+            self.workflow._check_interface_binding(port_id, value)
 
         self.workflow._apply_interface_binding(port_id, value)
+        self._input_column_bindings.pop(port_id, None)
+        self._input_constant_bindings.pop(port_id, None)
+        self._input_dataframe_bindings.pop(port_id, None)
+        self._workflow_input_bindings.pop(port_id, None)
+        if port.kind == "dataframe":
+            self._input_dataframe_bindings[port_id] = value
+        elif isinstance(value, ColumnRef):
+            self._input_column_bindings[port_id] = value
+        else:
+            self._input_constant_bindings[port_id] = value
+        self._upstream_nodes = {
+            reference.node for reference in self._input_column_bindings.values()
+        } | {source for source in self._input_dataframe_bindings.values() if isinstance(source, Node)}
 
     def output_name_for_id(self, port_id: str) -> str:
         port = self.workflow._interface_outputs.get(port_id)

@@ -46,6 +46,8 @@ Per-field keys:
    * - ``type``
      - Display-name string for the annotation (``"float"``, ``"int"``,
        ``"Path"``, ``"ImageFile"``, ...).
+   * - ``type_spec``
+     - Current finite semantic annotation descriptor; unlike ``type``, it preserves primitive/Path/reference/array, union, collection and choice structure for loaded schemas.
    * - ``required``
      - ``True`` when the field has no class-level default. Orthogonal
        to ``Optional[X]``.
@@ -74,8 +76,7 @@ Returns ``{}`` when the tool has no ``Inputs`` class.
 
 The function does not instantiate the tool — it walks annotations and
 class-level defaults. ``SchemaSerializationError`` is reserved for the
-rare introspection failure (typically when ``Inputs`` cannot be
-inspected at all).
+explicit semantic resolution error; unsupported declarations/default projections must not become empty schema success.
 
 Connectable
 -----------
@@ -103,6 +104,9 @@ The ``connectable`` field surfaces the
 DataFrameTool parameter fields always serialize ``connectable="never"``; positional upstream DataFrames are separate from these fields.
 Required, nullable and default are orthogonal: a nullable field without a default still requires a supplied value.
 Schema type strings are display metadata, not replacement Python annotations.
+``type_spec`` is admitted without evaluating Python expressions, while image, GUI and viewer metadata remain explicit fields.
+Output entries also retain requiredness and nullability; returned schema/default dictionaries are detached from the admitted semantic record.
+Passthrough resolution combines inherited columns and declared additions before publishing a configured schema.
 
 For ``Outputs``, ``connectable`` is ignored by the runtime because outputs
 always expose a pin. When an output carries ``GUIMeta``, the serializer still

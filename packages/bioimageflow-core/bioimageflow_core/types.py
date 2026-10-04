@@ -4,11 +4,22 @@ import warnings
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Optional, Tuple, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Optional,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+)
+import types as _types
 
 
 class Semantic(str, Enum):
     """What the pixel values represent."""
+
     BINARY = "binary"
     LABEL = "label"
     INTENSITY = "intensity"
@@ -17,12 +28,14 @@ class Semantic(str, Enum):
     FEATURE = "feature"
 
 
-SCALAR_IMAGE_SEMANTICS = frozenset({
-    Semantic.INTENSITY,
-    Semantic.BINARY,
-    Semantic.LABEL,
-    Semantic.PROBABILITY,
-})
+SCALAR_IMAGE_SEMANTICS = frozenset(
+    {
+        Semantic.INTENSITY,
+        Semantic.BINARY,
+        Semantic.LABEL,
+        Semantic.PROBABILITY,
+    }
+)
 """Semantic values for scalar raster images.
 
 Use this group for tools that consume displayable scalar images without
@@ -33,6 +46,7 @@ It intentionally excludes vector fields and feature images.
 
 class Layout(str, Enum):
     """Axis ordering of the image data."""
+
     PLANAR = "YX"
     PLANAR_CHANNEL = "CYX"
     PLANAR_TIME = "TYX"
@@ -50,6 +64,7 @@ class Layout(str, Enum):
 @dataclass(frozen=True)
 class ImageSpec:
     """Defines type constraints. Empty sets mean 'any' (wildcard)."""
+
     if not TYPE_CHECKING:
         __hash__ = None
 
@@ -68,6 +83,7 @@ class ImageSpec:
 @dataclass(frozen=True)
 class SharedArray:
     """A scoped numeric backing reference; local deletion ownership is not wire data."""
+
     name: str
     shape: Tuple[int, ...]
     dtype: str
@@ -116,6 +132,7 @@ class Connectable(Enum):
     - ``NOT_BY_DEFAULT``: Pin hidden by default; a GUI checkbox reveals it.
     - ``BY_DEFAULT``: Pin visible by default; a GUI checkbox can hide it.
     """
+
     NEVER = "never"
     NOT_BY_DEFAULT = "not_by_default"
     BY_DEFAULT = "by_default"
@@ -165,6 +182,7 @@ class GUIMeta:
         infer the default from the field type.  This is a
         rendering hint only and does not validate the filesystem value.
     """
+
     display_name: Optional[str] = None
     description: Optional[str] = None
     connectable: Connectable = Connectable.NOT_BY_DEFAULT
@@ -175,13 +193,25 @@ class GUIMeta:
     path_picker: Optional[PathPicker] = None
 
 
+def annotation_metadata(annotation: Any) -> tuple[Any, ...]:
+    """Metadata is equivalent through Annotated and single-value Optional."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        args = get_args(annotation)
+        return tuple(args[1:]) + annotation_metadata(args[0])
+    if origin in (Union, getattr(_types, "UnionType", Union)):
+        values = [item for item in get_args(annotation) if item is not type(None)]
+        if len(values) == 1:
+            return annotation_metadata(values[0])
+    return ()
+
+
 def extract_gui_meta(annotation: Any) -> Optional[GUIMeta]:
-    """Extract :class:`GUIMeta` from an ``Annotated`` type, or return ``None``."""
-    if get_origin(annotation) is Annotated:
-        for arg in get_args(annotation):
-            if isinstance(arg, GUIMeta):
-                return arg
-    return None
+    """Extract GUI metadata independently of Optional/Annotated ordering."""
+    return next(
+        (item for item in annotation_metadata(annotation) if isinstance(item, GUIMeta)),
+        None,
+    )
 
 
 def check_compatibility(producer_spec: ImageSpec, consumer_spec: ImageSpec) -> bool:

@@ -22,6 +22,9 @@ from .common import (
     inspect,
     os,
 )
+from bioimageflow_core.defaults import snapshot_value
+from bioimageflow_core.types import annotation_metadata
+
 from .models import (
     ValidationError,
 )
@@ -38,11 +41,14 @@ def build_pydantic_model(tool_model_cls: type[IOModel]) -> type[BaseModel]:
 
 def extract_image_spec(annotation: Any) -> ImageSpec | None:
     """Extract ImageSpec from an Annotated type, or return None."""
-    if get_origin(annotation) is Annotated:
-        for arg in get_args(annotation):
-            if isinstance(arg, ImageSpec):
-                return arg
-    return None
+    return next(
+        (
+            item
+            for item in annotation_metadata(annotation)
+            if isinstance(item, ImageSpec)
+        ),
+        None,
+    )
 
 
 def is_path_type(annotation: Any) -> bool:
@@ -133,7 +139,7 @@ def get_inputs_schema(tool: BaseTool) -> dict[str, dict[str, Any]]:
             base_type = get_args(annotation)[0]
 
         has_default = hasattr(inputs_cls, field_name)
-        default = getattr(inputs_cls, field_name, None)
+        default = snapshot_value(getattr(inputs_cls, field_name, None))
 
         entry: dict[str, Any] = {
             "type": base_type,
@@ -183,15 +189,8 @@ def check_type_compat(
     if consumer_spec is None:
         return None
 
-    upstream_outputs = col_ref.node.tool.Outputs
-    if upstream_outputs is None:
-        return None
-
-    output_annotations = upstream_outputs._get_all_annotations()
-    if col_ref.column not in output_annotations:
-        return None  # reported elsewhere (column_not_found)
-
-    producer_spec = extract_image_spec(output_annotations[col_ref.column])
+    port = col_ref.node.get_resolved_output_schema().get(col_ref.column)
+    producer_spec = port.image_spec if port is not None else None
     if producer_spec is None:
         return None
 

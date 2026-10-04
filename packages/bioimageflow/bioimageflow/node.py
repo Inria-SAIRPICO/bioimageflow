@@ -148,7 +148,13 @@ def _reset_name_counters() -> None:
 
 
 def _get_next_name(tool_name: str) -> str:
-    """Generate the next auto-name for a tool."""
+    """Choose a workflow-local name without consuming it before admission."""
+    workflow = get_active_workflow()
+    if workflow is not None:
+        index = 1
+        while f"{tool_name}_{index}" in workflow._nodes:
+            index += 1
+        return f"{tool_name}_{index}"
     with _name_counter_lock:
         _name_counters.setdefault(tool_name, 0)
         _name_counters[tool_name] += 1
@@ -159,8 +165,12 @@ def get_active_workflow() -> Any:
     return _active_workflow.get()
 
 
-def set_active_workflow(wf: Any) -> None:
-    _active_workflow.set(wf)
+def set_active_workflow(wf: Any) -> contextvars.Token:
+    return _active_workflow.set(wf)
+
+
+def reset_active_workflow(token: contextvars.Token) -> None:
+    _active_workflow.reset(token)
 
 
 class Node:
@@ -178,9 +188,13 @@ class Node:
     ) -> None:
         from bioimageflow.resources import NodeResourceOverrides
 
+        if isinstance(tool, ProcessingTool):
+            from bioimageflow_core import EnvironmentSpec
+            if tool.Outputs is None or not isinstance(getattr(tool, "environment", None), EnvironmentSpec):
+                raise TypeError("Concrete ProcessingTool graph nodes require Outputs and an EnvironmentSpec.")
         self.tool = tool
-        self._kwargs = kwargs or {}
-        self._args: list[Any] = args or []
+        self._kwargs = dict(kwargs or {})
+        self._args: list[Any] = list(args or [])
         self.output_templates: dict[str, str] = dict(output_templates or {})
         self._viewer_additions: dict[str, ViewerSpec] = {}
         for output, addition in (viewer_additions or {}).items():
@@ -211,6 +225,7 @@ class Node:
         self._workflow_input_bindings: dict[str, Any] = {}
         self._workflow_dataframe_bindings: dict[int, Any] = {}
         self._workflow_input_fallback_constants: set[str] = set()
+        self._pending_interface_targets: list[tuple[Any, dict[str, Any]]] = []
 
         # Determine name
         if name is not None:
@@ -223,6 +238,7 @@ class Node:
         # Register with active workflow
         wf = get_active_workflow()
         capture = _get_error_capture()
+        capture_start = len(capture) if capture is not None else 0
         if capture is None:
             # Reject prohibited bindings before positional or keyword symbolic
             # inputs can publish targets into their owning workflow.
@@ -247,7 +263,6 @@ class Node:
                     f"Node name '{name}' is not unique. Each node in a Workflow "
                     f"must have a unique name."
                 )
-            wf._register_node(self)
 
         # Track upstream from positional args (DataFrameTool)
         for index, arg in enumerate(self._args):
@@ -266,18 +281,54 @@ class Node:
             if isinstance(arg, Node):
                 self._upstream_nodes.add(arg)
 
-        # Process keyword arguments. When error capture is active we keep the
-        # node registered and best-effort wire what we can; otherwise we
-        # unregister on failure so the workflow stays clean.
-        if capture is not None:
-            self._process_kwargs()
-        else:
-            try:
-                self._process_kwargs()
-            except Exception:
-                if wf is not None:
-                    wf._nodes.pop(self._name, None)
-                raise
+        # New-node state and symbolic targets stay private until every
+        # positional/keyword/template/schema admission has completed.
+        self._process_kwargs()
+        self._construction_errors = [] if capture is None else list(capture[capture_start:])
+        if wf is not None:
+            wf._register_node(self)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Node":
+        existing = memo.get(id(self))
+        if existing is not None:
+            return existing
+        clone = object.__new__(type(self))
+        memo[id(self)] = clone
+        # The executable selector is carried, not claimed to be captured code.
+        # A tool's locks/model caches are execution state, not definition data.
+        clone.tool = copy.copy(self.tool)
+        if isinstance(self.tool, ProcessingTool):
+            setattr(clone.tool, "environment", copy.deepcopy(self.tool.environment, memo))
+        from bioimageflow.workflow.capture import capture_model, capture_value
+        setattr(clone.tool, "Inputs", capture_model(self.tool.Inputs))
+        setattr(clone.tool, "Outputs", capture_model(self.tool.Outputs))
+        for key, value in self.__dict__.items():
+            if key == "tool":
+                continue
+            if key == "_constant_bindings":
+                captured = {name: capture_value(item) for name, item in value.items()}
+            elif key == "_kwargs":
+                captured = {name: copy.deepcopy(item, memo) if isinstance(item, (Node, ColumnRef)) or hasattr(item, "port_id") else capture_value(item) for name, item in value.items()}
+            elif key == "_args":
+                captured = [copy.deepcopy(item, memo) if isinstance(item, Node) or item is None else capture_value(item) for item in value]
+            else:
+                captured = copy.deepcopy(value, memo)
+            setattr(clone, key, captured)
+        clone._capture_defaults()
+        return clone
+
+    def _capture_defaults(self) -> None:
+        from bioimageflow_core.defaults import snapshot_value
+        for field, value in self.tool.Inputs.capture_defaults().items():
+            if field not in self._constant_bindings and field not in self._column_bindings:
+                self._constant_bindings[field] = snapshot_value(value)
+                if field in self._workflow_input_bindings:
+                    self._workflow_input_fallback_constants.add(field)
+
+    def _refresh_dependencies(self) -> None:
+        self._upstream_nodes = {
+            reference.node for reference in self._column_bindings.values()
+        } | {value for value in self._args if isinstance(value, Node)}
 
     def _check_column_binding_allowed(self, field: str) -> None:
         """Reject row-valued bindings where a whole-table tool needs a constant."""
@@ -514,16 +565,8 @@ class Node:
         if consumer_spec is None:
             return
 
-        upstream_tool = col_ref.node.tool
-        upstream_outputs = upstream_tool.Outputs
-        if upstream_outputs is None:
-            return
-
-        output_annotations = upstream_outputs._get_all_annotations()
-        if col_ref.column not in output_annotations:
-            return  # Will be caught elsewhere
-
-        producer_spec = extract_image_spec(output_annotations[col_ref.column])
+        producer = col_ref.node.get_resolved_output_schema().get(col_ref.column)
+        producer_spec = None if producer is None else producer.image_spec
         if producer_spec is None:
             return
 
@@ -539,7 +582,7 @@ class Node:
     def name(self) -> str:
         return _runtime_node_names.get().get(id(self), self._name)
 
-    def get_output_schema(self) -> dict[str, dict[str, Any]] | None:
+    def _resolve_output_columns(self) -> dict[str, dict[str, Any]] | None:
         """Resolve this node's output column schema as currently configured.
 
         Algorithm:
@@ -566,8 +609,6 @@ class Node:
         def _overrides_resolve_merge_schema(cls: type) -> bool:
             return _overrides_classmethod(cls, DataFrameTool, "resolve_merge_schema")
 
-        tool_cls = type(self.tool)
-
         if isinstance(self.tool, DataFrameTool):
             df_tool_cls: type[DataFrameTool] = type(self.tool)
             # _constant_bindings holds exactly the kwargs that aren't
@@ -581,14 +622,52 @@ class Node:
                 schema = df_tool_cls.resolve_merge_schema(
                     upstream_schemas, self._constant_bindings,
                 )
-            else:
+            elif _overrides_classmethod(df_tool_cls, DataFrameTool, "resolve_outputs"):
                 schema = df_tool_cls.resolve_outputs(self._constant_bindings)
+            else:
+                schema = serialize_output_schema(self.tool)
             return self._schema_with_viewer_additions(schema)
 
         # ProcessingTool: static schema.
-        if getattr(tool_cls, "Outputs", None) is None:
+        if getattr(self.tool, "Outputs", None) is None:
             return None
-        return self._schema_with_viewer_additions(serialize_output_schema(tool_cls))
+        return self._schema_with_viewer_additions(serialize_output_schema(self.tool))
+
+    def get_resolved_output_schema(self) -> Any:
+        from bioimageflow.validation.resolved import ResolvedSchema
+        from bioimageflow.validation import _overrides_classmethod
+        outputs = getattr(self.tool, "Outputs", None)
+        from bioimageflow.dataframe_tool import DataFrameTool
+        configured = isinstance(self.tool, DataFrameTool) and any(
+            _overrides_classmethod(type(self.tool), DataFrameTool, method)
+            for method in ("resolve_outputs", "resolve_merge_schema")
+        )
+        annotations = outputs._get_all_annotations() if outputs is not None and not configured else {}
+        columns = self._resolve_output_columns()
+        if columns is not None and "_passthrough" in columns:
+            columns = dict(columns)
+            columns.pop("_passthrough")
+            declared = dict(columns)
+            inherited: dict[str, Any] = {}
+            inherited_annotations: dict[str, Any] = {}
+            for argument in self._args:
+                if not isinstance(argument, Node):
+                    partial = ResolvedSchema.from_columns(declared, annotations=annotations)
+                    return ResolvedSchema("dynamic", tuple(partial.ports.items()))
+                upstream = argument.get_resolved_output_schema()
+                if upstream.state == "dynamic":
+                    partial = ResolvedSchema.from_columns(declared, annotations=annotations)
+                    return ResolvedSchema("dynamic", tuple(partial.ports.items()))
+                inherited.update(upstream.to_wire() or {})
+                inherited_annotations.update({name: port.annotation for name, port in upstream.ports.items()})
+            inherited.update(declared)
+            inherited_annotations.update(annotations)
+            columns, annotations = inherited, inherited_annotations
+        return ResolvedSchema.from_columns(columns, annotations=annotations)
+
+    def get_output_schema(self) -> dict[str, dict[str, Any]] | None:
+        """Return a detached portable projection of resolved semantic columns."""
+        return self.get_resolved_output_schema().to_wire()
 
     def _schema_with_viewer_additions(
         self,
@@ -610,61 +689,22 @@ class Node:
         return result
 
     def __getitem__(self, column: str) -> ColumnRef:
-        """Create a ColumnRef: node['column_name']."""
-        from bioimageflow.dataframe_tool import Passthrough
-
-        tool = self.tool
-        has_own_outputs = tool.Outputs is not None
-        validated_via_static = False
-
-        if has_own_outputs:
-            outputs_cls = tool.Outputs
-            assert outputs_cls is not None
-            output_annotations = outputs_cls._get_all_annotations()
-
-            # For Passthrough, we can't validate columns at construction time
-            # via the static Outputs class (they depend on upstream).
-            if not issubclass(outputs_cls, Passthrough):
-                validated_via_static = True
-                if column not in output_annotations:
-                    available = list(output_annotations.keys())
-                    close = get_close_matches(column, available, n=3, cutoff=0.4)
-                    msg = (
-                        f"Column '{column}' not found in outputs of node "
-                        f"'{self.name}' (tool '{type(tool).__name__}'). "
-                        f"Available columns: {available}."
-                    )
-                    if close:
-                        msg += f" Did you mean: {', '.join(close)}?"
-                    exc = ColumnNotFoundError(msg)
-                    capture = _get_error_capture()
-                    if capture is None:
-                        raise exc
-                    capture.append(exc.to_validation_error(self._name))
-                    # Fall through — return a best-effort ColumnRef so
-                    # downstream construction can keep going.
-
-        # If static validation didn't fire (no Outputs, or Passthrough), try
-        # the dynamic schema (Generate, fully-configured merge tools, etc.).
-        if not validated_via_static:
-            schema = self.get_output_schema()
-            if schema is not None and "_passthrough" not in schema:
-                if column not in schema:
-                    available = list(schema.keys())
-                    close = get_close_matches(column, available, n=3, cutoff=0.4)
-                    msg = (
-                        f"Column '{column}' not found in outputs of node "
-                        f"'{self.name}' (tool '{type(tool).__name__}'). "
-                        f"Available columns: {available}."
-                    )
-                    if close:
-                        msg += f" Did you mean: {', '.join(close)}?"
-                    exc = ColumnNotFoundError(msg)
-                    capture = _get_error_capture()
-                    if capture is None:
-                        raise exc
-                    capture.append(exc.to_validation_error(self._name))
-
+        """Select a column against the same resolved authority as consumers."""
+        schema = self.get_resolved_output_schema()
+        if schema.state == "known" and schema.get(column) is None:
+            available = list(schema.ports)
+            close = get_close_matches(column, available, n=3, cutoff=0.4)
+            message = (
+                f"Column '{column}' not found in outputs of node '{self.name}' "
+                f"(tool '{type(self.tool).__name__}'). Available columns: {available}."
+            )
+            if close:
+                message += f" Did you mean: {', '.join(close)}?"
+            error = ColumnNotFoundError(message)
+            capture = _get_error_capture()
+            if capture is None:
+                raise error
+            capture.append(error.to_validation_error(self._name))
         return ColumnRef(node=self, column=column)
 
     def disable(self) -> None:

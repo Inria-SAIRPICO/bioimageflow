@@ -4,6 +4,9 @@ Type System
 BioImageFlow uses Python's ``Annotated`` types to describe declared image data constraints.
 Graph compatibility checks compare this metadata before computation; they do not certify actual pixels, biological suitability or arbitrary runtime values.
 Portable declaration types, GUI display schemas and current numeric runtime transport are separate boundaries.
+Optional and Annotated wrapper order does not remove image, GUI or viewer metadata.
+Configured resolved ports, including inherited Passthrough columns and declared additions, supply the compatibility authority; raw Outputs alone are insufficient.
+Known heterogeneous Any and genuinely dynamic columns remain legitimate, whereas resolution failure is an error rather than an empty success.
 
 ImageSpec
 ---------

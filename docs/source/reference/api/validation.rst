@@ -156,3 +156,11 @@ Constants
 Both helpers are used internally by ``Workflow.to_dict`` /
 ``WorkflowSession.set_constant`` and exposed publicly for hosts that
 need to encode constants outside those code paths.
+
+Resolved semantic authority
+---------------------------
+
+Configured nodes use a detached resolved port record and publish its portable projection.
+The current ``type_spec`` descriptor carries finite primitive, Path, scoped-reference/array, union, collection and literal-choice structure without Python expression evaluation.
+Display labels remain presentation data; resolution failure cannot become available empty columns, and known heterogeneous Any remains valid.
+Graph constant decoding admits exact variant payload types before any semantic coercion; malformed bool/int/none payloads are refused.

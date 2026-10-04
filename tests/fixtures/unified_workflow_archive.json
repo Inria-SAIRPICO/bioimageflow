@@ -1,7 +1,7 @@
 {
   "archive_version": 1,
   "workflow": {
-    "schema_version": 1,
+    "schema_version": 2,
     "name": "collision_parent",
     "display_name": "Collision Parent",
     "interface": {
@@ -16,7 +16,7 @@
         "name": "first",
         "type": "workflow",
         "workflow": {
-          "schema_version": 1,
+          "schema_version": 2,
           "name": "first_child",
           "display_name": "First Child",
           "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},
@@ -30,7 +30,7 @@
         "name": "second",
         "type": "workflow",
         "workflow": {
-          "schema_version": 1,
+          "schema_version": 2,
           "name": "second_child",
           "display_name": "Second Child",
           "interface": {"inputs": [], "outputs": [{"id": "output-value", "name": "value", "schema": {"type": "int", "image_spec": null}, "source": {"node": "collision", "column": "value"}}]},

@@ -21,6 +21,8 @@ from .common import (
     get_args,
     get_origin,
 )
+from .type_descriptors import encode_annotation
+
 from .schema import (
     _input_connectable,
     _unwrap_optional,
@@ -62,7 +64,7 @@ def _jsonify_default(value: Any) -> Any:
     - :class:`~enum.Enum` member → ``str(member.value)``.
     - ``list`` / ``tuple`` → list of recursively-serialized elements.
     - ``dict`` → dict with string keys and recursively-serialized values.
-    - Anything else → ``str(value)`` fallback.
+    - Unsupported objects or non-string dictionary keys → explicit refusal.
     """
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -75,8 +77,10 @@ def _jsonify_default(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonify_default(v) for v in value]
     if isinstance(value, dict):
-        return {str(k): _jsonify_default(v) for k, v in value.items()}
-    return str(value)
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("Portable schema default dictionary keys must be strings")
+        return {key: _jsonify_default(item) for key, item in value.items()}
+    raise TypeError(f"Unsupported portable schema default: {type(value).__name__}")
 
 
 def validate_output_template_defaults(outputs_cls: type[IOModel]) -> None:
@@ -120,11 +124,8 @@ def _display_type_name(annotation: Any) -> str:
     # Platform code special-cases these names for widget selection, so we
     # recognize them before generic Annotated-unwrapping collapses them to the
     # base type.
-    if (
-        get_origin(annotation) is Annotated
-        and extract_image_spec(annotation) is not None
-    ):
-        base = _unwrap_optional(get_args(annotation)[0])
+    if extract_image_spec(annotation) is not None:
+        base = _unwrap_annotated(_unwrap_optional(_unwrap_annotated(annotation)))
         base_origin = get_origin(base)
         if base is Path or (
             (base_origin is Union or base_origin is UnionType)
@@ -249,7 +250,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
     if inputs_cls is None:
         return {}
     annotations = inputs_cls._get_all_annotations()
-    schema: dict[str, dict[str, Any]] = {}
+    schema: dict[str, Any] = {}
 
     for field_name, annotation in annotations.items():
         image_spec = extract_image_spec(annotation)
@@ -260,6 +261,7 @@ def serialize_input_schema(tool_class: type[BaseTool]) -> dict[str, dict[str, An
 
         entry: dict[str, Any] = {
             "type": _display_type_name(annotation),
+            "type_spec": encode_annotation(annotation),
             "required": not has_default,
             "nullable": _is_nullable(annotation),
             "default": _jsonify_default(raw_default) if has_default else None,
@@ -344,9 +346,11 @@ def serialize_tool_metadata(tool_class: type[BaseTool]) -> dict[str, Any]:
         # overrides either ``resolve_outputs`` (input-driven schema like
         # ``Generate``) or ``resolve_merge_schema`` (upstream-driven schema
         # on built-in merge tools).
-        dynamic_outputs = _overrides_classmethod(
-            tool_class, DataFrameTool, "resolve_outputs"
-        ) or _overrides_classmethod(tool_class, DataFrameTool, "resolve_merge_schema")
+        dynamic_outputs = (
+            getattr(tool_class, "Outputs", None) is None
+            or _overrides_classmethod(tool_class, DataFrameTool, "resolve_outputs")
+            or _overrides_classmethod(tool_class, DataFrameTool, "resolve_merge_schema")
+        )
     else:
         if not issubclass(tool_class, ProcessingTool):
             raise TypeError(f"Unsupported tool class: {tool_class!r}")
@@ -386,7 +390,7 @@ def serialize_resolved_outputs(node: Any) -> dict[str, Any]:
     return {"resolved": True, "columns": schema}
 
 
-def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
+def serialize_output_schema(tool_class: type[BaseTool] | BaseTool) -> dict[str, Any]:
     """Return a JSON-serializable output schema for a tool.
 
     Per-field shape::
@@ -396,8 +400,8 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
     Returns ``{}`` when ``tool_class`` has no ``Outputs`` class attribute.
 
     When ``Outputs`` is (or subclasses) :class:`bioimageflow.Passthrough`,
-    the returned dict is the marker ``{"_passthrough": True}`` — GUIs
-    should render this as "inherits upstream columns".
+    the returned dict retains ``{"_passthrough": True}`` alongside declared
+    extra fields. Resolved consumers join inherited columns before admission.
     """
     outputs_cls = getattr(tool_class, "Outputs", None)
     if outputs_cls is None:
@@ -410,17 +414,16 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
     except ImportError:  # pragma: no cover - defensive
         Passthrough = None  # type: ignore[assignment]
 
-    if (
+    passthrough = (
         Passthrough is not None
         and isinstance(outputs_cls, type)
         and issubclass(outputs_cls, Passthrough)
-    ):
-        return {"_passthrough": True}
+    )
 
     validate_output_template_defaults(outputs_cls)
 
     annotations = outputs_cls._get_all_annotations()
-    schema: dict[str, dict[str, Any]] = {}
+    schema: dict[str, Any] = {"_passthrough": True} if passthrough else {}
 
     for field_name, annotation in annotations.items():
         image_spec = extract_image_spec(annotation)
@@ -432,7 +435,10 @@ def serialize_output_schema(tool_class: type[BaseTool]) -> dict[str, Any]:
 
         entry: dict[str, Any] = {
             "type": _display_type_name(annotation),
+            "type_spec": encode_annotation(annotation),
             "default": _jsonify_default(raw_default) if has_default else None,
+            "required": not has_default,
+            "nullable": _is_nullable(annotation),
             "image_spec": serialize_image_spec(image_spec),
         }
         if gui_meta is not None:

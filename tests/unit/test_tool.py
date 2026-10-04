@@ -7,7 +7,6 @@ from bioimageflow_core.environment import EnvironmentSpec
 
 
 class TestIOModel:
-
     def test_required_field(self):
         class M(IOModel):
             x: int
@@ -68,9 +67,11 @@ class TestIOModel:
 
 
 class TestProcessingToolValidation:
-
     def test_missing_process_methods_raises(self):
-        with pytest.raises(TypeError, match="must implement process_row or process_batch"):
+        with pytest.raises(
+            TypeError, match="must implement process_row or process_batch"
+        ):
+
             class Bad(ProcessingTool):
                 row_consumption = RowConsumption.MAPPED
                 display_name = "Bad"
@@ -109,6 +110,7 @@ class TestProcessingToolValidation:
 
     def test_missing_row_consumption_raises(self):
         with pytest.raises(TypeError, match="must explicitly declare"):
+
             class MissingConsumption(ProcessingTool):
                 display_name = "Missing consumption"
                 environment = EnvironmentSpec(name="test", dependencies={})
@@ -121,6 +123,7 @@ class TestProcessingToolValidation:
 
     def test_raw_string_row_consumption_raises(self):
         with pytest.raises(TypeError, match="must be a RowConsumption value"):
+
             class InvalidConsumption(ProcessingTool):
                 row_consumption = "mapped"
                 display_name = "Invalid consumption"
@@ -134,6 +137,7 @@ class TestProcessingToolValidation:
 
     def test_collective_requires_process_batch(self):
         with pytest.raises(TypeError, match="must implement process_batch"):
+
             class InvalidCollective(ProcessingTool):
                 row_consumption = RowConsumption.COLLECTIVE
                 display_name = "Invalid collective"
@@ -147,6 +151,7 @@ class TestProcessingToolValidation:
 
     def test_abstract_intermediate_not_validated(self):
         """A class without name or Outputs should not trigger validation."""
+
         class Intermediate(ProcessingTool):
             row_consumption = RowConsumption.MAPPED
             pass
@@ -159,3 +164,15 @@ class TestProcessingToolValidation:
             display_name = "Intermediate"
 
         # Has name but no Outputs — no validation
+
+
+def test_omitted_defaults_are_owned_but_explicit_values_keep_identity():
+    class Inputs(IOModel):
+        values: list = [{"count": 1}]
+
+    first = Inputs()
+    first.values[0]["count"] = 9
+    assert Inputs().values == [{"count": 1}]
+    assert Inputs.values == [{"count": 1}]
+    supplied = [{"count": 3}]
+    assert Inputs(values=supplied).values is supplied

@@ -78,3 +78,20 @@ class TestDeserializeUnknownType:
 
         with pytest.raises(ValueError, match="Unknown workflow constant"):
             deserialize_constant({"__type__": "exotic", "value": 7})
+
+
+def test_malformed_declared_constants_refuse_without_coercion():
+    import pytest
+
+    for payload in (
+        {"__type__": "bool", "value": "false"},
+        {"__type__": "int", "value": 1.5},
+        {"__type__": "none", "value": False},
+    ):
+        with pytest.raises(ValueError):
+            deserialize_constant(payload)
+    assert deserialize_constant(serialize_constant((None, False, 3))) == (
+        None,
+        False,
+        3,
+    )

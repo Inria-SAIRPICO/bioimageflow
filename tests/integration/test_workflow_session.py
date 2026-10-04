@@ -10,7 +10,7 @@ from bioimageflow_common_tools.generate import Generate
 
 def _graph() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "session",
         "display_name": "Session",
         "interface": {"inputs": [], "outputs": []},
@@ -91,13 +91,17 @@ def test_session_storage_path_change_updates_loaded_nested_workflow_and_cache(
     session.storage_path = Path("storage-b")
 
     assert session.storage_path == storage_b
-    assert session.to_workflow() is workflow
-    assert workflow.storage_path == storage_b
-    assert nested.workflow.storage_path == storage_b
+    current = session.to_workflow()
+    assert current is not workflow
+    assert workflow.storage_path == storage_a
+    assert nested.workflow.storage_path == storage_a
+    assert current.storage_path == storage_b
     assert session.plan()["nested/generate"].status is NodePlanStatus.UNEXECUTED
-    assert not storage_b.exists()
+    # Planning may admit its array-owner metadata, but executes/publishes no run.
+    assert not (storage_b / "views" / "runs").exists()
+    assert not list(storage_b.rglob("*.npy"))
 
-    result_b = workflow.compute()
+    result_b = current.compute()
 
     assert result_b["value"].tolist() == [1]
     assert session.plan()["nested/generate"].status is NodePlanStatus.CACHED
@@ -115,13 +119,18 @@ def test_session_storage_path_change_updates_loaded_nested_workflow_and_cache(
     ) == 1
 
 
-def test_session_constant_and_enabled_edits_update_cached_workflow(tmp_path) -> None:
+def test_session_edits_leave_previously_returned_definition_independent(tmp_path) -> None:
     session = WorkflowSession(_graph(), storage_path=tmp_path)
     workflow = session.to_workflow()
     session.set_constant("generate", "values", [3, 4])
     session.set_enabled("generate", False)
-    assert workflow.nodes["generate"]._constant_bindings["values"] == [3, 4]
-    assert workflow.nodes["generate"].enabled is False
+    assert workflow.nodes["generate"].enabled is True
+    assert workflow.compute(workflow.nodes["generate"])["value"].tolist() == [1]
+    current = session.to_workflow()
+    assert current.nodes["generate"].enabled is False
+    session.set_enabled("generate", True)
+    enabled = session.to_workflow()
+    assert enabled.compute(enabled.nodes["generate"])["value"].tolist() == [3, 4]
 
 
 def test_session_structural_edits_invalidate_materialization(tmp_path) -> None:

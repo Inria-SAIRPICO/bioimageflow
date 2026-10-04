@@ -10,8 +10,13 @@
       "image_spec": {
         "dtypes": [],
         "formats": [],
-        "layouts": ["YX", "ZYX"],
-        "semantics": ["binary"]
+        "layouts": [
+          "YX",
+          "ZYX"
+        ],
+        "semantics": [
+          "binary"
+        ]
       },
       "max": null,
       "min": null,
@@ -19,7 +24,10 @@
       "path_picker": null,
       "required": true,
       "step": null,
-      "type": "ImageFile"
+      "type": "ImageFile",
+      "type_spec": {
+        "kind": "Path"
+      }
     }
   },
   "outputs": {
@@ -32,8 +40,13 @@
       "image_spec": null,
       "max": null,
       "min": null,
+      "nullable": false,
+      "required": true,
       "step": null,
-      "type": "int"
+      "type": "int",
+      "type_spec": {
+        "kind": "int"
+      }
     },
     "output_image": {
       "connectable": "not_by_default",
@@ -42,16 +55,28 @@
       "display_name": "Label image",
       "group": null,
       "image_spec": {
-        "dtypes": ["uint32"],
+        "dtypes": [
+          "uint32"
+        ],
         "formats": [],
-        "layouts": ["YX", "ZYX"],
-        "semantics": ["label"]
+        "layouts": [
+          "YX",
+          "ZYX"
+        ],
+        "semantics": [
+          "label"
+        ]
       },
       "max": null,
       "min": null,
+      "nullable": false,
+      "required": false,
       "step": null,
       "template": "{input_image.stem}_labels.tif",
-      "type": "ImageFile"
+      "type": "ImageFile",
+      "type_spec": {
+        "kind": "Path"
+      }
     }
   }
 }

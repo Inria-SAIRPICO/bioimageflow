@@ -26,6 +26,8 @@ Core supports scientific worker Python >=3.9; the orchestrator requires Python >
 These floors do not certify every OS, model, binary or package recipe.
 Portable IOModel declarations and GUI schema strings are distinct from runtime scientific values: current typed transport supports numeric NumPy arrays and scalars without admitting arbitrary third-party annotation classes or picklable objects.
 IOModel enforces structural fields; semantic value validation belongs to the orchestrator.
+Omitted mutable defaults are detached per instance, while explicitly supplied values preserve caller identity.
+`IOModel.capture_defaults()` and `bioimageflow_core.defaults.snapshot_value` provide owned semantic copies for admitted definitions; scoped references retain their original local owner, and runtime managers/locks are not definition values.
 Postponed and inherited annotations retain their metadata without importing unavailable declaration modules.
 
 Numeric creation/mapping helpers reject object-containing NumPy dtypes before backing allocation or mapping.

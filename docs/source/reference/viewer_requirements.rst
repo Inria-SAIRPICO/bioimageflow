@@ -3,6 +3,7 @@ Portable viewer requirements
 
 Viewer requirements describe software needed to open a particular output.
 They are portable authoring metadata, separate from a tool's processing environment, local viewer installations, package discovery, and user preferences.
+Viewer extraction retains the same metadata whether Optional wraps Annotated or Annotated wraps the nullable type.
 They never affect execution dependency resolution or computation/cache identity.
 
 Worker-safe declarations

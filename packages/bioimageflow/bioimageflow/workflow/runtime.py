@@ -51,10 +51,12 @@ class _WorkflowSteps(Iterator["NodeStep"]):
         workflow: Any,
         iterator: Generator["NodeStep", None, None],
         reserved_engine: Any | None = None,
+        execution_workflow: Any | None = None,
     ) -> None:
         self._workflow = workflow
         self._iterator = iterator
         self._reserved_engine = reserved_engine
+        self._execution_workflow = execution_workflow
         self._closed = False
 
     def __next__(self) -> "NodeStep":
@@ -85,10 +87,32 @@ class _WorkflowSteps(Iterator["NodeStep"]):
             self._workflow._release_engine_execution_reservation(
                 self._reserved_engine
             )
+        if self._execution_workflow is not None:
+            self._execution_workflow._end_public_execution()
         self._workflow._end_public_execution()
 
 
+def _snapshot_root_inputs(inputs: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Detach admitted semantic values without cloning acquired resource owners."""
+    if inputs is None:
+        return None
+    from .capture import capture_value
+
+    return {name: capture_value(value) for name, value in inputs.items()}
+
+
 class _RuntimeMixin:
+    def _capture_public_execution(
+        self,
+        targets: tuple[Node, ...],
+        inputs: Mapping[str, Any] | None,
+    ) -> tuple[Any, tuple[Node, ...], dict[str, Any] | None]:
+        definition, captured_targets = self._capture_definition(
+            targets if targets and inputs is None else None
+        )
+        definition.on_progress = self.on_progress
+        return definition, captured_targets or (), _snapshot_root_inputs(inputs)
+
     @property
     def shared_memory_context(self) -> Any:
         """Retained controller owner; explicitly close it to release array resources."""
@@ -305,16 +329,22 @@ class _RuntimeMixin:
                 "constructing or loading the workflow."
             )
         context = run_context or WorkflowExecutionContext()
+        definition, captured_targets, captured_inputs = self._capture_public_execution(
+            targets, inputs
+        )
         self._begin_public_execution(context)
+        definition._shared_memory_context = self._shared_memory_context
+        definition._active_run_context = context
         try:
-            return self._compute_bound(
-                targets,
-                inputs=inputs,
+            return definition._compute_bound(
+                captured_targets,
+                inputs=captured_inputs,
                 dev_mode=dev_mode,
                 engine=engine,
                 run_context=context,
             )
         finally:
+            definition._end_public_execution()
             self._end_public_execution()
 
     def _compute_bound(
@@ -342,6 +372,7 @@ class _RuntimeMixin:
                 shared_memory_context=self.shared_memory_context,
             )
             parent._accept_root_dataframes = True
+            parent._env_configs = copy.deepcopy(self._env_configs)
             parent._captured_custom_sources = copy.deepcopy(
                 self._captured_custom_sources
             )
@@ -424,14 +455,19 @@ class _RuntimeMixin:
                 "constructing or loading the workflow."
             )
         context = run_context or WorkflowExecutionContext()
+        definition, captured_targets, captured_inputs = self._capture_public_execution(
+            targets, inputs
+        )
         self._begin_public_execution(context)
+        definition._shared_memory_context = self._shared_memory_context
+        definition._active_run_context = context
         engine_reserved = False
         try:
             if engine is not None:
                 engine_reserved = self._reserve_engine_execution(engine)
-            iterator = self._compute_steps_bound(
-                targets,
-                inputs=inputs,
+            iterator = definition._compute_steps_bound(
+                captured_targets,
+                inputs=captured_inputs,
                 dev_mode=dev_mode,
                 engine=engine,
                 run_context=context,
@@ -441,10 +477,12 @@ class _RuntimeMixin:
                 self,
                 iterator,
                 reserved_engine=engine if engine_reserved else None,
+                execution_workflow=definition,
             )
         except BaseException:
             if engine_reserved and engine is not None:
                 self._release_engine_execution_reservation(engine)
+            definition._end_public_execution()
             self._end_public_execution()
             raise
 
@@ -474,6 +512,10 @@ class _RuntimeMixin:
                 shared_memory_context=self.shared_memory_context,
             )
             parent._accept_root_dataframes = True
+            parent._env_configs = copy.deepcopy(self._env_configs)
+            parent._captured_custom_sources = copy.deepcopy(
+                self._captured_custom_sources
+            )
             with parent:
                 boundary = self(name=self.name, **supplied)
             boundary._is_root_boundary = True
@@ -496,7 +538,8 @@ class _RuntimeMixin:
 
         if engine is None:
             engine = self.create_engine()
-        if not engine_reserved:
+        owns_reservation = not engine_reserved
+        if owns_reservation:
             engine_reserved = self._reserve_engine_execution(engine)
         try:
             self._start_run_view(
@@ -519,7 +562,7 @@ class _RuntimeMixin:
             else:
                 run_context._execution_succeeded()
         finally:
-            if engine_reserved:
+            if engine_reserved and owns_reservation:
                 self._release_engine_execution_reservation(engine)
 
     def export_outputs(

@@ -83,9 +83,10 @@ the **same** proxy — edits propagate.
 
 .. important::
 
-   Accepted S target: capture independent effective environment recipes and launch settings before run-visible effects and callbacks.
-   Later proxy/dependency edits affect later calls only; read-only declaration metadata must not expose mutable launch authority.
-   T/C must verify this snapshot requirement rather than infer it from a frozen dataclass.
+   Local execution captures independent effective environment recipes and launch settings at public ``compute()`` or ``compute_steps()`` admission, before run-visible effects and callbacks.
+   Calling a workflow as a nested definition also captures its effective configuration.
+   Later proxy or dependency edits affect later admissions; a delayed steps iterator uses the configuration captured when it was created.
+   The admitted definition retains the caller's execution context and shared-array owner rather than copying acquired runtime resources.
 
 Wetlands configuration
 ----------------------

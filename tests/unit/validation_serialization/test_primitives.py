@@ -68,7 +68,6 @@ class TestJsonifyDefault:
                 [[1, 2], {"x": str(Path("a"))}],
                 id="nested",
             ),
-            pytest.param(_CustomDefault(), "custom-obj", id="fallback"),
         ],
     )
     def test_jsonify_default(self, value: Any, expected: Any) -> None:
@@ -169,3 +168,9 @@ class TestSerializeConnectable:
         expected: str,
     ) -> None:
         assert _serialize_connectable(connectable) == expected
+
+
+def test_unsupported_portable_defaults_refuse_instead_of_stringifying():
+    for value in (_CustomDefault(), {1: "one", "1": "string"}):
+        with pytest.raises(TypeError):
+            _jsonify_default(value)

@@ -61,6 +61,11 @@ You can size each environment independently:
 Pass a processing-tool instance, an :class:`~bioimageflow_core.EnvironmentSpec`, or an environment name to :meth:`~bioimageflow.Workflow.get_environment`.
 All tools that declare the same environment share that environment's worker pool.
 
+Set these values before calling ``compute()`` or creating a ``compute_steps()`` iterator.
+Each call captures its effective graph, omitted input defaults and environment settings before execution effects.
+Editing the original workflow after admission affects a later call, not the admitted run.
+An injected engine remains the caller's runtime engine; its resource ownership is not part of the captured definition.
+
 Run independent branches
 ------------------------
 

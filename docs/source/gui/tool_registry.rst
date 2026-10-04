@@ -105,6 +105,9 @@ discovered tool class:
      - Free-form tag tuple from the class (empty if not declared).
 
 The schemas are captured during registration; later metadata lookup does not rerun scientific tool work.
+Registration stages all discovered metadata before updating the index; an invalid schema publishes none of that registration.
+Returned metadata and nested defaults are detached, and re-registering a selected class updates name-only recency.
+``ToolMetadata.outputs_state`` distinguishes known declarations from input-dependent or no-Outputs dynamic DataFrame schemas; invalid schemas raise instead of masquerading as known empty declarations.
 The accepted contract keeps caller-facing schema/default snapshots detached from registry authority and preserves schema failures as diagnostics rather than empty success.
 Concrete ProcessingTool admission requires an environment, IOModel outputs and explicit mapped/collective row semantics.
 DataFrameTools have no worker environment or RowConsumption requirement and may declare static, Passthrough or dynamic output schemas without an Outputs class.

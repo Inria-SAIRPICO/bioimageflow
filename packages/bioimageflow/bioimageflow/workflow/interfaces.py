@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import contextvars
+from bioimageflow.node import BindingError
 from typing import Any, Callable, Literal, Mapping, TYPE_CHECKING
 
 from .common import (
@@ -22,7 +24,6 @@ from .common import (
     _annotation_schema,
     _new_port_id,
     _normalize_output_view,
-    _reset_name_counters,
     copy,
     get_active_workflow,
     set_active_workflow,
@@ -31,6 +32,9 @@ from .common import (
 
 if TYPE_CHECKING:
     from .model import Workflow
+
+
+_entry_tokens: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar("_workflow_entry_tokens", default=())
 
 
 class _InterfacesMixin:
@@ -105,6 +109,11 @@ class _InterfacesMixin:
         id: str | None = None,
     ) -> WorkflowInputRef:
         """Declare and return a symbolic public workflow input."""
+        port = self._plan_input_port(name, annotation, kind=kind, default=default, id=id)
+        self._interface_inputs[port.id] = port
+        return self._input_ref(port.id)
+
+    def _plan_input_port(self, name: str, annotation: Any, *, kind: Literal["field", "dataframe"], default: Any, id: str | None) -> WorkflowInputPort:
         if name == "name":
             raise ValueError(
                 "'name' is reserved for a workflow invocation's node name."
@@ -130,8 +139,7 @@ class _InterfacesMixin:
             schema=_annotation_schema(annotation) if kind == "field" else None,
             default=default,
         )
-        self._interface_inputs[port_id] = port
-        return WorkflowInputRef(self, port_id, name, kind, annotation)
+        return port
 
     def _input_ref(self, port_id: str) -> WorkflowInputRef:
         port = self._interface_inputs[port_id]
@@ -154,14 +162,11 @@ class _InterfacesMixin:
         if kind == "field" and annotation is None:
             annotations = node.tool.Inputs._get_all_annotations()
             annotation = annotations.get(str(target))
-        ref = self.input(
-            name,
-            annotation,
-            kind=kind,
-            default=default,
-            id=id,
-        )
-        self._bind_input_target(ref, node, target, kind=kind)
+        port = self._plan_input_port(name, annotation, kind=kind, default=default, id=id)
+        ref = WorkflowInputRef(self, port.id, port.name, port.kind, port.annotation)
+        record = self._plan_input_target(ref, node, target, kind=kind, port=port)
+        self._interface_inputs[port.id] = port
+        port.targets.append(record)
         if kind == "field":
             node._workflow_input_bindings[str(target)] = ref
             if str(target) in node._constant_bindings:
@@ -173,6 +178,7 @@ class _InterfacesMixin:
             while len(node._args) <= index:
                 node._args.append(None)
             node._args[index] = None
+        node._refresh_dependencies()
         return ref
 
     def _input_by_name(self, name: str) -> WorkflowInputPort | None:
@@ -227,18 +233,12 @@ class _InterfacesMixin:
                 )
             annotation, schema = child_port.annotation, copy.deepcopy(child_port.schema)
         else:
-            outputs = getattr(source.node.tool, "Outputs", None)
-            annotations = outputs._get_all_annotations() if outputs is not None else {}
-            if source.column in annotations:
-                annotation = annotations[source.column]
-                schema = _annotation_schema(annotation)
-            else:
-                resolved = source.node.get_output_schema() or {}
-                if source.column not in resolved:
-                    raise ValueError(
-                        f"Column '{source.column}' is not a resolved output of node '{source.node.name}'."
-                    )
-                schema = copy.deepcopy(resolved[source.column])
+            resolved = source.node.get_resolved_output_schema()
+            semantic = resolved.get(source.column)
+            if semantic is not None:
+                annotation, schema = semantic.annotation, semantic.to_wire()
+            elif resolved.state != "dynamic":
+                raise ValueError(f"Column '{source.column}' is not a resolved output of node '{source.node.name}'.")
         self._interface_outputs[port_id] = WorkflowOutputPort(
             id=port_id,
             name=name,
@@ -282,48 +282,65 @@ class _InterfacesMixin:
         port.viewer_addition = None if value is None else coerce_viewer_spec(value)
         return self
 
-    def _bind_input_target(
-        self,
-        ref: WorkflowInputRef,
-        node: Node,
-        target: str | int,
-        *,
-        kind: Literal["field", "dataframe"],
-    ) -> None:
+    def _plan_input_target(
+        self, ref: WorkflowInputRef, node: Node, target: str | int, *,
+        kind: Literal["field", "dataframe"], port: WorkflowInputPort | None = None,
+    ) -> dict[str, Any]:
         if ref.workflow is not self or get_active_workflow() is not self:
-            raise ValueError(
-                "A symbolic workflow input may only be bound in its owning active workflow."
-            )
-        port = self._interface_inputs.get(ref.port_id)
+            raise ValueError("A symbolic workflow input may only be bound in its owning active workflow.")
+        port = port if port is not None else self._interface_inputs.get(ref.port_id)
         if port is None or port.kind != kind:
-            raise ValueError(
-                f"Workflow input '{ref.name}' cannot target a {kind} input."
-            )
+            raise ValueError(f"Workflow input '{ref.name}' cannot target a {kind} input.")
         from bioimageflow.workflow_node import WorkflowNode
-
         if isinstance(node, WorkflowNode):
+            child = node.workflow._interface_inputs.get(str(target))
+            if child is None or child.kind != kind:
+                raise ValueError("Unknown or incompatible child workflow input target.")
             descriptor = {"kind": "workflow", "id": str(target)}
         elif kind == "field":
+            if target not in node.tool.Inputs._get_all_annotations():
+                raise ValueError(f"Unknown input target '{target}'.")
             if target in node._column_bindings:
-                raise ValueError(
-                    f"Node '{node.name}' input '{target}' already has an internal data edge."
-                )
+                raise ValueError(f"Node '{node.name}' input '{target}' already has an internal data edge.")
             descriptor = {"kind": "field", "name": str(target)}
         else:
-            index = int(target)
-            if index < len(node._args) and isinstance(node._args[index], Node):
-                raise ValueError(
-                    f"Node '{node.name}' positional input {index} already has an internal data edge."
-                )
-            descriptor = {"kind": "positional", "index": index}
+            from bioimageflow.dataframe_tool import DataFrameTool
+            if not isinstance(node.tool, DataFrameTool) or not isinstance(target, int) or isinstance(target, bool) or target < 0:
+                raise ValueError("Positional targets require a DataFrameTool and a nonnegative integer position.")
+            if target < len(node._args) and isinstance(node._args[target], Node):
+                raise ValueError(f"Node '{node.name}' positional input {target} already has an internal data edge.")
+            descriptor = {"kind": "positional", "index": target}
         record = {"node": node.name, "port": descriptor}
         for other in self._interface_inputs.values():
             if other.id != port.id and record in other.targets:
-                raise ValueError(
-                    f"Internal target {node.name}:{target} is already published by '{other.name}'."
-                )
-        if record not in port.targets:
+                raise ValueError(f"Internal target {node.name}:{target} is already published by '{other.name}'.")
+        return record
+
+    def _bind_input_target(self, ref: WorkflowInputRef, node: Node, target: str | int, *, kind: Literal["field", "dataframe"]) -> None:
+        record = self._plan_input_target(ref, node, target, kind=kind)
+        port = self._interface_inputs[ref.port_id]
+        pending = getattr(node, "_pending_interface_targets", None)
+        if self._nodes.get(node.name) is not node and pending is not None:
+            if (port, record) not in pending:
+                pending.append((port, record))
+        elif record not in port.targets:
             port.targets.append(record)
+
+    def _check_interface_binding(self, port_id: str, value: Any) -> None:
+        from bioimageflow.node import ColumnRef, Node
+        from bioimageflow.workflow_node import WorkflowNode
+        import pandas as pd
+        for target in self._interface_inputs[port_id].targets:
+            node = self._nodes[target["node"]]
+            endpoint = target["port"]
+            if isinstance(node, WorkflowNode):
+                node.workflow._check_interface_binding(endpoint["id"], value)
+            elif endpoint["kind"] == "field":
+                if isinstance(value, ColumnRef):
+                    node._check_column_binding_allowed(endpoint["name"])
+                    node._check_type_compat(endpoint["name"], value)
+            elif not isinstance(value, (Node, pd.DataFrame)):
+                raise TypeError(f"DataFrame workflow input '{self._interface_inputs[port_id].name}' requires a complete DataFrame or upstream node.")
 
     def _check_interface_column_binding(self, port_id: str) -> None:
         """Check every nested target before mutating a fanned-out field binding."""
@@ -342,6 +359,7 @@ class _InterfacesMixin:
         from bioimageflow.node import ColumnRef, Node
         from bioimageflow.workflow_node import WorkflowNode
 
+        self._check_interface_binding(port_id, value)
         port = self._interface_inputs[port_id]
         for target in port.targets:
             node = self._nodes[target["node"]]
@@ -374,6 +392,7 @@ class _InterfacesMixin:
                 node._args[index] = value
                 if isinstance(value, Node):
                     node._upstream_nodes.add(value)
+            node._refresh_dependencies()
 
     def _snapshot_definition(
         self,
@@ -400,6 +419,11 @@ class _InterfacesMixin:
         memo = memo if memo is not None else {}
         memo[id(self)] = snapshot
         snapshot._nodes = copy.deepcopy(self._nodes, memo)
+        snapshot._env_configs = copy.deepcopy(self._env_configs, memo)
+        snapshot._build_errors = copy.deepcopy(self._build_errors, memo)
+        snapshot._failed_nodes = copy.deepcopy(self._failed_nodes, memo)
+        snapshot._expected_node_names = copy.deepcopy(self._expected_node_names, memo)
+        snapshot._accept_root_dataframes = self._accept_root_dataframes
         snapshot._interface_inputs = copy.deepcopy(self._interface_inputs, memo)
         snapshot._interface_outputs = copy.deepcopy(self._interface_outputs, memo)
         snapshot._captured_custom_sources = copy.deepcopy(
@@ -411,6 +435,26 @@ class _InterfacesMixin:
         )
         snapshot._inherit_runtime_storage(runtime_storage)
         return snapshot
+
+    def _capture_definition(self, targets: Any = None) -> tuple["Workflow", tuple[Node, ...] | None]:
+        """Admit one owned effective definition and remap explicit target nodes."""
+        if self._build_errors or self._failed_nodes or self.is_partial:
+            raise BindingError("Cannot execute a diagnostic workflow with unresolved construction errors.")
+        memo: dict[int, Any] = {}
+        snapshot = self._snapshot_definition(memo)
+        if targets is None:
+            return snapshot, None
+        original = tuple(targets)
+        mapped: list[Node] = []
+        for node in original:
+            if not isinstance(node, Node):
+                raise TypeError("Execution targets must be Nodes.")
+            captured = copy.deepcopy(node, memo)
+            if captured.name in snapshot._nodes and snapshot._nodes[captured.name] is not captured:
+                raise ValueError(f"Execution target name '{captured.name}' conflicts with the captured workflow.")
+            snapshot._nodes[captured.name] = captured
+            mapped.append(captured)
+        return snapshot, tuple(mapped)
 
     def _inherit_runtime_storage(
         self,
@@ -458,18 +502,36 @@ class _InterfacesMixin:
         )
 
     def __enter__(self) -> "Workflow":
-        self._prev_workflow = get_active_workflow()
-        set_active_workflow(self)
-        _reset_name_counters()
+        token = set_active_workflow(self)
+        _entry_tokens.set((*_entry_tokens.get(), (self, token)))
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
-        set_active_workflow(self._prev_workflow)
+        from bioimageflow.node import reset_active_workflow
+        entries = _entry_tokens.get()
+        owner, token = entries[-1]
+        if owner is not self:
+            raise RuntimeError("Workflow contexts must exit in nesting order.")
+        reset_active_workflow(token)
+        _entry_tokens.set(entries[:-1])
         return False
 
     def _register_node(self, node: Node) -> None:
         """Register a node with this workflow."""
+        if node.name in self._nodes:
+            raise ValueError(f"Node name '{node.name}' is not unique.")
+        pending = node._pending_interface_targets
+        for port, record in pending:
+            if self._interface_inputs.get(port.id) is not port:
+                raise ValueError("Workflow input changed before node admission.")
+            if any(record in other.targets for other in self._interface_inputs.values() if other.id != port.id):
+                raise ValueError("A target is already published by another workflow input.")
         self._nodes[node.name] = node
+        self._build_errors.extend(getattr(node, "_construction_errors", ()))
+        for port, record in pending:
+            if record not in port.targets:
+                port.targets.append(record)
+        pending.clear()
 
     @property
     def nodes(self) -> dict[str, Node]:

@@ -23,7 +23,6 @@ from .common import (
     WorkflowInputPort,
     WorkflowInputRef,
     WorkflowOutputPort,
-    _reset_name_counters,
     cast,
     copy,
     deserialize_constant,
@@ -58,70 +57,16 @@ class _MaterializationMixin:
         partial: bool = False,
         errors: list[ValidationError] | None = None,
         graph_stack: tuple[int, ...] = (),
+        _admission: dict[str, Any] | None = None,
     ) -> "Workflow":
         from graphlib import TopologicalSorter
         from bioimageflow.dataframe_tool import DataFrameTool
 
-        if id(graph) in graph_stack:
-            raise ValueError("Recursive workflow graph containment is not allowed.")
+        from .graph_admission import capture_graph
+        if _admission is None:
+            graph, _admission = capture_graph(graph, partial=partial)
         graph_stack = (*graph_stack, id(graph))
-        required = {
-            "schema_version",
-            "name",
-            "display_name",
-            "interface",
-            "nodes",
-            "edges",
-            "config",
-        }
-        if set(graph) != required:
-            raise ValueError(
-                f"Workflow graph fields must be exactly {sorted(required)}; got {sorted(graph)}."
-            )
-        graph_version = graph["schema_version"]
-        if graph_version not in {1, 2}:
-            raise ValueError("Only workflow schema_version 1 and 2 are supported.")
-        if (
-            not isinstance(graph["name"], str)
-            or not graph["name"]
-            or "/" in graph["name"]
-            or not isinstance(graph["display_name"], str)
-        ):
-            raise ValueError("Invalid workflow definition metadata.")
-        if not isinstance(graph["interface"], dict) or set(graph["interface"]) != {
-            "inputs",
-            "outputs",
-        }:
-            raise ValueError(
-                "Workflow interface must contain exactly 'inputs' and 'outputs'."
-            )
-        if not isinstance(graph["nodes"], list) or not isinstance(graph["edges"], list):
-            raise ValueError("Workflow nodes and edges must be arrays.")
-        if not all(isinstance(items, list) for items in graph["interface"].values()):
-            raise ValueError("Workflow interface inputs and outputs must be arrays.")
-        for output in graph["interface"]["outputs"]:
-            if not isinstance(output, dict):
-                continue
-            serialized_schema = output.get("schema")
-            if isinstance(serialized_schema, dict) and "viewer" in serialized_schema:
-                if graph_version == 1:
-                    raise ValueError(
-                        "Workflow schema_version 1 does not support viewer metadata."
-                    )
-                ViewerSpec.from_dict(serialized_schema["viewer"])
-            if "viewer_addition" in output:
-                if graph_version == 1:
-                    raise ValueError(
-                        "Workflow schema_version 1 does not support viewer additions."
-                    )
-                ViewerSpec.from_dict(output["viewer_addition"])
         config = graph["config"]
-        if not isinstance(config, dict) or not set(config) <= {
-            "engine",
-            "execution",
-            "output_view",
-        }:
-            raise ValueError("Unknown workflow config field.")
         wf = cls(
             name=graph["name"],
             display_name=graph["display_name"],
@@ -139,202 +84,32 @@ class _MaterializationMixin:
             if isinstance(item, dict) and isinstance(item.get("name"), str)
         }
 
-        serialized_targets: dict[str, list[dict[str, Any]]] = {}
+        from bioimageflow.validation.resolved import ResolvedSchema
         for item in graph["interface"]["inputs"]:
-            allowed = {"id", "name", "kind", "schema", "default", "targets"}
-            if (
-                not isinstance(item, dict)
-                or not {"id", "name", "kind", "targets"} <= set(item)
-                or not set(item) <= allowed
-            ):
-                raise ValueError("Malformed workflow input record.")
-            if (
-                not isinstance(item["id"], str)
-                or not item["id"]
-                or not isinstance(item["name"], str)
-                or not item["name"]
-                or item["name"] == "name"
-                or item["kind"] not in {"field", "dataframe"}
-                or not isinstance(item["targets"], list)
-            ):
-                raise ValueError("Invalid workflow input name or kind.")
+            schema = copy.deepcopy(item.get("schema"))
+            annotation = None
+            if item["kind"] == "field":
+                semantic = ResolvedSchema.from_columns({item["id"]: schema}).get(item["id"])
+                assert semantic is not None
+                annotation = semantic.annotation
+                schema = semantic.to_wire()
             port = WorkflowInputPort(
-                id=item["id"],
-                name=item["name"],
-                kind=item["kind"],
-                annotation=Any,
-                schema=copy.deepcopy(item.get("schema")),
-                default=deserialize_constant(item["default"])
-                if "default" in item
-                else MISSING,
+                id=item["id"], name=item["name"], kind=item["kind"],
+                annotation=annotation, schema=schema,
+                default=deserialize_constant(item["default"]) if "default" in item else MISSING,
             )
-            if port.id in wf._interface_inputs or any(
-                p.name == port.name for p in wf._interface_inputs.values()
-            ):
-                raise ValueError("Duplicate workflow input ID or name.")
             wf._interface_inputs[port.id] = port
-            serialized_targets[port.id] = copy.deepcopy(item["targets"])
-
-        nodes_by_name: dict[str, dict[str, Any]] = {}
-        for node_data in graph["nodes"]:
-            if not isinstance(node_data, dict) or node_data.get("type") not in {
-                "tool",
-                "workflow",
-            }:
-                raise ValueError("Unknown or malformed workflow node variant.")
-            name = node_data.get("name")
-            if (
-                not isinstance(name, str)
-                or not name
-                or "/" in name
-                or name in nodes_by_name
-            ):
-                raise ValueError(
-                    "Node names must be unique, non-empty, and may not contain '/'."
-                )
-            required_node_fields = (
-                {"name", "type", "workflow", "bindings"}
-                if node_data["type"] == "workflow"
-                else {
-                    "name",
-                    "type",
-                    "tool_module",
-                    "tool_class",
-                    "tool_package",
-                    "tool_package_version",
-                    "constants",
-                }
-            )
-            allowed = (
-                {
-                    "name",
-                    "type",
-                    "workflow",
-                    "bindings",
-                    "enabled",
-                    *(["viewer_additions"] if graph_version == 2 else []),
-                }
-                if node_data["type"] == "workflow"
-                else {
-                    "name",
-                    "type",
-                    "tool_module",
-                    "tool_class",
-                    "tool_package",
-                    "tool_package_version",
-                    "source_module",
-                    "constants",
-                    "output_templates",
-                    "resource_overrides",
-                    "enabled",
-                    *(["viewer_additions"] if graph_version == 2 else []),
-                }
-            )
-            if (
-                not required_node_fields <= set(node_data)
-                or not set(node_data) <= allowed
-            ):
-                raise ValueError(f"Malformed or unknown fields on node '{name}'.")
-            viewer_additions = node_data.get("viewer_additions", {})
-            if not isinstance(viewer_additions, dict) or not all(
-                isinstance(output, str) and output and isinstance(viewer, dict)
-                for output, viewer in viewer_additions.items()
-            ):
-                raise ValueError(
-                    f"Node '{name}' viewer_additions must be an output-keyed object."
-                )
-            for viewer in viewer_additions.values():
-                ViewerSpec.from_dict(viewer)
-            nodes_by_name[name] = node_data
-
-        incoming: dict[str, list[dict[str, Any]]] = {name: [] for name in nodes_by_name}
-        deps: dict[str, set[str]] = {name: set() for name in nodes_by_name}
-        edge_ids: set[str] = set()
-        for edge in graph["edges"]:
-            if not isinstance(edge, dict) or edge.get("type") not in {
-                "column",
-                "dataframe",
-            }:
-                raise ValueError("Unknown or malformed edge variant.")
-            common = {"type", "id", "source_node", "target_node"}
-            allowed = common | (
-                {"source_output", "target_input"}
-                if edge["type"] == "column"
-                else {"target_position", "target_input"}
-            )
-            if not set(edge) <= allowed or not common <= set(edge):
-                raise ValueError("Malformed edge endpoint combination.")
-            if edge["type"] == "column" and set(edge) != common | {
-                "source_output",
-                "target_input",
-            }:
-                raise ValueError("Column edges require source_output and target_input.")
-            if edge["type"] == "dataframe" and (
-                ("target_position" in edge) == ("target_input" in edge)
-            ):
-                raise ValueError(
-                    "DataFrame edges target exactly one position or workflow input."
-                )
-            if edge["id"] in edge_ids:
-                raise ValueError(f"Duplicate edge ID '{edge['id']}'.")
-            edge_ids.add(edge["id"])
-            if (
-                edge["source_node"] not in nodes_by_name
-                or edge["target_node"] not in nodes_by_name
-            ):
-                if partial and errors is not None:
-                    errors.append(
-                        ValidationError(
-                            kind="missing_input",
-                            message="Edge references an unknown node.",
-                            node=edge.get("target_node"),
-                            edge_id=edge.get("id"),
-                        )
-                    )
-                    continue
-                raise ValueError("Edge references an unknown node.")
-            incoming[edge["target_node"]].append(edge)
-            deps[edge["target_node"]].add(edge["source_node"])
-
-        target_by_node: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-        for port_id, targets in serialized_targets.items():
-            for target in targets:
-                if not isinstance(target, dict) or set(target) != {"node", "port"}:
-                    raise ValueError("Malformed workflow interface target.")
-                if target["node"] not in nodes_by_name:
-                    raise ValueError(
-                        "Workflow interface target references an unknown node."
-                    )
-                port_endpoint = target["port"]
-                if not isinstance(port_endpoint, dict):
-                    raise ValueError("Malformed workflow interface target port.")
-                endpoint_kind = port_endpoint.get("kind")
-                endpoint_fields = {
-                    "field": {"kind", "name"},
-                    "positional": {"kind", "index"},
-                    "workflow": {"kind", "id"},
-                }
-                if (
-                    endpoint_kind not in endpoint_fields
-                    or set(port_endpoint) != endpoint_fields[endpoint_kind]
-                ):
-                    raise ValueError("Malformed workflow interface target port.")
-                input_kind = wf._interface_inputs[port_id].kind
-                if endpoint_kind != "workflow" and (
-                    (input_kind == "field") != (endpoint_kind == "field")
-                ):
-                    raise ValueError(
-                        "Workflow input kind does not match its target port."
-                    )
-                target_by_node.setdefault(target["node"], []).append(
-                    (port_id, target["port"])
-                )
+        nodes_by_name = _admission["nodes"]
+        incoming = _admission["incoming"]
+        deps = _admission["deps"]
+        target_by_node = _admission["targets"]
+        if errors is not None:
+            errors.extend(ValidationError(kind="missing_input", message="Edge references an unknown node.", node=edge["target_node"], edge_id=edge["id"]) for edge in _admission["missing_edges"])
 
         store = _get_store_path()
         built: dict[str, Node] = {}
         previous = get_active_workflow()
         set_active_workflow(wf)
-        _reset_name_counters()
         try:
             for name in TopologicalSorter(deps).static_order():
                 node_data = nodes_by_name[name]
@@ -413,6 +188,7 @@ class _MaterializationMixin:
                                     partial=partial,
                                     errors=child_errors,
                                     graph_stack=graph_stack,
+                                    _admission=_admission["children"][name],
                                 )
                             except BindingError:
                                 nested_failure_reported = bool(child_errors)
@@ -570,31 +346,6 @@ class _MaterializationMixin:
             set_active_workflow(previous)
 
         for item in graph["interface"]["outputs"]:
-            allowed = {"id", "name", "schema", "source"}
-            if graph_version == 2:
-                allowed.add("viewer_addition")
-            if (
-                not isinstance(item, dict)
-                or set(item) - allowed
-                or not {"id", "name", "source"} <= set(item)
-            ):
-                raise ValueError("Malformed workflow output record.")
-            if (
-                not isinstance(item["id"], str)
-                or not item["id"]
-                or not isinstance(item["name"], str)
-                or not item["name"]
-            ):
-                raise ValueError("Invalid workflow output ID or name.")
-            serialized_schema = item.get("schema")
-            if isinstance(serialized_schema, dict) and "viewer" in serialized_schema:
-                if graph_version == 1:
-                    raise ValueError(
-                        "Workflow schema_version 1 does not support viewer metadata."
-                    )
-                ViewerSpec.from_dict(serialized_schema["viewer"])
-            if "viewer_addition" in item:
-                ViewerSpec.from_dict(item["viewer_addition"])
             source = item["source"]
             if (
                 not isinstance(source, dict)
@@ -627,10 +378,15 @@ class _MaterializationMixin:
                     raise ValueError(
                         "Workflow output references an unknown tool output column."
                     )
+            annotation = Any
+            if item.get("schema") is not None:
+                semantic = ResolvedSchema.from_columns({item["id"]: item["schema"]}).get(item["id"])
+                assert semantic is not None
+                annotation = semantic.annotation
             port = WorkflowOutputPort(
                 id=item["id"],
                 name=item["name"],
-                annotation=Any,
+                annotation=annotation,
                 schema=copy.deepcopy(item.get("schema")),
                 source_node=source["node"],
                 source_output=source["column"],

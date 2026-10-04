@@ -29,8 +29,9 @@ def tool_store(tmp_path):
         "    return Workflow(name='packaged_definition', storage_path=storage_path)\n"
     )
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments, EnvironmentSpec\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    environment = EnvironmentSpec(name='registry-fixture', dependencies={})\n"
         "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Alpha'\n"
         "    tags = ['demo']\n"
@@ -43,12 +44,11 @@ def tool_store(tmp_path):
     )
     pkg_dir_v2 = store / "dummy_tools" / "2.0.0" / "dummy_tools"
     pkg_dir_v2.mkdir(parents=True)
-    (pkg_dir_v2 / "__init__.py").write_text(
-        "from .alpha import AlphaTool\n"
-    )
+    (pkg_dir_v2 / "__init__.py").write_text("from .alpha import AlphaTool\n")
     (pkg_dir_v2 / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments, EnvironmentSpec\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    environment = EnvironmentSpec(name='registry-fixture', dependencies={})\n"
         "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Alpha v2'\n"
         "    tags = ['demo', 'v2']\n"
@@ -84,8 +84,9 @@ def tool_store_lazy_exports(tmp_path):
         "    return value\n"
     )
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments, EnvironmentSpec\n"
         "class LazyAlpha(ProcessingTool):\n"
+        "    environment = EnvironmentSpec(name='registry-fixture', dependencies={})\n"
         "    row_consumption = RowConsumption.MAPPED\n"
         "    display_name = 'Lazy Alpha'\n"
         "    tags = ['lazy']\n"
@@ -102,14 +103,10 @@ def tool_store_lazy_exports(tmp_path):
 @pytest.fixture(autouse=True)
 def _cleanup_sys_modules():
     yield
-    for k in [
-        k for k in sys.modules
-        if k.startswith(("dummy_tools", "lazy_tools"))
-    ]:
+    for k in [k for k in sys.modules if k.startswith(("dummy_tools", "lazy_tools"))]:
         del sys.modules[k]
     sys.path[:] = [
-        p for p in sys.path
-        if "dummy_tools" not in p and "lazy_tools" not in p
+        p for p in sys.path if "dummy_tools" not in p and "lazy_tools" not in p
     ]
 
 
@@ -164,12 +161,8 @@ class TestRegisterPackage:
             ("AlphaTool", "1.0.0"),
             ("AlphaTool", "2.0.0"),
         ]
-        alpha_v1 = reg.get_metadata(
-            "AlphaTool", package="dummy_tools", version="1.0.0"
-        )
-        alpha_v2 = reg.get_metadata(
-            "AlphaTool", package="dummy_tools", version="2.0.0"
-        )
+        alpha_v1 = reg.get_metadata("AlphaTool", package="dummy_tools", version="1.0.0")
+        alpha_v2 = reg.get_metadata("AlphaTool", package="dummy_tools", version="2.0.0")
         alpha_cls = reg.get_class("AlphaTool")
         assert alpha_v1 is not None
         assert alpha_v2 is not None
@@ -178,9 +171,7 @@ class TestRegisterPackage:
         assert alpha_v2.display_name == "Alpha v2"
         assert alpha_cls._bif_package_version == "2.0.0"
 
-    def test_register_discovers_lazy_all_exports(
-        self, tool_store_lazy_exports
-    ) -> None:
+    def test_register_discovers_lazy_all_exports(self, tool_store_lazy_exports) -> None:
         reg = ToolRegistry(store_path=tool_store_lazy_exports)
 
         metas = reg.register_package("lazy_tools", "1.0.0")
@@ -265,12 +256,11 @@ def tool_store_absolute_imports(tmp_path):
     # Absolute import bypasses the scoped loader — tool classes are
     # loaded under the canonical name, so _stamp_tool_classes skips
     # them and they end up in the scoped namespace without _bif_package.
-    (pkg_dir / "__init__.py").write_text(
-        "from abs_tools.alpha import AlphaTool\n"
-    )
+    (pkg_dir / "__init__.py").write_text("from abs_tools.alpha import AlphaTool\n")
     (pkg_dir / "alpha.py").write_text(
-        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments\n"
+        "from bioimageflow_core import ProcessingTool, RowConsumption, IOModel, Arguments, EnvironmentSpec\n"
         "class AlphaTool(ProcessingTool):\n"
+        "    environment = EnvironmentSpec(name='registry-fixture', dependencies={})\n"
         "    row_consumption = RowConsumption.MAPPED\n"
         "    class Inputs(IOModel):\n"
         "        value: int = 0\n"
@@ -301,3 +291,41 @@ class TestAbsoluteImportDiagnostic:
             and "abs_tools" in rec.message
             for rec in caplog.records
         ), f"expected absolute-import warning, got: {caplog.records}"
+
+
+def test_registration_refuses_schema_failure_without_partial_publication(tool_store):
+    package = tool_store / "dummy_tools" / "1.0.0" / "dummy_tools"
+    with (package / "__init__.py").open("a") as stream:
+        stream.write("from .broken import BrokenTool\n")
+    (package / "broken.py").write_text(
+        "from bioimageflow import DataFrameTool\n"
+        "from bioimageflow_core import IOModel\n"
+        "class BrokenTool(DataFrameTool):\n"
+        "    class Inputs(IOModel):\n"
+        "        value: 'UndefinedAnnotation'\n"
+    )
+    registry = ToolRegistry(store_path=tool_store)
+    with pytest.raises((NameError, TypeError, ValueError)):
+        registry.register_package("dummy_tools", "1.0.0")
+    assert registry.list_tools() == []
+    assert registry.get_class("AlphaTool") is None
+
+
+def test_registry_skips_processing_family_keeps_dynamic_and_owns_metadata(tool_store):
+    package = tool_store / "dummy_tools" / "1.0.0" / "dummy_tools"
+    with (package / "__init__.py").open("a") as stream:
+        stream.write(
+            "from bioimageflow_core import ProcessingTool, IOModel\n"
+            "from bioimageflow import DataFrameTool\n"
+            "class Family(ProcessingTool):\n    pass\n"
+            "class Dynamic(DataFrameTool):\n"
+            "    class Inputs(IOModel):\n        values: list = [1]\n"
+        )
+    registry = ToolRegistry(store_path=tool_store)
+    discovered = registry.register_package("dummy_tools", "1.0.0")
+    assert {item.class_name for item in discovered} == {"AlphaTool", "Dynamic"}
+    metadata = registry.get_metadata("Dynamic")
+    assert metadata is not None
+    assert metadata.outputs_state == "dynamic"
+    metadata.inputs_schema["values"]["default"].append(9)
+    assert registry.get_metadata("Dynamic").inputs_schema["values"]["default"] == [1]

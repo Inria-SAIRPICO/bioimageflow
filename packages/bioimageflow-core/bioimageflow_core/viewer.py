@@ -8,7 +8,7 @@ discovery state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Mapping, Optional, Sequence, get_args, get_origin
+from typing import Any, Mapping, Optional, Sequence
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import InvalidName, canonicalize_name
@@ -233,12 +233,14 @@ class ViewerSpec:
 
 def extract_viewer_spec(annotation: Any) -> Optional[ViewerSpec]:
     """Return the :class:`ViewerSpec` carried by ``Annotated``, if any."""
-    if get_origin(annotation) is Annotated:
-        specs = [item for item in get_args(annotation)[1:] if isinstance(item, ViewerSpec)]
-        if len(specs) > 1:
-            raise ValueError("An output annotation may carry at most one ViewerSpec.")
-        return specs[0] if specs else None
-    return None
+    from .types import annotation_metadata
+
+    specs = [
+        item for item in annotation_metadata(annotation) if isinstance(item, ViewerSpec)
+    ]
+    if len(specs) > 1:
+        raise ValueError("An output annotation may carry at most one ViewerSpec.")
+    return specs[0] if specs else None
 
 
 def _combine_versions(first: Optional[str], second: Optional[str]) -> Optional[str]:
@@ -275,9 +277,7 @@ def merge_viewer_specs(*specs: Optional[ViewerSpec]) -> Optional[ViewerSpec]:
     if not napari_specs:
         return None
     required_names = {
-        item.normalized_name
-        for spec in napari_specs
-        for item in spec.required_packages
+        item.normalized_name for spec in napari_specs for item in spec.required_packages
     }
     required = _merge_packages(
         tuple(item for spec in napari_specs for item in spec.required_packages)

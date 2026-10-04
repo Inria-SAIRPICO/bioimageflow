@@ -56,6 +56,7 @@ class TestSerializeInputSchema:
         schema = serialize_input_schema(_SchemaTool)
         expected_keys = {
             "type",
+            "type_spec",
             "required",
             "nullable",
             "connectable",
@@ -220,7 +221,9 @@ class TestSerializeInputSchema:
         }
 
     @pytest.mark.parametrize("connectable", list(Connectable))
-    def test_dataframe_parameters_never_offer_column_connections(self, connectable) -> None:
+    def test_dataframe_parameters_never_offer_column_connections(
+        self, connectable
+    ) -> None:
         from bioimageflow.validation import get_inputs_schema
 
         class TableTool(DataFrameTool):
@@ -233,3 +236,25 @@ class TestSerializeInputSchema:
         for field in ("implicit", "explicit"):
             assert wire_schema[field]["connectable"] == "never"
             assert python_schema[field]["connectable"] is Connectable.NEVER
+
+
+def test_optional_annotated_metadata_and_owned_default_projection():
+    class Dynamic(DataFrameTool):
+        class Inputs(IOModel):
+            image: Optional[
+                Annotated[
+                    Path,
+                    ImageSpec(layouts={Layout.PLANAR}),
+                    GUIMeta(display_name="Pixels"),
+                ]
+            ]
+            values: list = [{"count": 1}]
+
+    schema = serialize_input_schema(Dynamic)
+    assert schema["image"]["type"] == "ImageFile"
+    assert schema["image"]["image_spec"]["layouts"] == ["YX"]
+    assert schema["image"]["display_name"] == "Pixels"
+    assert schema["image"]["required"] is True
+    assert schema["image"]["nullable"] is True
+    schema["values"]["default"][0]["count"] = 9
+    assert serialize_input_schema(Dynamic)["values"]["default"] == [{"count": 1}]

@@ -154,6 +154,8 @@ IOModel
 type annotations and structural field checks.
 It rejects missing required or unknown constructor fields; semantic type/value validation belongs to the orchestrator.
 Resolved inherited/postponed annotations preserve metadata, and unavailable names are actionable declaration errors rather than invented unknown types.
+Omitted mutable defaults are owned by each instance; explicitly supplied objects retain their caller identity.
+Definition admission captures effective default values and resolved declaration facades separately from the unchanged executable tool class and runtime resource owners.
 
 .. code-block:: python
 

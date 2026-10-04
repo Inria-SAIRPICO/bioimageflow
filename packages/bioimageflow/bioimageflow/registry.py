@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
+
+from bioimageflow_core import EnvironmentSpec, ProcessingTool
 
 from bioimageflow.paths import get_tool_store_path
 from bioimageflow.tool_loader import (
@@ -72,6 +75,7 @@ class ToolMetadata:
     tags
         Free-form tags declared on the class (empty list if none).
     """
+
     package: str
     version: str
     module: str
@@ -81,6 +85,7 @@ class ToolMetadata:
     display_name: str
     row_consumption: str | None
     tags: tuple[str, ...] = field(default_factory=tuple)
+    outputs_state: str = "known"
 
 
 class ToolRegistry:
@@ -137,7 +142,7 @@ class ToolRegistry:
         # than auto-installing.
         mod = load_versioned_package(name, version, self._store_path)
 
-        discovered: list[ToolMetadata] = []
+        discovered: list[tuple[_RegistryKey, type, ToolMetadata]] = []
         seen: set[type] = set()
         unstamped: dict[type, str] = {}
 
@@ -145,6 +150,7 @@ class ToolRegistry:
         # scoped name. Tool classes stamped by _stamp_tool_classes carry
         # _bif_canonical_module pointing at the original module path.
         import sys
+
         scoped_prefix = mod.__name__
         for sys_name, sys_mod in list(sys.modules.items()):
             if sys_mod is None:
@@ -166,6 +172,11 @@ class ToolRegistry:
                     continue
                 if obj is BaseTool:
                     continue
+                if (
+                    issubclass(obj, ProcessingTool)
+                    and getattr(obj, "Outputs", None) is None
+                ):
+                    continue
                 if getattr(obj, "_bif_package", None) != name:
                     # A tool-like class that wasn't stamped for this
                     # package. If its __module__ points at the canonical
@@ -176,8 +187,7 @@ class ToolRegistry:
                     # list empty with no actionable diagnostic.
                     obj_module = getattr(obj, "__module__", "")
                     if (
-                        obj_module == name
-                        or obj_module.startswith(name + ".")
+                        obj_module == name or obj_module.startswith(name + ".")
                     ) and obj not in unstamped:
                         unstamped[obj] = obj_module
                     continue
@@ -185,9 +195,7 @@ class ToolRegistry:
 
                 meta = self._build_metadata(obj)
                 key = self._key(meta)
-                self._classes[key] = obj
-                self._metadata[key] = meta
-                discovered.append(meta)
+                discovered.append((key, obj, meta))
 
         for cls, obj_module in unstamped.items():
             logger.warning(
@@ -197,10 +205,19 @@ class ToolRegistry:
                 "(`from %s.module import X`) instead of relative ones "
                 "(`from .module import X`). The class will not be "
                 "registered. See specs.md §Tool Packages.",
-                obj_module, cls.__name__, name, version, name,
+                obj_module,
+                cls.__name__,
+                name,
+                version,
+                name,
             )
 
-        return discovered
+        for key, cls, meta in discovered:
+            self._classes.pop(key, None)
+            self._metadata.pop(key, None)
+            self._classes[key] = cls
+            self._metadata[key] = meta
+        return [deepcopy(meta) for _, _, meta in discovered]
 
     def register_workflow(self, workflow: Any) -> list[ToolMetadata]:
         """Index custom tools carried by a workflow.
@@ -222,6 +239,7 @@ class ToolRegistry:
 
         classes: list[type] = []
         if isinstance(workflow, Workflow):
+
             def visit_live(definition: Workflow) -> None:
                 for node in definition.nodes.values():
                     if isinstance(node, WorkflowNode):
@@ -252,12 +270,14 @@ class ToolRegistry:
                         continue
                     source_id = node_data.get("source_module")
                     if source_id:
-                        classes.append(_resolve_custom_tool_class(
-                            modules,
-                            source_id,
-                            node_data["tool_module"],
-                            node_data["tool_class"],
-                        ))
+                        classes.append(
+                            _resolve_custom_tool_class(
+                                modules,
+                                source_id,
+                                node_data["tool_module"],
+                                node_data["tool_class"],
+                            )
+                        )
 
             visit_graph(graph)
         else:
@@ -265,7 +285,7 @@ class ToolRegistry:
                 "register_workflow expects a Workflow instance or workflow dict"
             )
 
-        discovered: list[ToolMetadata] = []
+        pending: list[tuple[_RegistryKey, type, ToolMetadata]] = []
         seen: set[type] = set()
         for cls in classes:
             if cls in seen:
@@ -273,32 +293,34 @@ class ToolRegistry:
             seen.add(cls)
             meta = self._build_metadata(cls)
             key = self._key(meta)
+            pending.append((key, cls, meta))
+        for key, cls, meta in pending:
+            self._classes.pop(key, None)
+            self._metadata.pop(key, None)
             self._classes[key] = cls
             self._metadata[key] = meta
-            discovered.append(meta)
-        return discovered
+        return [deepcopy(meta) for _, _, meta in pending]
 
     @staticmethod
     def _key(meta: ToolMetadata) -> _RegistryKey:
         return (meta.package, meta.version, meta.module, meta.class_name)
 
     def _build_metadata(self, cls: type) -> ToolMetadata:
+        if issubclass(cls, ProcessingTool) and not isinstance(
+            getattr(cls, "environment", None), EnvironmentSpec
+        ):
+            raise TypeError(
+                f"Concrete ProcessingTool {cls.__name__} requires an EnvironmentSpec"
+            )
         canonical = getattr(cls, "_bif_canonical_module", cls.__module__)
         package = getattr(cls, "_bif_package", "")
         version = getattr(cls, "_bif_package_version", "")
-        try:
-            inputs_schema = serialize_input_schema(cls)
-        except Exception:
-            inputs_schema = {}
-        try:
-            outputs_schema = serialize_output_schema(cls)
-        except Exception:
-            outputs_schema = {}
-        display_name = (
-            getattr(cls, "display_name", None) or cls.__name__
-        )
+        inputs_schema = serialize_input_schema(cls)
+        outputs_schema = serialize_output_schema(cls)
+        display_name = getattr(cls, "display_name", None) or cls.__name__
         tags = tuple(getattr(cls, "tags", ()) or ())
-        row_consumption = serialize_tool_metadata(cls)["row_consumption"]
+        tool_metadata = serialize_tool_metadata(cls)
+        row_consumption = tool_metadata["row_consumption"]
         return ToolMetadata(
             package=package,
             version=version,
@@ -309,6 +331,7 @@ class ToolRegistry:
             display_name=display_name,
             row_consumption=row_consumption,
             tags=tags,
+            outputs_state="dynamic" if tool_metadata["dynamic_outputs"] else "known",
         )
 
     # -- lookups ------------------------------------------------------------
@@ -328,7 +351,9 @@ class ToolRegistry:
         class. A name-only lookup returns the most recently registered matching
         class.
         """
-        match = self._find_key(class_name, package=package, version=version, module=module)
+        match = self._find_key(
+            class_name, package=package, version=version, module=module
+        )
         if match is None:
             return None
         return self._classes[match]
@@ -342,14 +367,16 @@ class ToolRegistry:
         module: str | None = None,
     ) -> ToolMetadata | None:
         """Return registered :class:`ToolMetadata`, or ``None``."""
-        match = self._find_key(class_name, package=package, version=version, module=module)
+        match = self._find_key(
+            class_name, package=package, version=version, module=module
+        )
         if match is None:
             return None
-        return self._metadata[match]
+        return deepcopy(self._metadata[match])
 
     def list_tools(self) -> list[ToolMetadata]:
         """Return all registered tool metadata, in insertion order."""
-        return list(self._metadata.values())
+        return deepcopy(list(self._metadata.values()))
 
     def forget(
         self,
@@ -360,12 +387,14 @@ class ToolRegistry:
         module: str | None = None,
     ) -> None:
         """Drop matching classes from the registry. No-op if none match."""
-        for key in list(self._matching_keys(
-            class_name,
-            package=package,
-            version=version,
-            module=module,
-        )):
+        for key in list(
+            self._matching_keys(
+                class_name,
+                package=package,
+                version=version,
+                module=module,
+            )
+        ):
             self._classes.pop(key, None)
             self._metadata.pop(key, None)
 
@@ -377,12 +406,14 @@ class ToolRegistry:
         version: str | None = None,
         module: str | None = None,
     ) -> _RegistryKey | None:
-        matches = list(self._matching_keys(
-            class_name,
-            package=package,
-            version=version,
-            module=module,
-        ))
+        matches = list(
+            self._matching_keys(
+                class_name,
+                package=package,
+                version=version,
+                module=module,
+            )
+        )
         if not matches:
             return None
         return matches[-1]

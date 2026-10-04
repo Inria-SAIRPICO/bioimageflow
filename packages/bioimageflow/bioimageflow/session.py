@@ -1,20 +1,8 @@
-"""Incremental editing session for GUI clients.
+"""A current graph editing authority with detached materializations.
 
-A :class:`WorkflowSession` is a parallel data model to :class:`Workflow`
-that holds the wire-format dict and exposes mutation operations. It
-materializes a :class:`Workflow` on demand and caches it across edits,
-selectively rebuilding only when structural changes (add/remove
-node/edge) demand it. Edits that don't change the graph topology
-(``set_constant``, ``set_enabled``) mutate the cached workflow in
-place — so a constant edit followed by ``validate()`` does not
-re-resolve any tool class.
-
-Why a separate class? :class:`Workflow` builds nodes eagerly during
-construction, with ``_upstream_nodes`` references and column bindings
-wired at ``__init__`` time. Retrofitting incremental mutation onto that
-model would require invasive changes to ``Node``. A dict-backed
-session, materialized to a Workflow only when needed, is both simpler
-and matches what GUIs actually want to send over the wire.
+Every edit admits a proposed graph before replacing the session revision.
+Previously returned Workflows remain independent definitions; the materialized
+cache is only a projection of one accepted session revision.
 """
 
 from __future__ import annotations
@@ -46,7 +34,7 @@ class WorkflowSession:
         """Create an editing session with runtime storage kept outside its graph."""
         if data is None:
             data = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "workflow",
                 "display_name": "workflow",
                 "interface": {"inputs": [], "outputs": []},
@@ -60,10 +48,7 @@ class WorkflowSession:
         self._data: dict[str, Any] = data
         self._registry = registry
 
-        # Cached materialization. `_workflow_cache` is invalidated on
-        # structural edits; non-structural edits (constants, enabled
-        # flag) update the cached workflow in place to avoid tool
-        # re-resolution.
+        # Materialization belongs to exactly this accepted graph revision.
         self._workflow_cache: Workflow | None = None
         self._validate_cache: list[ValidationError] | None = None
         self.storage_path = storage_path
@@ -78,8 +63,7 @@ class WorkflowSession:
         """Assign one runtime storage root to this session and its materialization."""
         normalized = _absolute_runtime_path(value)
         self._storage_path = normalized
-        if self._workflow_cache is not None:
-            self._workflow_cache._inherit_runtime_storage(normalized)
+        self._workflow_cache = None
         self._validate_cache = None
 
     # ------------------------------------------------------------------
@@ -100,102 +84,76 @@ class WorkflowSession:
                 return nd
         raise KeyError(f"Node '{name}' not in session.")
 
-    def _invalidate_structural(self) -> None:
-        self._workflow_cache = None
+    def _commit(self, candidate: dict[str, Any]) -> None:
+        """Admit a detached candidate before publishing a new graph revision."""
+        workflow, errors = Workflow.from_dict(
+            candidate, storage_path=self.storage_path, validate_only=True,
+            partial=True, auto_install=False,
+        )
+        refused = next((error for error in errors if error.kind in {
+            "unknown_input", "duplicate_name", "column_not_found", "type_mismatch",
+        }), None)
+        if refused is not None:
+            raise ValueError(refused.message)
+        self._data = candidate
+        self._workflow_cache = workflow
         self._validate_cache = None
-
-    def _invalidate_compute_caches(self) -> None:
-        # Edits that don't require a workflow rebuild still invalidate
-        # the validation cache. ``plan()`` intentionally refreshes the
-        # storage-facing cache snapshot on every call.
-        self._validate_cache = None
-
-    # ------------------------------------------------------------------
-    # Mutating operations
-    # ------------------------------------------------------------------
 
     def add_node(self, node: dict[str, Any]) -> None:
-        """Append a node entry to the session.
-
-        ``node`` is a wire-format dict with at least ``name`` and tool
-        identification keys for either a tool or recursive workflow node.
-        """
-        if any(nd["name"] == node["name"] for nd in self._nodes_list):
+        candidate = self.to_dict()
+        if any(item["name"] == node["name"] for item in candidate["nodes"]):
             raise ValueError(f"Node '{node['name']}' already exists.")
-        self._nodes_list.append(deepcopy(node))
-        self._invalidate_structural()
+        candidate["nodes"].append(deepcopy(node))
+        self._commit(candidate)
 
     def remove_node(self, name: str) -> None:
-        """Remove a node and all edges touching it."""
-        self._data["nodes"] = [
-            nd for nd in self._nodes_list if nd["name"] != name
-        ]
-        self._data["edges"] = [
-            e for e in self._edges_list
-            if e.get("source_node") != name and e.get("target_node") != name
-        ]
-        self._invalidate_structural()
+        self._get_node_dict(name)
+        candidate = self.to_dict()
+        candidate["nodes"] = [node for node in candidate["nodes"] if node["name"] != name]
+        candidate["edges"] = [edge for edge in candidate["edges"] if name not in (edge["source_node"], edge["target_node"])]
+        interface = candidate["interface"]
+        interface["outputs"] = [port for port in interface["outputs"] if port["source"]["node"] != name]
+        for port in interface["inputs"]:
+            port["targets"] = [target for target in port["targets"] if target["node"] != name]
+        interface["inputs"] = [port for port in interface["inputs"] if port["targets"]]
+        self._commit(candidate)
 
     def add_edge(self, edge: dict[str, Any]) -> None:
-        """Append one strict column or DataFrame edge record."""
-        for key in ("type", "id", "source_node", "target_node"):
-            if key not in edge:
-                raise ValueError(f"Edge missing required key '{key}'.")
-        if edge["type"] not in {"column", "dataframe"}:
-            raise ValueError("Unknown edge type.")
-        self._edges_list.append(deepcopy(edge))
-        self._invalidate_structural()
+        candidate = self.to_dict()
+        candidate["edges"].append(deepcopy(edge))
+        self._commit(candidate)
 
     def remove_edge(self, edge_id: str) -> None:
-        """Remove an edge by its opaque ``id`` field."""
-        before = len(self._edges_list)
-        self._data["edges"] = [
-            e for e in self._edges_list if e.get("id") != edge_id
-        ]
-        if len(self._edges_list) == before:
+        candidate = self.to_dict()
+        edges = candidate["edges"]
+        candidate["edges"] = [edge for edge in edges if edge["id"] != edge_id]
+        if len(edges) == len(candidate["edges"]):
             raise KeyError(f"Edge with id '{edge_id}' not found.")
-        self._invalidate_structural()
+        self._commit(candidate)
 
     def set_constant(self, node: str, field: str, value: Any) -> None:
-        """Update a constant binding on a node.
-
-        This is a non-structural edit: the cached :class:`Workflow` (if
-        any) is mutated in place so that subsequent
-        :meth:`to_workflow` / :meth:`validate` / :meth:`plan` calls do
-        not re-resolve any tool class.
-        """
-        node_dict = self._get_node_dict(node)
-        key = "bindings" if node_dict.get("type") == "workflow" else "constants"
-        node_dict.setdefault(key, {})[field] = serialize_constant(value)
-
-        if self._workflow_cache is not None:
-            built = self._workflow_cache._nodes.get(node)
-            if built is not None:
-                from bioimageflow.workflow_node import WorkflowNode
-
-                if isinstance(built, WorkflowNode):
-                    built._input_constant_bindings[field] = value
-                    built.workflow._apply_interface_binding(field, value)
-                else:
-                    built._constant_bindings[field] = value
-        self._invalidate_compute_caches()
+        """Replace a field's edge with an owned constant in one revision."""
+        self._get_node_dict(node)
+        candidate = self.to_dict()
+        entry = next(item for item in candidate["nodes"] if item["name"] == node)
+        key = "bindings" if entry["type"] == "workflow" else "constants"
+        entry.setdefault(key, {})[field] = serialize_constant(value)
+        candidate["edges"] = [edge for edge in candidate["edges"] if not (
+            edge["target_node"] == node and edge.get("target_input") == field
+        )]
+        self._commit(candidate)
 
     def set_enabled(self, node: str, enabled: bool) -> None:
-        """Toggle a node's enabled flag.
-
-        Non-structural: the cached workflow is updated in place.
-        """
-        node_dict = self._get_node_dict(node)
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be a bool")
+        self._get_node_dict(node)
+        candidate = self.to_dict()
+        entry = next(item for item in candidate["nodes"] if item["name"] == node)
         if enabled:
-            node_dict.pop("enabled", None)
+            entry.pop("enabled", None)
         else:
-            node_dict["enabled"] = False
-
-        if self._workflow_cache is not None:
-            built = self._workflow_cache._nodes.get(node)
-            if built is not None:
-                built.enabled = enabled
-        self._invalidate_compute_caches()
+            entry["enabled"] = False
+        self._commit(candidate)
 
     # ------------------------------------------------------------------
     # Read-only views
@@ -251,7 +209,7 @@ class WorkflowSession:
     def validate(self) -> list[ValidationError]:
         """Return the validation errors for the current state.
 
-        Cached across non-structural edits.
+        Cached only for the accepted graph revision.
         """
         if self._validate_cache is not None:
             return list(self._validate_cache)

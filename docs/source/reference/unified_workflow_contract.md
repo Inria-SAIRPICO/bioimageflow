@@ -6,7 +6,8 @@ The golden examples are `tests/fixtures/unified_workflow_graph.json` and `tests/
 
 **Accepted target intent (S):** the clauses below define the coherent current design accepted by specification review.
 Conformance of owning revision `2cd79a2`, existing examples and golden fixtures is assessed next in test review (T) and causal code review (C); this clarification supplies no implementation or runtime certification.
-Behavior-changing requirements, including legacy retirement, transactional refusal and execution snapshots, remain explicit global-review findings before source repair.
+The accepted design separates graph/edit/capture/schema admission from later executable-source, collective-result and physical result-owner repairs.
+Conformance evidence is scoped to each completed repair wave; this contract does not imply full-library, native-worker or publication certification.
 
 ## Public Python API
 
@@ -116,9 +117,11 @@ Root callers use `compute(inputs={...})`.
 Invocation and root input mappings are keyed by interface names, while serialized bindings and workflow edges use stable IDs.
 The input name `name` is reserved for assigning the structural invocation name.
 
-Each invocation takes an independent structural snapshot.
-The snapshot contains graph structure, interface definitions, defaults, constants, templates, enabled state, definition metadata, and tool-class references.
-It does not copy callbacks, cancellation state, execution engines, environment managers, run views, or validation caches.
+Each callable invocation captures an independent definition before it escapes.
+The capture contains graph structure, interface definitions, effective omitted defaults, constants, templates, enabled state, definition metadata, per-environment configuration, and original tool-class/origin selectors.
+Every compute, explicit-target and compute_steps admission then captures the effective invoked definition and values again before setup; the compiler receives remapped owned targets rather than live original Nodes.
+It does not copy callbacks, cancellation state, execution engines, environment managers, run views, active leases or mutable tool model caches into definition data.
+Runtime callbacks, engine reservations and result owners bind separately; an owned tool recipe preserves the original executable class and is not proof of admitted executable bytes.
 The editable invocation definition and the immutable effective definition used by one execution are separate authorities.
 A root call captures its effective definition, inputs, targets, exact executable origin and per-environment configuration before run-visible effects; later edits affect later calls only.
 
@@ -132,7 +135,9 @@ A symbolic reference can fan out to multiple compatible targets.
 The library rejects references used outside their owning active workflow, kind mismatches, a target already carrying an internal data edge, duplicate targets owned by different inputs, missing required values, and unknown invocation keys.
 Ordinary construction, invocation, expose/rebind and deletion publish one coherent change or leave prior node, edge, interface and name ownership unchanged.
 Diagnostic editing may deliberately retain incomplete values with current scoped errors; it never labels a partial result executable.
-Replacing a binding removes its old data dependency without erasing genuine independent terminal-completion obligations.
+Replacing a binding removes its old data dependency and competing binding authority without erasing genuine independent terminal-completion obligations.
+Session edits admit a detached current graph and replace their derived materialization; a previously returned Workflow keeps its own definition and storage binding.
+A constant edit removes the matching incoming edge; node deletion removes affected interface sources/targets in the same revision.
 
 At root execution, field inputs receive ordinary values and DataFrame inputs receive complete DataFrames.
 At nested invocation, field inputs receive constants or `ColumnRef` values and DataFrame inputs receive upstream nodes as complete results.

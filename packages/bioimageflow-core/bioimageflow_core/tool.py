@@ -1,6 +1,7 @@
 """Worker-safe tool base classes."""
 
 from dataclasses import dataclass
+from .defaults import snapshot_value
 from enum import Enum
 from pathlib import Path
 import sys
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, get_type_hints
 
 class Category(str, Enum):
     """High-level functional category for a tool."""
+
     CONVERSION = "conversion"
     IMAGE_PROCESSING = "image_processing"
     SEGMENTATION = "segmentation"
@@ -102,6 +104,15 @@ class IOModel:
             )
         return annotations
 
+    @classmethod
+    def capture_defaults(cls) -> dict[str, Any]:
+        """Return detached defaults, preserving missing versus explicit None."""
+        return {
+            name: snapshot_value(getattr(cls, name))
+            for name in cls._get_all_annotations()
+            if hasattr(cls, name)
+        }
+
     def __init__(self, **kwargs: Any) -> None:
         all_annotations = self._get_all_annotations()
         unknown = set(kwargs) - set(all_annotations)
@@ -111,7 +122,7 @@ class IOModel:
             if name in kwargs:
                 setattr(self, name, kwargs[name])
             elif hasattr(self.__class__, name):
-                setattr(self, name, getattr(self.__class__, name))
+                setattr(self, name, snapshot_value(getattr(self.__class__, name)))
             else:
                 raise TypeError(f"Missing required field: '{name}'")
 
@@ -125,6 +136,7 @@ class BaseTool:
     Common base for all tools. Provides identity and Inputs.
     __call__ is NOT defined here — each subclass defines its own.
     """
+
     display_name: ClassVar[str] = ""
     documentation: ClassVar[str] = ""
     category: ClassVar[Optional[Category]] = None
@@ -138,6 +150,7 @@ class BaseTool:
 
 class ProcessingTool(BaseTool):
     """Tool that processes data in an isolated Wetlands environment."""
+
     environment: ClassVar[Any]
     Outputs: ClassVar[Optional[type[IOModel]]]
     resources: ClassVar[Any] = None
@@ -151,6 +164,11 @@ class ProcessingTool(BaseTool):
         # Validate every concrete class, including subclasses that inherit Outputs.
         if getattr(cls, "Outputs", None) is None:
             return
+        outputs = cls.Outputs
+        if not isinstance(outputs, type) or not issubclass(outputs, IOModel):
+            raise TypeError(f"{cls.__name__}.Outputs must be an IOModel class")
+        if not isinstance(cls.Inputs, type) or not issubclass(cls.Inputs, IOModel):
+            raise TypeError(f"{cls.__name__}.Inputs must be an IOModel class")
         # Check that at least one of process_row or process_batch is overridden
         has_process_row = cls.process_row is not ProcessingTool.process_row
         has_process_batch = cls.process_batch is not ProcessingTool.process_batch
@@ -159,9 +177,7 @@ class ProcessingTool(BaseTool):
                 f"{cls.__name__} must implement process_row or process_batch"
             )
         if "row_consumption" not in cls.__dict__:
-            raise TypeError(
-                f"{cls.__name__} must explicitly declare row_consumption"
-            )
+            raise TypeError(f"{cls.__name__} must explicitly declare row_consumption")
         row_consumption = cls.__dict__["row_consumption"]
         if not isinstance(row_consumption, RowConsumption):
             raise TypeError(

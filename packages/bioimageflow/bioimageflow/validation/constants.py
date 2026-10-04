@@ -30,13 +30,13 @@ def serialize_constant(value: Any) -> dict[str, Any]:
     """
     if value is None:
         return {"__type__": "none", "value": None}
-    if isinstance(value, bool):
+    if type(value) is bool:
         return {"__type__": "bool", "value": value}
-    if isinstance(value, int):
+    if type(value) is int:
         return {"__type__": "int", "value": value}
-    if isinstance(value, float):
+    if type(value) is float:
         return {"__type__": "float", "value": value}
-    if isinstance(value, str):
+    if type(value) is str:
         return {"__type__": "str", "value": value}
     if isinstance(value, Path):
         return {"__type__": "path", "value": value.as_posix()}
@@ -66,27 +66,42 @@ def deserialize_constant(data: dict[str, Any]) -> Any:
     produced by :func:`serialize_constant`. Unknown ``__type__`` values
     are rejected.
     """
-    t = data["__type__"]
-    v = data["value"]
+    if type(data) is not dict or set(data) != {"__type__", "value"}:
+        raise ValueError("Workflow constant must have exact type/value fields")
+    t, v = data["__type__"], data["value"]
+    if type(t) is not str:
+        raise ValueError("Workflow constant kind must be a string")
     if t == "none":
+        if v is not None:
+            raise ValueError("none constant requires None")
         return None
-    if t == "bool":
-        return bool(v)
-    if t == "int":
-        return int(v)
-    if t == "float":
-        return float(v)
-    if t == "str":
-        return str(v)
+    scalar_types = {"bool": bool, "int": int, "float": float, "str": str}
+    if t in scalar_types:
+        if type(v) is not scalar_types[t]:
+            raise ValueError(f"{t} constant has an invalid payload type")
+        return v
     if t == "path":
+        if type(v) is not str:
+            raise ValueError("path constant requires a string")
         return Path(v)
-    if t == "tuple":
-        return tuple(deserialize_constant(item) for item in v)
-    if t == "list":
-        return [deserialize_constant(item) for item in v]
+    if t in {"tuple", "list"}:
+        if type(v) is not list:
+            raise ValueError(f"{t} constant requires an array")
+        values = [deserialize_constant(item) for item in v]
+        return tuple(values) if t == "tuple" else values
     if t == "dict":
-        return {
-            deserialize_constant(entry["key"]): deserialize_constant(entry["value"])
-            for entry in v
-        }
+        if type(v) is not list:
+            raise ValueError("dict constant requires an entry array")
+        result = {}
+        for entry in v:
+            if type(entry) is not dict or set(entry) != {"key", "value"}:
+                raise ValueError("dict constant entries require exact key/value fields")
+            key = deserialize_constant(entry["key"])
+            try:
+                if key in result:
+                    raise ValueError("dict constant contains duplicate keys")
+                result[key] = deserialize_constant(entry["value"])
+            except TypeError as error:
+                raise ValueError("dict constant key is unhashable") from error
+        return result
     raise ValueError(f"Unknown workflow constant type: {t!r}.")

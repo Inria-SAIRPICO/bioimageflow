@@ -75,10 +75,8 @@ class WorkflowInputRef:
     annotation: Any = None
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "WorkflowInputRef":
-        # Ownership is definition identity, not mutable payload. Keeping the
-        # reference also avoids recursively copying the complete Workflow from
-        # a Node's construction-time bookkeeping.
-        return self
+        owner = memo.get(id(self.workflow), self.workflow)
+        return WorkflowInputRef(owner, self.port_id, self.name, self.kind, self.annotation)
 
 
 @dataclass
@@ -93,33 +91,40 @@ class WorkflowInputPort:
     default: Any = MISSING
     targets: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> "WorkflowInputPort":
+        from .capture import capture_value
+        clone = WorkflowInputPort(
+            self.id, self.name, self.kind, self.annotation,
+            copy.deepcopy(self.schema, memo),
+            MISSING if self.default is MISSING else capture_value(self.default),
+            copy.deepcopy(self.targets, memo),
+        )
+        memo[id(self)] = clone
+        return clone
+
     def has_fallback(self, workflow: "Workflow") -> bool:
         if self.default is not MISSING:
             return True
+        if not self.targets:
+            return False
         for target in self.targets:
             node = workflow._nodes.get(target["node"])
             if node is None:
-                continue
+                return False
             endpoint = target["port"]
-            if (
-                endpoint["kind"] == "field"
-                and endpoint["name"] in node._constant_bindings
-            ):
-                return True
-            if endpoint["kind"] == "field" and hasattr(
-                node.tool.Inputs, endpoint["name"]
-            ):
-                return True
-            if endpoint["kind"] == "workflow":
+            if endpoint["kind"] == "field":
+                if endpoint["name"] not in node._constant_bindings and not hasattr(node.tool.Inputs, endpoint["name"]):
+                    return False
+            elif endpoint["kind"] == "workflow":
                 from bioimageflow.workflow_node import WorkflowNode
-
-                if isinstance(node, WorkflowNode):
-                    child_port = node.workflow._interface_inputs.get(endpoint["id"])
-                    if child_port is not None and child_port.has_fallback(
-                        node.workflow
-                    ):
-                        return True
-        return False
+                if not isinstance(node, WorkflowNode):
+                    return False
+                child_port = node.workflow._interface_inputs.get(endpoint["id"])
+                if child_port is None or not child_port.has_fallback(node.workflow):
+                    return False
+            else:
+                return False
+        return True
 
 
 @dataclass
@@ -149,8 +154,10 @@ def _annotation_schema(annotation: Any) -> dict[str, Any] | None:
     )
     from bioimageflow_core.viewer import extract_viewer_spec
 
+    from bioimageflow.validation.type_descriptors import encode_annotation
     result = {
         "type": _display_type_name(annotation),
+        "type_spec": encode_annotation(annotation),
         "image_spec": serialize_image_spec(extract_image_spec(annotation)),
     }
     viewer = extract_viewer_spec(annotation)
