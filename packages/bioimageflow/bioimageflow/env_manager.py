@@ -257,6 +257,7 @@ class WetlandsEnvManager:
         self._environments: dict[str, ManagedEnvironment] = {}
         self._pools: dict[str, WorkerPool] = {}
         self._shared_memory_grants: dict[str, list[Any]] = {}
+        self._processing_tasks: dict[str, list[Any]] = {}
         self._pool_configs: dict[str, tuple[int, float | None]] = {}
         self._specs: dict[str, EnvironmentSpec] = {}
         self._lock = threading.RLock()
@@ -676,7 +677,11 @@ class WetlandsEnvManager:
             # Registration/submission shares the pool owner's close fence.
             # A mutating/raising submission may already have handed the scope
             # to a live worker, so keep its grant until successful pool close.
-            return pool.submit_import(_WORKER_TARGET, args=(payload,), context_keyword="task")
+            task = pool.submit_import(_WORKER_TARGET, args=(payload,), context_keyword="task")
+            active = [item for item in self._processing_tasks.get(env_spec.name, ()) if not item.state.terminal]
+            active.append(task)
+            self._processing_tasks[env_spec.name] = active
+            return task
 
     def map_processing_tasks(
         self,
@@ -700,6 +705,22 @@ class WetlandsEnvManager:
             for name in tuple(self._pools):
                 self.stop(name)
 
+    def retire_idle(self, env_name: str) -> bool:
+        """Physically retire one idle pool; failed close retains ownership for retry.
+
+        Terminal tasks permit the attempt, but only successful public pool close
+        drains shared-array grants. An active tracked task refuses retirement.
+        """
+        with self._lock:
+            pool = self._pools.get(env_name)
+            if pool is None:
+                return False
+            if any(not task.state.terminal for task in self._processing_tasks.get(env_name, ())):
+                raise RuntimeError(f"Environment {env_name!r} has active processing tasks")
+            pool.close()
+            self._retire_closed_pool(env_name)
+            return True
+
     def stop(self, env_name: str) -> bool:
         with self._lock:
             pool = self._pools.get(env_name)
@@ -719,6 +740,7 @@ class WetlandsEnvManager:
         for grant in self._shared_memory_grants.get(name, ()):
             grant.drained()
         self._shared_memory_grants.pop(name, None)
+        self._processing_tasks.pop(name, None)
         self._pools.pop(name, None)
         self._pool_configs.pop(name, None)
         self._environments.pop(name, None)

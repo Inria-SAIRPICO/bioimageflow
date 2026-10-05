@@ -22,11 +22,12 @@ def create_shared_output(data: Any, name: Optional[str] = None) -> Generator[Sha
 
 
 @contextmanager
-def open_shared_array(ref: SharedArray) -> Generator[Any, None, None]:
+def open_shared_array(ref: SharedArray, *, writable: Optional[bool] = None) -> Generator[Any, None, None]:
     """
-    Map an admitted backing file and yield a zero-copy numeric array.
+    Map admitted backing without copying; accepted snapshots are read-only.
+    Explicit writable access is available only for unpublished producer allocations.
     Live arrays and derived views retain the mapping beyond lexical exit.
     """
     _shared_memory_dtype(ref.dtype)
     context = ref.bound_owner or get_shared_memory_context()
-    yield context.open(ref)
+    yield context.open(ref, writable=writable)

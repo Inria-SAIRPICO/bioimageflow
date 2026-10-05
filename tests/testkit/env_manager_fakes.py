@@ -88,6 +88,7 @@ def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvMana
     manager._environments = {}
     manager._pools = {}
     manager._shared_memory_grants = {}
+    manager._processing_tasks = {}
     manager._pool_configs = {}
     manager._specs = {}
     manager._lock = threading.RLock()

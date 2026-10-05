@@ -102,6 +102,11 @@ def _snapshot_root_inputs(inputs: Mapping[str, Any] | None) -> dict[str, Any] | 
 
 
 class _RuntimeMixin:
+    @property
+    def last_execution_context(self) -> WorkflowExecutionContext | None:
+        """Latest admitted execution; groups are weakly observed, never retained here."""
+        return getattr(self, "_last_execution_context", None)
+
     def _capture_public_execution(
         self,
         targets: tuple[Node, ...],
@@ -264,6 +269,7 @@ class _RuntimeMixin:
             else:
                 context.shared_memory_context = self.shared_memory_context
             self._active_run_context = context
+            self._last_execution_context = context
 
     def _end_public_execution(self) -> None:
         with self._execution_lock:

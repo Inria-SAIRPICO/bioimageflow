@@ -47,17 +47,23 @@ SharedArray references are host-local, so distributed callers such as Parsl must
 
 ### Shared-array ownership
 
-SharedArray uses scoped numeric NPY2 file-backed mmap storage, with one initial copy and zero-copy mapped views thereafter.
+SharedArray uses scoped numeric NPY2 file-backed mmap storage.
+Producer allocation copies data once; controller `publish()`/`publish_value()` creates a separate accepted snapshot once per admission, so a retained producer writer cannot mutate accepted bytes.
+Accepted opens use read-only zero-copy views, explicit writable opens refuse, and already sealed pass-through values reuse the same physical backing and bound owner.
 Allocate under an explicit `SharedMemoryContext.activate()`; helper/context exit only unbinds.
 References carry a strong local owner excluded from equality and wire; pure typed decoding is attachment-free, and workers borrow explicit task/input descriptors.
-Controller close/release refuses new access while mapped views and admitted workers retain backing; `CleanupStatus` reports pending readers/grants/files/errors until physical drain.
+Controller close/release refuses new access while mapped views, exact group leases and admitted workers retain backing; `CleanupStatus` reports pending readers/grants/leases/files/errors until physical drain.
 Workflow/engine completion never auto-closes returned references; no resource tracker or private unregister is involved.
 Accepted and borrowed scientific inputs are immutable to consumers by contract; mutable processing creates a separate work/output value.
 
-The accepted lifecycle target also requires public owner/status access and exact result/group release, so callers can release a discarded result without closing unrelated groups.
+`retain(reference)` returns a metadata-only `SharedArrayLease`; `lease.project(group)` creates a local descriptor pin and `lease.release()` requests exact allocation cleanup after the last lease, reader and physical grant drains.
+Local owner, lease and group pins are excluded from equality and typed wire values.
+`content_identity(reference)` reads the accepted snapshot digest recorded during sealing; a mutable producer identity is only a current-byte planning preview, so authoritative cache execution publishes before computing its key.
+SDK image writes refuse read-only backing through canonical paths and existing hardlink/symlink aliases; this is an SDK access policy, not a hostile Python or filesystem sandbox.
 Normal reusable worker pools can retain physical grants; idle or quota-pressure retirement must drain the owning pool before reclaiming backing, while live mapped views remain valid.
 If safe retirement cannot reclaim enough space, finite allocation budgets must refuse clearly.
-The exact result/group API and conformance are assessed in the ordered test and causal-code review; these requirements are not a claim that an unspecified method already exists.
+BioImageFlow exposes exact returned group handles through `result_groups(result)`; ordinary result discard releases only its group leases.
+The current owner-wide grant counter can conservatively delay cleanup behind another admitted task; group release does not force pool retirement or invalidate live views.
 See the [library specifications](../../docs/source/specs.md) for the declaration, typed-value and resource-owner contracts.
 
 

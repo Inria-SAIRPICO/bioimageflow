@@ -42,7 +42,13 @@ class ArrayLifetimeTool(ProcessingTool):
         with open_shared_array(arguments.reference) as array:
             assert array.dtype == np.dtype("uint16")
             np.testing.assert_array_equal(array, np.arange(6, dtype="uint16").reshape(2, 3))
-            array[0, 0] = 100
+            assert not array.flags.writeable
+            try:
+                array[0, 0] = 100
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("accepted input was writable")
             total = int(array.sum())
         del array
         with create_shared_output(np.arange(6, dtype="uint16").reshape(2, 3) + 10) as output:
@@ -139,6 +145,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
     )
 
     label = "failure" if fail else "success"
+    input_ref = owner.publish(input_ref)
     task_scope = owner.task_scope(label)
     grant = task_scope.acquire_worker_grant(inputs=(input_ref,))
     task = ProcessingTask(
@@ -172,7 +179,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
             value = decode_processing_result(decoded["result"])
             validate_processing_result(task, value)
             accepted = task_scope.accept_result(value.groups[0].outputs[0])
-            assert accepted["total"] == 115
+            assert accepted["total"] == 15
             output = accepted["reference"]
     finally:
         # run_child reaps the real child before returning/raising. No logical
@@ -213,7 +220,7 @@ def capability_checks(args: argparse.Namespace) -> list:
         output, child_receipt = transport_case(args, owner, ref, source, fail=False)
         assert isinstance(output, SharedArray)
         with open_shared_array(ref) as array:
-            np.testing.assert_array_equal(array, [[100, 1, 2], [3, 4, 5]])
+            np.testing.assert_array_equal(array, [[0, 1, 2], [3, 4, 5]])
         del array
         with open_shared_array(output) as array:
             np.testing.assert_array_equal(array, [[10, 11, 12], [13, 14, 15]])

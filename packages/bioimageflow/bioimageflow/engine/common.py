@@ -579,6 +579,8 @@ class NodeStep:
         self._sig_hash: str | None = None
         self._cache_checked = False
         self._cached_df: pd.DataFrame | None = None
+        self._cached_selection: Any = None
+        self._run_context = getattr(workflow, "_active_run_context", None)
 
     @property
     def skipped(self) -> bool:
@@ -649,7 +651,13 @@ class NodeStep:
         # Reuse cache result if already checked by prepare() / cached
         self._ensure_cache_checked()
         if self._cached_df is not None:
-            self._df = self._cached_df
+            from bioimageflow.row_relation import ResultRelation
+            relation = None if self._cached_selection is None else ResultRelation.from_dict(self._cached_selection.manifest.row_relation)
+            self._df = self._engine._bind_provider_groups(self._node, self._cached_df, self._workflow,
+                relation=relation, context=self._run_context)
+            if self._cached_selection is not None and self._run_context is not None and self._run_context.terminal_status is None:
+                from dataclasses import replace
+                self._engine._pin_selected_result(self._node, replace(self._cached_selection, dataframe=self._df))
             assert self._sig_hash is not None
             result_key = self._engine._node_result_key(self._node, self._sig_hash)
             self._engine._write_run_node_view(
@@ -664,7 +672,7 @@ class NodeStep:
                     self._node.name,
                     "cached",
                     result_key=result_key,
-                    record_id=self._engine._pinned_record_id(self._node),
+                    record_id=None if self._cached_selection is None else self._cached_selection.record_id,
                 )
             from .node_execution import _ProviderExecutionResult
 
@@ -674,7 +682,7 @@ class NodeStep:
                 _ProviderExecutionResult(
                     self._df,
                     self._sig_hash,
-                    selection=self._engine._selected_result(self._node),
+                    selection=self._cached_selection,
                 ),
             )
             self._executed = True
@@ -702,6 +710,7 @@ class NodeStep:
         if self._cache_checked:
             return
         self._cache_checked = True
+        self._engine._adopt_node_inputs(self._node)
         cached_df, sig_hash = self._engine._check_node_cache(
             self._node,
             self._results,
@@ -709,5 +718,6 @@ class NodeStep:
             self._workflow,
         )
         self._cached_df = cached_df
+        self._cached_selection = self._engine._selected_result(self._node)
         if sig_hash is not None:
             self._sig_hash = sig_hash

@@ -373,3 +373,39 @@ def test_recreate_removes_incomplete_managed_target_and_creates_missing_target(
     assert public.replace_existing == [False, False, False]
     assert manager.get_or_create(EnvironmentSpec(name="other", dependencies={"python": "3.11"})) is other
     assert other.close_count == 0
+
+
+def test_explicit_idle_retirement_keeps_active_and_failed_close_state_for_retry() -> None:
+    from wetlands import ExecutionState
+
+    manager, public = _generation_runtime_manager()
+    spec = EnvironmentSpec(name="selected", dependencies={"python": "3.11"})
+    pool = manager.get_or_create(spec)
+    other = manager.get_or_create(EnvironmentSpec(name="other", dependencies={"python": "3.11"}))
+    task = SimpleNamespace(state=ExecutionState.RUNNING)
+    manager._processing_tasks[spec.name] = [task]
+    class Grant:
+        drain_count = 0
+        def drained(self):
+            self.drain_count += 1
+    grant = Grant()
+    manager._shared_memory_grants[spec.name] = [grant]
+    with pytest.raises(RuntimeError, match="active"):
+        manager.retire_idle(spec.name)
+    assert pool.close_count == grant.drain_count == 0
+    task.state = ExecutionState.COMPLETED
+    failure = RuntimeError("physical retirement failed")
+    pool.close_failure = failure
+    with pytest.raises(RuntimeError) as raised:
+        manager.retire_idle(spec.name)
+    assert raised.value is failure
+    assert manager._pools[spec.name] is pool
+    assert manager._processing_tasks[spec.name] == [task]
+    assert grant.drain_count == 0 and other.close_count == 0
+    pool.close_failure = None
+    assert manager.retire_idle(spec.name)
+    assert pool.close_count == 2 and grant.drain_count == 1
+    assert spec.name not in manager._processing_tasks
+    assert not manager.retire_idle(spec.name)
+    assert manager.get_or_create(EnvironmentSpec(name="other", dependencies={"python": "3.11"})) is other
+    assert public.remove_calls == []

@@ -558,7 +558,19 @@ def _rehydrate_public_return(
                 asset_root, manifest, storage=storage, record_assets=record_assets,
             )
         frames = [result] if isinstance(result, pd.DataFrame) else list(result.values())
-        scope.accept_result([frame.to_numpy(dtype=object).tolist() for frame in frames])
+        from bioimageflow.result_groups import map_shared_values as publish_frame
+        from bioimageflow.result_groups import bind_result_group
+        from bioimageflow.engine.shared_arrays import references
+        frame_values = {str(position): {column: list(frame[column].array) for column in frame.columns
+            if any(tuple(references(cell)) for cell in frame[column].array)} for position, frame in enumerate(frames)}
+        accepted = scope.accept_result(frame_values)
+        sealed = [publish_frame(frame, lambda _values, position=position: accepted[str(position)])
+                  for position, frame in enumerate(frames)]
+        if isinstance(result, pd.DataFrame):
+            result = sealed[0]
+        else:
+            result = dict(zip(result, sealed, strict=True))
+        result, _group = bind_result_group(result, node_name="return", group_id=scope.scope_id)
         scope.discard_unreturned()
         return result
     except BaseException:

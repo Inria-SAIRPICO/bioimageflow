@@ -12,6 +12,10 @@ from bioimageflow.workflow import (
     InvalidatedSelection as InvalidatedSelection,
     OutputView as OutputView,
 )
+from bioimageflow.result_groups import (
+    ResultGroup as ResultGroup,
+    result_groups as result_groups,
+)
 from bioimageflow.storage import (
     OutputViewerMetadata as OutputViewerMetadata,
     OutputViewCapability as OutputViewCapability,
@@ -256,6 +260,7 @@ __all__ = [
     "RemoteSubmissionUncertainError",
     "RemoteWorkflowRun",
     "ResourceLifetime",
+    "ResultGroup",
     "RetryInvalidation",
     "RunNodeResult",
     "RunRetryPlan",
@@ -312,6 +317,7 @@ __all__ = [
     "plan_distributed_execution",
     "prepare_remote_submission",
     "require_tool_packages",
+    "result_groups",
     "serialize_constant",
     "serialize_image_spec",
     "serialize_input_schema",

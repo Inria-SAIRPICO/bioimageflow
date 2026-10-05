@@ -90,6 +90,14 @@ class SharedArray:
     scope_id: str
     _owner: Any = field(default=None, compare=False, hash=False, repr=False)
 
+    _lease: Any = field(default=None, compare=False, hash=False, repr=False)
+    _group: Any = field(default=None, compare=False, hash=False, repr=False)
+
+    @property
+    def bound_group(self) -> Any:
+        """The local exact result group, absent from portable values."""
+        return self._group
+
     @property
     def bound_owner(self) -> Any:
         """The explicitly admitted local context, or None after pure decoding."""

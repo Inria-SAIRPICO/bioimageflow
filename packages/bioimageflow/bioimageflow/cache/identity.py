@@ -58,12 +58,10 @@ def deterministic_serialize(obj: Any) -> str:
         if isinstance(o, Enum):
             return o.value
         if isinstance(o, SharedArray):
-            return {
-                "name": o.name,
-                "shape": o.shape,
-                "dtype": o.dtype,
-                "scope_id": o.scope_id,
-            }
+            owner = o.bound_owner
+            if owner is None:
+                raise ValueError("Shared cache identity requires an admitted owner")
+            return {"kind": "shared_array", **owner.content_identity(o)}
         if hasattr(o, "__dataclass_fields__"):
             return {k: getattr(o, k) for k in o.__dataclass_fields__}
         raise TypeError(

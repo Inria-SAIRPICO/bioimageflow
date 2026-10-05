@@ -244,15 +244,21 @@ def _rehydrate_processing_assets(
                 shared_array_columns,
                 outputs,
             )
-        scope.accept_result(
+        accepted = scope.accept_result(
             {
                 column: hydrated[column].tolist()
                 for column in shared_array_columns
                 if column in hydrated.columns
             }
         )
+        result = pd.DataFrame(hydrated, copy=False)
+        for column, values in accepted.items():
+            result[column] = pd.Series(values, index=hydrated.index, dtype=object)
+        # Retain before settling the child namespace; callers can discover/release it.
+        from bioimageflow.result_groups import bind_result_group
+        result, _group = bind_result_group(result, node_name="cache", group_id=scope.scope_id)
         scope.discard_unreturned()
-        return hydrated
+        return result
     except BaseException:
         scope.close()
         raise

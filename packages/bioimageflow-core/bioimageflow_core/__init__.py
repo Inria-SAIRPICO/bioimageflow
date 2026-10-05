@@ -40,6 +40,7 @@ from bioimageflow_core.arguments import (
 )
 from bioimageflow_core.shared_memory import (
     CleanupStatus as CleanupStatus,
+    SharedArrayLease as SharedArrayLease,
     SharedMemoryContext as SharedMemoryContext,
     WorkerGrant as WorkerGrant,
     collect_input_scopes as collect_input_scopes,
@@ -81,6 +82,7 @@ __all__ = [
     "BaseTool",
     "Category",
     "CleanupStatus",
+    "SharedArrayLease",
     "Connectable",
     "ConsumedRow",
     "EnvironmentMismatchError",

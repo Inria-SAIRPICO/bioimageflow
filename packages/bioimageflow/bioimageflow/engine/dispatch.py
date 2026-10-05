@@ -154,7 +154,7 @@ class _DispatchMixin:
         borrowed = scope.borrowed()
         try:
             with borrowed.activate():
-                arguments, batch_values, reference_values = borrowed.bind_value(payload_values)
+                arguments, batch_values, reference_values = borrowed.bind_value(scope.inputs)
                 bound_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=tuple(ReferenceRow(row.position, row.row_index, values) for row, values in zip(batch_context.reference_rows, reference_values, strict=True)))
                 outputs = self._dispatch_direct_bound(
                     tool, arguments, workflow, node_name, has_batch, row_contexts, bound_context,
@@ -299,7 +299,11 @@ class _DispatchMixin:
                 )
                 scope = SharedTaskScope(workflow.shared_memory_context, invocation_id, [arguments_dicts, invocation.batch_arguments, [row.arguments for row in invocation.reference_rows]])
                 scopes.append(scope)
-                invocation = replace(invocation, shared_memory_context=scope.wire)
+                rows_values, batch_values, reference_values = scope.inputs
+                invocation = replace(invocation, shared_memory_context=scope.wire,
+                    rows=tuple(replace(row, arguments=values) for row, values in zip(invocation.rows, rows_values, strict=True)),
+                    batch_arguments=batch_values,
+                    reference_rows=tuple(ReferenceRow(row.position, row.row_index, values) for row, values in zip(invocation.reference_rows, reference_values, strict=True)))
                 payload = encode_processing_task(invocation)
                 handed_off.add(id(scope))
                 task = self._env_manager.submit_processing_task(
@@ -384,7 +388,7 @@ class _DispatchMixin:
                     [row.arguments for row in invocation.rows],
                 )
                 scopes.append(scope)
-                invocations[index] = replace(invocation, shared_memory_context=scope.wire)
+                invocations[index] = replace(invocation, shared_memory_context=scope.wire, rows=tuple(replace(row, arguments=values) for row, values in zip(invocation.rows, scope.inputs, strict=True)))
             payloads = [encode_processing_task(invocation) for invocation in invocations]
             selected_resources = (
                 resources or getattr(tool, "resources", None) or ResourceSpec()

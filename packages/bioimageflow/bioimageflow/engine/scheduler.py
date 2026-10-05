@@ -152,6 +152,7 @@ class DefaultEngine(
         self._cache_hit_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
         self._closed = False
+        self._close_requested = False
         self._execution_active = False
         self._compiled_ordinals: dict[Node, int] = {}
         self._node_cache_hits: dict[Node, bool] = {}
@@ -185,12 +186,12 @@ class DefaultEngine(
 
     def _ensure_open(self) -> None:
         with self._lifecycle_lock:
-            if self._closed:
+            if self._close_requested:
                 raise RuntimeError("This execution engine is closed.")
 
     def _begin_execution(self) -> None:
         with self._lifecycle_lock:
-            if self._closed:
+            if self._close_requested:
                 raise RuntimeError("This execution engine is closed.")
             if self._execution_active:
                 raise RuntimeError(
@@ -204,6 +205,9 @@ class DefaultEngine(
     def _end_execution(self) -> None:
         with self._lifecycle_lock:
             self._execution_active = False
+            with self._cache_hit_lock:
+                self._node_selected_results.clear()
+                self._node_result_relations.clear()
 
     def _is_cancellation_requested(self, workflow: Any) -> bool:
         external = self._external_cancellation_requested
@@ -243,8 +247,9 @@ class DefaultEngine(
         with self._lifecycle_lock:
             if self._closed:
                 return
-            self._closed = True
+            self._close_requested = True
             self._backend.close(self)
+            self._closed = True
 
     def __enter__(self) -> "DefaultEngine":
         """Return an open engine for context-manager use."""

@@ -199,7 +199,8 @@ The public :class:`~bioimageflow.engine.ResourceLifetime` values define ownershi
 - ``"external"`` requires an injected :class:`~bioimageflow.env_manager.WetlandsEnvManager`; neither execution nor engine closure stops that manager.
 
 ``DefaultEngine.close()`` and ``SequentialEngine.close()`` are idempotent.
-A closed engine cannot be executed again.
+A close request refuses new execution immediately; a failed physical close remains retryable and preserves its original exception.
+Only a successful close makes subsequent close calls no-ops.
 ``execute_steps()`` follows the same ownership policy as ``execute()``: execution-owned workers stop when its generator finishes or is closed, while engine-owned workers remain warm.
 
 An application can share a manager across workflow engines:
@@ -265,7 +266,11 @@ Successful public pool close releases captured worker grants; failed close retai
 Task terminal/result notification alone is not a physical release fence.
 Workflow execution/context exit never closes returned-array owners; explicit owner close/release waits for existing mapped views and admitted workers.
 
-Accepted S target: expose an accessible public cleanup owner and an exact result/allocation-group release boundary.
-Discarded normal results need bounded cleanup, including safe idle/quota-pressure physical pool retirement when retained grants prevent reclamation.
+Use ``bioimageflow.result_groups(value)`` to capture exact returned-array group handles.
+``group.release()`` refuses new opens through that group's descriptors and reports pending views or physical grants; another group's lease remains valid.
+Returned descriptors pin their group; ordinary result discard releases that exact group without closing the whole shared owner.
+``Workflow.last_execution_context`` exposes the latest admitted context and weakly observes its live groups; a retained context does not retain returned arrays.
+``WetlandsEnvManager.retire_idle(name)`` explicitly closes one pool after tracked tasks become terminal, then drains its grants.
+An active task refuses retirement; a failed physical close propagates its original error and retains pool/task/grant ownership for retry.
+The broader automatic idle/quota-pressure scheduler and whole-DataFrame sealing remain accepted targets for later increments.
 Refuse finite-budget exhaustion if safe reclamation cannot complete; never invalidate live views or release unrelated allocations.
-These obligations are T/C checks, not a claim that the present candidate already supplies a complete result-group API.

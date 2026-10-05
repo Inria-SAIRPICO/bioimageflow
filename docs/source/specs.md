@@ -2587,7 +2587,7 @@ Mapped descendants inherit their admitted input domain, including aggregate-deri
 Alignment reads the pinned/live admitted relation, never DataFrame attributes or a later current-pointer lookup; aggregate and observation domains require an explicit merge such as CrossJoin, even if coarse graph ancestry overlaps.
 An explicit CrossJoin combines a selected model/aggregate record with training images or a different prediction dataset; the model remains one selected record and consumer rows are the explicitly requested Cartesian product.
 DataFrame transforms/explicit merges may define a new domain with conservative whole-input selected-record association; arbitrary custom index equality or reset ordinals do not prove exact row lineage.
-These relation guarantees do not seal mutable DataFrames or published numeric backing; accepted-value immutability and exact group release remain separate ownership requirements.
+These relation guarantees are separate from shared-array publication sealing and exact group release in §8; arbitrary mutable DataFrame contents are not sealed.
 
 - **No column carry-forward (ProcessingTool):** A ProcessingTool's output DataFrame contains **only** the columns declared in its `Outputs` class, plus the row index. Upstream columns are not carried forward. Downstream tools that need upstream data reference the originating node directly (e.g., `raw["path"]`). This makes output schemas deterministic — a node's output depends only on its own `Outputs` declaration, never on what happens upstream.
 - **DataFrameTool output:** A DataFrameTool's output DataFrame is whatever `transform()` returns. The tool author decides which columns to include. This is where intentional carry-forward happens — tools like `FilterRows` naturally preserve all input columns, while tools like `CountLabelOverlaps` may produce entirely new schemas.
@@ -3036,25 +3036,39 @@ The controller precreates one task output namespace and grants access to explici
 The worker borrows those descriptors and has allocation/read access but no deletion ownership.
 Direct processing uses the same admitted borrowed-context semantics; DataFrame execution and cache/return hydration allocate in separately owned groups.
 The pure typed decoder never attaches or transfers ownership.
-Accepted results regain a strong local owner binding that is excluded from reference equality, cache identity and wire data; input pass-through preserves its original exact owner.
+Accepted producer arrays are published once into independent sealed backing before scientific/cache acceptance; retained writable producer mappings cannot mutate that published value.
+Already sealed pass-through values keep the same physical locator and exact original bound owner without another byte copy.
+Local per-group descriptor projections can be distinct Python objects while retaining identical resource identity; owner, lease and group bindings are excluded from equality, scientific cache identity and wire data.
 A Workflow lazily retains its owner and may receive `shared_memory_context=` explicitly; a `WorkflowExecutionContext` can provide the same captured owner but cannot retarget an existing Workflow owner.
 Temporary parent Workflows inherit that owner, and returned DataFrames keep it reachable through their references after Workflow collection.
 Workflow execution, context-manager exit, result finalization, cache completion and engine cleanup never automatically close returned-array owners.
 
-`owner.close()`, `owner.release(ref)` and `owner.status()` expose immutable `CleanupStatus(state, pending_readers, pending_grants, pending_files, errors)`.
+`owner.close()`, `owner.release(ref)` and `owner.status()` expose immutable `CleanupStatus(state, pending_readers, pending_grants, pending_files, errors, pending_leases)`.
 Explicit close/release refuses new controller allocation/open; existing views and already admitted worker grants remain usable until they physically drain.
 `WorkerGrant.drained()` is idempotent and is called only after local execution physically returns or the owning public worker pool successfully closes, never merely on a task's result/terminal status.
 A failed/uncertain pool close retains the pool and grants for retry; cleanup remains pending and does not advertise reclaimed storage.
 Windows deletion restrictions and mapped-handle/namespace errors remain pending with explicit errors until a later status/close retry succeeds.
-Garbage collection never initiates release of an accepted array owner; final-reader drain may finish an already explicit pending release.
+Ordinary loss of the final returned reference to a group releases only that group’s exact allocation leases.
+It never closes the whole owner or unrelated groups; retained descriptors and mapped views remain independent pins, and final-reader drain may finish a pending release.
+Weak context bookkeeping never retains discarded result handles or frames.
+Successful terminal finalization drops captured executable bindings and observer callbacks while preserving immutable outcome/status metadata and detached exact return routes/storage address for later export; deferred or failed finalization keeps its retry authority.
 No private tracker manipulation is used.
 
-**Accepted target — S10:** Returned results expose an accessible cleanup owner and an exact result/allocation-group release boundary; no new method signature is prescribed here.
+The public `result_groups(value)` discovers exact `ResultGroup` handles from actual returned SharedArray bindings, without using DataFrame attrs, a global registry or a moving latest-result pointer.
+A caller-provided `WorkflowExecutionContext.result_groups` weakly observes that execution’s live groups; `Workflow.last_execution_context` is a context/status convenience, never the authority for a previously returned result.
+Each handle captures provider/group identity and consumed association and exposes `release()`, `status()` and `released`.
+A group contains allocation-lease metadata, not strong reference objects; returned reference descriptors pin the handle without an ownership cycle.
+Group status counts each physical allocation once and each owner-wide physical grant once; grants conservatively retain allocations across that owner’s scopes.
+Failed group admission cancels only its uncommitted retentions, preserving preexisting accepted backing rather than requesting its release.
+Releasing one group refuses new opens/grants through its descriptors, while another group’s projection of the same allocation and existing views stay admitted.
+Array-free values expose no shared-array group, and foreign/unaccepted group bindings refuse discovery.
 Accepted or borrowed scientific input allocations are immutable; tools needing mutable work allocate independent outputs.
 Normal success with discarded results has a bounded cleanup path as well as failed/rejected/unreturned work.
 A reusable pool may retain physical grants, so idle or quota-pressure retirement must close the owning pool safely before reclaiming those groups, without invalidating live views or releasing unrelated allocations.
 Finite quota admission refuses clearly if safe retirement cannot reclaim enough; lexical unbinding, task completion and Workflow collection are not permission to close an accepted owner.
-These result-group and normal-run obligations require T/C verification; earlier targeted mmap proofs do not establish their complete implementation.
+This increment implements shared-array sealing and exact group leases; it does not seal arbitrary DataFrame contents or certify every support/OS capability.
+The public manager `retire_idle(env_name)` attempts physical close only for an idle selected pool; a close failure preserves its pool, task and grant ownership for retry.
+Automatic quota-pressure pool scheduling and unrelated lifecycle obligations remain separate from explicit idle retirement.
 
 Physical worker drain releases its grant independently of controller result disposition.
 Pending outputs remain until the controller accepts or rejects them, even if the pool has already closed.

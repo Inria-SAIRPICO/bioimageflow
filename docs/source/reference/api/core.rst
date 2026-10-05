@@ -96,4 +96,4 @@ Shared-array ownership
 ----------------------
 
 .. automodule:: bioimageflow_core.shared_memory
-   :members: SharedMemoryContext, CleanupStatus, WorkerGrant, collect_input_scopes, validate_scope_descriptor
+   :members: SharedMemoryContext, SharedArrayLease, CleanupStatus, WorkerGrant, collect_input_scopes, validate_scope_descriptor

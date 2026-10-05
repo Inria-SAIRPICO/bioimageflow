@@ -6,6 +6,12 @@ import re
 import threading
 import uuid
 import logging
+import weakref
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bioimageflow.result_groups import ResultGroup
+    from bioimageflow.launcher.return_routes import ReturnRoutePlan
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +80,26 @@ class WorkflowExecutionContext:
         self._execution_outcomes: dict[str, ExecutionProviderOutcome] = {}
         self._launcher_storage_path: Path | None = None
         self._result_export_digest: str | None = None
+        self._attached_storage_path: Path | None = None
+        self._attached_provider_routes: ReturnRoutePlan | None = None
+        self._result_groups: dict[str, weakref.ReferenceType[ResultGroup]] = {}
+
+    @property
+    def result_groups(self) -> tuple[ResultGroup, ...]:
+        """Captured live groups, weakly observed without retaining result data."""
+        with self._lock:
+            live = {key: ref for key, ref in self._result_groups.items() if ref() is not None}
+            self._result_groups = live
+            return tuple(group for ref in live.values() if (group := ref()) is not None)
+
+    def _register_result_group(self, group: ResultGroup) -> None:
+        """Observe an admitted provider group without pinning it past discard."""
+        with self._lock:
+            existing = self._result_groups.get(group.group_id)
+            captured = None if existing is None else existing()
+            if captured is not None and captured is not group:
+                raise RuntimeError("Conflicting captured result group identity")
+            self._result_groups[group.group_id] = weakref.ref(group)
 
     @property
     def cancel_requested(self) -> bool:
@@ -316,6 +342,18 @@ class WorkflowExecutionContext:
             if status == "succeeded":
                 assert callback is not None
                 callback()
+                if hasattr(self._binding, "storage_path"):
+                    from types import MappingProxyType
+                    from bioimageflow.launcher.inputs import LoadedInvocation
+                    from bioimageflow.launcher.return_routes import build_return_provider_routes
+                    invocation = LoadedInvocation(
+                        variant="targets", inputs=MappingProxyType({}),
+                        targets=self._target_nodes, outputs=(),
+                    )
+                    self._attached_provider_routes = build_return_provider_routes(
+                        self._binding, invocation, self.execution_outcomes,
+                    )
+                    self._attached_storage_path = Path(getattr(self._binding, "storage_path"))
             else:
                 assert callback is not None
                 assert error is not None
@@ -327,3 +365,7 @@ class WorkflowExecutionContext:
         else:
             with self._lock:
                 self._state = status
+                self._binding = None
+                self._success_callback = None
+                self._failure_callback = None
+                self._cancel_callbacks.clear()

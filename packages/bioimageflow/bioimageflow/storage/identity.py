@@ -186,6 +186,11 @@ def _datetime_payload(value: datetime | pd.Timestamp) -> dict[str, str]:
 
 
 def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -> Any:
+    from bioimageflow_core import SharedArray
+    if isinstance(value, SharedArray):
+        if value.bound_owner is None:
+            raise ValueError("Shared dataframe identity requires an admitted owner")
+        return {"kind": "shared_array", **value.bound_owner.content_identity(value)}
     if hasattr(value, "item"):
         value = value.item()
     if _is_missing(value):

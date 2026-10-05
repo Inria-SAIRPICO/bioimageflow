@@ -109,6 +109,8 @@ def _bare_manager(
     manager._pools = dict(envs or {})
     manager._pool_configs = {name: (1, None) for name in manager._pools}
     manager._specs = {}
+    manager._shared_memory_grants = {}
+    manager._processing_tasks = {}
     manager._lock = threading.RLock()
     return manager
 
@@ -273,8 +275,11 @@ def test_manager_stop_and_status_introspection() -> None:
     manager.shutdown_all()
     manager.shutdown_all()
 
+    assert manager.running_environments() == ("zeta",)
+    assert second.close_calls == 2
+    second.fail_on_exit = False
+    assert manager.retire_idle("zeta")
     assert manager.running_environments() == ()
-    assert second.close_calls == 1
 
 
 def test_sequential_engine_honors_engine_lifetime() -> None:
@@ -332,3 +337,27 @@ def test_workflow_factory_injects_external_manager(tmp_path) -> None:
     assert type(engine) is DefaultEngine
     assert engine.environment_manager is manager
     assert manager.shutdown_calls == 0
+
+
+def test_failed_engine_close_preserves_original_error_and_allows_retry() -> None:
+    failure = RuntimeError("physical close still pending")
+
+    class RetryManager(_TrackingManager):
+        fail = True
+
+        def shutdown_all(self) -> None:
+            super().shutdown_all()
+            if self.fail:
+                raise failure
+
+    manager = RetryManager()
+    engine = _HarnessEngine(manager, lifetime="engine")
+    with pytest.raises(RuntimeError) as raised:
+        engine.close()
+    assert raised.value is failure
+    assert manager.shutdown_calls == 1
+    manager.fail = False
+    engine.close()
+    assert manager.shutdown_calls == 2
+    engine.close()
+    assert manager.shutdown_calls == 2

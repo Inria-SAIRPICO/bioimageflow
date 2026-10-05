@@ -329,3 +329,27 @@ def test_remote_log_pages_hold_the_first_page_snapshot(tmp_path: Path) -> None:
     assert second["snapshot_size"] == 3
     assert second["eof"] is True
     assert second["next_offset"] == 3
+
+
+def test_attached_export_keeps_exact_routes_after_later_execution(tmp_path: Path) -> None:
+    from bioimageflow import result_groups
+    from bioimageflow_core.shm import open_shared_array
+    from tests.testkit.runtime_cache import SourceSharedMemoryWriter
+
+    with Workflow(storage_path=tmp_path / "storage", engine="direct") as workflow:
+        node = SourceSharedMemoryWriter()(value=4)
+    first_context = WorkflowExecutionContext()
+    first = workflow.compute(node, run_context=first_context)
+    captured = first_context.execution_outcomes
+    second = workflow.compute(SourceSharedMemoryWriter()(value=99, name="later"))
+    assert workflow.last_execution_context is not first_context
+    exported = first_context.export_result(first, destination=tmp_path / "old-result")
+    assert first_context.execution_outcomes == captured
+    with open_shared_array(exported.at["0", "result"]) as pixels:
+        assert pixels.tolist() == [[4, 4], [4, 4]]
+        assert not pixels.flags.writeable
+    del pixels
+    for value in (first, second, exported):
+        for group in result_groups(value):
+            group.release()
+    workflow.shared_memory_context.close()

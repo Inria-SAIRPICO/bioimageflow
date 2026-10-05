@@ -12,7 +12,8 @@ A first-valid loser consumes the selected winner; linked views are read-only pro
 Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address once through `Storage.load_record(result_key, record_id)`, which returns the admitted manifest, dataframe and record directory.
 This public exact-record admission validates path containment, Parquet transport and logical identity, declared assets and the result relation together, reading the Parquet file once; manifest/dataframe accessors use the same admission boundary.
 Progress, run views, provider outcomes, downstream identity and export use that captured selection; a later current-pointer change affects a later selection, not the provenance of an already consumed frame.
-Manifest inspection returns detached metadata; this binding does not seal mutable DataFrame/array contents or establish the separately required accepted-resource access and cleanup policies.
+Manifest inspection returns detached metadata.
+Accepted shared-array values use an independent sealed backing and exact group leases; the mutable DataFrame container has a separate, still-pending sealing contract.
 Automatic human-view export warns on projection failure while explicit export is strict; neither may rewrite scientific cache identity.
 
 ## Design Goals
@@ -1123,7 +1124,10 @@ For example:
 }
 ```
 
-Cache hydration recreates a fresh controller-owned numeric file/mmap allocation group from durable `.npy` assets and binds returned `SharedArray` references to that owner.
+Cache hydration recreates a fresh sealed controller-owned allocation group from validated durable `.npy` assets and binds returned `SharedArray` references to exact group leases before settling the child namespace.
+The same dtype, shape, logical digest, transport digest, assets and selected record authority remain validated.
+Array execution input identity uses the content digest of the same admitted sealed snapshot handed to the task; mutable planning previews read current bytes without allocating backing and do not promise execution-time stability.
+Already accepted inputs preserve their backing and owner; repeated equal producer bytes produce equal semantic keys, while changed producer bytes require a new snapshot and key.
 Allocation tokens, scope roots and handles are runtime state, not result-key or record-ID material.
 Failure retires only newly hydrated allocations after their readers/grants drain; durable records and unrelated input allocations remain untouched.
 

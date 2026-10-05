@@ -25,4 +25,12 @@ def load_image(source: Any, *, file_reader: Callable[[Path], Any]) -> Generator[
 
 def save_image(destination: Union[str, Path], data: Any, *, file_writer: Callable[[Path, Any], None]) -> None:
     """Save image data to disk using the provided writer."""
-    file_writer(Path(destination), data)
+    path = Path(destination)
+    try:
+        mode = path.stat().st_mode  # follows SDK aliases to the actual backing inode
+    except FileNotFoundError:
+        pass
+    else:
+        if not mode & 0o222:
+            raise PermissionError("SDK image destination is read-only")
+    file_writer(path, data)

@@ -1,5 +1,6 @@
 """Contained NPY backing and finite cross-process allocation reservations."""
 
+import hashlib
 import io
 import json
 import math
@@ -205,9 +206,127 @@ def create(descriptor: dict[str, Any], name: str, array: Any) -> None:
         raise
 
 
-def map_array(descriptor: dict[str, Any], ref: Any) -> tuple[Any, mmap.mmap]:
+def _sealed_marker(descriptor: dict[str, Any], name: str) -> Path:
+    return Path(descriptor["root"]) / ("." + token(name) + ".sealed.json")
+
+
+def _seal_record(descriptor: dict[str, Any], name: str) -> Any:
+    try:
+        with _open(_sealed_marker(descriptor, name), os.O_RDONLY,
+                   descriptor["root_identity"]) as handle:
+            metadata_budget = 6 * descriptor["max_header_bytes"] + 4096
+            payload = handle.read(metadata_budget + 1)
+            if len(payload) > metadata_budget:
+                raise ValueError("Sealed backing marker exceeds its metadata budget")
+            record = json.loads(payload)
+            if (not isinstance(record, dict) or set(record) != {"identity", "sha256", "shape", "dtype"}
+                    or not isinstance(record["identity"], list) or len(record["identity"]) != 3
+                    or any(type(value) is not int or value < 0 for value in record["identity"])
+                    or not isinstance(record["sha256"], str)
+                    or not re.fullmatch(r"[a-f0-9]{64}", record["sha256"])
+                    or not isinstance(record["shape"], list)
+                    or any(type(n) is not int or n < 0 for n in record["shape"])
+                    or not isinstance(record["dtype"], str)):
+                raise ValueError("Invalid sealed backing identity")
+            return record
+    except FileNotFoundError:
+        return None
+
+
+def _require_sealed_identity(record: Any, value: Any) -> None:
+    if record["identity"] != [value.st_dev, value.st_ino, value.st_size] or value.st_mode & 0o222:
+        raise ValueError("Sealed backing identity or access policy changed")
+
+
+def sealed(descriptor: dict[str, Any], ref: Any) -> bool:
+    """Admit the persisted immutable backing identity, never a descriptor flag."""
+    verify(descriptor)
+    record = _seal_record(descriptor, ref.name)
+    if record is None:
+        return False
+    if record["shape"] != list(ref.shape) or record["dtype"] != ref.dtype:
+        raise ValueError("Sealed metadata does not match its reference")
+    path = Path(descriptor["root"]) / (token(ref.name) + ".npy")
+    with _open(path, os.O_RDONLY, descriptor["root_identity"]) as handle:
+        _require_sealed_identity(record, os.fstat(handle.fileno()))
+    return True
+
+
+def seal(descriptor: dict[str, Any], ref: Any) -> None:
+    """Publish read-only access for a newly independent controller allocation."""
+    verify(descriptor)
+    name = token(ref.name)
+    path = Path(descriptor["root"]) / (name + ".npy")
+    with _open(path, os.O_RDWR, descriptor["root_identity"]) as handle:
+        value = os.fstat(handle.fileno())
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+        if hasattr(os, "fchmod"):
+            os.fchmod(handle.fileno(), 0o400)
+        else:
+            os.chmod(path, 0o400)
+        with _open(_sealed_marker(descriptor, name), os.O_RDWR | os.O_CREAT | os.O_EXCL,
+                   descriptor["root_identity"]) as marker:
+            marker.write(json.dumps({"identity": [value.st_dev, value.st_ino, value.st_size],
+                                     "sha256": digest.hexdigest(), "shape": list(ref.shape),
+                                     "dtype": ref.dtype}).encode())
+            marker.flush()
+
+
+def content_identity(descriptor: dict[str, Any], ref: Any) -> dict[str, Any]:
+    """Read an accepted digest, or preview current mutable bytes without publishing."""
+    verify(descriptor)
+    record = _seal_record(descriptor, ref.name)
+    path = Path(descriptor["root"]) / (token(ref.name) + ".npy")
+    with _open(path, os.O_RDONLY, descriptor["root_identity"]) as handle:
+        if record is not None:
+            _require_sealed_identity(record, os.fstat(handle.fileno()))
+            if record["shape"] != list(ref.shape) or record["dtype"] != ref.dtype:
+                raise ValueError("Sealed metadata does not match its reference")
+            digest = record["sha256"]
+        else:
+            with quota(descriptor) as allocations:
+                size = allocations.get(descriptor["scope_id"] + ":" + ref.name)
+            _layout(handle, descriptor, ref, size)
+            handle.seek(0)
+            hasher = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(chunk)
+            digest = hasher.hexdigest()
+    return {"shape": list(ref.shape), "dtype": ref.dtype, "sha256": digest}
+
+
+def _layout(handle: Any, descriptor: dict[str, Any], ref: Any, reserved_size: Any) -> tuple[Any, ...]:
     import numpy as np
     expected_dtype = dtype(ref.dtype)
+    if not isinstance(ref.shape, tuple) or any(type(n) is not int or n < 0 for n in ref.shape):
+        raise ValueError("Invalid shared array shape")
+    prefix = handle.read(12)
+    if len(prefix) != 12 or prefix[:8] != b"\x93NUMPY\x02\x00":
+        raise ValueError("Shared backing must use the current NPY2 format")
+    header_size = struct.unpack("<I", prefix[8:])[0]
+    if header_size > descriptor["max_header_bytes"]:
+        raise ValueError("Shared array header exceeds admitted header budget")
+    handle.seek(0)
+    np.lib.format.read_magic(handle)
+    shape, fortran, actual_dtype = np.lib.format.read_array_header_2_0(
+        handle, max_header_size=descriptor["max_header_bytes"]
+    )
+    dtype(actual_dtype)
+    offset = handle.tell()
+    expected_size = offset + math.prod(shape) * actual_dtype.itemsize
+    if shape != ref.shape or actual_dtype != expected_dtype:
+        raise ValueError("Shared array header does not match its reference")
+    if (expected_size != reserved_size or expected_size > descriptor["max_bytes"]
+            or os.fstat(handle.fileno()).st_size != expected_size):
+        raise ValueError("Shared backing size does not match admitted numeric layout")
+    return shape, actual_dtype, offset, fortran
+
+
+def map_array(descriptor: dict[str, Any], ref: Any, *, writable: Any = None) -> tuple[Any, mmap.mmap]:
+    import numpy as np
+    dtype(ref.dtype)
     token(ref.name)
     if not isinstance(ref.shape, tuple) or any(type(n) is not int or n < 0 for n in ref.shape):
         raise ValueError("Invalid shared array shape")
@@ -216,28 +335,17 @@ def map_array(descriptor: dict[str, Any], ref: Any) -> tuple[Any, mmap.mmap]:
         reserved_size = allocations.get(descriptor["scope_id"] + ":" + ref.name)
     if reserved_size is None:
         raise ValueError("Shared backing has no owned allocation reservation")
+    record = _seal_record(descriptor, ref.name)
+    readonly = record is not None
+    if readonly and writable is True:
+        raise PermissionError("Accepted shared backing is read-only")
     path = Path(descriptor["root"]) / (ref.name + ".npy")
-    with _open(path, os.O_RDWR, descriptor["root_identity"]) as handle:
-        prefix = handle.read(12)
-        if len(prefix) != 12 or prefix[:8] != b"\x93NUMPY\x02\x00":
-            raise ValueError("Shared backing must use the current NPY2 format")
-        header_size = struct.unpack("<I", prefix[8:])[0]
-        if header_size > descriptor["max_header_bytes"]:
-            raise ValueError("Shared array header exceeds admitted header budget")
-        handle.seek(0)
-        np.lib.format.read_magic(handle)
-        shape, fortran, actual_dtype = np.lib.format.read_array_header_2_0(
-            handle, max_header_size=descriptor["max_header_bytes"]
-        )
-        dtype(actual_dtype)
-        offset = handle.tell()
-        expected_size = offset + math.prod(shape) * actual_dtype.itemsize
-        if shape != ref.shape or actual_dtype != expected_dtype:
-            raise ValueError("Shared array header does not match its reference")
-        if expected_size != reserved_size or expected_size > descriptor["max_bytes"] or os.fstat(handle.fileno()).st_size != expected_size:
-            raise ValueError("Shared backing size does not match admitted numeric layout")
+    with _open(path, os.O_RDONLY if readonly or writable is False else os.O_RDWR, descriptor["root_identity"]) as handle:
+        if readonly:
+            _require_sealed_identity(record, os.fstat(handle.fileno()))
+        shape, actual_dtype, offset, fortran = _layout(handle, descriptor, ref, reserved_size)
         # Header admission and mapping use this same captured descriptor.
-        mapping = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_WRITE)
+        mapping = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ if readonly or writable is False else mmap.ACCESS_WRITE)
     try:
         array = np.ndarray(shape, dtype=actual_dtype, buffer=mapping, offset=offset,
                            order="F" if fortran else "C")
@@ -258,6 +366,14 @@ def delete(descriptor: dict[str, Any], name: str) -> None:
     if value is not None:
         if not stat.S_ISREG(value.st_mode):
             raise ValueError("Refusing cleanup of substituted shared backing")
+        # Windows cannot unlink a read-only file; only this owning cleanup may restore access.
+        if not value.st_mode & 0o200:
+            os.chmod(path, 0o600)
         path.unlink()
+    marker = _sealed_marker(descriptor, name)
+    if marker.exists() or marker.is_symlink():
+        with _open(marker, os.O_RDONLY, descriptor["root_identity"]):
+            pass
+        marker.unlink()
     with quota(descriptor) as allocations:
         allocations.pop(descriptor["scope_id"] + ":" + name, None)

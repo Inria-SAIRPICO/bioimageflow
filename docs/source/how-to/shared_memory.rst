@@ -2,14 +2,15 @@ Pass Arrays Through Shared Memory
 =================================
 
 BioImageFlow shares numeric arrays through scoped NPY2 file-backed mmap storage.
-Allocation copies data once; subsequent mapped reads use zero-copy NumPy views.
+Allocation copies producer data, and publication makes one independent sealed numeric copy.
+Subsequent accepted reads use read-only zero-copy NumPy views; already sealed pass-through values are not copied again.
 This storage contract does not promise a measured speedup over ordinary files.
 
 Overview
 --------
 
 Mapped numeric backing shares one admitted NPY2 file rather than repeatedly encoding an image format.
-It still uses files and performs an initial copy; zero-copy views do not imply an observed latency gain.
+It uses files, allocation and one publication copy; zero-copy reads do not imply a measured latency gain.
 You can:
 
 1. Write a numpy array to shared memory with
@@ -154,21 +155,55 @@ Workflow/context exit and execution completion do not close returned arrays.
    owner = SharedMemoryContext("./shared-arrays", max_bytes=512 * 1024 * 1024)
    with owner.activate(), create_shared_output(data) as reference:
        pass
-   with open_shared_array(reference) as array:
-       view = array[1:]
+   accepted = owner.publish(reference)  # one independent accepted snapshot
+   with open_shared_array(accepted) as array:
+       view = array[1:]  # read-only zero-copy view
    status = owner.close()  # pending while mapped views or worker grants remain
 
 Explicit ``close()`` or ``release(reference)`` refuses new controller access.
 Already admitted workers and existing base/slice/asarray views retain backing until physical drain.
-``CleanupStatus`` reports pending readers, grants, files and errors; Windows deletion failures stay pending for retry.
+``CleanupStatus`` reports pending readers, grants, leases, files and errors; Windows deletion failures stay pending for retry.
 Workers borrow scopes and never own deletion; public pool close releases grants only after successful physical drain.
 No resource tracker, private unregister or automatic context-exit unlink is used.
-GC does not initiate accepted-result or whole-owner release; final-reader drainage may finish a previously requested explicit cleanup.
+Loss of the final returned reference releases its exact group leases, without closing a whole owner or unrelated results.
+Retained unopened references and mapped views remain pins; final-reader drainage may finish a pending group release.
 Borrowed and accepted scientific inputs are immutable to consumers by contract; allocate a separate work/output value before modifying pixels.
 
-The accepted lifecycle target requires accessible public owner/status information and exact result/group release, including results callers discard between repeated runs.
-Releasing one result must not close unrelated groups.
-A reused worker pool can retain physical grants: idle or quota-pressure retirement must physically drain its pool before reclamation, without forcing live mapped views closed.
-Finite quota exhaustion refuses clearly if enough space cannot safely be reclaimed.
-The exact result/group API and these conformance obligations remain subject to the ordered test and code review; this guide does not invent a cleanup method.
+
+A producer allocation remains writable until it is independently published.
+``publish(reference)`` or recursive ``publish_value(value)`` copies each distinct mutable backing once in that admission and persists its read-only identity and digest.
+Already sealed pass-through references reuse their physical backing and exact bound owner.
+``open_shared_array(accepted, writable=True)`` refuses, and SDK image writers refuse existing canonical/hardlink/symlink aliases whose backing is read-only.
+This does not sandbox arbitrary trusted Python or hostile filesystem replacement.
+``content_identity(reference)`` reads the seal digest without rehashing accepted pixels; an unsealed producer identity is only a current-byte planning preview and cannot prove stability across later writes.
+Actual cached execution publishes inputs before computing its authoritative identity.
+
+Exact returned groups
+---------------------
+
+The ordinary Workflow return remains a pandas DataFrame.
+Use ``result_groups(value)`` on that captured return rather than infer ownership from DataFrame attrs or a latest-result pointer.
+
+.. code-block:: python
+
+   from bioimageflow import result_groups
+
+   groups = result_groups(result)
+   statuses = [group.release() for group in groups]
+   # Existing mapped views may keep a release pending.
+   statuses = [group.status() for group in groups]
+
+Every ``ResultGroup`` exposes captured ``node_name``, ``group_id`` and ``consumed_rows`` metadata plus ``release()``, ``status()`` and ``released``.
+An explicitly retained handle intentionally keeps its leases alive until release or discard.
+A caller-provided ``WorkflowExecutionContext.result_groups`` weakly observes live handles; the context never silently pins discarded result data.
+Array-free results have no shared-array groups; unaccepted or foreign bindings are refused.
+New per-group descriptors preserve the same sealed physical locator and exact original owner, while release of one descriptor’s group leaves another group and existing views usable.
+This preserves resource identity, not Python descriptor-object identity.
+
+A reused worker pool may retain physical grants.
+Call the owning manager’s ``retire_idle(env_name)`` to physically close an idle selected pool before reclamation; a close error retains ownership for explicit retry.
+Never force-close live mapped views or release unrelated environments.
+Finite quota exhaustion still refuses if safe reclamation is unavailable; this does not promise an automatic quota-pressure scheduler.
+Owner-wide physical grant accounting may conservatively delay cleanup behind another task in the same owner.
+Arbitrary DataFrame contents are not sealed by these array/group APIs.
 See :doc:`/specs` §8 for the normative ownership and admission contract.

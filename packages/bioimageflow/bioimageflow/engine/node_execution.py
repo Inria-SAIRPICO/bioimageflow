@@ -69,31 +69,73 @@ class _NodeExecutionMixin:
         workflow: Any,
     ) -> Any:
         from bioimageflow.dataframe_tool import DataFrameTool
+        from bioimageflow.result_groups import map_shared_values as publish_frame
+        import uuid
+
+        self._adopt_node_inputs(node)
+        owner = workflow.shared_memory_context
+        scope = None
+        try:
+            if isinstance(node.tool, DataFrameTool):
+                scope = owner.task_scope("dataframe_" + uuid.uuid4().hex)
+                with scope.activate():
+                    dataframe, signature = self._execute_node_bound(node, results, sig_hashes, workflow)
+                dataframe = publish_frame(dataframe, scope.publish_value)
+            else:
+                with owner.activate():
+                    dataframe, signature = self._execute_node_bound(node, results, sig_hashes, workflow)
+            dataframe = self._bind_provider_groups(node, dataframe, workflow)
+            selection = self._selected_result(node)
+            if selection is not None:
+                self._pin_selected_result(node, replace(selection, dataframe=dataframe))
+            if scope is not None:
+                scope.discard_unreturned()
+            return dataframe, signature
+        except BaseException:
+            if scope is not None:
+                scope.close()
+            raise
+
+    def _adopt_node_inputs(self, node: Node) -> None:
+        """Capture producer bytes once before the execution's first key lookup."""
+        from .shared_arrays import publish_inputs
+        from bioimageflow.result_groups import bind_result_group
+        import uuid
+
+        admitted, _inputs_group = bind_result_group(
+            publish_inputs([node._constant_bindings, node._args]),
+            node_name=node.name, group_id="inputs_" + uuid.uuid4().hex,
+        )
+        node._constant_bindings, captured_args = admitted
+        node._args = list(captured_args)
+
+    def _bind_provider_groups(self, node: Node, dataframe: pd.DataFrame, workflow: Any, *, relation: ResultRelation | None = None, context: Any = None) -> pd.DataFrame:
+        from bioimageflow.result_groups import bind_result_group
         from .shared_arrays import references
         import uuid
 
-        owner = workflow.shared_memory_context
-        if not isinstance(node.tool, DataFrameTool):
-            with owner.activate():
-                return self._execute_node_bound(node, results, sig_hashes, workflow)
-        scope = owner.task_scope("dataframe_" + uuid.uuid4().hex)
-        try:
-            with scope.activate():
-                dataframe, signature = self._execute_node_bound(
-                    node, results, sig_hashes, workflow
-                )
-            scope.accept_result(
-                [
-                    ref
-                    for ref in references(dataframe.to_numpy(dtype=object).tolist())
-                    if ref.scope_id == scope.scope_id
-                ]
-            )
-            scope.discard_unreturned()
-            return dataframe, signature
-        except BaseException:
-            scope.close()
-            raise
+        if not any(tuple(references(cell)) for column in dataframe.columns for cell in dataframe[column].array):
+            return dataframe
+        relation = relation if relation is not None else self._result_relation(node)
+        groups = relation.row_associations if relation is not None else (RowAssociation((), tuple(str(index) for index in dataframe.index)),)
+        result = pd.DataFrame(dataframe, copy=False)
+        positions = {str(index): position for position, index in enumerate(dataframe.index)}
+        context = context if context is not None else getattr(workflow, "_active_run_context", None)
+        for association in groups:
+            selected_positions = [positions[index] for index in association.output_indices]
+            section = pd.DataFrame(dataframe, copy=False).take(selected_positions)
+            pinned, handle = bind_result_group(section, node_name=node.name,
+                group_id=uuid.uuid4().hex, consumed_rows=association.consumed_rows)
+            if handle is None:
+                continue
+            if context is not None:
+                context._register_result_group(handle)
+            for column_position, column in enumerate(dataframe.columns):
+                if any(tuple(references(cell)) for cell in section[column].array):
+                    result[column] = pd.Series(list(result[column].array), index=dataframe.index, dtype=object)
+                    for local_position, output_position in enumerate(selected_positions):
+                        result.iat[output_position, column_position] = pinned.iat[local_position, column_position]
+        return result
 
     def _execute_node_bound(
         self,
@@ -755,5 +797,3 @@ class _NodeExecutionMixin:
             transient_invocation_id=invocation_id if transient else None,
             selection=None if transient else self._selected_result(node),
         )
-
-    # ── Argument resolution ────────────────────────────────────────────

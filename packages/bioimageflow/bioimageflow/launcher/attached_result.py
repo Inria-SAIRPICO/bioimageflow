@@ -5,17 +5,14 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
-from .inputs import LoadedInvocation
 from .result_download import (
     _load_existing_local_result,
     _load_manifest,
     _validate_destination_parent,
     export_local_result,
 )
-from .return_routes import build_return_provider_routes
 from .returns import persist_public_return
 
 
@@ -52,26 +49,16 @@ def _export_attached_result_locked(
         raise RuntimeError("Only a successful attached execution can be exported.")
     if not isinstance(destination, (str, Path)) or not str(destination):
         raise TypeError("destination must be a non-empty path.")
-    workflow = context._binding
-    if workflow is None or not hasattr(workflow, "storage_path"):
-        raise RuntimeError("Execution context has no retained workflow binding.")
-    target_nodes = context._target_nodes
-    if type(target_nodes) is not tuple or any(
-        type(node) is not str or not node for node in target_nodes
-    ):
-        raise RuntimeError("Execution context has no retained target binding.")
-    invocation = LoadedInvocation(
-        variant="targets",
-        inputs=MappingProxyType({}),
-        targets=target_nodes,
-        outputs=(),
-    )
+    storage_path = context._attached_storage_path
+    routes = context._attached_provider_routes
+    if storage_path is None or routes is None:
+        raise RuntimeError("Execution context has no captured result export binding.")
     destination_path = Path(destination).absolute()
     _validate_destination_parent(destination_path)
     expected_digest = context._result_export_digest
     attached_run = _AttachedReturnRun(
         context.run_id,
-        Path(workflow.storage_path),
+        Path(storage_path),
         Path(),
     )
     if destination_path.exists() and expected_digest is not None:
@@ -89,15 +76,11 @@ def _export_attached_result_locked(
     try:
         persist_public_return(
             temporary,
-            workflow.storage_path,
+            storage_path,
             context.run_id,
             value,
             outcomes=context.execution_outcomes,
-            provider_routes=build_return_provider_routes(
-                workflow,
-                invocation,
-                context.execution_outcomes,
-            ),
+            provider_routes=routes,
         )
         attached_run.control_dir = temporary
         result = export_local_result(

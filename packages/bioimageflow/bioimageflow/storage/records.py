@@ -186,6 +186,31 @@ class _ExactRecordsMixin:
                     )
 
     def _rehydrate_record_assets(
+        self, dataframe: pd.DataFrame, record_dir: Path, manifest: RecordManifest, *,
+        path_columns: set[str], shared_array_columns: set[str],
+    ) -> pd.DataFrame:
+        if not shared_array_columns:
+            return self._rehydrate_record_assets_bound(dataframe, record_dir, manifest,
+                path_columns=path_columns, shared_array_columns=shared_array_columns)
+        import uuid
+        from bioimageflow_core import get_shared_memory_context
+        from bioimageflow.result_groups import map_shared_values as publish_frame
+        from bioimageflow.result_groups import bind_result_group
+
+        scope = get_shared_memory_context().task_scope("record_" + uuid.uuid4().hex)
+        try:
+            with scope.activate():
+                hydrated = self._rehydrate_record_assets_bound(dataframe, record_dir, manifest,
+                    path_columns=path_columns, shared_array_columns=shared_array_columns)
+            sealed = publish_frame(hydrated, scope.publish_value)
+            sealed, _group = bind_result_group(sealed, node_name="record", group_id=scope.scope_id)
+            scope.discard_unreturned()
+            return sealed
+        except BaseException:
+            scope.close()
+            raise
+
+    def _rehydrate_record_assets_bound(
         self,
         dataframe: pd.DataFrame,
         record_dir: Path,

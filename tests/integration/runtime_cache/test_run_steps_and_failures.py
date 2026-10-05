@@ -165,3 +165,28 @@ def test_failed_parallel_compute_keeps_successful_sibling_run_view(
         ).read_text()
     )
     assert latest_node["target"] == f"../runs/{run_dir.name}/nodes/{success_name}"
+
+
+def test_cached_shared_step_keeps_exact_group_metadata_after_completion(tmp_path: Path) -> None:
+    from bioimageflow import WorkflowExecutionContext, result_groups
+    from tests.testkit.runtime_cache import SourceSharedMemoryWriter
+    with Workflow(engine="direct", storage_path=tmp_path) as workflow:
+        node = SourceSharedMemoryWriter()(value=4)
+    first = workflow.compute(node)
+    context = WorkflowExecutionContext()
+    steps = workflow.compute_steps(node, run_context=context)
+    step = next(steps)
+    assert step.cached
+    frame = step.execute()
+    handle, = result_groups(frame)
+    assert handle.node_name == node.name
+    assert [(row.position, row.row_index) for row in handle.consumed_rows] == [(0, "0")]
+    assert context.result_groups == (handle,)
+    list(steps)
+    assert step.execute() is frame
+    assert result_groups(frame) == (handle,)
+    assert context.result_groups == (handle,)
+    for value in (first, frame):
+        for group in result_groups(value):
+            group.release()
+    workflow.shared_memory_context.close()
