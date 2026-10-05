@@ -90,6 +90,11 @@ Workflow.export(path: str | Path) -> None
 Hosts choose it when constructing, loading, importing, or editing a workflow.
 There is no default storage location and no separate override parameter.
 Archive import keeps the persistent extraction `destination` independent from runtime `storage_path`.
+The destination must be absent, including an empty directory, and every existing parent must be a real directory.
+Import admits the complete ZIP entry set and JSON definition without executing source code, extracts into a private sibling, then publishes with native exclusive rename.
+A competing destination remains untouched; after publication, tool loading uses the stable final root.
+A later tool-loading failure retains that published definition because imported code may already reference its files.
+JSON and ZIP export finish and close a private sibling file before atomically replacing the requested file; a writing failure preserves the previous requested bytes.
 
 GUI editing sessions follow the same rule:
 

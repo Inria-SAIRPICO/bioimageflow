@@ -1992,6 +1992,10 @@ Workflow.import_archive(path, destination, *, storage_path)
 `storage_path` always means the workflow's runtime root for cache records, provenance, run views, transient workspaces, and materialized outputs.
 It is not an override, has no implicit fallback, and is never serialized into a graph or archive.
 `Workflow.import_archive()` keeps the persistent extraction `destination` separate from runtime `storage_path`; the platform convention is to use `<destination>/results/`.
+Persistent import requires an absent destination; an occupied directory, empty directory or symlink raises `FileExistsError` without overlaying its contents.
+Complete entry and graph/archive-envelope admission precedes extraction into private sibling staging, which is published with native no-replace semantics before loading from the stable final root.
+A publication collision preserves the winner; only owned unpublished staging is retired.
+If loading fails after publication, the published definition remains available rather than being removed as if publication had never occurred.
 
 Ordinary ad hoc graphs still register tools through the workflow context manager.
 Reusable definitions additionally declare symbolic inputs and published outputs:
@@ -3501,7 +3505,9 @@ Executable namespaces for both single-file sources and package bundles distingui
 Direct and managed execution of a captured custom source use that source's admitted content authority; mutable runtime module paths or a newer same-ID source are not its executable identity.
 Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
 Embedded Python remains trusted executable code; contained staging is not a Python sandbox.
-**Accepted target — S11:** Admit the complete outer archive destination and entry set before writes, refuse symlink/traversal/foreign-destination conflicts, and retire only owned partial staging on failure.
+Outer archive entry admission checks the complete member set and workflow JSON/envelope before extraction; malformed later entries cannot leave earlier extracted files.
+Persistent destination publication follows the exclusive owned-staging contract in §4.3 and does not follow preexisting destination ancestors supplied by an occupied extraction tree.
+Graph-level external path references retain their existing reference semantics; they are not archive extraction destinations.
 Captured source roots stay valid for all live compiled owners and relative helper/asset reads; eager staging deletion is not permitted merely because initial import finished.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
@@ -3510,6 +3516,8 @@ JSON export likewise remains an editable graph when no custom sources exist and 
 **Accepted target — S01:** Archive import uses the one current strict envelope and refuses unsupported schemas or undeclared fields; historical conversion is not a current feature requirement.
 Exports never include local viewer environments, selections, paths, discovery/enabled state, credentials, executable install commands, or process state.
 Export serializes the already-materialized graph and never calls a factory again.
+Requested JSON and ZIP definition exports serialize into unique sibling temporary files and completely close them before atomically replacing the requested file.
+A failure before publication preserves the previous requested artifact bytes and propagates the original exception; cleanup is restricted to the owned temporary file.
 
 ### 14.4 Trusted Python loading
 

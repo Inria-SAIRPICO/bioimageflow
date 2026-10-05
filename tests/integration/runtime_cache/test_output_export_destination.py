@@ -279,3 +279,29 @@ def test_replace_requires_explicit_destination(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="requires an explicit"):
         export_outputs(storage_path, replace=True)
+
+
+def test_export_no_replace_preserves_late_winner(tmp_path, monkeypatch):
+    storage, _, _ = _computed_output(tmp_path)
+    target = tmp_path / 'late-export'
+    original = Storage.materialize_latest_outputs
+    winner = {}
+
+    def materialize(self, mode):
+        paths = original(self, mode)
+        target.mkdir()
+        (target / 'sentinel').write_text('foreign winner')
+        winner['inode'] = target.stat().st_ino
+        return paths
+
+    monkeypatch.setattr(Storage, 'materialize_latest_outputs', materialize)
+    error = None
+    try:
+        export_outputs(storage, destination=target, replace=False)
+    except FileExistsError as exc:
+        error = exc
+    observed = {'error': str(error), 'inode': target.stat().st_ino,
+                'sentinel': (target / 'sentinel').read_text() if (target / 'sentinel').exists() else None}
+    assert error is not None, observed
+    assert observed['inode'] == winner['inode'], observed
+    assert observed['sentinel'] == 'foreign winner', observed

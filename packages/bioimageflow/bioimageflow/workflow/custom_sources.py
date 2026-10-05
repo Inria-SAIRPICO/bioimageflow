@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import stat
+
 from dataclasses import dataclass
 from pathlib import PureWindowsPath
 from typing import TYPE_CHECKING
@@ -110,12 +113,57 @@ def _workflow_import_scope(root: Path):
         sys.modules.update(previous_tools_modules)
 
 
+def _archive_definition(data: Any) -> tuple[dict[str, Any], list[Any], Any]:
+    """Parse the portable envelope without executing or materializing sources."""
+    if not isinstance(data, dict):
+        raise TypeError("Workflow definition must be a dictionary.")
+    viewing_requirements = None
+    if data.get("archive_version") == 1:
+        if set(data) != {"archive_version", "workflow", "custom_sources"}:
+            raise ValueError("Malformed version-1 workflow archive envelope.")
+        graph, sources = data["workflow"], data["custom_sources"]
+    elif data.get("archive_version") == 2:
+        if set(data) != {"archive_version", "workflow", "custom_sources", "viewing_requirements"}:
+            raise ValueError("Malformed version-2 workflow archive envelope.")
+        from bioimageflow.viewing import ViewingRequirementsManifest
+
+        viewing_requirements = ViewingRequirementsManifest.from_dict(data["viewing_requirements"])
+        graph, sources = data["workflow"], data["custom_sources"]
+    else:
+        graph, sources = data, []
+    if not isinstance(sources, list):
+        raise ValueError("Workflow archive custom_sources must be an array.")
+    if not isinstance(graph, dict):
+        raise TypeError("Workflow graph must be a dictionary.")
+    return graph, sources, viewing_requirements
+
+
 def _extract_workflow_archive(path: Path, destination: Path) -> None:
+    """Admit every entry and definition before extracting into owned staging."""
+    from .graph_admission import admit_graph
+
     with zipfile.ZipFile(path) as archive:
-        for member in archive.namelist():
-            member_path = Path(member)
-            if member_path.is_absolute() or ".." in member_path.parts:
-                raise ValueError(f"Invalid workflow archive member: {member!r}")
+        entries: dict[str, bool] = {}
+        for entry in archive.infolist():
+            name = _safe_source_path(entry.filename, nested=True)
+            kind = stat.S_IFMT(entry.external_attr >> 16)
+            if kind not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                raise ValueError(f"Invalid workflow archive entry type: {entry.filename!r}")
+            if name in entries:
+                raise ValueError(f"Duplicate workflow archive member: {entry.filename!r}")
+            entries[name] = entry.is_dir()
+        for name, directory in entries.items():
+            if any(entries.get(parent.as_posix()) is False for parent in Path(name).parents if parent != Path('.')):
+                raise ValueError(f"Workflow archive file shadows an ancestor: {name!r}")
+            if directory and name == "workflow.json":
+                raise ValueError("Workflow archive workflow.json must be a file")
+        if entries.get("workflow.json") is not False:
+            raise ValueError("Workflow archive is missing workflow.json")
+        graph, sources, _ = _archive_definition(json.loads(archive.read("workflow.json")))
+        admit_graph(graph)
+        admitted = tuple(_admit_custom_source(source) for source in sources)
+        if len({source.source_id for source in admitted}) != len(admitted):
+            raise ValueError("Custom source IDs must be unique non-empty strings.")
         archive.extractall(destination)
 
 

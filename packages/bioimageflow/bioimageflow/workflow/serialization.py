@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 from .common import (
     Any,
     MISSING,
@@ -264,12 +267,27 @@ class _SerializationMixin:
     def export(self, path: str | Path) -> None:
         """Serialize the workflow to a JSON file or BioImageFlow zip archive."""
         path = Path(path)
-        if path.suffix == ".zip":
-            self._export_archive(path)
-            return
-        data = self.to_dict(include_custom_tools=True)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, default=str))
+        descriptor, filename = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        os.close(descriptor)
+        candidate = Path(filename)
+        try:
+            if path.suffix == ".zip":
+                self._export_archive(candidate)
+            else:
+                data = self.to_dict(include_custom_tools=True)
+                candidate.write_text(json.dumps(data, indent=2, default=str))
+            os.replace(candidate, path)
+        except BaseException as primary:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError as cleanup:
+                add_note = getattr(primary, "add_note", None)
+                if callable(add_note):
+                    add_note(f"Definition staging cleanup failed: {cleanup!r}")
+            raise
 
     def _export_archive(self, path: Path) -> None:
         data = self.to_archive_dict()

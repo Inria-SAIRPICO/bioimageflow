@@ -13,6 +13,9 @@ Local and remote handles use the same destination-shaped API:
 
    exported = run.export_result(downloads / run.id)
 
+The local launcher first publishes its retained public-return snapshot from an owned, validated sibling with native exclusive rename.
+A late empty or foreign ``return/`` directory is preserved and refused; an already complete matching return retains the existing idempotent verification contract.
+
 Local submission builds from retained storage; remote submission downloads through the bounded transport.
 Both write a private sibling, verify the manifest and every entry digest, and atomically rename it into place.
 The destination parent must already be a real non-symlink directory.

@@ -204,7 +204,7 @@ def test_unrecorded_staged_import_member_is_refused_before_publication(tmp_path,
 
 @pytest.mark.parametrize("empty_winner", [True, False], ids=["empty-winner", "foreign-sentinel-winner"])
 def test_atomic_publication_preserves_a_racing_target(tmp_path, monkeypatch, empty_winner):
-    from bioimageflow.installation import publish_installation
+    from bioimageflow.filesystem import publish_no_replace
 
     package = _package(tmp_path)
     target = tmp_path / package / "1.2.3"
@@ -222,9 +222,9 @@ def test_atomic_publication_preserves_a_racing_target(tmp_path, monkeypatch, emp
         winner_identity.append((stat.st_dev, stat.st_ino))
         # Only the race boundary is injected. The real OS exclusive rename
         # primitive runs against the newly occupied destination.
-        publish_installation(stage, destination)
+        publish_no_replace(stage, destination)
     monkeypatch.setattr(tool_loader.subprocess, "run", install)
-    monkeypatch.setattr(tool_loader, "publish_installation", create_winner_then_publish)
+    monkeypatch.setattr(tool_loader, "publish_no_replace", create_winner_then_publish)
     with pytest.raises(FileExistsError):
         ToolRegistry(store_path=tmp_path).install_package(package, "1.2.3")
     stat = target.stat()

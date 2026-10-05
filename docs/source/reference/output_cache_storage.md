@@ -1066,6 +1066,7 @@ Passing `destination=<path>` or `--destination <path>` installs a complete exter
 External exports are always rebuilt from canonical run views and immutable records, never from a disposable tree already present under `outputs/`.
 The complete tree is staged beside the destination before installation.
 An existing destination raises `FileExistsError` unless `replace=True` or `--replace` is provided; failed replacement restores the previous tree and removes staging artifacts.
+Without replacement, native exclusive publication also refuses a destination created after materialization, preserving that winner's inode and contents.
 Passing `replace=True` without an explicit destination raises `ValueError`.
 The destination may not equal, contain, or be contained by the source storage root.
 Returned paths always identify the installed destination rather than its staging directory.

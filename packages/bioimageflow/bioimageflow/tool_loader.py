@@ -21,7 +21,8 @@ from typing import Any
 from bioimageflow.paths import get_tool_store_path
 from bioimageflow_core.import_context import admit_import_root, selected_import_root
 
-from bioimageflow.installation import admit_installation, installation_target, publish_installation, validate_installation_selectors
+from bioimageflow.filesystem import publish_no_replace
+from bioimageflow.installation import admit_installation, installation_target, validate_installation_selectors
 
 logger = logging.getLogger("bioimageflow")
 
@@ -440,7 +441,7 @@ def ensure_installed(
                 f"Failed to install {pypi_name}=={version} into tool store.\n{details}"
             ) from exc
         admit_installation(stage, pkg_name, version, distribution=pypi_name)
-        publish_installation(stage, target)
+        publish_no_replace(stage, target)
     except BaseException as exc:
         primary = exc
         raise

@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+from bioimageflow.filesystem import publish_no_replace
+
 from .models import CacheCorruptionError
 from .storage import Storage
 
@@ -115,11 +117,14 @@ def _export_to_destination(
         )
         relative_paths = [path.relative_to(temporary) for path in temporary_paths]
 
-        if destination.exists() or destination.is_symlink():
+        if replace and (destination.exists() or destination.is_symlink()):
             os.replace(destination, backup)
             moved_previous = True
         try:
-            os.replace(temporary, destination)
+            if replace:
+                os.replace(temporary, destination)
+            else:
+                publish_no_replace(temporary, destination)
             installed = True
         except BaseException:
             if moved_previous:

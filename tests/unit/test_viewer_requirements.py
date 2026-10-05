@@ -95,7 +95,7 @@ def test_output_introspection_includes_strict_viewer_wire_metadata() -> None:
     assert viewer["napari"]["reader_id"] == "example.reader"
 
 
-def test_graph_v2_archive_manifest_and_v1_normalization(tmp_path: Path) -> None:
+def test_graph_v2_archive_manifest_and_v1_refusal(tmp_path: Path) -> None:
     addition = ViewerSpec(
         NapariRequirement(required_packages=[PackageRequirement("extra-reader", ">=1")])
     )
@@ -122,16 +122,14 @@ def test_graph_v2_archive_manifest_and_v1_normalization(tmp_path: Path) -> None:
     legacy["schema_version"] = 1
     legacy["nodes"][0].pop("viewer_additions")
     legacy["interface"]["outputs"][0]["schema"].pop("viewer")
-    normalized = Workflow.from_dict(legacy, storage_path=tmp_path / "legacy")
-    assert normalized.to_dict()["schema_version"] == 2
-    assert normalized.get_output_viewer_spec("public-image") == DECLARED
+    with pytest.raises(ValueError, match="Only current workflow schema_version 2"):
+        Workflow.from_dict(legacy, storage_path=tmp_path / "legacy")
 
 
-def test_v1_rejects_v2_fields_and_v2_rejects_unknown_fields(tmp_path: Path) -> None:
+def test_v1_refuses_and_v2_rejects_unknown_fields(tmp_path: Path) -> None:
     graph = Workflow(storage_path=tmp_path).to_dict()
     graph["schema_version"] = 1
-    graph["nodes"] = [{"name": "bad", "type": "workflow", "workflow": graph.copy(), "bindings": {}, "viewer_additions": {}}]
-    with pytest.raises(ValueError, match="unknown fields"):
+    with pytest.raises(ValueError, match="Only current workflow schema_version 2"):
         Workflow.from_dict(graph, storage_path=tmp_path / "legacy")
 
     graph = Workflow(storage_path=tmp_path).to_dict()
@@ -201,12 +199,9 @@ def test_unknown_viewer_fields_reject_at_every_v2_wire_layer(tmp_path: Path) -> 
         Workflow.inspect_viewing_requirements(candidate)
 
 
-def test_v1_normalizes_to_the_canonical_v2_launcher_graph(tmp_path: Path) -> None:
+def test_v2_preserves_the_canonical_launcher_graph(tmp_path: Path) -> None:
     canonical = Workflow(storage_path=tmp_path, engine="direct").to_dict()
-    legacy = copy.deepcopy(canonical)
-    legacy["schema_version"] = 1
-
-    loaded = Workflow.from_dict(legacy, storage_path=tmp_path / "loaded")
+    loaded = Workflow.from_dict(canonical, storage_path=tmp_path / "loaded")
     assert loaded.to_dict() == canonical
     launcher_payload = serialize_workflow_payload(loaded)
     assert launcher_payload["kind"] == "graph_v2"

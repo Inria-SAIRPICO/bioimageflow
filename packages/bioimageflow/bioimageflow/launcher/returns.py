@@ -15,6 +15,7 @@ from typing import Any
 
 import pandas as pd
 
+from bioimageflow.filesystem import publish_no_replace
 from bioimageflow.storage import (
     CacheCorruptionError,
     Storage,
@@ -324,7 +325,7 @@ def persist_public_return(
             storage=storage,
         )
         try:
-            os.rename(candidate, installed)
+            publish_no_replace(candidate, installed)
         except FileExistsError:
             shutil.rmtree(candidate)
             existing = load_return_manifest(

@@ -5,6 +5,11 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+
+from bioimageflow.filesystem import publish_no_replace
+
 from typing import TYPE_CHECKING, overload
 
 from .common import (
@@ -25,6 +30,7 @@ from .common import (
     uuid,
 )
 from .custom_sources import (
+    _archive_definition,
     _extract_workflow_archive,
     _load_custom_sources,
     _workflow_import_scope,
@@ -32,6 +38,16 @@ from .custom_sources import (
 
 if TYPE_CHECKING:
     from .model import Workflow
+
+
+def _retire_archive_stage(stage: Path, primary: BaseException) -> None:
+    """Retire only an owned pre-import stage without replacing its primary error."""
+    try:
+        shutil.rmtree(stage)
+    except OSError as cleanup:
+        add_note = getattr(primary, "add_note", None)
+        if callable(add_note):
+            add_note(f"Archive staging cleanup failed: {cleanup!r}")
 
 
 class _LoadingMixin:
@@ -166,12 +182,13 @@ class _LoadingMixin:
         storage_path: str | Path,
     ) -> "Workflow":
         temp_root = Path(tempfile.mkdtemp(prefix="bioimageflow_workflow_archive_"))
-        _extract_workflow_archive(path, temp_root)
-        workflow_path = temp_root / "workflow.json"
-        if not workflow_path.exists():
-            raise ValueError("Workflow archive is missing workflow.json")
+        try:
+            _extract_workflow_archive(path, temp_root)
+            data = json.loads((temp_root / "workflow.json").read_text(encoding="utf-8"))
+        except BaseException as primary:
+            _retire_archive_stage(temp_root, primary)
+            raise
         with _workflow_import_scope(temp_root):
-            data = json.loads(workflow_path.read_text(encoding="utf-8"))
             result = cls.from_dict(data, storage_path=storage_path)
             assert isinstance(result, cls)  # strict mode
             return result
@@ -186,12 +203,23 @@ class _LoadingMixin:
     ) -> "Workflow":
         """Extract a portable archive and load it with explicit runtime storage."""
         path = Path(path)
-        destination = Path(destination)
-        destination.mkdir(parents=True, exist_ok=True)
-        _extract_workflow_archive(path, destination)
+        destination = Path(os.path.abspath(destination))
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(f"Workflow import destination already exists: {destination}")
+        for parent in destination.parents:
+            if parent.is_symlink():
+                raise ValueError(f"Workflow import parent must not be a symlink: {parent}")
+            if parent.exists() and not parent.is_dir():
+                raise NotADirectoryError(str(parent))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        candidate = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+        try:
+            _extract_workflow_archive(path, candidate)
+            publish_no_replace(candidate, destination)
+        except BaseException as primary:
+            _retire_archive_stage(candidate, primary)
+            raise
         workflow_path = destination / "workflow.json"
-        if not workflow_path.exists():
-            raise ValueError("Workflow archive is missing workflow.json")
         with _workflow_import_scope(destination):
             data = json.loads(workflow_path.read_text(encoding="utf-8"))
             result = cls.from_dict(data, storage_path=storage_path)
@@ -331,35 +359,7 @@ class _LoadingMixin:
         errors: list[ValidationError] | None = None,
     ) -> "Workflow":
         """Materialize a strict graph or portable archive envelope."""
-        viewing_requirements = None
-        if data.get("archive_version") == 1:
-            if set(data) != {"archive_version", "workflow", "custom_sources"}:
-                raise ValueError("Malformed version-1 workflow archive envelope.")
-            graph = data["workflow"]
-            source_records = data["custom_sources"]
-        elif data.get("archive_version") == 2:
-            fields = {
-                "archive_version",
-                "workflow",
-                "custom_sources",
-                "viewing_requirements",
-            }
-            if set(data) != fields:
-                raise ValueError("Malformed version-2 workflow archive envelope.")
-            from bioimageflow.viewing import ViewingRequirementsManifest
-
-            viewing_requirements = ViewingRequirementsManifest.from_dict(
-                data["viewing_requirements"]
-            )
-            graph = data["workflow"]
-            source_records = data["custom_sources"]
-        else:
-            graph = data
-            source_records = []
-        if not isinstance(source_records, list):
-            raise ValueError("Workflow archive custom_sources must be an array.")
-        if not isinstance(graph, dict):
-            raise TypeError("Workflow graph must be a dictionary.")
+        graph, source_records, viewing_requirements = _archive_definition(data)
         custom_modules = _load_custom_sources(source_records)
         workflow = cls._materialize_graph(
             graph,
