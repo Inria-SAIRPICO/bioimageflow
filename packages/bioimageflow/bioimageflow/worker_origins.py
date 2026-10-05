@@ -25,6 +25,8 @@ from bioimageflow_core import (
     WorkerToolOriginV1,
 )
 
+EXECUTION_CONTRACT_VERSION = "bioimageflow.execution.v1"
+
 
 def _canonical_distribution(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
@@ -344,6 +346,7 @@ def capture_tool_executable(
     key: dict[str, Any] = {"module": canonical_module, "class": klass.__qualname__,
                            "declared_version": declared_version,
                            "declared_distribution": declared_distribution,
+                           "execution_contract": EXECUTION_CONTRACT_VERSION,
                            "declaration": _declaration_identity(tool),
                            "declaration_contract": DECLARATION_CONTRACT_VERSION}
     custom_hash = getattr(klass, "_bif_custom_source_hash", None)

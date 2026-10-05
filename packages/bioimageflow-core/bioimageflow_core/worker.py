@@ -7,10 +7,11 @@ from dataclasses import replace
 import inspect
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from bioimageflow_core._processing_values import accept_native_values
 from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.declarations import compare_tool_declarations, declaration_digest, describe_tool_declaration
 from bioimageflow_core.import_context import admit_import_root, selected_import_root
-from bioimageflow_core.shared_memory import SharedMemoryContext, collect_input_scopes
+from bioimageflow_core.shared_memory import SharedMemoryContext, collect_input_scopes, get_shared_memory_context
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.worker_origins import VersionedModuleOriginV1, _load_worker_tool, load_worker_tool
 from bioimageflow_core.worker_protocol import (
@@ -35,10 +36,16 @@ def _outputs_to_dict(
 
 
 def _normalize_row_outputs(
-    result: Any, output_type: type[IOModel], fields: Tuple[str, ...]
+    result: Any, output_type: type[IOModel], fields: Tuple[str, ...], task: ProcessingTask
 ) -> Tuple[Dict[str, Any], ...]:
     outputs = result if isinstance(result, list) else [result]
-    return tuple(_outputs_to_dict(output, output_type, fields) for output in outputs)
+    return _accept_callback_outputs(tuple(_outputs_to_dict(output, output_type, fields) for output in outputs), task)
+
+
+def _accept_callback_outputs(outputs: Any, task: ProcessingTask) -> Any:
+    if task.shared_memory_context is not None:
+        return get_shared_memory_context()._publish_outputs(outputs)
+    return accept_native_values(outputs)
 
 
 def _call_kwargs(
@@ -83,7 +90,7 @@ def _execute_rows(
         )
         results.append(OutputGroup(
             consumed_rows=(ConsumedRow(row.position, row.row_index),),
-            outputs=_normalize_row_outputs(output, output_type, fields),
+            outputs=_normalize_row_outputs(output, output_type, fields, task),
         ))
     return tuple(results)
 
@@ -105,7 +112,7 @@ def _execute_batch(
     if task.row_consumption == "collective":
         return (OutputGroup(
             consumed_rows=_consumed_rows(task),
-            outputs=tuple(_outputs_to_dict(output, output_type, fields) for output in raw),
+            outputs=_accept_callback_outputs(tuple(_outputs_to_dict(output, output_type, fields) for output in raw), task),
         ),)
     if raw and not isinstance(raw[0], list):
         if len(raw) != len(task.rows):
@@ -115,12 +122,16 @@ def _execute_batch(
         grouped = raw
         if len(grouped) != len(task.rows):
             raise ValueError("Nested process_batch output groups must match the input row count.")
+    accepted = _accept_callback_outputs(tuple(
+        tuple(_outputs_to_dict(output, output_type, fields) for output in outputs)
+        for outputs in grouped
+    ), task)
     return tuple(
         OutputGroup(
             consumed_rows=(ConsumedRow(row.position, row.row_index),),
-            outputs=tuple(_outputs_to_dict(output, output_type, fields) for output in outputs),
+            outputs=outputs,
         )
-        for row, outputs in zip(task.rows, grouped)
+        for row, outputs in zip(task.rows, accepted)
     )
 
 

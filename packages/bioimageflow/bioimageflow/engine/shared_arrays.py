@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Iterator
 
-from bioimageflow_core import SharedArray, SharedMemoryContext, collect_input_scopes
+from bioimageflow_core import SharedArray, SharedMemoryContext, collect_input_scopes, accept_native_array
 from bioimageflow.result_groups import map_shared_values
 
 
@@ -22,10 +22,16 @@ def references(value: Any) -> Iterator[SharedArray]:
 def publish_inputs(value: Any) -> Any:
     """Snapshot each producer once per admission; reuse already accepted refs."""
     import pandas as pd
+    import numpy as np
+    native: dict[int, np.ndarray] = {}
     memo: dict[tuple[Any, ...], SharedArray] = {}
     created: list[SharedArray] = []
 
     def walk(item: Any) -> Any:
+        if isinstance(item, np.ndarray):
+            if id(item) not in native:
+                native[id(item)] = accept_native_array(item)
+            return accept_native_array(native[id(item)])
         if isinstance(item, SharedArray):
             owner = item.bound_owner
             if not isinstance(owner, SharedMemoryContext):
@@ -77,16 +83,25 @@ class SharedTaskScope:
     def borrowed(self) -> SharedMemoryContext:
         return SharedMemoryContext.borrow(self.wire["output"], inputs=self.wire["inputs"])
 
-    def accept_outputs(self, outputs: list[list[Any]]) -> list[list[Any]]:
-        # Outputs have already passed declared field validation/correlation.
+    def publish_outputs(self, outputs: list[list[Any]]) -> list[list[Any]]:
+        """Capture validated callback values before another callback can mutate them."""
         values = [[{name: getattr(output, name) for name in output._get_all_annotations()}
                    for output in row] for row in outputs]
         with self._lock:
             if self._disposition == "rejected":
                 raise RuntimeError("Task outputs have already been rejected")
             bound = self.context.accept_result(values)
+            return [[type(output)(**value) for output, value in zip(row, bound_row, strict=True)]
+                    for row, bound_row in zip(outputs, bound, strict=True)]
+
+    def accept_outputs(self, outputs: list[list[Any]]) -> list[list[Any]]:
+        # Final acceptance retains one result group after validation/correlation.
+        with self._lock:
+            published = self.publish_outputs(outputs)
+            values = [[{name: getattr(output, name) for name in output._get_all_annotations()}
+                       for output in row] for row in published]
             from bioimageflow.result_groups import bind_result_group
-            bound, _group = bind_result_group(bound, node_name="task", group_id=self.context.scope_id)
+            bound, _group = bind_result_group(values, node_name="task", group_id=self.context.scope_id)
             restored = [[type(output)(**value) for output, value in zip(row, bound_row, strict=True)]
                         for row, bound_row in zip(outputs, bound, strict=True)]
             self._disposition = "accepted"

@@ -19,9 +19,61 @@ def _array(value: Any) -> np.ndarray:
     if not isinstance(value, np.ndarray):
         raise ValueError("NumPy value must contain an array.")
     _shared_memory_dtype(value.dtype)
-    if value.dtype.metadata:
+    if _dtype_metadata(value.dtype):
         raise ValueError("NumPy dtype metadata is not supported in processing values.")
     return value
+
+
+def _dtype_metadata(dtype: np.dtype) -> bool:
+    if dtype.metadata:
+        return True
+    if dtype.subdtype is not None and _dtype_metadata(dtype.subdtype[0]):
+        return True
+    return any(_dtype_metadata(field[0]) for field in (dtype.fields or {}).values())
+
+
+def accept_native_array(value: np.ndarray) -> np.ndarray:
+    """Accept a C-layout native array with immutable data and independent metadata.
+
+    Mutable producers are copied once into immutable bytes. Re-admission of an
+    immutable bytes-backed C array creates only a new ndarray view descriptor.
+    A readonly flag or readonly memoryview does not prove immutable backing.
+    """
+    array = _array(value)
+    base: Any = array
+    while isinstance(base, np.ndarray):
+        base = base.base
+    if isinstance(base, bytes) and array.flags.c_contiguous:
+        return array.view(np.ndarray)
+    return np.frombuffer(array.tobytes(order="C"), dtype=array.dtype).reshape(array.shape)
+
+
+def accept_native_values(value: Any) -> Any:
+    """Snapshot native leaves together; other leaves keep their existing authority."""
+    memo: dict[int, np.ndarray] = {}
+    visiting: set[int] = set()
+
+    def walk(item: Any) -> Any:
+        if isinstance(item, np.ndarray):
+            key = id(item)
+            if key not in memo:
+                memo[key] = accept_native_array(item)
+            return accept_native_array(memo[key])
+        if type(item) not in (dict, list, tuple):
+            return item
+        key = id(item)
+        if key in visiting:
+            raise ValueError("Cyclic processing values are not supported.")
+        visiting.add(key)
+        try:
+            if type(item) is dict:
+                return {key: walk(child) for key, child in item.items()}
+            children = [walk(child) for child in item]
+            return children if type(item) is list else tuple(children)
+        finally:
+            visiting.remove(key)
+
+    return walk(value)
 
 
 def _reference(value: dict) -> SharedArray:

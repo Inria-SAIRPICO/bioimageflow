@@ -125,3 +125,107 @@ def test_budget_and_object_guard_precede_backing_file_creation(tmp_path, monkeyp
                 pass
     assert not list(tmp_path.rglob("*.npy"))
     assert owner.close().state == "closed"
+
+
+def test_nested_owner_activation_restores_exact_caller_without_closing(tmp_path):
+    from bioimageflow_core import SharedMemoryContext, get_shared_memory_context
+    from bioimageflow_core.shm import create_shared_output
+
+    caller = SharedMemoryContext(tmp_path / "caller")
+    owner = SharedMemoryContext(tmp_path / "owner")
+    with caller.activate():
+        with owner:
+            with owner:
+                assert get_shared_memory_context() is owner
+            assert get_shared_memory_context() is owner
+            with create_shared_output(np.array([9])) as ref:
+                assert ref.bound_owner is owner
+            with owner.activate():
+                with owner.activate():
+                    assert get_shared_memory_context() is owner
+            assert get_shared_memory_context() is owner
+        assert get_shared_memory_context() is caller
+    array = owner.open(ref)
+    np.testing.assert_array_equal(array, [9])
+    del array
+    assert owner.close().state == caller.close().state == "closed"
+
+
+@pytest.mark.parametrize("task", [False, True])
+def test_failed_marker_acquisition_retires_only_new_namespace(tmp_path, monkeypatch, task):
+    from pathlib import Path
+    from bioimageflow_core import SharedMemoryContext
+
+    owner = SharedMemoryContext(tmp_path) if task else None
+    sibling = owner.task_scope("sibling") if owner else None
+    original_ref = owner.publish(owner.create(np.array([4]))) if owner else None
+    sibling_ref = sibling.publish(sibling.create(np.array([7]))) if sibling else None
+    parent = Path(owner.descriptor()["root"]) if owner else tmp_path
+    foreign = parent / "foreign"
+    foreign.mkdir()
+    sentinel = foreign / "sentinel"
+    sentinel.write_text("keep")
+    before = set(parent.iterdir())
+    original_write = Path.write_text
+
+    def denied(path, *args, **kwargs):
+        if path.name == ".scope.json" and path.parent not in before:
+            raise PermissionError("marker write denied")
+        return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", denied)
+    with pytest.raises(PermissionError, match="marker write denied"):
+        owner.task_scope("failed") if owner else SharedMemoryContext(tmp_path)
+    assert set(parent.iterdir()) == before
+    assert sentinel.read_text() == "keep"
+    if owner:
+        for context, ref, value in [(owner, original_ref, 4), (sibling, sibling_ref, 7)]:
+            array = context.open(ref)
+            np.testing.assert_array_equal(array, [value])
+            del array
+        # Outside entries remain caller-owned; the SDK must not remove them.
+        sentinel.unlink()
+        foreign.rmdir()
+        assert owner.close().state == "closed"
+
+
+def test_failed_acquisition_cleanup_keeps_primary_error_and_exact_pending_root(tmp_path, monkeypatch):
+    from pathlib import Path
+    from bioimageflow_core import SharedMemoryContext
+
+    monkeypatch.setattr(Path, "write_text", lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("primary marker")))
+    original_rmdir = Path.rmdir
+    monkeypatch.setattr(Path, "rmdir", lambda *_: (_ for _ in ()).throw(OSError("secondary cleanup")))
+    with pytest.raises(PermissionError, match="primary marker") as caught:
+        SharedMemoryContext(tmp_path)
+    pending = caught.value.shared_scope_cleanup
+    assert pending["state"] == "pending" and pending["errors"] == ("secondary cleanup",)
+    root = Path(pending["root"])
+    assert root.exists() and [root.stat().st_dev, root.stat().st_ino] == pending["root_identity"]
+    # Exact witness-owned empty namespace may be retried by its caller.
+    monkeypatch.setattr(Path, "rmdir", original_rmdir)
+    root.rmdir()
+
+
+@pytest.mark.parametrize("task", [False, True])
+def test_existing_acquisition_target_is_not_adopted_or_removed(tmp_path, monkeypatch, task):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from bioimageflow_core import SharedMemoryContext
+    import bioimageflow_core.shared_memory as shared
+
+    owner = SharedMemoryContext(tmp_path) if task else None
+    parent = Path(owner.descriptor()["root"]) if owner else tmp_path
+    target = parent / (("task_" if task else "bif_shared_") + "a" * 32)
+    target.mkdir()
+    sentinel = target / "sentinel"
+    sentinel.write_text("foreign")
+    identity = target.stat().st_ino
+    monkeypatch.setattr(shared.uuid, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    with pytest.raises(FileExistsError):
+        owner.task_scope("collision") if owner else SharedMemoryContext(tmp_path)
+    assert target.stat().st_ino == identity and sentinel.read_text() == "foreign"
+    sentinel.unlink()
+    target.rmdir()
+    if owner:
+        assert owner.close().state == "closed"

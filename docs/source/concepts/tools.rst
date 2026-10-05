@@ -115,6 +115,13 @@ Key properties:
   :class:`~bioimageflow.SourceToolUpstreamError`. See
   :doc:`graph` for the source-node patterns.
 
+Execution supplies mutable working DataFrames to ``merge_dataframes`` and ``transform``.
+A custom merge may return and modify one of those working inputs without changing the selected upstream provider frame or another consumer's values.
+The default merge reuses its single working input; ownership is captured once before the hooks, rather than relying on each merge implementation to make another copy.
+Supported native numeric array cells are detached, while sealed SharedArray descriptors keep their existing physical identity and leases.
+This contract does not promise a deepcopy of arbitrary Python objects in table cells.
+Native ndarray outputs retain their shape, dtype and values through cache publication and hydration, with independent immutable byte backing; their layout normalizes to C order.
+
 Dynamic output schemas
 ~~~~~~~~~~~~~~~~~~~~~~
 

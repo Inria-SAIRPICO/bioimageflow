@@ -21,6 +21,7 @@ from .models import (
 )
 from .identity import (
     _file_sha256,
+    _native_record_dtype,
     _validate_record_id,
     _validate_sha256_digest,
     asset_digest_and_size,
@@ -248,7 +249,7 @@ class RecordManifest:
             _validate_sha256_digest(str(output["digest"]), label="asset")
             if actual_digest != output["digest"]:
                 raise CacheCorruptionError(f"Record asset digest mismatch: {relative}")
-            if output.get("asset_role") == "shared_array":
+            if output.get("asset_role") in {"shared_array", "native_array"}:
                 self._validate_shared_array_asset(
                     asset_path, relative, output, asset_type=asset_type
                 )
@@ -356,7 +357,8 @@ class RecordManifest:
             raise CacheCorruptionError(
                 f"Record shared-array asset must be a file: {relative}"
             )
-        if not relative.startswith("assets/shm/"):
+        prefix = "assets/native/" if output.get("asset_role") == "native_array" else "assets/shm/"
+        if not relative.startswith(prefix):
             raise CacheCorruptionError(
                 f"Record shared-array asset path is invalid: {relative}"
             )
@@ -383,7 +385,7 @@ class RecordManifest:
             )
         shape = array.get("shape")
         if not isinstance(shape, list) or not all(
-            isinstance(item, int) and item >= 0 for item in shape
+            type(item) is int and item >= 0 for item in shape
         ):
             raise CacheCorruptionError(
                 f"Record shared-array shape is invalid: {relative}"
@@ -401,11 +403,23 @@ class RecordManifest:
             raise CacheCorruptionError(
                 f"Record shared-array asset is unreadable: {relative}"
             ) from exc
+        from bioimageflow_core._processing_values import _array
+        try:
+            _array(loaded)
+        except (TypeError, ValueError) as exc:
+            raise CacheCorruptionError(f"Record array dtype is unsupported: {relative}") from exc
         if list(loaded.shape) != shape:
             raise CacheCorruptionError(
                 f"Record shared-array shape mismatch: {relative}"
             )
-        if str(loaded.dtype) != dtype:
+        if output.get("asset_role") == "native_array":
+            try:
+                matches_dtype = loaded.dtype == _native_record_dtype(dtype)
+            except (TypeError, ValueError, SyntaxError) as exc:
+                raise CacheCorruptionError(f"Record native-array dtype is invalid: {relative}") from exc
+        else:
+            matches_dtype = str(loaded.dtype) == dtype
+        if not matches_dtype:
             raise CacheCorruptionError(
                 f"Record shared-array dtype mismatch: {relative}"
             )

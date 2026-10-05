@@ -146,6 +146,10 @@ Workflow execution establishes a controller scope automatically; standalone help
 Returned DataFrames retain their reference owners even when a temporary Workflow is collected.
 Output-only producers still need an admitted output allocation namespace; a task with no shared capability needs no such scope.
 Workflow/context exit and execution completion do not close returned arrays.
+Both ``with owner:`` and ``owner.activate()`` are nestable lexical activation contexts and restore the exact previous caller on exit.
+Root and task namespace acquisition use exclusive creation; failed marker or quota initialization retires only the newly acquired, identity-checked namespace.
+An existing target is refused without adoption or deletion.
+If rollback cannot finish, the original exception remains primary and its ``shared_scope_cleanup`` diagnostic records the retained root, identity and cleanup errors for explicit caller recovery.
 
 .. code-block:: python
 
@@ -205,5 +209,22 @@ Call the owning manager’s ``retire_idle(env_name)`` to physically close an idl
 Never force-close live mapped views or release unrelated environments.
 Finite quota exhaustion still refuses if safe reclamation is unavailable; this does not promise an automatic quota-pressure scheduler.
 Owner-wide physical grant accounting may conservatively delay cleanup behind another task in the same owner.
-Arbitrary DataFrame contents are not sealed by these array/group APIs.
+Arbitrary Python objects in DataFrames are not sealed by these array/group APIs.
 See :doc:`/specs` §8 for the normative ownership and admission contract.
+
+Native NumPy values
+-------------------
+
+``accept_native_array(array)`` returns a plain NumPy ndarray with immutable bytes-backed data and independent shape/dtype metadata.
+Acceptance copies a mutable producer once; changing a retained producer view cannot alter accepted pixels, and the accepted array cannot enable writable access with ``setflags``.
+Re-admitting a C-contiguous array already backed by immutable bytes creates a new ndarray descriptor over the same data without another pixel copy.
+A read-only flag or a read-only memoryview over mutable storage does not establish immutable backing.
+Recursive ``publish_value`` deduplicates repeated native producers within one admission and returns separate view descriptors for their consumers.
+``accept_native_values(value)`` applies the same native acceptance to dictionary, list and tuple leaves together, preserving other leaves under their existing contract.
+Processing callback outputs are captured before the next row callback can reuse or mutate a producer buffer; batch outputs are captured after their single callback returns.
+Workers make independent sealed shared-array output copies only in their admitted output namespace, while controller validation and physical grant drain still own result disposition and deletion.
+Already sealed inputs are reused, and failed or unreturned worker copies remain controller-owned until physical retirement.
+Native values retain their dtype, shape and values, including zero-dimensional, empty, structured and noncontiguous inputs; acceptance normalizes storage to C layout without preserving source strides.
+Python-object dtypes and dtype metadata, including nested structured-field metadata, are refused.
+Native cache assets hydrate as native ndarray values rather than SharedArray references; their immutable bytes lifetime needs no shared-array result-group lease.
+This finite array contract does not provide a generic deepcopy policy for arbitrary Python objects.

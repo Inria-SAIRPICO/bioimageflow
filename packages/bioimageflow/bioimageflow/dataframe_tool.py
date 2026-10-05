@@ -54,12 +54,12 @@ class DataFrameTool(BaseTool):
         )
 
     def merge_dataframes(self, dfs: list[Any], arguments: Any) -> Any:
-        """Default: inner join on index."""
+        """Merge execution-owned mutable inputs by inner join on index."""
         if not dfs:
             import pandas as pd
             return pd.DataFrame()
         if len(dfs) == 1:
-            return dfs[0].copy()
+            return dfs[0]
         result = dfs[0]
         for df in dfs[1:]:
             result = result.join(df, how="inner", rsuffix="__bif_dup")

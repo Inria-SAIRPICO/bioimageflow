@@ -84,6 +84,43 @@ def _write_shared_array_asset(
     return relative, entry, path
 
 
+def native_array_assets(
+    frame: pd.DataFrame, staging_assets_dir: Path,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path], dict[str, str]]:
+    """Persist native array cells as owned NPY assets with explicit runtime kind."""
+    import numpy as np
+    from bioimageflow_core import accept_native_array
+
+    stored = pd.DataFrame(frame, copy=True)
+    outputs: list[dict[str, Any]] = []
+    assets: dict[str, Path] = {}
+    kinds: dict[str, str] = {}
+    for column in frame.columns:
+        if not any(isinstance(value, np.ndarray) for value in frame[column].array):
+            continue
+        kinds[str(column)] = "record_asset"
+        for position, (index, value) in enumerate(frame[column].items()):
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            if not isinstance(value, np.ndarray):
+                raise CacheCorruptionError(f"Native array column {column!r} mixes array and scalar values")
+            array = accept_native_array(value)
+            segment = _safe_asset_segment(column)
+            filename = f"{position:06d}_{_safe_asset_segment(index)}.npy"
+            relative = f"assets/native/{segment}/{filename}"
+            path = staging_assets_dir / "native" / segment / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(path, array, allow_pickle=False)
+            size, digest = asset_digest_and_size(path)
+            outputs.append({"kind": "owned_asset", "asset_role": "native_array",
+                "asset_type": "file", "path": relative, "size": size, "digest": digest,
+                "array": {"column": str(column), "row_index": str(index), "format": "npy",
+                          "order": "C", "shape": list(array.shape), "dtype": str(array.dtype)}})
+            assets[relative] = path
+            stored.at[index, column] = relative
+    return stored, outputs, assets, kinds
+
+
 def _add_processing_owned_asset(
     *,
     path: Path,
@@ -105,8 +142,8 @@ def _add_processing_owned_asset(
         record_relative = validate_relative_posix_path(f"assets/{relative.as_posix()}")
     except ValueError as exc:
         raise CacheCorruptionError("Declared output asset path is unsafe.") from exc
-    if record_relative.startswith("assets/shm/"):
-        raise CacheCorruptionError("assets/shm/ is reserved for shared-array assets.")
+    if record_relative.startswith(("assets/shm/", "assets/native/")):
+        raise CacheCorruptionError("Array asset namespaces are reserved for declared array assets.")
     if not path.exists():
         if require_exists:
             raise CacheCorruptionError(f"Declared output asset is missing: {path}")
@@ -216,9 +253,7 @@ def _processing_manifest_entries_and_dataframe(
     dict[str, Path],
     dict[str, str],
 ]:
-    stored = df.copy()
-    outputs: list[dict[str, Any]] = []
-    owned_assets: dict[str, Path] = {}
+    stored, outputs, owned_assets, native_kinds = native_array_assets(df, staging_assets_dir)
     seen_outputs: set[tuple[str, str]] = set()
     seen_scalar_outputs: set[tuple[str, str, str]] = set()
     staging_root = staging_assets_dir.resolve()
@@ -232,6 +267,7 @@ def _processing_manifest_entries_and_dataframe(
         )
         for column in path_columns | shared_array_columns
     }
+    column_kinds.update(native_kinds)
     observed_column_kinds: dict[str, str] = {}
     from bioimageflow_core.types import SharedArray
 

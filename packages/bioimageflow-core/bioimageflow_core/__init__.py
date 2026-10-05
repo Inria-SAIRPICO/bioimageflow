@@ -11,6 +11,8 @@ from bioimageflow_core.types import (
     check_compatibility as check_compatibility,
     extract_gui_meta as extract_gui_meta,
 )
+from bioimageflow_core._processing_values import accept_native_array as accept_native_array
+from bioimageflow_core._processing_values import accept_native_values as accept_native_values
 from bioimageflow_core.viewer import (
     NapariRequirement as NapariRequirement,
     PackageRequirement as PackageRequirement,
@@ -85,6 +87,8 @@ from bioimageflow_core.worker_protocol import (
 )
 
 __all__ = [
+    "accept_native_array",
+    "accept_native_values",
     "ArchiveModuleOriginV1",
     "Arguments",
     "BaseTool",

@@ -250,12 +250,8 @@ class _NodeExecutionMixin:
 
         assert isinstance(node.tool, DataFrameTool)
 
-        dfs = [
-            results[arg] if isinstance(arg, Node) else arg
-            for arg in node._args
-            if (isinstance(arg, Node) and arg in results)
-            or isinstance(arg, pd.DataFrame)
-        ]
+        dfs = [results[arg] if isinstance(arg, Node) else arg for arg in node._args
+               if isinstance(arg, pd.DataFrame) or (isinstance(arg, Node) and arg in results)]
         arguments, args_dict = self._resolve_constant_arguments(node)
         for index, arg in enumerate(node._args):
             if isinstance(arg, pd.DataFrame):
@@ -306,6 +302,8 @@ class _NodeExecutionMixin:
 
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
 
+        from bioimageflow.result_groups import working_dataframe
+        dfs = [working_dataframe(frame) for frame in dfs]
         if len(dfs) > 1:
             dfs = self._align_dataframes_for_merge(dfs)
         capture = self._capture_executable(node)

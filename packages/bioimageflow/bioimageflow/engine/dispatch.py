@@ -162,6 +162,7 @@ class _DispatchMixin:
                 with self._capture_executable(node).execution_context():
                     outputs = self._dispatch_direct_bound(
                         tool, arguments, workflow, node_name, has_batch, row_contexts, bound_context,
+                        scope=scope,
                     )
             bound = scope.accept_outputs([list(group.outputs) for group in outputs])
             return [replace(group, outputs=tuple({field: getattr(output, field) for field in output._get_all_annotations()} for output in values)) for group, values in zip(outputs, bound, strict=True)]
@@ -180,6 +181,8 @@ class _DispatchMixin:
         has_batch: bool,
         row_contexts: list[ExecutionContext],
         batch_context: ExecutionContext,
+        *,
+        scope: SharedTaskScope,
     ) -> list[OutputGroup]:
         """Direct dispatch — tool runs in the main process."""
         node = next(node for node in self._compiled_ordinals if node.name == node_name)
@@ -201,6 +204,7 @@ class _DispatchMixin:
                 expected_rows=len(arguments_dicts),
                 row_consumption=tool.row_consumption.value,
             )
+            normalized = scope.publish_outputs(normalized)
             consumed = tuple(ConsumedRow(position, str(context.row_index)) for position, context in enumerate(row_contexts))
             if tool.row_consumption.value == "collective":
                 return [OutputGroup(consumed, cast(Any, tuple(normalized[0])))]
@@ -212,7 +216,8 @@ class _DispatchMixin:
             kwargs = {"context": context} if accepts_context else {}
             result = callbacks["process_row"](Arguments(**args_dict), **kwargs)
             assert tool.Outputs is not None
-            raw_results.append(OutputGroup((ConsumedRow(i, str(context.row_index)),), cast(Any, tuple(normalize_processing_row_outputs(result, tool.Outputs)))))
+            accepted = scope.publish_outputs([normalize_processing_row_outputs(result, tool.Outputs)])[0]
+            raw_results.append(OutputGroup((ConsumedRow(i, str(context.row_index)),), cast(Any, tuple(accepted))))
             self._emit_progress(
                 workflow,
                 node_name,

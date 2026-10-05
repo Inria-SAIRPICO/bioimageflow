@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from .common import (
     Any,
     CACHE_SCHEMA_VERSION,
@@ -43,6 +45,14 @@ def canonical_json_bytes(value: Any) -> bytes:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _native_record_dtype(label: str) -> np.dtype[Any]:
+    """Parse NumPy's structured literal label without executable evaluation."""
+    import ast
+    from bioimageflow_core._shared_storage import dtype as parse_dtype
+    value = ast.literal_eval(label) if label.startswith(("[", "{")) else label
+    return parse_dtype(value)
 
 
 def _validate_output_view_mode(mode: str) -> str:
@@ -191,7 +201,13 @@ def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -
         if value.bound_owner is None:
             raise ValueError("Shared dataframe identity requires an admitted owner")
         return {"kind": "shared_array", **value.bound_owner.content_identity(value)}
-    if hasattr(value, "item"):
+    if isinstance(value, np.ndarray):
+        from bioimageflow_core import accept_native_array
+        array = accept_native_array(value)
+        return {"kind": "native_array", "shape": list(array.shape),
+                "dtype": np.lib.format.dtype_to_descr(array.dtype), "dtype_label": str(array.dtype),
+                "sha256": hashlib.sha256(memoryview(cast(Any, array))).hexdigest()}
+    if isinstance(value, np.generic):
         value = value.item()
     if _is_missing(value):
         return {"kind": "null", "value": None}

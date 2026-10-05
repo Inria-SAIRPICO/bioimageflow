@@ -2520,7 +2520,7 @@ When `node.compute()` is called:
    1. **Collect Upstream DataFrames:** Gather the output DataFrames from all positional upstream nodes.
    2. **Resolve Arguments:** Resolve `Inputs` parameters into a single `Arguments` object (all constants, validated via Pydantic). Path-typed values are converted to absolute runtime paths before `merge_dataframes()` or `transform()` is called.
    3. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, root DataFrame logical digests, and selected upstream provider/selector record references. If the key exists and `current.json` selects a valid reusable record, load that exact selected record and refresh its derived run view without publishing another record.
-   4. **Merge:** Call `tool.merge_dataframes(dfs, arguments)`. Default: inner join on index.
+   4. **Working Inputs and Merge:** Before calling a DataFrame tool hook, capture execution-owned mutable working DataFrames from the selected provider frames. Call `tool.merge_dataframes(dfs, arguments)` on those working inputs; the default inner join reuses its single working input without another ownership copy. A custom merge may return and mutate a working input without changing a selected provider frame or sibling consumer. Supported native numeric cells are detached; sealed SharedArray descriptors retain their admitted physical identity and leases. This boundary does not deepcopy arbitrary Python objects.
    5. **Transform:** Call `tool.transform(df, arguments)`. Returns a (potentially different) DataFrame. Default: identity (passthrough).
    6. **Caching:** When reusable, publish the result as an immutable cache record under `storage_path/cache/v1/` and update the run view from the selected record. When identity is unavailable, return the in-memory DataFrame without creating cache or view artifacts.
 
@@ -2615,7 +2615,7 @@ Mapped descendants inherit their admitted input domain, including aggregate-deri
 Alignment reads the pinned/live admitted relation, never DataFrame attributes or a later current-pointer lookup; aggregate and observation domains require an explicit merge such as CrossJoin, even if coarse graph ancestry overlaps.
 An explicit CrossJoin combines a selected model/aggregate record with training images or a different prediction dataset; the model remains one selected record and consumer rows are the explicitly requested Cartesian product.
 DataFrame transforms/explicit merges may define a new domain with conservative whole-input selected-record association; arbitrary custom index equality or reset ordinals do not prove exact row lineage.
-These relation guarantees are separate from shared-array publication sealing and exact group release in §8; arbitrary mutable DataFrame contents are not sealed.
+These relation guarantees are separate from array publication acceptance and exact shared-array group release in §8. DataFrame hooks receive execution-owned working inputs as specified in §5.2; this does not freeze every caller-visible DataFrame or arbitrary Python object.
 
 - **No column carry-forward (ProcessingTool):** A ProcessingTool's output DataFrame contains **only** the columns declared in its `Outputs` class, plus the row index. Upstream columns are not carried forward. Downstream tools that need upstream data reference the originating node directly (e.g., `raw["path"]`). This makes output schemas deterministic — a node's output depends only on its own `Outputs` declaration, never on what happens upstream.
 - **DataFrameTool output:** A DataFrameTool's output DataFrame is whatever `transform()` returns. The tool author decides which columns to include. This is where intentional carry-forward happens — tools like `FilterRows` naturally preserve all input columns, while tools like `CountLabelOverlaps` may produce entirely new schemas.
@@ -2663,6 +2663,8 @@ Result-key material includes every value that can affect logical output and cach
 The key retains the captured declared tool/distribution version token and the instance's semantic Inputs/Outputs contract: portable `type_spec`, requiredness, nullability, image metadata and supported declared bounds, distinguishing dynamic Outputs absence, known-empty schemas and Passthrough declarations without hashing GUI descriptions or invoking a dynamic resolver merely for identity.
 These declaration facts reuse the effective definition capture rather than copying default values or shared-array owners again; arbitrary custom annotation-validator closure remains explicitly unproved.
 The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
+ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v1`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
+This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
 The supported declaration parity check is specified in Section 5.2; controller key facts do not establish whole-class, constructor/module-initializer or post-load class-state sealing.
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
 Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
@@ -2706,11 +2708,14 @@ Publication binds the actual first-valid winner selected by that publication dec
 The loaded DataFrame, result key, record ID, detached admitted manifest metadata and exact record address travel together as one selected-result binding.
 Execution outcomes, progress events, downstream identity and provenance, run views and exports use that binding rather than recapturing a later current pointer.
 A pointer change after a record has been loaded affects later independent selections; it does not relabel the already consumed DataFrame or redirect that execution's recorded outputs.
-Binding metadata is owned by the selection, but this does not make an in-memory DataFrame or external asset backing immutable or revoke existing writable views; accepted-array publication and access ownership remain separate contracts.
+Binding metadata is owned by the selection. Selected provider frames are not passed as mutable working inputs to DataFrame hooks, and accepted native numeric array cells have independent immutable backing (§8.3); this does not freeze every caller-visible DataFrame, external asset or arbitrary Python object, or revoke existing external writable views.
 
 Each reusable record manifest stores `dataframe.logical_digest`, `dataframe.logical_schema`, and `dataframe.transport_digest`.
 Logical fields determine record identity.
 The transport digest validates the Parquet bytes but never changes record identity.
+The worker typed-container grammar in §5.2 is distinct from reusable DataFrame-cell transport.
+Current reusable records admit supported scalar cells, declared paths and admitted shared/native array assets; list, tuple and dictionary object cells are refused at record publication rather than silently coerced.
+This context-specific storage limit does not prohibit those containers in supported task arguments/results or claim that every portable output declaration has a reusable cell representation.
 Loading validates both the bytes and the recomputed logical values.
 
 ### 6.3 Executable Changes
@@ -3043,6 +3048,8 @@ This storage choice does not establish a latency improvement over ordinary files
 ### 8.1 Shared Memory Helpers
 
 `SharedMemoryContext(root, max_bytes=None, max_header_bytes=10000)` creates the explicit controller owner.
+Root and task namespace admission preserve preexisting directories, markers and foreign files; failure cleans only newly and exclusively owned admission artifacts and preserves the primary exception.
+Nested `with owner:` and `owner.activate()` restore the enclosing active owner at each exit; lexical exit unbinds activation without requesting physical close.
 A default byte budget captures available free space once; allocations across its child namespaces share this finite budget under public OS file locks.
 `create_shared_output(data, name=None)` requires an active context, creates an allocation and yields its bound `SharedArray`; exiting the helper only unbinds lexical work and leaves backing intact.
 `open_shared_array(ref)` and the SharedArray branch of `load_image()` use the reference's bound owner or an explicitly active borrowed context.
@@ -3098,9 +3105,12 @@ Accepted or borrowed scientific input allocations are immutable; tools needing m
 Normal success with discarded results has a bounded cleanup path as well as failed/rejected/unreturned work.
 A reusable pool may retain physical grants, so idle or quota-pressure retirement must close the owning pool safely before reclaiming those groups, without invalidating live views or releasing unrelated allocations.
 Finite quota admission refuses clearly if safe retirement cannot reclaim enough; lexical unbinding, task completion and Workflow collection are not permission to close an accepted owner.
-This increment implements shared-array sealing and exact group leases; it does not seal arbitrary DataFrame contents or certify every support/OS capability.
+Shared-array sealing and exact group leases are distinct from native ndarray acceptance in §8.3 and execution-owned DataFrame working inputs in §5.2; none of these contracts seals arbitrary Python objects or certifies every support/OS capability.
 The public manager `retire_idle(env_name)` attempts physical close only for an idle selected pool; a close failure preserves its pool, task and grant ownership for retry.
 Automatic quota-pressure pool scheduling and unrelated lifecycle obligations remain separate from explicit idle retirement.
+
+Per-row execution publishes each validated callback return before the next row callback; a batch return is published once after its callback returns.
+This value publication is nonterminal: it creates no per-callback result group and does not release task input retentions or physical worker grants; final correlated acceptance, result-group ownership and physical drain remain separate fences.
 
 Physical worker drain releases its grant independently of controller result disposition.
 Pending outputs remain until the controller accepts or rejects them, even if the pool has already closed.
@@ -3112,6 +3122,20 @@ References are host-local and supported by local Wetlands processing; Parsl refu
 Physical resource release still requires the owning pool/controller fences; this contract is not a blanket fix for active-engine shutdown races or arbitrary process death.
 
 ---
+
+### 8.3 Native NumPy Array Acceptance
+
+Native numeric `numpy.ndarray` outputs remain plain ndarrays through local execution, cache publication and hydration; scalar conversion applies only to actual NumPy scalar values, never to an ndarray based on its element count.
+Acceptance copies producer values once into independent immutable byte backing and reconstructs a read-only ndarray over those bytes.
+Re-admitting an already accepted C-contiguous native value creates an independent view of its immutable backing without another data copy; strided views are normalized to C layout through acceptance.
+Retained producer aliases cannot change accepted values, and an accepted array cannot regain writable access by changing its NumPy flags.
+Shape, dtype, endianness and element values are preserved, including zero-dimensional, empty and noncontiguous arrays; strides and memory layout normalize to C order.
+Object-containing dtypes and dtype metadata remain unsupported under the finite typed numeric grammar in §5.2.
+Native-array cache assets use integrity-checked NPY data and explicit native-array representation metadata, preserving shape and dtype on hydration rather than returning a scalar or a SharedArray descriptor.
+This native byte backing has ordinary NumPy base-object lifetime and exposes no shared-array result group or physical worker-grant ownership.
+Existing accepted SharedArray pass-through retains its exact sealed locator and original owner without a pixel copy; native array acceptance does not replace that resource contract.
+A tool needing mutable native work uses its execution-owned working values or an independent array copy.
+These acceptance guarantees cover represented numeric values, not arbitrary Python objects, custom external resources or explicit exported hardlink/symlink aliases.
 
 ## 9. Error Handling
 

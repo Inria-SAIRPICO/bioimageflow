@@ -7,6 +7,7 @@ import threading
 from typing import Any, TYPE_CHECKING
 import weakref
 
+import numpy as np
 import pandas as pd
 
 from bioimageflow_core import CleanupStatus, ConsumedRow, SharedArray, SharedMemoryContext
@@ -111,13 +112,45 @@ def _project_value(value: Any, group: ResultGroup, leases: dict[tuple[Any, ...],
     return value
 
 
+def _contains_array(value: Any) -> bool:
+    if isinstance(value, (SharedArray, np.ndarray)):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_array(child) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_array(child) for child in value)
+    return False
+
+
+def working_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
+    """Detach execution-owned blocks and mutable native pixels before a merge hook."""
+    def copy_pixels(value: Any) -> Any:
+        if isinstance(value, np.ndarray):
+            return np.array(value, copy=True, order="K")
+        if isinstance(value, dict):
+            return {name: copy_pixels(child) for name, child in value.items()}
+        if isinstance(value, list):
+            return [copy_pixels(child) for child in value]
+        if isinstance(value, tuple):
+            return tuple(copy_pixels(child) for child in value)
+        return value
+    owned = pd.DataFrame(frame, copy=True)
+    owned.index = frame.index.copy(deep=True)
+    owned.columns = frame.columns.copy(deep=True)
+    for column in frame.columns:
+        if frame[column].dtype == object:
+            owned[column] = pd.Series([copy_pixels(value) for value in frame[column].array],
+                                      index=owned.index, dtype=object)
+    return owned
+
+
 def map_shared_values(frame: pd.DataFrame, transform: Callable[[Any], Any]) -> pd.DataFrame:
-    """Admit shared-bearing cells together without copying attrs or ordinary columns."""
+    """Admit array-bearing cells together without copying attrs or ordinary columns."""
     result = pd.DataFrame(frame, copy=False)
     shared = {}
     for column in frame.columns:
         cells = frame[column].array
-        if any(tuple(_references(cell)) for cell in cells):
+        if any(_contains_array(cell) for cell in cells):
             shared[column] = list(cells)
     if shared:
         admitted = transform(shared)

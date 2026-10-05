@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from .common import (
     Any,
     Path,
@@ -43,7 +45,7 @@ def _prepare_dataframe_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
                         continue
                 except (TypeError, ValueError):
                     pass
-                if hasattr(value, "item"):
+                if isinstance(value, np.generic):
                     scalar = value.item()
                     if isinstance(scalar, (str, int, float, bool, type(None))):
                         normalized.append(scalar)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import shutil
 
 from bioimageflow.row_relation import ResultRelation, RowAssociation
 
@@ -25,6 +26,7 @@ from .metadata import (
     _write_dataframe_result_metadata,
 )
 from .publication import create_record_candidate, install_record_candidate
+from .assets import native_array_assets
 from .selection import SelectedResult, selected_result
 
 
@@ -40,7 +42,7 @@ def dataframe_lookup(
     if pointer is None:
         return None
     try:
-        return selected_result(storage, result_key, pointer.record_id)
+        return selected_result(storage, result_key, pointer.record_id, hydrate_assets=True)
     except Exception as exc:
         raise CacheCorruptionError("Cached dataframe is unreadable.") from exc
 
@@ -83,10 +85,12 @@ def dataframe_publish(
         tool_identity=tool_identity,
         engine=engine,
     )
+    stored, outputs, owned_assets, native_kinds = native_array_assets(df, staging_dir / "assets")
+    column_kinds = {**(column_kinds or {}), **native_kinds}
     staging_parquet = staging_dir / "dataframe.parquet"
-    _write_canonical_parquet(df, staging_parquet)
+    _write_canonical_parquet(stored, staging_parquet)
     logical_schema, logical_digest = canonical_dataframe_identity(
-        df,
+        stored,
         column_kinds=column_kinds,
     )
     transport_digest = _file_sha256(staging_parquet)
@@ -100,7 +104,7 @@ def dataframe_publish(
             "logical_schema": logical_schema,
             "transport_digest": transport_digest,
         },
-        "outputs": [],
+        "outputs": outputs,
         "row_relation": relation,
     }
     record_id = make_record_id(manifest_material)
@@ -110,6 +114,10 @@ def dataframe_publish(
         attempt_id,
         record_id,
     )
+    for relative, path in owned_assets.items():
+        destination = candidate / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
     (candidate / "dataframe.parquet").write_bytes(staging_parquet.read_bytes())
     manifest = RecordManifest(
         result_key=result_key,
@@ -117,7 +125,7 @@ def dataframe_publish(
         dataframe_logical_digest=logical_digest,
         dataframe_transport_digest=transport_digest,
         dataframe_logical_schema=logical_schema,
-        outputs=[],
+        outputs=outputs,
         row_relation=relation,
     )
     (candidate / "manifest.json").write_text(
@@ -138,7 +146,7 @@ def dataframe_publish(
         run_id=run_id,
     )
     try:
-        selected = selected_result(storage, result_key, pointer.record_id)
+        selected = selected_result(storage, result_key, pointer.record_id, hydrate_assets=True)
     except Exception as exc:
         raise CacheCorruptionError("Published dataframe is unreadable.") from exc
     storage.finish_cache_attempt(

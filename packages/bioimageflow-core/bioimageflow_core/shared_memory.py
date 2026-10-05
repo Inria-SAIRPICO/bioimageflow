@@ -8,10 +8,11 @@ keep pending backing alive until their physical lifetime has drained.
 import contextvars
 import json
 import shutil
+import stat
 import threading
 import uuid
 import weakref
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -182,6 +183,31 @@ def collect_input_scopes(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(scopes.values())
 
 
+def _rollback_acquisition(root: Path, identity: Any, primary: BaseException) -> None:
+    """Retire only the exclusively acquired namespace, keeping primary failure."""
+    try:
+        if identity is None or storage.identity(root) != identity:
+            raise ValueError("Failed acquisition namespace identity changed")
+        entries = tuple(root.iterdir())
+        if any(entry.name not in {".scope.json", ".quota.lock", ".quota.json"}
+               or not stat.S_ISREG(entry.lstat().st_mode) for entry in entries):
+            raise ValueError("Failed acquisition contains an unowned entry")
+        for entry in entries:
+            if storage.identity(root) != identity:
+                raise ValueError("Failed acquisition namespace identity changed")
+            entry.unlink()
+        if storage.identity(root) != identity:
+            raise ValueError("Failed acquisition namespace identity changed")
+        root.rmdir()
+    except BaseException as cleanup:
+        diagnostic = {"state": "pending", "root": str(root),
+                      "root_identity": identity, "errors": (str(cleanup),)}
+        setattr(primary, "shared_scope_cleanup", diagnostic)
+        note = getattr(primary, "add_note", None)
+        if note is not None:
+            note(f"Shared scope acquisition cleanup remains pending: {diagnostic}")
+
+
 class SharedMemoryContext:
     """Controller-owned scope or explicitly admitted borrowed task namespace."""
 
@@ -195,21 +221,29 @@ class SharedMemoryContext:
         scope_id = uuid.uuid4().hex
         scope_root = parent / ("bif_shared_" + scope_id)
         scope_root.mkdir(mode=0o700)
-        self._descriptor = {
-            "scope_id": scope_id, "root": str(scope_root),
-            "root_identity": storage.identity(scope_root), "owner_id": scope_id,
-            "owner_root": str(scope_root), "owner_root_identity": storage.identity(scope_root),
-            "max_bytes": budget, "max_header_bytes": max_header_bytes,
-        }
-        self._write_marker()
-        (scope_root / ".quota.lock").write_bytes(b"0")
-        (scope_root / ".quota.json").write_text("{}", encoding="utf-8")
+        identity = None
+        try:
+            identity = storage.identity(scope_root)
+            self._descriptor = {
+                "scope_id": scope_id, "root": str(scope_root),
+                "root_identity": identity, "owner_id": scope_id,
+                "owner_root": str(scope_root), "owner_root_identity": identity,
+                "max_bytes": budget, "max_header_bytes": max_header_bytes,
+            }
+            self._write_marker()
+            (scope_root / ".quota.lock").write_bytes(b"0")
+            (scope_root / ".quota.json").write_text("{}", encoding="utf-8")
+        except BaseException as primary:
+            _rollback_acquisition(scope_root, identity, primary)
+            raise
         self._owner: Optional[_Owner] = _Owner()
         self._owner.contexts[scope_id] = self
         self._inputs: dict[str, dict[str, Any]] = {}
         self._input_refs: dict[tuple[str, str, tuple[int, ...], str], SharedArray] = {}
         self._accepted: set[str] = set()
         self._inputs_settled = False
+        self._activations: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar(
+            "shared_scope_activations", default=())
 
     def _write_marker(self) -> None:
         path = Path(self._descriptor["root"]) / ".scope.json"
@@ -234,6 +268,7 @@ class SharedMemoryContext:
         result._input_refs = {}
         result._accepted = set()
         result._inputs_settled = False
+        result._activations = contextvars.ContextVar("shared_scope_activations", default=())
         return result
 
     def descriptor(self) -> dict[str, Any]:
@@ -261,11 +296,17 @@ class SharedMemoryContext:
             _active.reset(token)
 
     def __enter__(self) -> "SharedMemoryContext":
-        self._activation = self.activate()
-        return self._activation.__enter__()
+        activation = self.activate()
+        result = activation.__enter__()
+        self._activations.set(self._activations.get() + (activation,))
+        return result
 
     def __exit__(self, *args: Any) -> Any:
-        return self._activation.__exit__(*args)
+        activations = self._activations.get()
+        if not activations:
+            raise RuntimeError("Shared scope context was not entered here")
+        self._activations.set(activations[:-1])
+        return activations[-1].__exit__(*args)
 
     def _require_open(self, scope_id: Optional[str] = None) -> None:
         if self._owner is not None and (scope_id or self.scope_id) in self._owner.closing:
@@ -282,12 +323,19 @@ class SharedMemoryContext:
             scope_id = uuid.uuid4().hex
             root = Path(self._descriptor["owner_root"]) / ("task_" + scope_id)
             root.mkdir(mode=0o700)
-            result._descriptor = self.descriptor()
-            result._descriptor.update(scope_id=scope_id, root=str(root), root_identity=storage.identity(root))
-            result._owner = self._owner
-            result._inputs, result._input_refs, result._accepted = {}, {}, set()
-            result._inputs_settled = False
-            result._write_marker()
+            identity = None
+            try:
+                identity = storage.identity(root)
+                result._descriptor = self.descriptor()
+                result._descriptor.update(scope_id=scope_id, root=str(root), root_identity=identity)
+                result._owner = self._owner
+                result._inputs, result._input_refs, result._accepted = {}, {}, set()
+                result._inputs_settled = False
+                result._activations = contextvars.ContextVar("shared_scope_activations", default=())
+                result._write_marker()
+            except BaseException as primary:
+                _rollback_acquisition(root, identity, primary)
+                raise
             self._owner.contexts[scope_id] = result
             return result
 
@@ -385,6 +433,16 @@ class SharedMemoryContext:
         """Deduplicate publication within this admission, without global mutable caches."""
         if self._owner is None:
             raise RuntimeError("Only a controller can publish accepted backing")
+        return self._publish_outputs(value)
+
+    def _publish_outputs(self, value: Any) -> Any:
+        """Snapshot callback outputs in the admitted scope, without borrower deletion.
+
+        Borrowed workers publish only into their admitted output namespace.
+        Failed/unreturned copies remain owned by the controller's physical drain.
+        """
+        from bioimageflow_core._processing_values import accept_native_values
+
         memo: dict[Any, SharedArray] = {}
         created: list[SharedArray] = []
 
@@ -394,6 +452,8 @@ class SharedMemoryContext:
             if not isinstance(source, SharedMemoryContext):
                 raise ValueError("Publication requires a bound source owner")
             descriptor = source._descriptor_for(ref.scope_id)
+            if self._owner is None and self._descriptor_for(ref.scope_id) != descriptor:
+                raise ValueError("Callback output reference is not admitted to this task")
             if storage.sealed(descriptor, ref):
                 return ref
             key = self._ref_key(ref)
@@ -419,13 +479,14 @@ class SharedMemoryContext:
                 return tuple(walk(child) for child in item)
             return item
 
-        with self._owner.lock:
+        with self._owner.lock if self._owner is not None else nullcontext():
             self._require_open()
             try:
-                result = walk(value)
+                result = walk(accept_native_values(value))
             except BaseException:
-                for ref in created:
-                    self.release(ref)
+                if self._owner is not None:
+                    for ref in created:
+                        self.release(ref)
                 raise
             self._accepted.update(ref.name for ref in created)
             return result

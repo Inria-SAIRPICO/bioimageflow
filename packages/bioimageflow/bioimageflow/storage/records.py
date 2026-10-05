@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from .common import Path, pd
-from .identity import validate_relative_posix_path
+from .identity import _native_record_dtype, validate_relative_posix_path
 from .manifests import RecordManifest
 from .models import CacheCorruptionError
 
@@ -133,7 +133,11 @@ class _ExactRecordsMixin:
             str(column.get("name")): str(column.get("kind"))
             for column in manifest.dataframe_logical_schema
         }
-        unknown = (path_columns | shared_array_columns) - set(declared_column_kinds)
+        native_outputs = [output for output in manifest.outputs
+                          if output.get("asset_role") == "native_array"]
+        native_columns = {str(output["array"]["column"]) for output in native_outputs}
+        array_columns = shared_array_columns | native_columns
+        unknown = (path_columns | array_columns) - set(declared_column_kinds)
         if unknown:
             raise CacheCorruptionError(
                 f"Exact record asset columns are not declared: {sorted(unknown)!r}"
@@ -143,7 +147,11 @@ class _ExactRecordsMixin:
             for output in manifest.outputs
             if output.get("kind") == "owned_asset"
         }
-        for column in path_columns | shared_array_columns:
+        for output in native_outputs:
+            column, index = output["array"]["column"], output["array"]["row_index"]
+            if column not in dataframe or index not in dataframe.index or dataframe.at[index, column] != output["path"]:
+                raise CacheCorruptionError("Native array metadata does not identify its dataframe cell")
+        for column in path_columns | array_columns:
             if column not in dataframe.columns:
                 continue
             for value in dataframe[column]:
@@ -170,7 +178,7 @@ class _ExactRecordsMixin:
                             f"Exact record asset is missing manifest metadata: {safe_relative}"
                         )
                     continue
-                if column in shared_array_columns and column not in path_columns:
+                if column in array_columns and column not in path_columns:
                     raise CacheCorruptionError(
                         f"Exact record shared-array column {column!r} contains "
                         "a non-asset value."
@@ -219,7 +227,27 @@ class _ExactRecordsMixin:
         path_columns: set[str],
         shared_array_columns: set[str],
     ) -> pd.DataFrame:
-        hydrated = dataframe.copy()
+        hydrated = pd.DataFrame(dataframe, copy=True)
+        native_outputs = {str(output["path"]): output for output in manifest.outputs
+                          if output.get("asset_role") == "native_array"}
+        native_columns = {str(output["array"]["column"]) for output in native_outputs.values()}
+        for column in native_columns:
+            def rehydrate_native(value: object) -> object:
+                if value is None or (isinstance(value, float) and bool(pd.isna(value))):
+                    return value
+                if not isinstance(value, str) or value not in native_outputs:
+                    raise CacheCorruptionError("Native array cell has no exact asset metadata")
+                import numpy as np
+                from bioimageflow_core import accept_native_array
+                path = self._confined_record_path(record_dir, value)
+                try:
+                    expected_dtype = _native_record_dtype(native_outputs[value]["array"]["dtype"])
+                    loaded = np.load(path, allow_pickle=False, mmap_mode="r")
+                    return accept_native_array(loaded.view(expected_dtype))
+                except (OSError, ValueError, TypeError) as exc:
+                    raise CacheCorruptionError(f"Native array asset is unreadable: {value}") from exc
+            hydrated[column] = pd.Series([rehydrate_native(value) for value in hydrated[column]],
+                                          index=hydrated.index, dtype=object)
         shared_outputs = {
             str(output.get("path")): output
             for output in manifest.outputs

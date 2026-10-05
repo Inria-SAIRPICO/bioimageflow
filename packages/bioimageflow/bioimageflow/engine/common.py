@@ -19,6 +19,7 @@ from collections.abc import Generator
 from graphlib import CycleError, TopologicalSorter
 from typing import Annotated, Any, cast, get_args, get_origin, TYPE_CHECKING, Union
 
+import numpy as np
 import pandas as pd
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
@@ -186,15 +187,15 @@ def _resolve_staged_output_path(
 
 
 def _to_python(val: Any) -> Any:
-    """Convert numpy scalars to native Python types.
+    """Convert NumPy scalars and borrow independently described accepted arrays.
 
-    pandas DataFrames store numeric values as numpy scalars (np.int64,
-    np.float64, etc.).  When these are pickled and sent to Wetlands worker
-    environments that don't have numpy installed, unpickling fails.
-    The ``.item()`` method is the standard way to get the native Python
-    equivalent and is available on all numpy scalar types.
+    Native arrays retain their exact dtype and shape with immutable bytes;
+    each consumer gets its own view metadata without copying accepted pixels.
     """
-    return val.item() if hasattr(val, "item") else val
+    if isinstance(val, np.ndarray):
+        from bioimageflow_core import accept_native_array
+        return accept_native_array(val)
+    return val.item() if isinstance(val, np.generic) else val
 
 
 def _compute_engine_timeout(worker_timeout: float | None) -> float | None:
