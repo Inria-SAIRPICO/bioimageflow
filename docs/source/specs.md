@@ -2682,6 +2682,9 @@ Logical DataFrame identity reads exact cells within each column, preserving its 
 Adjacent large integers remain distinct even beside floating-point columns; signed and unsigned values retain the existing dtype-aware logical representation.
 Data loaded for execution keeps declared string values such as `"001"` as strings rather than implicitly converting them to numbers.
 Lists and tuples in semantic values or environment dependencies retain their declared order, including ordered channel selections; only genuinely unordered sets use canonical sorting.
+Actual declared field values for source and column-bound ProcessingTools and DataFrameTool parameters use the same finite portable-value identity as reusable cells, preserving list versus tuple kind, exact built-in dictionary key types, bytes and numeric scalar facts rather than approximating them through generic JSON.
+An omitted default enters that identity as its captured effective value; an equal explicit value retains normal reuse.
+This value projection does not replace the separate structural authorities for bindings, templates, workflow configuration, executable facts or provenance.
 These rules preserve the existing scalar, dtype and nonfinite-value identity grammar and do not claim verified executable-content identity from a class selector or package label.
 Compilation retains provider/selector recipes without substituting workflow-boundary diagnostic signatures.
 Planning reports `PENDING_UPSTREAM` while a recipe depends on an unresolved selection.

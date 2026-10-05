@@ -106,11 +106,31 @@ class _IdentityRuntimeMixin:
         capture = self._capture_executable(node)
         from bioimageflow.cache.identity import deterministic_serialize
         tool_version = deterministic_serialize(dict(capture.scientific_key))
+        from bioimageflow.portable_cells import portable_identity
+        from enum import Enum
+
+        def field_identity(value: Any) -> Any:
+            # Declared Enum choices keep their existing primitive-value semantics.
+            return portable_identity(value.value if isinstance(value, Enum) else value)
+
         if isinstance(node.tool, ProcessingTool):
+            resolved_params = dict(resolved_params)
+            for category in ("constants", "defaults"):
+                if category in resolved_params:
+                    resolved_params[category] = {
+                        name: field_identity(value)
+                        for name, value in resolved_params[category].items()
+                    }
             resolved_params = {
                 "arguments": resolved_params,
                 "row_consumption": node.tool.row_consumption.value,
                 "collective_reference_inputs": list(node.tool.collective_reference_inputs),
+            }
+        else:
+            declared_fields = node.tool.Inputs._get_all_annotations()
+            resolved_params = {
+                name: field_identity(value) if name in declared_fields else value
+                for name, value in resolved_params.items()
             }
         return compute_signature_hash(
             type(node.tool).__name__,

@@ -78,6 +78,7 @@ PUBLIC_EXPORTS = {
     "PreparedSubmissionExternalSource",
     "PreparedSubmissionManifest",
     "ProgressEvent",
+    "ResultGroup",
     "ResourceLifetime",
     "RemoteProfileValidationReport",
     "RemoteProfileDiagnostic",
@@ -158,6 +159,7 @@ PUBLIC_EXPORTS = {
     "validate_parameters",
     "validate_parsl_config_ref",
     "validate_remote_execution_profile",
+    "result_groups",
 }
 
 

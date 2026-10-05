@@ -160,6 +160,9 @@ Runtime callable and source-backed admission prove the finite supported facts de
 - Output contract version when output schema changes affect cache compatibility.
 
 Scientific values retain their declared meaning: numeric-looking strings remain strings unless a tool explicitly converts them.
+Actual declared parameter field values use the same finite portable identity as record cells: container kind, ordered primitive key types, exact bytes/numeric scalar facts and nested content-bound array leaves remain distinct.
+Processing constants/defaults and DataFrame parameters share this projection; binding/template/provenance descriptors, synthetic root-frame digests and executable/configuration facts retain their separate structural grammar.
+Equal omitted effective defaults and explicit values reuse the same computation identity, and runtime argument objects are not rewritten for hashing.
 Dataframe identity encodes scalar cells from each column independently, preserving large signed/unsigned integer values beside floats instead of promoting an entire mixed row to floating point.
 Environment mappings have canonical key order, ordered dependency/channel lists and tuples retain precedence, and only actual unordered sets are canonicalized without order.
 These rules retain the existing scalar/nonfinite/dtype encoding and do not claim a new worker wire protocol or collective aggregate representation.
