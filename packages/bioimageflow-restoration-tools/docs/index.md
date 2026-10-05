@@ -3,7 +3,8 @@
 `bioimageflow-restoration-tools` provides restoration inference wrappers, simple image-processing comparisons, and image-quality metrics.
 It is designed for workflows that compare noisy or blurred microscopy images with restored outputs.
 
-Execution environments provide imageio, NumPy, SciPy, and scikit-image.
+Package discovery requires only `bioimageflow-core`.
+Execution environments provide ImageIO, NumPy, SciPy, and scikit-image when the processing tools run.
 `CAREamicsPredict` runs CAREamics inference from a checkpoint.
 The simple filters are documented as image-processing methods rather than learned restoration models.
 SAIRPICO command-line restoration tools live in `bioimageflow-sairpico-tools`.

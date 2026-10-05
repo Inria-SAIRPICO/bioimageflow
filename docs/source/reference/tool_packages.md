@@ -17,6 +17,7 @@ Full deterministic Python 3.11 validation is manually available before tagging a
 Package metadata separates distribution dependencies from isolated runtime dependencies.
 Install-time dependencies must stay small enough for package import, documentation discovery, and metadata validation.
 Heavy or tool-specific runtimes belong in the tool's `EnvironmentSpec`, not in the package import path.
+Hosts may install a tool distribution with `ToolRegistry.install_package(..., install_dependencies=False)` when they provide compatible main-process dependencies; other callers install declared dependencies by default.
 Package-local `uv.sources` entries mirror first-party runtime dependencies so editable workspace runs and built artifacts use the same package graph.
 Published first-party dependency requirements declare the oldest tested compatible version and an upper compatibility boundary.
 Downstream packages are released only when their code, packaged content, or compatibility requirements change.

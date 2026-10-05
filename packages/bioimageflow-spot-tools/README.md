@@ -1,6 +1,7 @@
 # bioimageflow-spot-tools
 
 Tools for puncta and spot quantification.
+Main-process dataframe tools require BioImageFlow, ImageIO, NumPy, pandas, and SciPy from the host; processing tools obtain scikit-image from their worker environment.
 
 ## Tools
 

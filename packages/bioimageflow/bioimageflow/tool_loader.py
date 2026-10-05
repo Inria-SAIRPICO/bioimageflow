@@ -367,11 +367,15 @@ def ensure_installed(
     version: str,
     pypi_name: str,
     store_path: Path,
+    *,
+    install_dependencies: bool = True,
 ) -> None:
     """Install a package into the tool store if not already present.
 
     Uses the current orchestrator interpreter's ``pip`` module with an
-    argument-vector subprocess call.
+    argument-vector subprocess call. Hosts that supply compatible main-process
+    dependencies can set ``install_dependencies=False`` to install only the
+    tool distribution. Worker dependencies remain owned by ``EnvironmentSpec``.
     """
     pkg_dir = store_path / pkg_name / version / pkg_name
     if pkg_dir.exists():
@@ -383,16 +387,12 @@ def ensure_installed(
     logger.info("Installing %s==%s into tool store (%s)", pypi_name, version, target)
 
     try:
+        command = [sys.executable, "-m", "pip", "install", "--target", str(target)]
+        if not install_dependencies:
+            command.append("--no-deps")
+        command.append(f"{pypi_name}=={version}")
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--target",
-                str(target),
-                f"{pypi_name}=={version}",
-            ],
+            command,
             check=True,
             capture_output=True,
             text=True,

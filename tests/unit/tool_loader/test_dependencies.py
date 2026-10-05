@@ -16,6 +16,52 @@ from bioimageflow.dataframe_tool import DataFrameTool
 pytest_plugins = ("tests.testkit.tool_loader",)
 
 
+@pytest.mark.parametrize("install_dependencies", [True, False])
+def test_ensure_installed_dependency_option(
+    tmp_path, monkeypatch, install_dependencies: bool
+) -> None:
+    from bioimageflow import tool_loader
+
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        commands.append(command)
+        (tmp_path / "example_tools" / "1.2.3" / "example_tools").mkdir(
+            parents=True
+        )
+
+    monkeypatch.setattr(tool_loader.subprocess, "run", fake_run)
+    tool_loader.ensure_installed(
+        "example_tools",
+        "1.2.3",
+        "example-tools",
+        tmp_path,
+        install_dependencies=install_dependencies,
+    )
+
+    assert len(commands) == 1
+    assert commands[0][:4] == [sys.executable, "-m", "pip", "install"]
+    assert commands[0][-1] == "example-tools==1.2.3"
+    assert ("--no-deps" in commands[0]) is not install_dependencies
+
+
+def test_ensure_installed_default_installs_dependencies(tmp_path, monkeypatch) -> None:
+    from bioimageflow import tool_loader
+
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        commands.append(command)
+        (tmp_path / "example_tools" / "1.2.3" / "example_tools").mkdir(
+            parents=True
+        )
+
+    monkeypatch.setattr(tool_loader.subprocess, "run", fake_run)
+    tool_loader.ensure_installed("example_tools", "1.2.3", "example-tools", tmp_path)
+
+    assert "--no-deps" not in commands[0]
+
+
 class TestRequireToolPackages:
     def test_require_loads_and_registers(self, tool_store, tmp_path):
         """require_tool_packages parses PEP 723, loads packages, and

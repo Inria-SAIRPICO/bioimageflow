@@ -4,6 +4,7 @@
 command-line programs. The package exposes point-spread-function
 generation, deconvolution, denoising, and hotspot detection tools while keeping
 the original binaries in conda-backed `EnvironmentSpec` definitions.
+Package discovery requires only `bioimageflow-core`; image libraries are supplied by the tool environments at execution time.
 
 The public tools are:
 

@@ -1,6 +1,8 @@
 # bioimageflow-phasor-tools
 
 `bioimageflow-phasor-tools` provides a small composable FLIM phasor-analysis surface backed by PhasorPy.
+Package discovery requires only `bioimageflow-core`.
+NumPy, tifffile, and PhasorPy are supplied by the isolated `spectral-phasorpy` worker environment when the tools execute.
 
 ## Tools
 
