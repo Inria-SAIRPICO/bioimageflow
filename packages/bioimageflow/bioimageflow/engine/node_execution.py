@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+from bioimageflow.execution_state import WorkflowCancelledError
+
+from bioimageflow.cache.lifecycle import AttemptFailure
+
 from dataclasses import dataclass, replace
 from bioimageflow_core import Arguments, ConsumedRow
 from bioimageflow.row_relation import ResultRelation, RowAssociation
@@ -16,7 +20,6 @@ from .common import (
     Node,
     ProcessingTool,
     Storage,
-    WorkflowCancelledError,
     _declared_owned_artifact_paths,
     _declared_zero_row_scalar_outputs,
     _explicit_template_output_columns,
@@ -337,6 +340,7 @@ class _NodeExecutionMixin:
                     f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
                 ),
                 row_relation=relation.to_dict(),
+                run_context=getattr(workflow, "_active_run_context", None),
                 column_kinds={
                     column: "external_path"
                     for column in _path_output_columns(node.tool)
@@ -438,6 +442,7 @@ class _NodeExecutionMixin:
             )
         )
 
+        failure = AttemptFailure.capture(storage, result_key, attempt_id)
         try:
             row_args = self._resolve_defaults(node, input_annotations)
             path_input_fields = [
@@ -516,18 +521,7 @@ class _NodeExecutionMixin:
             self._pin_selected_result(node, selection)
             df = selection.dataframe
         except BaseException as exc:
-            storage.finish_cache_attempt(
-                result_key,
-                attempt_id,
-                status=(
-                    "cancelled" if isinstance(exc, WorkflowCancelledError) else "failed"
-                ),
-                error_type=(
-                    None
-                    if isinstance(exc, WorkflowCancelledError)
-                    else type(exc).__name__
-                ),
-            )
+            failure.finish(exc, getattr(workflow, "_active_run_context", None))
             raise
         storage.finish_cache_attempt(
             result_key,
@@ -649,6 +643,10 @@ class _NodeExecutionMixin:
                 )
             )
 
+        failure = None
+        if not transient:
+            assert result_key is not None and attempt_id is not None
+            failure = AttemptFailure.capture(storage, result_key, attempt_id)
         try:
             path_input_fields = [
                 n for n, a in input_annotations.items() if is_path_type(a)
@@ -745,22 +743,8 @@ class _NodeExecutionMixin:
                     error=(None if isinstance(exc, WorkflowCancelledError) else exc),
                 )
             else:
-                assert result_key is not None
-                assert attempt_id is not None
-                storage.finish_cache_attempt(
-                    result_key,
-                    attempt_id,
-                    status=(
-                        "cancelled"
-                        if isinstance(exc, WorkflowCancelledError)
-                        else "failed"
-                    ),
-                    error_type=(
-                        None
-                        if isinstance(exc, WorkflowCancelledError)
-                        else type(exc).__name__
-                    ),
-                )
+                assert failure is not None
+                failure.finish(exc, getattr(workflow, "_active_run_context", None))
             raise
 
         if transient:

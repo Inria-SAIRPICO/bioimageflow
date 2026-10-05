@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from bioimageflow.execution_state import WorkflowCancelledError
+
 import threading
 import uuid
 from dataclasses import replace
@@ -38,7 +40,6 @@ from .common import (
     ProcessingDispatch,
     ProcessingTool,
     WorkerTimeoutError,
-    WorkflowCancelledError,
     _accepts_context,
     _compute_engine_timeout,
     _raise_worker_task_error,

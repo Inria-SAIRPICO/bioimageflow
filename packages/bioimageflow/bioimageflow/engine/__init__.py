@@ -1,5 +1,7 @@
 """Execution engines and their public shared values."""
 
+from bioimageflow.execution_state import WorkflowCancelledError
+
 from .common import (
     CycleInWorkflowError,
     DisabledNodeError,
@@ -9,7 +11,6 @@ from .common import (
     NodeStep,
     WorkerTaskError,
     WorkerTimeoutError,
-    WorkflowCancelledError,
     _accepts_context,
     _compute_engine_timeout,
     _raise_worker_task_error,

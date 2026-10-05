@@ -60,6 +60,15 @@ class EnvironmentRecipeState(Enum):
     STALE = "stale"
 
 
+class EnvironmentShutdownError(RuntimeError):
+    """Selected pools failed physical close and remain owned for retry."""
+
+    def __init__(self, failures: tuple[tuple[str, Exception], ...]) -> None:
+        self.failures = failures
+        names = ", ".join(repr(name) for name, _ in failures)
+        super().__init__(f"Environment shutdown remains pending for {names}")
+
+
 @dataclass(frozen=True)
 class EnvironmentPreparation:
     """One observable processing-environment preparation decision."""
@@ -701,9 +710,19 @@ class WetlandsEnvManager:
         ]
 
     def shutdown_all(self) -> None:
+        """Close every selected pool, retaining failed owners and original errors.
+
+        Successful pools retire independently. If any close fails, raise after
+        attempting the captured set; another call retries the remaining pools.
+        """
         with self._lock:
+            failures: list[tuple[str, Exception]] = []
             for name in tuple(self._pools):
-                self.stop(name)
+                _, error = self._stop_pool(name)
+                if error is not None:
+                    failures.append((name, error))
+            if failures:
+                raise EnvironmentShutdownError(tuple(failures)) from failures[0][1]
 
     def retire_idle(self, env_name: str) -> bool:
         """Physically retire one idle pool; failed close retains ownership for retry.
@@ -722,18 +741,26 @@ class WetlandsEnvManager:
             return True
 
     def stop(self, env_name: str) -> bool:
+        """Best-effort close of one pool; failure retains its owner for retry."""
         with self._lock:
-            pool = self._pools.get(env_name)
-            if pool is None:
-                return False
-            try:
-                pool.close()
-            except Exception:
-                logger.warning("Failed to close Wetlands pool %r", env_name, exc_info=True)
-                return False
+            stopped, error = self._stop_pool(env_name)
+            if error is not None:
+                logger.warning("Failed to close Wetlands pool %r", env_name,
+                               exc_info=(type(error), error, error.__traceback__))
+            return stopped
+
+    def _stop_pool(self, env_name: str) -> tuple[bool, Exception | None]:
+        """Close under the caller's ownership lock without losing the failure."""
+        pool = self._pools.get(env_name)
+        if pool is None:
+            return False, None
+        try:
+            pool.close()
             # A task's logical result/terminal status is not this physical fence.
             self._retire_closed_pool(env_name)
-            return True
+        except Exception as error:
+            return False, error
+        return True, None
 
     def _retire_closed_pool(self, name: str) -> None:
         """Retire only the selected physically closed pool and its grants."""

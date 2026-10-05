@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProgressEvent:
     """Progress event reported by an execution engine."""
 

@@ -401,15 +401,15 @@ class _RuntimeMixin:
             engine = self.create_engine()
         engine_reserved = self._reserve_engine_execution(engine)
         try:
-            self._start_run_view(
-                target_list,
-                run_context=run_context,
-                engine=engine,
-            )
             try:
+                self._start_run_view(
+                    target_list,
+                    run_context=run_context,
+                    engine=engine,
+                )
                 results = engine.execute(target_list, self)
             except BaseException as exc:
-                run_context._execution_failed(exc)
+                run_context._execution_failed(exc, binding=self)
                 raise
             else:
                 run_context._execution_succeeded()
@@ -537,22 +537,22 @@ class _RuntimeMixin:
         if owns_reservation:
             engine_reserved = self._reserve_engine_execution(engine)
         try:
-            self._start_run_view(
-                target_list,
-                run_context=run_context,
-                engine=engine,
-            )
             try:
+                self._start_run_view(
+                    target_list,
+                    run_context=run_context,
+                    engine=engine,
+                )
                 yield from engine.execute_steps(target_list, self)
             except GeneratorExit:
-                from bioimageflow.engine import WorkflowCancelledError
+                from bioimageflow.execution_state import WorkflowCancelledError
 
                 run_context._execution_failed(
-                    WorkflowCancelledError("Workflow step execution was closed.")
+                    WorkflowCancelledError("Workflow step execution was closed."), binding=self,
                 )
                 raise
             except BaseException as exc:
-                run_context._execution_failed(exc)
+                run_context._execution_failed(exc, binding=self)
                 raise
             else:
                 run_context._execution_succeeded()
@@ -627,17 +627,14 @@ class _RuntimeMixin:
         def finish_success() -> None:
             self._finish_run_view("succeeded", update_latest_success=True)
 
-        def finish_failure(error: BaseException) -> None:
-            self._finish_run_view(
-                self._run_status_for_exception(error),
-                update_latest_success=False,
-            )
+        from bioimageflow.storage.run_views import _RunViewAdmission
 
+        admission = _RunViewAdmission(Path(self.storage_path), run_context._ensure_run_id())
         run_id = run_context._bind(
             self,
             target_nodes=tuple(target_nodes),
             on_success=finish_success,
-            on_failure=finish_failure,
+            on_failure=admission,
         )
         self._run_view_context = {
             "run_id": run_id,
@@ -659,6 +656,7 @@ class _RuntimeMixin:
             launcher_reserved=run_context._uses_launcher_reservation(
                 self.storage_path
             ),
+            _admission=admission,
         )
 
     def _finish_run_view(self, status: str, *, update_latest_success: bool) -> None:
@@ -694,7 +692,7 @@ class _RuntimeMixin:
         return f"workflow:{digest}"
 
     def _run_status_for_exception(self, exc: BaseException) -> str:
-        from bioimageflow.engine import WorkflowCancelledError
+        from bioimageflow.execution_state import WorkflowCancelledError
 
         return "cancelled" if isinstance(exc, WorkflowCancelledError) else "failed"
 

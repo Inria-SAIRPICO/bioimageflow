@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow.execution_state import WorkflowCancelledError
+
 from collections.abc import Callable
 from contextvars import copy_context
 from typing import TYPE_CHECKING
@@ -20,7 +22,6 @@ from .common import (
     ResourceLifetime,
     TopologicalSorter,
     WetlandsBackend,
-    WorkflowCancelledError,
     concurrent,
     logger,
     pd,
@@ -65,24 +66,32 @@ class _EngineSteps:
         except StopIteration:
             self._release()
             raise
-        except BaseException:
-            self._release()
+        except BaseException as primary:
+            self._release(primary)
             raise
 
     def close(self) -> None:
         if self._closed:
             return
+        primary: BaseException | None = None
         try:
             self._iterator.close()
+        except BaseException as error:
+            primary = error
+            raise
         finally:
-            self._release()
+            self._release(primary)
 
-    def _release(self) -> None:
+    def _release(self, primary: BaseException | None = None) -> None:
         if self._closed:
             return
         self._closed = True
         try:
             self._engine._cleanup_after_execution()
+        except BaseException:
+            if primary is None:
+                raise
+            logger.exception("Engine cleanup failed while preserving the execution error")
         finally:
             self._engine._end_execution()
 
@@ -148,7 +157,6 @@ class DefaultEngine(
 
         self._use_wetlands = use_wetlands
         self._force_sequential = force_sequential
-        self._progress_lock = threading.Lock()
         self._cache_hit_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
         self._closed = False
@@ -265,16 +273,32 @@ class DefaultEngine(
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         """Close the engine when leaving a context manager."""
-        self.close()
+        try:
+            self.close()
+        except BaseException:
+            if exc is None:
+                raise
+            logger.exception("Engine close remains pending while preserving the body error")
 
     def execute(self, targets: list[Node], workflow: Any) -> dict[str, pd.DataFrame]:
         """Execute the workflow, returning results for target nodes."""
         self._begin_execution()
+        primary: BaseException | None = None
         try:
             return self._execute_impl(targets, workflow)
+        except BaseException as error:
+            primary = error
+            raise
         finally:
             try:
                 self._cleanup_after_execution()
+            except BaseException as secondary:
+                if primary is None:
+                    raise
+                context = getattr(workflow, "_active_run_context", None)
+                if context is not None:
+                    context._record_cleanup_failure("engine-cleanup", secondary)
+                logger.exception("Engine cleanup failed while preserving the execution error")
             finally:
                 self._end_execution()
 
@@ -540,7 +564,7 @@ class DefaultEngine(
         record_id: str | None = None,
         diagnostic: Any | None = None,
     ) -> None:
-        """Emit a progress event, serialized via ``_progress_lock``."""
+        """Deliver an optional observer outside scheduler locks."""
         if workflow.on_progress is not None:
             event = ProgressEvent(
                 node_name=node_name,
@@ -555,8 +579,13 @@ class DefaultEngine(
                 timestamp=time.time(),
                 diagnostic=diagnostic,
             )
-            with self._progress_lock:
+            try:
                 workflow.on_progress(event)
+            except BaseException as error:
+                context = getattr(workflow, "_active_run_context", None)
+                if context is not None:
+                    context._record_cleanup_failure("progress-observer", error)
+                logger.exception("Workflow progress observer failed")
 
     # ── Pre-execution planning ─────────────────────────────────────────
 

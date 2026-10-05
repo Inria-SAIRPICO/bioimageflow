@@ -40,8 +40,8 @@ from bioimageflow.engine import (
     WorkerTaskError as WorkerTaskError,
     WorkerTimeoutError as WorkerTimeoutError,
     SequentialEngine as SequentialEngine,
-    WorkflowCancelledError as WorkflowCancelledError,
 )
+from bioimageflow.execution_state import WorkflowCancelledError as WorkflowCancelledError
 from bioimageflow.node import (
     ColumnRef as ColumnRef,
     ColumnNotFoundError as ColumnNotFoundError,

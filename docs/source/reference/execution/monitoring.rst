@@ -25,7 +25,8 @@ Failed events may carry a :class:`~bioimageflow.NodeFailureDiagnostic`.
 Parsl futures may complete out of order, but row-complete callbacks for one node are serialized and emitted in aligned row order.
 Events from independent nodes may interleave.
 
-Accepted S target: observer exceptions do not choose the scientific outcome or mask the primary failure.
+Progress observers run outside scheduler locks and may execute concurrently for independent nodes.
+Their exceptions do not choose the scientific outcome or mask the primary failure; the active context records detached ``cleanup_errors`` diagnostics.
 An independently observed owner interruption follows cancellation/drain semantics; its origin cannot be inferred universally from an exception type raised inside a callback.
 A whole-node ``process_batch()`` emits no row-complete events.
 
@@ -128,7 +129,17 @@ An attached Direct, Wetlands, or Parsl execution can produce the same run-specif
        destination=downloads / context.run_id,
    )
 
-The successful context retains the run ID, target binding, and engine-neutral provider outcomes needed to distinguish record-owned, return-owned, and external assets.
+The successful context retains the run ID, detached exact return routes, and engine-neutral provider outcomes needed to distinguish record-owned, return-owned, and external assets.
 Export uses a private sibling, verifies the complete bundle, and installs the destination atomically.
 It creates no new workflow execution and allocates no engine resources.
 Attached export snapshots the supplied successful result when ``export_result()`` is called, so it is process-local and should run before the caller mutates the DataFrame or removes transient assets.
+
+Failure persistence and cleanup
+--------------------------------
+
+A failed execution becomes logically terminal even when an owned run or cache-attempt terminal write fails.
+``context.cleanup_errors`` exposes an immutable tuple of phase, error type and message diagnostics without retaining exception traceback frames.
+``context.cleanup_pending`` identifies exact owned persistence actions; ``context.retry_cleanup()`` retries them and removes an action only after it succeeds.
+Pending actions retain storage identities rather than the workflow graph; setup refusal before canonical-view acquisition does not create or alter a run view.
+Deferred successful computation remains a separate contract: a failed ``finalize_success()`` retains its existing success-finalization authority for retry.
+Engine shutdown failure preserves the retained pool and grant authority for explicit ``engine.close()`` retry, while a scientific primary exception remains the caller's error.

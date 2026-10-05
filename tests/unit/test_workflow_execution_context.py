@@ -196,3 +196,45 @@ def test_root_input_wrapper_uses_exact_context(tmp_path) -> None:
     workflow.compute(inputs={"value": 7}, engine=engine, run_context=context)
 
     assert engine.seen_context is context
+
+
+def workflow_at(path, value):
+    with Workflow(engine="direct", storage_path=path) as workflow:
+        node = CountingTable()(value=value)
+    return workflow, node
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_reusing_admitted_context_preserves_its_outcome_and_retry(tmp_path, deferred):
+    first, a = workflow_at(tmp_path / "a", 4)
+    second, b = workflow_at(tmp_path / "b", 9)
+    context = WorkflowExecutionContext(defer_success_finalization=deferred)
+    first.compute(a, run_context=context)
+    prior = context.terminal_status
+    outcomes = context.execution_outcomes
+    protected = {p: p.read_bytes() for p in (tmp_path / "a").rglob("*") if p.is_file()}
+    with pytest.raises(RuntimeError, match="already bound or finalized"):
+        second.compute(b, run_context=context)
+    assert context.terminal_status == prior
+    assert context.execution_outcomes == outcomes
+    assert all(p.read_bytes() == value for p, value in protected.items())
+    if deferred:
+        context.finalize_success()
+        assert context.terminal_status == "succeeded"
+
+
+def test_reentrant_foreign_context_refusal_preserves_active_owner(tmp_path):
+    second, b = workflow_at(tmp_path / "b", 9)
+    context = WorkflowExecutionContext()
+    observed = []
+    def observer(event):
+        if event.status == "started":
+            with pytest.raises(RuntimeError, match="already bound or finalized"):
+                second.compute(b, run_context=context)
+            observed.append(context.terminal_status)
+    first, a = workflow_at(tmp_path / "a", 4)
+    first.on_progress = observer
+    result = first.compute(a, run_context=context)
+    assert observed == [None]
+    assert result["value"].tolist() == [4]
+    assert context.terminal_status == "succeeded"

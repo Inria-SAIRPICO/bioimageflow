@@ -174,7 +174,8 @@ An unexpected completion-API error preserves the original error with that failur
 as its cause and cannot be reported as completed cleanup.
 Public completion does not certify final operation-thread return, child-process/PID
 cleanup success or completion of background managed reclamation.
-``stop()`` and ``shutdown_all()`` retain their existing best-effort cleanup behavior.
+``stop()`` is a best-effort operation returning ``False`` when physical close fails; the selected pool and its grants remain owned for retry.
+``shutdown_all()`` requires successful retirement of its captured pools, as described below.
 
 Environment lifetime and ownership
 ----------------------------------
@@ -230,6 +231,10 @@ An application can share a manager across workflow engines:
 
 The manager exposes ``stop(env_name)``, ``is_running(env_name)``, ``running_environments()``, and idempotent ``shutdown_all()`` so hosts do not need to access ``_envs`` or ``_launch_configs``.
 Status means that the adapter tracks an environment as launched; it is not a process-health probe.
+``shutdown_all()`` attempts every captured pool and retires successful pools independently.
+If a pool fails physical close or grant retirement, :class:`~bioimageflow.env_manager.EnvironmentShutdownError` exposes an immutable ``failures`` tuple of environment names and original exceptions, with the first error retained as its cause.
+Failed pools and grants remain owned; a later ``shutdown_all()`` or owning engine ``close()`` retries only the remaining pools.
+The owning engine refuses further execution after close is requested, while failed cleanup remains retryable.
 
 Long-running applications should keep one ``WetlandsEnvManager`` for the desired sharing scope and build workflow engines with ``resource_lifetime="external"`` as shown above.
 Use ``manager.stop(name)`` for a per-environment stop action and ``manager.shutdown_all()`` during application shutdown.

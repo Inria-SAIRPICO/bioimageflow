@@ -18,6 +18,7 @@ from bioimageflow import (
 from bioimageflow_core import EnvironmentSpec
 from bioimageflow.backends import WetlandsBackend
 from bioimageflow.engine import WorkflowCancelledError
+from bioimageflow.env_manager import EnvironmentShutdownError
 
 
 class _TrackingManager:
@@ -272,8 +273,11 @@ def test_manager_stop_and_status_introspection() -> None:
     assert manager.is_running("alpha") is False
     assert first.close_calls == 1
 
-    manager.shutdown_all()
-    manager.shutdown_all()
+    for _ in range(2):
+        with pytest.raises(EnvironmentShutdownError) as caught:
+            manager.shutdown_all()
+        assert caught.value.failures[0][0] == "zeta"
+        assert caught.value.__cause__ is caught.value.failures[0][1]
 
     assert manager.running_environments() == ("zeta",)
     assert second.close_calls == 2
@@ -359,5 +363,37 @@ def test_failed_engine_close_preserves_original_error_and_allows_retry() -> None
     manager.fail = False
     engine.close()
     assert manager.shutdown_calls == 2
+    engine.close()
+    assert manager.shutdown_calls == 2
+
+
+@pytest.mark.parametrize("operation", ["execute", "steps", "with"])
+def test_cleanup_failure_preserves_primary_and_engine_close_retries(operation):
+    primary = ValueError("scientific primary")
+    secondary = RuntimeError("physical close pending")
+
+    class RetryManager(_TrackingManager):
+        fail = True
+
+        def shutdown_all(self):
+            super().shutdown_all()
+            if self.fail:
+                raise secondary
+
+    manager = RetryManager()
+    engine = _HarnessEngine(manager, error=primary)
+    with pytest.raises(ValueError) as caught:
+        if operation == "execute":
+            engine.execute([], object())
+        elif operation == "steps":
+            def fail_graph(*args):
+                raise primary
+            engine._compile_execution_graph = fail_graph
+            next(engine.execute_steps([], object()))
+        else:
+            with engine:
+                raise primary
+    assert caught.value is primary
+    manager.fail = False
     engine.close()
     assert manager.shutdown_calls == 2

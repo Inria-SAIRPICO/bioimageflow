@@ -1,4 +1,4 @@
-"""Progress callback serialization under concurrent engine emission."""
+"""Progress callback isolation under concurrent engine emission."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from bioimageflow import DefaultEngine
 
 
-def test_progress_callback_invocations_are_serialized() -> None:
+def test_progress_callback_invocations_can_overlap_without_scheduler_lock() -> None:
     first_entered = Event()
     release_first = Event()
     second_started = Event()
@@ -49,7 +49,7 @@ def test_progress_callback_invocations_are_serialized() -> None:
     assert first_entered.wait(timeout=2)
     second.start()
     assert second_started.wait(timeout=2)
-    assert not second_entered.wait(timeout=0.1)
+    assert second_entered.wait(timeout=1)
 
     release_first.set()
     first.join(timeout=2)
@@ -58,4 +58,4 @@ def test_progress_callback_invocations_are_serialized() -> None:
     assert not first.is_alive()
     assert not second.is_alive()
     assert second_entered.is_set()
-    assert maximum_active == 1
+    assert maximum_active == 2

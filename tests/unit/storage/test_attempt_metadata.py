@@ -45,3 +45,23 @@ def test_cache_attempt_metadata_carries_run_and_terminal_state(
     assert terminal["status"] == "failed"
     assert terminal["completed_at"] is not None
     assert terminal["error_type"] == "RuntimeError"
+
+
+def test_repeated_terminal_attempt_write_requires_identical_facts(tmp_path):
+    import pytest
+    from bioimageflow.storage import CacheCorruptionError
+
+    storage = Storage(tmp_path)
+    key = make_result_key({"node": "repeated"})
+    attempt = storage.new_attempt_id()
+    path = storage.start_cache_attempt(
+        key, attempt, run_id="run_" + "3" * 32,
+        node_key="repeated", tool_identity="tool", engine="direct",
+    )
+    storage.finish_cache_attempt(key, attempt, status="failed", error_type="ValueError")
+    prior = path.read_bytes()
+    storage.finish_cache_attempt(key, attempt, status="failed", error_type="ValueError")
+    assert path.read_bytes() == prior
+    with pytest.raises(CacheCorruptionError, match="already terminal"):
+        storage.finish_cache_attempt(key, attempt, status="succeeded")
+    assert path.read_bytes() == prior

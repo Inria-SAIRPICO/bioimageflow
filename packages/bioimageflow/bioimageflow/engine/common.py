@@ -361,12 +361,6 @@ class DisabledNodeError(Exception):
     pass
 
 
-class WorkflowCancelledError(Exception):
-    """Raised when a workflow execution is cancelled via ``Workflow.cancel()``."""
-
-    pass
-
-
 class CycleInWorkflowError(ValueError):
     """Raised by :meth:`DefaultEngine.plan` / :meth:`Workflow.plan` when the
     graph contains a cycle.

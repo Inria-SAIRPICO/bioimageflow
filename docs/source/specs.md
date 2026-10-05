@@ -427,10 +427,12 @@ Actual waiter interruptions are retried; the original interruption propagates an
 An unexpected completion-API failure preserves the original error with that failure as its cause and cannot be reported as completed cleanup.
 Public operation completion does not certify final operation-thread return, child-process/PID cleanup success or completion of background managed reclamation.
 Preparation callbacks distinguish creation, update, worker startup, and warm-pool reuse; their exceptions occur before destructive force effects, and reentrant lifecycle mutation from those callbacks is unsupported.
-Ordinary `get_or_create(..., replace_existing=False)` preserves matching warm-pool reuse, while `stop()` and `shutdown_all()` retain their existing best-effort behavior.
+Ordinary `get_or_create(..., replace_existing=False)` preserves matching warm-pool reuse, and `stop()` remains an explicitly best-effort selected close.
+`shutdown_all()` strictly attempts the captured pools, retires successful pools independently, and reports ordinary close or grant-retirement failures through `EnvironmentShutdownError.failures`, an ordered tuple of environment names and original exceptions.
+Failed pool and remaining grant ownership stays retained for retry; engine cleanup preserves any admitted scientific primary error while reporting this secondary shutdown failure.
 
 **Dependency normalization:** For cache and provenance hashing, the framework normalizes the dependency specification to avoid false cache misses:
-- Dependency lists are sorted alphabetically (e.g., `["numpy==2.4.2", "cellpose==3.1.1.1"]` and `["cellpose==3.1.1.1", "numpy==2.4.2"]` produce the same hash).
+- Dependency lists and tuples retain their declared order; only genuinely unordered sets are canonically sorted.
 - Version strings are normalized to PEP 440 canonical form (e.g., `"3.0"` and `"3.0.0"` are treated as equivalent).
 - Whitespace is stripped from dependency strings.
 
@@ -2053,7 +2055,9 @@ Row/chunk `row_complete` events are emitted once per row in aligned position ord
 **Accepted target — S09:** Observational callback failure must not select a scientific outcome or mask its primary error.
 An independently observed owner cancellation/interruption follows the drain contract; exception type alone cannot universally distinguish that event from an exception raised inside a callback.
 
-When using branch-level parallelism, progress events from concurrent nodes may interleave. The engine serializes all `on_progress` callback invocations via an internal lock, so the callback does not need to be thread-safe.
+Progress events are immutable snapshots, delivered to optional best-effort observers outside scheduler locks.
+Concurrent nodes may invoke `on_progress` concurrently; the observer is responsible for its own thread safety.
+Observer failures are recorded as detached `progress-observer` cleanup diagnostics without selecting the scientific outcome or creating a pending persistence action.
 
 ### 4.5 Environment Configuration
 
@@ -2099,6 +2103,10 @@ Every engine exposes idempotent `close()`, `__enter__`, and `__exit__`; executin
 **Accepted target — S09:** Idempotency does not excuse a failed physical close: retain cleanup ownership and grants for retry, report pending/error honestly, and release no caller-owned engine or manager.
 Task outcome and cessation of task writers, public operation completion, and physical pool retirement are distinct fences.
 One execution reservation releases once on every setup, success, failure, cancellation and iterator-close exit; setup refusal leaves no running binding or view claim.
+Run-view setup records exclusive directory ownership before its first metadata write; failure terminalizes or cleans only that admitted directory with the same captured filesystem identity, never a preexisting run view.
+A refused start with a newly admitted context binding but no allocated view fails that context without manufacturing run metadata.
+Rejected reuse preserves every prior context status, callback and run view.
+Context-binding admission and run-directory ownership are independent authorities.
 Closing or exhausting a steps generator applies its cleanup policy after submitted work drains.
 
 `Workflow.create_engine()` is the only engine factory:
@@ -2126,10 +2134,10 @@ Bare `Workflow(storage_path="./results", engine="parsl").compute(...)` has no im
 
 `WetlandsEnvManager` provides these public, thread-safe lifecycle methods:
 
-- `stop(env_name) -> bool` stops one tracked environment and returns whether it was running.
+- `stop(env_name) -> bool` returns `True` only after successful selected retirement, and `False` when absent or an ordinary close/retirement failure leaves its owner retained for retry; it is not a running-status probe.
 - `is_running(env_name) -> bool` reports whether the adapter tracks that name as launched.
 - `running_environments() -> tuple[str, ...]` returns sorted tracked environment names.
-- `shutdown_all() -> None` stops every tracked environment and is idempotent.
+- `shutdown_all() -> None` strictly attempts every captured pool, raises `EnvironmentShutdownError` with original ordinary close or grant-retirement failures, and retries only retained pools on a later call.
 
 Manager status is lifecycle introspection, not a worker health probe.
 Applications must not inspect or mutate `_envs` or `_launch_configs`.
@@ -2947,6 +2955,9 @@ workspace/
 Reusable records are immutable once published.
 Non-reusable `ProcessingTool` invocations use the confined `cache/v1/transient/runs/` tree, create no records or views, and remain until explicit writer-safe transient cleanup.
 Reusable attempts carry required running and terminal lifecycle metadata in `attempt.json`.
+An allocated DataFrame publication attempt becomes failed or cancelled when publication fails; a transform failure before attempt allocation does not invent an attempt.
+After correlation checks, an identical terminal status and error type may be written idempotently; conflicting terminal facts refuse, and owned persistence retry checks the captured attempt-directory identity before writing.
+If terminal metadata persistence fails, the exact owned run or attempt remains pending cleanup with detached diagnostics and explicit retry authority, without claiming successful publication or physical resource retirement.
 Backend task metadata is terminalized after future observation under `diagnostics/v1/` and never contributes to result keys or immutable record IDs.
 `views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
@@ -3090,7 +3101,11 @@ Windows deletion restrictions and mapped-handle/namespace errors remain pending 
 Ordinary loss of the final returned reference to a group releases only that group’s exact allocation leases.
 It never closes the whole owner or unrelated groups; retained descriptors and mapped views remain independent pins, and final-reader drain may finish a pending release.
 Weak context bookkeeping never retains discarded result handles or frames.
-Successful terminal finalization drops captured executable bindings and observer callbacks while preserving immutable outcome/status metadata and detached exact return routes/storage address for later export; deferred or failed finalization keeps its retry authority.
+Successful terminal finalization drops captured executable bindings and observer callbacks while preserving immutable outcome/status metadata and detached exact return routes/storage address for later export.
+Automatic failure also releases the captured execution binding and becomes logically failed even when terminal persistence fails; `WorkflowExecutionContext.cleanup_errors` exposes immutable detached diagnostic history, while `cleanup_pending` reports outstanding owned persistence actions.
+`retry_cleanup()` retries only those captured actions and clears each pending action only after its write succeeds; retained diagnostic history is separate from current cleanup status.
+`cleanup_pending` covers registered persistence actions, not physical pool, reader or grant drain; failed engine-owned pool retirement is retried through the owning engine's `close()`.
+Completed computation awaiting explicit deferred-success finalization retains its separate strict retry authority; this is distinct from a failed execution with pending cleanup.
 No private tracker manipulation is used.
 
 The public `result_groups(value)` discovers exact `ResultGroup` handles from actual returned SharedArray bindings, without using DataFrame attrs, a global registry or a moving latest-result pointer.
@@ -3153,6 +3168,7 @@ After observing a failure, the scheduler stops new task submission and drains al
 For worker task failures, it chooses the public primary failure among failures from tasks actually submitted, ordered by `(compiled node ordinal, first input position, task ID)`.
 Completion timing does not choose the primary error among those submitted failures.
 **Accepted target — S09:** Cleanup, callback and later secondary failures must not mask this admitted primary error; pending cleanup remains explicitly reportable.
+Failed run or attempt terminal persistence preserves the original primary exception object and records its secondary failure separately rather than replacing that exception.
 A ready node whose task was not submitted before stopping does not contribute a hypothetical failure; the scheduler does not launch additional work solely to obtain an earlier-ordered error.
 For example, if only node `second` was submitted before it failed, that failure is reported; if both `first` and `second` were submitted and failed, `first` is primary according to their compiled order regardless of which failure completed first.
 
@@ -3269,6 +3285,7 @@ One `Workflow` permits one active public execution; overlap fails before compila
 A supplied context preserves a cancellation request made before startup.
 Finalization is idempotently bound to one execution.
 `defer_success_finalization=True` leaves successful execution non-terminal for the submitted launcher, while failure and cancellation finalize immediately; invalid or mismatched finalization raises `RuntimeError`.
+The attached context's `terminal_status` is `succeeded` or `failed`; failure and cancellation both finalize it as `failed`, while persisted run and attempt metadata distinguish `cancelled` and `cancel_requested` remains an independent request signal.
 
 ```python
 import threading
@@ -3567,7 +3584,8 @@ pool.close()
 
 A successful public pool close is the physical grant-retirement fence.
 Strict selected recreation retains pool/cache/grant ownership after close failure for explicit retry.
-The adapter's `stop()` and `shutdown_all()` are named best-effort operations and must not be described as unconditional physical cleanup certification.
+The adapter's `stop()` is explicitly best-effort; `shutdown_all()` reports ordinary close or grant-retirement failures after attempting its captured pools and retains their ownership for retry.
+Neither a logical outcome nor an interrupted or failed shutdown certifies physical cleanup; composing cleanup with a scientific failure preserves the original primary exception.
 BioImageFlow never uses Wetlands private environment storage or transport internals.
 
 #### Retained-side keyed joins for collective outputs

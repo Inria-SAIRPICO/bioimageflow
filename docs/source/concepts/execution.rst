@@ -130,6 +130,9 @@ The engine emits :class:`~bioimageflow.ProgressEvent` objects via the
 Cache-related events expose ``result_key`` / ``record_id`` values.
 Diagnostic signatures are separate debug values and are not cache keys.
 
+Progress observers receive frozen event snapshots outside scheduler locks.
+Independent nodes may invoke observers concurrently; observer errors are diagnostics and do not change the scientific result.
+
 See also
 --------
 

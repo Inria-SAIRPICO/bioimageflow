@@ -21,6 +21,8 @@ from .models import (
     OutputViewerMetadata,
     RunNodeResult,
 )
+from dataclasses import dataclass
+
 from .allocation import RunAllocationLock
 from .identity import (
     _atomic_write_json,
@@ -33,6 +35,48 @@ from .identity import (
 )
 
 
+@dataclass
+class _RunViewAdmission:
+    """Exact authority acquired by one exclusive canonical-view creation."""
+
+    storage_path: Path
+    run_id: str
+    identity: tuple[int, int] | None = None
+    failure_status: str = "failed"
+
+    def acquired(self, directory: Path) -> None:
+        stat = directory.stat(follow_symlinks=False)
+        self.identity = (stat.st_dev, stat.st_ino)
+
+    def __call__(self, error: BaseException) -> None:
+        from bioimageflow.execution_state import WorkflowCancelledError
+
+        self.failure_status = "cancelled" if isinstance(error, WorkflowCancelledError) else "failed"
+        self.retry()
+
+    def retry(self) -> None:
+        from bioimageflow.storage import Storage
+
+        if self.identity is None:
+            return
+        storage = Storage(self.storage_path)
+        directory = storage.run_dir(self.run_id)
+        with RunAllocationLock(self.storage_path):
+            if not directory.exists() and not directory.is_symlink():
+                return
+            stat = directory.stat(follow_symlinks=False)
+            if directory.is_symlink() or (stat.st_dev, stat.st_ino) != self.identity:
+                raise CacheCorruptionError("Owned canonical run directory identity changed.")
+            if (directory / "run.json").is_symlink():
+                raise CacheCorruptionError("Owned canonical run metadata became a symbolic link.")
+            if not (directory / "run.json").exists():
+                directory.rmdir()
+                return
+            storage.finalize_run_metadata(
+                self.run_id, status=self.failure_status, update_latest_success=False,
+            )
+
+
 class _RunViewsMixin:
     def start_run_metadata(
         self,
@@ -43,6 +87,7 @@ class _RunViewsMixin:
         target_nodes: Sequence[str],
         launcher_reserved: bool,
         started_at: str | None = None,
+        _admission: _RunViewAdmission | None = None,
     ) -> Path:
         """Create one canonical running view under the global run-ID guard."""
         safe_run_id = _validate_path_segment(run_id, label="Run ID")
@@ -85,7 +130,13 @@ class _RunViewsMixin:
                 raise CacheCorruptionError(
                     f"Run ID {safe_run_id!r} already has a canonical view."
                 )
+            if _admission is not None and (
+                _admission.storage_path != self.storage_path or _admission.run_id != safe_run_id
+            ):
+                raise ValueError("Canonical run admission does not match creation.")
             run_dir.mkdir(parents=True)
+            if _admission is not None:
+                _admission.acquired(run_dir)
             try:
                 return self.write_run_metadata(
                     safe_run_id,

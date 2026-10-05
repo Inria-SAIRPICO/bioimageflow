@@ -139,6 +139,8 @@ class _RepositoryMixin:
             or payload.get("attempt_id") != attempt_id
         ):
             raise CacheCorruptionError("Cache attempt metadata correlation mismatch.")
+        if payload.get("status") == status and payload.get("error_type") == error_type:
+            return
         if payload.get("status") != "running":
             raise CacheCorruptionError("Cache attempt metadata is already terminal.")
         payload["status"] = status

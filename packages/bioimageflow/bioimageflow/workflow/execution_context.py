@@ -44,6 +44,15 @@ class ExecutionProviderOutcome:
         return "memory"
 
 
+@dataclass(frozen=True)
+class CleanupDiagnostic:
+    """Detached secondary failure; logical outcome and physical cleanup differ."""
+
+    phase: str
+    error_type: str
+    message: str
+
+
 class WorkflowExecutionContext:
     """Cancellation, run identity, and finalization for one root execution."""
 
@@ -77,12 +86,47 @@ class WorkflowExecutionContext:
         self._success_callback: Callable[[], None] | None = None
         self._failure_callback: Callable[[BaseException], None] | None = None
         self._state = "new"
+        self._cleanup_errors: list[CleanupDiagnostic] = []
+        self._pending_cleanup: list[Callable[[], None]] = []
         self._execution_outcomes: dict[str, ExecutionProviderOutcome] = {}
         self._launcher_storage_path: Path | None = None
         self._result_export_digest: str | None = None
         self._attached_storage_path: Path | None = None
         self._attached_provider_routes: ReturnRoutePlan | None = None
         self._result_groups: dict[str, weakref.ReferenceType[ResultGroup]] = {}
+
+    @property
+    def cleanup_errors(self) -> tuple[CleanupDiagnostic, ...]:
+        """Secondary diagnostics, without retaining exception traceback frames."""
+        with self._lock:
+            return tuple(self._cleanup_errors)
+
+    @property
+    def cleanup_pending(self) -> bool:
+        """Whether this context has registered owned persistence actions."""
+        with self._lock:
+            return bool(self._pending_cleanup)
+
+    def _record_cleanup_failure(
+        self, phase: str, error: BaseException, retry: Callable[[], None] | None = None,
+    ) -> None:
+        try:
+            message = str(error)
+        except BaseException:
+            message = "<unprintable exception>"
+        with self._lock:
+            self._cleanup_errors.append(CleanupDiagnostic(phase, type(error).__name__, message))
+            if retry is not None:
+                self._pending_cleanup.append(retry)
+
+    def retry_cleanup(self) -> None:
+        """Retry only exact owned pending cleanup; a failure retains its authority."""
+        with self._lock:
+            pending = tuple(self._pending_cleanup)
+        for callback in pending:
+            callback()
+            with self._lock:
+                self._pending_cleanup.remove(callback)
 
     @property
     def result_groups(self) -> tuple[ResultGroup, ...]:
@@ -311,8 +355,28 @@ class WorkflowExecutionContext:
                 return
         self._finalize("succeeded", None)
 
-    def _execution_failed(self, error: BaseException) -> None:
-        self._finalize("failed", error)
+    def _execution_failed(self, error: BaseException, *, binding: object | None = None) -> None:
+        with self._lock:
+            if binding is not None and self._binding is not binding:
+                return
+            if self._state not in {"running", "awaiting_success"} or self._binding is None:
+                raise RuntimeError("WorkflowExecutionContext has no admitted failure binding.")
+            admitted_binding = self._binding
+        try:
+            self._finalize("failed", error)
+        except BaseException as secondary:
+            with self._lock:
+                if self._binding is not admitted_binding or self._state != "running":
+                    raise
+                callback = self._failure_callback
+            retry = getattr(callback, "retry", None)
+            self._record_cleanup_failure("run-finalization", secondary, retry)
+            with self._lock:
+                self._state = "failed"
+                self._binding = None
+                self._success_callback = None
+                self._failure_callback = None
+                self._cancel_callbacks.clear()
 
     def _finalize(
         self,

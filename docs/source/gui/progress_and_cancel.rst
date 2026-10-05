@@ -57,11 +57,10 @@ progress events. Diagnostic signatures are separate debug values and are not
 cache keys. During a cache miss, ``"started"`` can include
 ``result_key`` while ``record_id`` remains empty until publication succeeds.
 
-The engine **serializes callbacks via an internal lock** — your
-``on_progress`` callable does not need to be thread-safe. It runs on
-the engine's progress dispatch path; expensive work in the callback
-will slow down execution, so push UI updates onto a dispatch queue
-rather than re-rendering inline.
+The engine delivers frozen progress events outside scheduler locks.
+Callbacks from independent nodes may run concurrently, so observers own their thread safety.
+Observer exceptions are recorded as detached diagnostics and do not decide the scientific outcome or replace its primary failure.
+Expensive observer work still slows its dispatch path; queue UI updates rather than rendering inline.
 
 Sub-row progress
 ----------------
