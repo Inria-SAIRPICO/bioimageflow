@@ -2567,8 +2567,15 @@ The selected module and the tool class's actual defining module must belong to t
 Single-file shared/archive origins retain exact single-file membership rather than requiring a nonexistent package directory.
 An unadmitted preexisting synthetic source namespace is not executable authority merely because its file path matches; refusal preserves that module, while any reuse must retain the exact owning loader's source admission.
 Only successful tool admission and construction publishes an instance into the worker cache; failed loading or construction removes new source/version-scoped modules without removing preexisting namespace owners.
-These bounded checks establish local source/module membership and same-byte fresh source execution, not complete controller/worker content equality or transitive dependency closure for installed, shared or versioned origins.
-Existing origin selectors and ordinary programmatic Direct tools remain supported; executable-content cache proofs remain a separate requirement.
+Before reusable cache lookup, the controller admits the actual executable authority for the selected local execution strategy.
+Captured custom-source bytes provide one content authority for Direct and managed execution; ordinary Direct runtime-callable authority and ordinary source-backed managed captured-source authority are distinct.
+Direct identity describes actual callable code and constants, nested code, defaults and closure values, and representable referenced literal globals and same-source helper functions.
+Plain managed-source admission captures source bytes and compares the resident controller callable, literal values and same-source helpers with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
+Installed and versioned managed origins instead retain declared-installation authority: admitted distribution membership and version, declared recipe and actual controller admission facts, without claiming that those worker DTOs carry captured controller source bytes.
+The current processing task carries origin, arguments and execution correlation rather than a controller I/O-schema attestation, and the worker uses its loaded tool declarations; ordinary managed whole-class/declaration and module-initializer parity remains an open MAIN C04 obligation beyond the bounded primary-callable comparison.
+Captured custom-source bytes provide stronger source authority without sealing arbitrary later class or module state.
+These bounded checks do not establish arbitrary dynamic-initializer or process-global isolation, complete controller/worker installed-content equality, or transitive dependency closure for installed, shared or versioned origins.
+Existing origin selectors, ordinary programmatic Direct tools and normal caching remain supported; labels, selectors and development-only current-source inspection are not substitutes for actual admitted executable identity.
 
 Direct invokes the shared output-normalization path locally.
 Wetlands submits the core task entry point to its selected environment.
@@ -2623,16 +2630,18 @@ Result-key material includes every value that can affect logical output and cach
 - BioImageFlow cache schema version.
 - Workflow or workflow-fragment identity when relevant.
 - Node definition identity.
-- Tool identity and version.
+- Admitted executable identity for the selected execution strategy, together with descriptive tool identity and version.
 - Environment dependency hash.
 - Normalized parameters and statically declared input bindings or selectors.
 - Selected upstream record references for every cacheable upstream value consumed by the node.
 - Recursive provider/selector recipes for values published through workflow boundaries, resolved to selected real-provider records at runtime.
 - Canonical logical digests for root DataFrame inputs.
 - Declared external references consumed by the node.
-- Development-mode source hash when development mode is enabled.
 - Output contract version when output schema changes affect cache compatibility.
 
+The key retains the captured declared tool/distribution version token and the instance's semantic Inputs/Outputs contract: portable `type_spec`, requiredness, nullability, image metadata and supported declared bounds, distinguishing dynamic Outputs absence, known-empty schemas and Passthrough declarations without hashing GUI descriptions or invoking a dynamic resolver merely for identity.
+These declaration facts reuse the effective definition capture rather than copying default values or shared-array owners again; arbitrary custom annotation-validator closure remains explicitly unproved.
+Controller declaration-key facts do not certify ordinary managed declaration parity or post-load class-state sealing, as qualified in Section 5.2.
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
 Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
 Adjacent large integers remain distinct even beside floating-point columns; signed and unsigned values retain the existing dtype-aware logical representation.
@@ -2682,16 +2691,17 @@ Logical fields determine record identity.
 The transport digest validates the Parquet bytes but never changes record identity.
 Loading validates both the bytes and the recomputed logical values.
 
-### 6.3 Development Mode
+### 6.3 Executable Changes
 
-In development mode (`workflow.compute(dev_mode=True)`), result-key material additionally includes a source hash of the tool class.
-This auto-invalidates reusable records when tool code changes without requiring a version bump.
-Development mode is intended for iteration; production workflows should rely on compatible declared dependencies and explicit tool package versions for reproducibility.
+Normal execution and planning use the admitted executable identity described in Section 6.1.
+A changed admitted callable or captured source selects a different reusable computation without requiring a separate development flag or a package version bump.
+Unchanged admitted computation retains normal cache reuse; inspection of a later mutable source file is not its executable authority.
 
 ### 6.4 Limitations
 
 - **Path-based external references:** V1 external reference identity is path-based, not content-based. If an input file is modified without changing its path, the cache may report a false hit. Users can manually invalidate affected nodes when needed.
-- **Transitive dependency changes:** The environment dependency hash catches declared version spec changes, such as `cellpose==3.0` to `cellpose==4.0`. If a dependency changes without a changed declared version, bump the tool package version or use development mode to force re-execution.
+- **Transitive dependency changes:** The environment dependency hash catches declared version spec changes, such as `cellpose==3.0` to `cellpose==4.0`. If a dependency changes without a changed declared version, bump the declared tool package version or explicitly invalidate affected nodes.
+  Actual installed/transitive dependency closure remains explicitly unproved by this declared recipe hash; this limitation does not excuse a concrete mismatch between resident callable code or representable referenced literal/helper values and admitted executable authority.
 
 ### 6.5 Pre-execution Planning
 
@@ -2703,7 +2713,7 @@ Callers that need to report cache state should use `plan()` rather than reimplem
 
 ```python
 from bioimageflow import NodePlan, NodePlanStatus
-plan: dict[str, NodePlan] = workflow.plan(dev_mode=False)
+plan: dict[str, NodePlan] = workflow.plan()
 for name, entry in plan.items():
     assert isinstance(entry, NodePlan)
     # entry.node_name, entry.final_result_key, entry.selected_record_id, entry.status, entry.upstream, entry.logical_signature
@@ -3415,6 +3425,8 @@ The source table is collected once across the recursive graph.
 Before creating custom-source staging files or importing embedded Python, public archive loaders capture and validate the complete source table, including unique safe single-component IDs, contained single-file names and relative bundle paths, and computed content hashes with supplied hashes verified under the existing contract.
 Portable source paths reject colon, backslash and Windows reserved device components even on POSIX hosts.
 Staging consumes captured immutable bytes and paths; invalid later records cannot cause earlier custom sources to execute or partially stage.
+Executable namespaces for both single-file sources and package bundles distinguish captured content as well as logical source ID, so a later different body under the same ID cannot replace the authority of a retained earlier definition.
+Direct and managed execution of a captured custom source use that source's admitted content authority; mutable runtime module paths or a newer same-ID source are not its executable identity.
 Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
 Embedded Python remains trusted executable code; contained staging is not a Python sandbox.
 **Accepted target — S11:** Admit the complete outer archive destination and entry set before writes, refuse symlink/traversal/foreign-destination conflicts, and retire only owned partial staging on failure.

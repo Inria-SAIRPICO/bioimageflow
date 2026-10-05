@@ -300,15 +300,6 @@ def get_tool_version(tool: BaseTool) -> str:
         return "unversioned"
 
 
-def get_source_hash(tool_class: type[Any]) -> str:
-    """SHA256 of the tool class source code, for dev mode."""
-    try:
-        source = inspect.getsource(tool_class)
-        return hashlib.sha256(source.encode()).hexdigest()
-    except (OSError, TypeError):
-        return "nosource"
-
-
 def _unwrap_optional(annotation: Any) -> Any:
     """If ``annotation`` is ``Optional[X]`` or ``X | None``, return ``X``; otherwise pass through.
 

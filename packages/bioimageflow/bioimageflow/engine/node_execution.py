@@ -38,14 +38,12 @@ from .common import (
     source_processing_signature_material,
 )
 
-
 @dataclass(frozen=True)
 class _ProviderExecutionResult:
     dataframe: pd.DataFrame
     signature_hash: str | None
     transient_invocation_id: str | None = None
     selection: SelectedResult | None = None
-
 
 def _reject_reserved_source_indexes(
     dataframe: pd.DataFrame,
@@ -150,6 +148,8 @@ class _NodeExecutionMixin:
 
         try:
             self._raise_if_cancelled(workflow)
+            if not isinstance(node, WorkflowNode):
+                self._capture_executable(node)
             if isinstance(node, WorkflowNode):
                 dataframe, signature_hash = self._execute_workflow_node(
                     node, results, sig_hashes, workflow
@@ -310,8 +310,9 @@ class _NodeExecutionMixin:
 
         if len(dfs) > 1:
             dfs = self._align_dataframes_for_merge(dfs)
-        merged = node.tool.merge_dataframes(dfs, arguments)
-        df = node.tool.transform(merged, arguments)
+        callbacks = self._capture_executable(node).callbacks
+        merged = callbacks["merge_dataframes"](dfs, arguments)
+        df = callbacks["transform"](merged, arguments)
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
         if not dfs:

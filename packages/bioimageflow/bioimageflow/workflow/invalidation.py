@@ -217,7 +217,7 @@ class _InvalidationMixin:
             queue.extend(reverse.get(nxt, ()))
         return visited
 
-    def plan(self, *, dev_mode: bool = False) -> "dict[str, NodePlan]":
+    def plan(self) -> "dict[str, NodePlan]":
         """Return a per-node cache-status plan.
 
         Instantiates a non-Wetlands :class:`DefaultEngine` and calls its
@@ -225,6 +225,5 @@ class _InvalidationMixin:
         """
         from bioimageflow.engine import DefaultEngine
 
-        self._dev_mode = dev_mode
         self._discover_graph(list(self._nodes.values()))
         return DefaultEngine(use_wetlands=False).plan(self)

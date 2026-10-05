@@ -51,6 +51,15 @@ All nine tool bounds must resolve and validate; the eight existing projects are 
 The release job requires successful exact-head normal CI, builds the selected distributions with workspace sources disabled, validates their artifacts, then publishes them in dependency order.
 A manually selected affected resource suite is additionally blocking; unrelated models, downloads and binaries are not automatic release gates.
 
+## Executable Admission and Cache Identity
+
+Reusable cache lookup and execution consume one admitted executable capture rather than reconstructing source or package selectors after a cache hit.
+Captured custom tools retain their admitted source content and canonical module/class identity; loading another single-file source with the same logical ID must not retarget the earlier definition.
+Ordinary Direct tools remain supported and cacheable from their actual retained primary callbacks and represented code, defaults, closed literal state and same-source helper facts, with configured values and declarations supplied by the effective definition capture.
+Managed source admission compiles captured bytes without executing imports and refuses proven resident/source primary, literal-global, helper or default mismatches before lookup; these controller-local bytecode comparisons are not cross-Python worker tokens.
+Retaining a callback prevents later method replacement from selecting another function, but does not freeze arbitrary module globals or closures after admission.
+Mutable observational globals, dynamic initializers, opaque imported/native modules and installed transitive dependencies remain explicitly qualified; current paths, package labels and matching primary code alone are not complete executable-content proof.
+
 ## Package-Owned Documentation Contract
 
 Each package owns its README, `docs/index.md`, tool pages, workflow pages, tests, fixtures, examples, and small runtime assets.

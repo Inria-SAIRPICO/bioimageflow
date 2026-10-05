@@ -92,22 +92,6 @@ class TestPlan:
         # All cached
         assert all(p.cached for p in plan_post.values())
 
-    def test_plan_parity_dev_mode(self, tmp_path: Path) -> None:
-        src = tmp_path / "files"
-        src.mkdir()
-        (src / "a.txt").write_text("a")
-
-        wf = Workflow(engine="direct", storage_path=tmp_path / "cache")
-        with wf:
-            load = FileLoader()(path=str(src))
-            StubSegmenter()(input_image=load["path"])
-        plan_dev = wf.plan(dev_mode=True)
-        plan_nodev = wf.plan(dev_mode=False)
-        # dev_mode should produce different hashes (source_hash included)
-        for name in plan_dev:
-            assert (
-                plan_dev[name].logical_signature != plan_nodev[name].logical_signature
-            )
 
     def test_plan_disabled_node(self, tmp_path: Path) -> None:
         wf = Workflow(engine="direct", storage_path=tmp_path)

@@ -26,22 +26,7 @@ class TestInspectIntegration:
         source_file = inspect.getfile(v1.AlphaTool)
         assert "/1.0.0/dummy_tools/alpha.py" in source_file
 
-    def test_get_source_hash_works(self, tool_store):
-        from bioimageflow.tool_loader import load_versioned_package
-        from bioimageflow.validation import get_source_hash
 
-        v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
-        h = get_source_hash(v1.AlphaTool)
-        assert h != "nosource"
-        assert len(h) == 64  # SHA256 hex
-
-    def test_source_hash_differs_across_versions(self, tool_store):
-        from bioimageflow.tool_loader import load_versioned_package
-        from bioimageflow.validation import get_source_hash
-
-        v1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
-        v2 = load_versioned_package("dummy_tools", "2.0.0", tool_store)
-        assert get_source_hash(v1.AlphaTool) != get_source_hash(v2.AlphaTool)
 
 
 class TestUnloadVersionedPackage:
@@ -59,20 +44,6 @@ class TestUnloadVersionedPackage:
         unload_versioned_package("dummy_tools", "1.0.0")
         assert not any(k.startswith(scoped) for k in sys.modules)
 
-    def test_source_hash_stable_across_reloads(self, tool_store):
-        from bioimageflow.tool_loader import (
-            load_versioned_package,
-            unload_versioned_package,
-        )
-        from bioimageflow.validation import get_source_hash
-
-        mod1 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
-        h1 = get_source_hash(mod1.AlphaTool)
-        unload_versioned_package("dummy_tools", "1.0.0")
-
-        mod2 = load_versioned_package("dummy_tools", "1.0.0", tool_store)
-        h2 = get_source_hash(mod2.AlphaTool)
-        assert h1 == h2
 
     def test_reload_after_unload_returns_fresh_module(self, tool_store):
         from bioimageflow.tool_loader import (

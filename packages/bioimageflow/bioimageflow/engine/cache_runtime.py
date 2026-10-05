@@ -124,7 +124,6 @@ class _CacheRuntimeMixin:
         """Describe a node computation and its selected input records."""
         from bioimageflow.dataframe_tool import DataFrameTool
         from bioimageflow.engine.provenance import resolve_provenance_recipe
-        from bioimageflow.validation import get_tool_version
 
         environment_hash = ""
         if isinstance(node.tool, DataFrameTool):
@@ -168,7 +167,9 @@ class _CacheRuntimeMixin:
             "tool": {
                 "module": type(node.tool).__module__,
                 "class": type(node.tool).__qualname__,
-                "version": get_tool_version(node.tool),
+                "version": self._capture_executable(node).scientific_key.get("declared_version"),
+                "executable": dict(self._capture_executable(node).scientific_key),
+                "executable_qualification": list(self._capture_executable(node).qualification),
             },
             "logical_digest": sig_hash,
             "environment_hash": environment_hash,

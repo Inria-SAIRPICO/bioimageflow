@@ -154,9 +154,9 @@ The result key must include every value that can affect the logical result and c
 - Normalized parameters and statically declared input bindings or selectors.
 - Selected upstream record references for every cacheable upstream value consumed by this node.
 - Declared external references consumed by this node.
-- Development-mode source hash when development mode is enabled.
+- Admitted actual executable and captured semantic input/output declaration identity.
 
-Current tool/version and optional development source signature material still do not prove the exact executed source/dependency closure; verified executable-content identity remains a separate owning implementation gate, without disabling ordinary caching in this increment.
+Runtime callable and source-backed admission prove the finite supported facts described below; installed worker and arbitrary transitive dependency byte closure remain unproved without disabling ordinary caching.
 - Output contract version when output schema changes affect cache compatibility.
 
 Scientific values retain their declared meaning: numeric-looking strings remain strings unless a tool explicitly converts them.
@@ -188,6 +188,21 @@ External references are durable values outside the record directory, such as sou
 External reference identity is path-based.
 The identity material is the normalized absolute path string plus the declared reference kind.
 Input content fingerprinting is outside the current path-based external-reference contract.
+
+Executable admission occurs before cache lookup.
+Ordinary Direct tools use `runtime_callable` identity from the actual retained primary callbacks, semantic code/constants/defaults, supported immutable globals/closures, and same-source helpers.
+The engine calls those retained callbacks; it does not obtain execution proof from a later `inspect` of mutable source files or a package version label.
+Mutable observational globals, opaque initializer/imported/native dependencies, arbitrary instance state and concurrent global mutation remain outside that finite proof.
+Source-backed managed tools use `captured_source`: one source read and non-executing resident code/literal/helper comparison precede lookup, and the retained worker origin verifies the same digest before cold loading.
+Proof-bearing embedded sources use their admitted source/bundle content authority for Direct and managed execution, with single-file namespaces qualified by both source ID and content.
+Installed/versioned managed tools retain `declared_installation` authority with distribution membership/version, declared recipe, and controller callable evidence; this does not certify worker or transitive installed dependency byte equality.
+Node provenance records the exact admitted executable authority and its qualifications, separately from a descriptive declared version.
+That authority includes the captured instance facades' portable input/output types, requiredness, nullability, image constraints and supported declared bounds, preserving dynamic outputs and Passthrough as distinct states.
+Captured parameter/default/template values remain separate; arbitrary custom annotation validator closure is unproved.
+The current worker task carries no controller IO-schema token: primary callable/literal/helper matching does not prove ordinary managed class/declaration/module-initializer IO parity.
+Embedded captured bytes provide stronger source authority, but do not seal arbitrary post-load class mutations.
+Declared distribution/version tokens remain manual cache invalidators, including installed import packages whose distribution names differ.
+Capture is memoized only within the owned operation; there is no global cache keyed by mutable source paths.
 
 The result key should be encoded as a namespaced digest token, for example:
 

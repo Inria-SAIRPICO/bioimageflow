@@ -14,8 +14,6 @@ from .common import (
     compute_env_hash,
     compute_signature_hash,
     get_output_templates,
-    get_source_hash,
-    get_tool_version,
     pd,
 )
 from .provenance import (
@@ -27,6 +25,22 @@ from .provenance import (
 
 
 class _IdentityRuntimeMixin:
+    def _capture_executable(self, node: Node) -> Any:
+        """Own one admission per operation, shared by lookup and actual call."""
+        from bioimageflow.worker_origins import capture_tool_executable
+        from bioimageflow.cache.identity import deterministic_serialize
+
+        with self._cache_hit_lock:
+            capture = self._node_executable_captures.get(node)
+            if capture is None:
+                capture = capture_tool_executable(
+                    node.tool, managed=self._use_wetlands and isinstance(node.tool, ProcessingTool),
+                    canonicalize=deterministic_serialize,
+                    declared_versions=self._executable_distribution_versions,
+                )
+                self._node_executable_captures[node] = capture
+            return capture
+
     def _upstream_identity_map(
         self,
         workflow: Any,
@@ -89,8 +103,9 @@ class _IdentityRuntimeMixin:
         workflow: Any,
     ) -> str:
         """Compute the logical digest for any node type."""
-        tool_version = get_tool_version(node.tool)
-        source_hash = get_source_hash(type(node.tool)) if workflow._dev_mode else None
+        capture = self._capture_executable(node)
+        from bioimageflow.cache.identity import deterministic_serialize
+        tool_version = deterministic_serialize(dict(capture.scientific_key))
         if isinstance(node.tool, ProcessingTool):
             resolved_params = {
                 "arguments": resolved_params,
@@ -103,7 +118,6 @@ class _IdentityRuntimeMixin:
             env_hash,
             resolved_params,
             upstream_hashes,
-            source_hash=source_hash,
         )
 
     def _compute_processing_sig_hash(

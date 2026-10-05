@@ -109,7 +109,7 @@ class TestIntegration:
             ],
         )
         wf, errs = Workflow.from_dict(
-            data,
+            {**data, "schema_version": 2},
             storage_path=tmp_path / "results",
             validate_only=True,
             partial=True,
@@ -121,7 +121,7 @@ class TestIntegration:
         v_kinds = {e.kind for e in v_errs}
         assert "parameter_invalid" in v_kinds
 
-    def test_I3_plan_parity_under_dev_mode(self, tmp_path: Path) -> None:
+    def test_I3_plan_parity_under_normal_admission(self, tmp_path: Path) -> None:
         src = tmp_path / "files"
         src.mkdir()
         (src / "a.txt").write_text("a")

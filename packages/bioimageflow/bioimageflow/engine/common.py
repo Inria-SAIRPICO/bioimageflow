@@ -47,7 +47,7 @@ from bioimageflow.storage import (
     validate_relative_posix_path,
 )
 from bioimageflow.template import get_output_templates, resolve_template
-from bioimageflow.validation import get_tool_version, get_source_hash, is_path_type
+from bioimageflow.validation import is_path_type
 from bioimageflow.backends import (
     DirectBackend,
     ProcessingDispatch,
@@ -580,6 +580,7 @@ class NodeStep:
         self._cache_checked = False
         self._cached_df: pd.DataFrame | None = None
         self._cached_selection: Any = None
+        self._executable_capture: Any = None
         self._run_context = getattr(workflow, "_active_run_context", None)
 
     @property
@@ -648,6 +649,8 @@ class NodeStep:
         if self._executed:
             assert self._df is not None
             return self._df
+        if self._executable_capture is not None:
+            self._engine._node_executable_captures[self._node] = self._executable_capture
         # Reuse cache result if already checked by prepare() / cached
         self._ensure_cache_checked()
         if self._cached_df is not None:
@@ -711,6 +714,7 @@ class NodeStep:
             return
         self._cache_checked = True
         self._engine._adopt_node_inputs(self._node)
+        self._executable_capture = self._engine._capture_executable(self._node)
         cached_df, sig_hash = self._engine._check_node_cache(
             self._node,
             self._results,

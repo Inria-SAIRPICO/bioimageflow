@@ -156,8 +156,7 @@ class TestEngineInjection:
             df = wf.compute(results, engine=custom_engine)
             assert isinstance(df, pd.DataFrame)
 
-            # Should NOT accept engine as positional (compute takes *targets then dev_mode)
-            # dev_mode is the only other keyword arg currently; engine must be after it
+            # Engine injection is keyword-only after the target list.
             # This is enforced by Python's signature; we just verify it works as keyword
 
     def test_engine_state_accessible_after_compute(self, tmp_workspace):

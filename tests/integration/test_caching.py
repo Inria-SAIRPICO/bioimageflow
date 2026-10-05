@@ -129,22 +129,22 @@ class TestCacheMiss:
             assert len(df) == 4  # Now 4 images
 
 
-class TestDevMode:
+class TestExecutableChanges:
 
-    def test_dev_mode_includes_source_hash(self, tmp_workspace):
-        """In dev mode, changing tool source code invalidates cache."""
+    def test_source_pipeline_computes_in_normal_mode(self, tmp_workspace):
+        """Normal execution admits actual executable identity."""
         load = FileLoader()
         segment = StubSegmenter()
 
-        # First run with dev_mode
+        # First ordinary run
         with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
-            df1 = wf.compute(masks, dev_mode=True)
+            df1 = wf.compute(masks)
             assert len(df1) == 3
 
-    def test_dev_mode_cache_miss_on_source_change(self, tmp_workspace):
-        """In dev mode, a tool with different source code causes a cache miss."""
+    def test_changed_tool_computes_new_values_in_normal_mode(self, tmp_workspace):
+        """An actual different tool produces its declared changed values."""
         load = FileLoader()
         segment = StubSegmenter()
 
@@ -157,7 +157,7 @@ class TestDevMode:
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
-            wf.compute(masks, dev_mode=True)
+            wf.compute(masks)
 
         # Second identical run — should cache hit
         events2: list[Any] = []
@@ -168,7 +168,7 @@ class TestDevMode:
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = segment(input_image=raw["path"])
-            wf.compute(masks, dev_mode=True)
+            wf.compute(masks)
             seg_cached = [
                 e for e in events2
                 if "Segmenter" in e.node_name and e.status == "cached"
@@ -176,7 +176,7 @@ class TestDevMode:
             assert len(seg_cached) > 0, "Second identical run should use cache"
 
         # Third run with a dynamically created tool (different source hash)
-        # Even though it has the same name and params, dev_mode should miss cache
+        # Even though it has the same name and params, normal execution should miss cache
         from bioimageflow_core import Arguments
 
         class ModifiedSegmenter(ProcessingTool):
@@ -210,12 +210,13 @@ class TestDevMode:
         ) as wf:
             raw = load(path=str(tmp_workspace / "data"))
             masks = modified_seg(input_image=raw["path"])
-            wf.compute(masks, dev_mode=True)
+            changed = wf.compute(masks)
+            assert changed["cell_count"].tolist() == [99, 99, 99]
             seg_started = [
                 e for e in events3
                 if "Segmenter" in e.node_name and e.status == "started"
             ]
-            assert len(seg_started) > 0, "Modified source should cause cache miss in dev mode"
+            assert len(seg_started) > 0, "Modified source should cause cache miss in normal mode"
 
 
 class TestEnvironmentDependencyChange:
@@ -289,18 +290,17 @@ class TestEnvironmentDependencyChange:
 
 class TestDependencyNormalization:
 
-    def test_sorted_dependencies_produce_same_hash(self):
-        """Dependency list order does not affect the hash."""
+    def test_ordered_dependencies_preserve_their_declared_order(self):
+        """Recipe sequences retain declared solver precedence."""
         env1 = EnvironmentSpec(
             name="test", dependencies={"conda": ["numpy=2.4.2", "cellpose==3.0"]}
         )
         env2 = EnvironmentSpec(
             name="test", dependencies={"conda": ["cellpose==3.0", "numpy=2.4.2"]}
         )
-        # Both should normalize to the same hash
         from bioimageflow.cache import compute_env_hash
 
-        assert compute_env_hash(env1.dependencies) == compute_env_hash(
+        assert compute_env_hash(env1.dependencies) != compute_env_hash(
             env2.dependencies
         )
 

@@ -48,6 +48,15 @@ Tools sharing one environment also share its worker pool.
 The pool size is not multiplied by the number of nodes.
 
 ``DataFrameTool.transform()`` and ``merge_dataframes()`` run in the orchestrator and are not submitted to worker processes.
+Before cache lookup the controller captures the actual primary callbacks and their executable identity.
+Direct execution uses those retained callbacks, including a stepped operation whose class methods are subsequently replaced.
+For source-backed managed tools, supported resident method, default, literal-global and same-source helper mismatches against captured source refuse before cache lookup or environment provisioning.
+The worker receives the captured origin rather than resolving the mutable controller module again at dispatch.
+Cold source loading verifies the captured digest; an already admitted warm worker instance intentionally retains its admitted definition.
+Embedded single-file sources with the same logical ID and different bytes occupy different content-qualified namespaces.
+Installed/versioned managed origins retain their declared membership/version authority and remain usable; exact worker/transitive installed byte closure is still unproved.
+These checks do not freeze arbitrary mutable globals, opaque initializers or imported native dependency state.
+The current task has no controller IO-schema token; ordinary managed class/declaration/module-initializer IO parity remains unproved even when the selected primary callable matches.
 A ProcessingTool that implements whole-node ``process_batch()`` occupies one worker task for the batch.
 
 The local engine enforces the effective ``max_concurrent`` limit for each node.

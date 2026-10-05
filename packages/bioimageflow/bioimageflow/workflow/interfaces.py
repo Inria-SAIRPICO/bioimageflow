@@ -83,7 +83,6 @@ class _InterfacesMixin:
         self._active_run_context: Any = None
         self._nodes: dict[str, Node] = {}
         self._prev_workflow: Any = None
-        self._dev_mode: bool = False
         # Build-time errors and failed-node bookkeeping. These are
         # populated by ``from_dict`` (in collecting modes) and exposed
         # via the public ``errors`` / ``failed_nodes`` / ``is_partial``

@@ -18,7 +18,6 @@ from bioimageflow.validation import (
     is_image_type,
     extract_image_spec,
     get_inputs_schema,
-    get_source_hash,
 )
 
 
@@ -221,14 +220,3 @@ class TestGetInputsSchema:
         assert schema["count"]["min"] == 0
         assert "max" not in schema["count"]
         assert "step" not in schema["count"]
-
-
-class TestGetSourceHash:
-
-    def test_produces_hex_string(self):
-        h = get_source_hash(TestGetSourceHash)
-        assert isinstance(h, str)
-        assert len(h) == 64  # SHA-256 hex
-
-    def test_deterministic(self):
-        assert get_source_hash(TestGetSourceHash) == get_source_hash(TestGetSourceHash)

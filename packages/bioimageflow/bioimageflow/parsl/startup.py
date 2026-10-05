@@ -178,7 +178,7 @@ def prepare_parsl_execution(
     cancellation_requested: Callable[[], bool],
 ) -> ParslExecutionPlan:
     """Compile, plan, route, and materialize before DFK acquisition."""
-    validation_errors = workflow.validate(dev_mode=getattr(workflow, "_dev_mode", False))
+    validation_errors = workflow.validate()
     if validation_errors:
         raise ValueError(
             "Workflow validation failed before Parsl startup: "

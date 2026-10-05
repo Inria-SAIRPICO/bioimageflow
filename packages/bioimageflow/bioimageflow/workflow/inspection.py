@@ -28,7 +28,6 @@ class _InspectionMixin:
     def validate(
         self,
         *,
-        dev_mode: bool = False,
         _recursion_stack: tuple[int, ...] = (),
     ) -> list[ValidationError]:
         """Return all domain-level problems in this workflow.
@@ -49,11 +48,6 @@ class _InspectionMixin:
         it is intentionally not performed at construction time, so a GUI
         editing one field at a time does not need every other field to
         be valid yet.
-
-        Parameters
-        ----------
-        dev_mode
-            Accepted for symmetry with :meth:`plan`; unused by validate.
 
         Returns
         -------

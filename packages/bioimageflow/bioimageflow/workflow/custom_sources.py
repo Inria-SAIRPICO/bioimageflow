@@ -356,7 +356,10 @@ def _load_custom_sources(
         module_dir = Path(tempfile.mkdtemp(prefix="bioimageflow_custom_tools_"))
         module_path = module_dir / record.filename
         module_path.write_bytes(record.source)
-        module_name = f"bioimageflow_custom_tools_{source_id}"
+        scope_key = hashlib.sha256(
+            source_id.encode("utf-8") + b"\0" + record.source_hash.encode("ascii")
+        ).hexdigest()
+        module_name = f"bioimageflow_custom_tools_{scope_key}"
         spec = importlib.util.spec_from_file_location(module_name, module_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"Cannot load embedded custom tool module {source_id!r}")
@@ -456,6 +459,7 @@ def _stamp_embedded_custom_classes(
             continue
         setattr(obj, "_bif_custom_source_hash", source_hash)
         setattr(obj, "_bif_custom_source_id", source_id)
+        setattr(obj, "_bif_admitted_source_file", module.__file__)
         if canonical_module:
             setattr(obj, "_bif_canonical_module", canonical_module)
 

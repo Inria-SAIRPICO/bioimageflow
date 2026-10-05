@@ -111,12 +111,12 @@ class _DispatchMixin:
         cache_attempt_id: str | None,
     ) -> list[OutputGroup]:
         """Dispatch to process_batch or process_row. Returns list[list[Outputs]]."""
-        has_batch = type(tool).process_batch is not ProcessingTool.process_batch
         compiled_node, compiled_node_ordinal = next(
             (node, ordinal)
             for node, ordinal in self._compiled_ordinals.items()
             if node.name == node_name
         )
+        has_batch = "process_batch" in self._capture_executable(compiled_node).callbacks
         row_indexes = tuple(
             context.row_index if context.row_index is not None else str(position)
             for position, context in enumerate(row_contexts)
@@ -178,14 +178,16 @@ class _DispatchMixin:
         batch_context: ExecutionContext,
     ) -> list[OutputGroup]:
         """Direct dispatch — tool runs in the main process."""
+        node = next(node for node in self._compiled_ordinals if node.name == node_name)
+        callbacks = self._capture_executable(node).callbacks
         if has_batch:
             if not arguments_dicts and tool.row_consumption.value == "mapped":
                 return []
             args_list = [Arguments(**d) for d in arguments_dicts]
             kwargs = {}
-            if _accepts_context(tool.process_batch):
+            if _accepts_context(callbacks["process_batch"]):
                 kwargs["context"] = batch_context
-            raw_results = tool.process_batch(args_list, **kwargs)
+            raw_results = callbacks["process_batch"](args_list, **kwargs)
             assert tool.Outputs is not None
             normalized = normalize_processing_batch_outputs(
                 raw_results,
@@ -199,10 +201,10 @@ class _DispatchMixin:
             return [OutputGroup((row,), cast(Any, tuple(outputs))) for row, outputs in zip(consumed, normalized, strict=True)]
 
         raw_results: list[OutputGroup] = []
-        accepts_context = _accepts_context(tool.process_row)
+        accepts_context = _accepts_context(callbacks["process_row"])
         for i, (args_dict, context) in enumerate(zip(arguments_dicts, row_contexts)):
             kwargs = {"context": context} if accepts_context else {}
-            result = tool.process_row(Arguments(**args_dict), **kwargs)
+            result = callbacks["process_row"](Arguments(**args_dict), **kwargs)
             assert tool.Outputs is not None
             raw_results.append(OutputGroup((ConsumedRow(i, str(context.row_index)),), cast(Any, tuple(normalize_processing_row_outputs(result, tool.Outputs)))))
             self._emit_progress(
@@ -247,7 +249,6 @@ class _DispatchMixin:
         resources: ResourceSpec | None = None,
     ) -> list[OutputGroup]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
-        from bioimageflow.worker_origins import resolve_worker_tool_origin
         from wetlands import ExecutionEventKind, ExecutionState
 
         assert self._env_manager is not None
@@ -258,7 +259,10 @@ class _DispatchMixin:
         ):
             return []
         env_spec = tool.environment
-        origin = resolve_worker_tool_origin(tool)
+        node = next(node for node in self._compiled_ordinals if node.name == node_name)
+        origin = self._capture_executable(node).worker_origin
+        if origin is None:
+            raise RuntimeError("Managed dispatch requires a captured worker origin")
         max_workers, worker_timeout = self._resolve_worker_config(tool, workflow)
         engine_timeout = _compute_engine_timeout(worker_timeout)
         tracker = _WetlandsTaskTracker(workflow)

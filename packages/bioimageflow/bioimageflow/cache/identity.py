@@ -78,12 +78,9 @@ def compute_signature_hash(
     env_hash: str,
     resolved_params: Any,
     upstream_hashes: dict[str, Any],
-    source_hash: str | None = None,
 ) -> str:
     """Compute the logical digest for a node."""
     parts = [tool_name, str(tool_version), env_hash]
-    if source_hash is not None:
-        parts.append(source_hash)
     parts.append(deterministic_serialize(resolved_params))
     for name, identity in sorted(upstream_hashes.items()):
         parts.append(f"{name}:{deterministic_serialize(identity)}")

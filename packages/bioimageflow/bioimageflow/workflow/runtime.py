@@ -324,7 +324,6 @@ class _RuntimeMixin:
         self,
         *targets: Node,
         inputs: Mapping[str, Any] | None = None,
-        dev_mode: bool = False,
         engine: "_ExecutionEngine | None" = None,
         run_context: WorkflowExecutionContext | None = None,
     ) -> Any:
@@ -345,7 +344,6 @@ class _RuntimeMixin:
             return definition._compute_bound(
                 captured_targets,
                 inputs=captured_inputs,
-                dev_mode=dev_mode,
                 engine=engine,
                 run_context=context,
             )
@@ -358,11 +356,9 @@ class _RuntimeMixin:
         targets: tuple[Node, ...],
         *,
         inputs: Mapping[str, Any] | None,
-        dev_mode: bool,
         engine: "_ExecutionEngine | None",
         run_context: WorkflowExecutionContext,
     ) -> Any:
-        self._dev_mode = dev_mode
 
         if inputs is not None or not targets:
             supplied = dict(inputs or {})
@@ -390,7 +386,6 @@ class _RuntimeMixin:
                 return parent._compute_bound(
                     (boundary,),
                     inputs=None,
-                    dev_mode=dev_mode,
                     engine=engine,
                     run_context=run_context,
                 )
@@ -430,7 +425,6 @@ class _RuntimeMixin:
         self,
         *targets: Node,
         inputs: Mapping[str, Any] | None = None,
-        dev_mode: bool = False,
         engine: "_ExecutionEngine | None" = None,
         run_context: WorkflowExecutionContext | None = None,
     ) -> "_WorkflowSteps":
@@ -438,7 +432,6 @@ class _RuntimeMixin:
         for each node in topological (dependency) order.
 
         Parameters:
-            dev_mode: Development mode flag
             engine: Optional pre-configured engine to use. If None, a default DefaultEngine is created.
 
         The engine stays alive between yields so Wetlands environments
@@ -474,7 +467,6 @@ class _RuntimeMixin:
             iterator = definition._compute_steps_bound(
                 captured_targets,
                 inputs=captured_inputs,
-                dev_mode=dev_mode,
                 engine=engine,
                 run_context=context,
                 engine_reserved=engine_reserved,
@@ -497,12 +489,10 @@ class _RuntimeMixin:
         targets: tuple[Node, ...],
         *,
         inputs: Mapping[str, Any] | None,
-        dev_mode: bool,
         engine: "_ExecutionEngine | None",
         run_context: WorkflowExecutionContext,
         engine_reserved: bool,
     ) -> "Generator[NodeStep, None, None]":
-        self._dev_mode = dev_mode
 
         if inputs is not None or not targets:
             supplied = dict(inputs or {})
@@ -530,7 +520,6 @@ class _RuntimeMixin:
                 yield from parent._compute_steps_bound(
                     (boundary,),
                     inputs=None,
-                    dev_mode=dev_mode,
                     engine=engine,
                     run_context=run_context,
                     engine_reserved=engine_reserved,

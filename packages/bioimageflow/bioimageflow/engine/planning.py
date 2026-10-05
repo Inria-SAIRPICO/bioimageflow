@@ -32,6 +32,16 @@ if TYPE_CHECKING:
 
 class _PlanningMixin:
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
+        """Inspect cache state without running tools or retaining their callbacks."""
+        self._node_executable_captures.clear()
+        self._executable_distribution_versions.clear()
+        try:
+            return self._plan_admitted(workflow)
+        finally:
+            self._node_executable_captures.clear()
+            self._executable_distribution_versions.clear()
+
+    def _plan_admitted(self, workflow: Any) -> dict[str, NodePlan]:
         """Return the cache status and diagnostic plan state of every node.
 
         Walks the graph in topological order, computes diagnostic logical
@@ -52,6 +62,7 @@ class _PlanningMixin:
             If the graph contains a cycle. Use :meth:`Workflow.validate`
             for non-fatal cycle reporting.
         """
+        self._node_executable_captures.clear()
         reachable, completion_dependencies, scoped_names = (
             self._compile_execution_graph(list(workflow._nodes.values()))
         )
@@ -97,15 +108,9 @@ class _PlanningMixin:
         # Include any nodes not reachable from terminals (shouldn't happen
         # in practice, but plan is expected to cover every registered node).
         for name, node in workflow._nodes.items():
-            plan.setdefault(
-                name,
-                NodePlan(
-                    name,
-                    "",
-                    NodePlanStatus.SKIPPED,
-                    (),
-                ),
-            )
+            if name not in plan:
+                plan[name] = NodePlan(name, "", NodePlanStatus.SKIPPED, ())
+        self._node_executable_captures.clear()
         return plan
 
     def _plan_node(

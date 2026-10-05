@@ -10,7 +10,6 @@ Covers:
 - Cached nodes are still yielded
 - Root boundary execution of every enabled branch
 - Progress callbacks fire during stepped execution
-- dev_mode parameter forwarded correctly
 """
 
 import pandas as pd
@@ -335,21 +334,3 @@ class TestComputeStepsProgress:
 
         node_names = {e.node_name for e in events}
         assert len(node_names) >= 2
-
-
-class TestComputeStepsDevMode:
-
-    def test_dev_mode_forwarded(self, tmp_workspace):
-        """dev_mode=True is forwarded to the engine."""
-        load = FileLoader()
-        segment = StubSegmenter()
-
-        with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
-            raw = load(path=str(tmp_workspace / "data"))
-            masks = segment(input_image=raw["path"])
-
-            steps_data = []
-            for step in wf.compute_steps(masks, dev_mode=True):
-                df = step.execute()
-                steps_data.append((step.node_name, df))
-            assert len(steps_data) == 2

@@ -13,22 +13,20 @@ Each successful execution publishes an immutable **record**, and ``current.json`
 
 The implementation also computes a diagnostic logical signature from:
 
-- Tool class name and version
+- Admitted actual executable identity and descriptive declared version
 - Environment hash (dependencies)
 - Resolved parameter values
 - Selected upstream record references when available, with diagnostic fallback material while a plan is pending
-- Source-code hash (``dev_mode`` only)
 
 This signature is exposed as ``NodePlan.logical_signature`` for diagnostics, but it is not the public cache identity.
 Use ``NodePlan.final_result_key`` and ``NodePlan.selected_record_id`` for cache/provenance state.
 If ``current.json`` selects a valid record for a node's final result key, the cached DataFrame is loaded instead of re-executing the tool.
 
-.. note::
-
-   ``dev_mode=True`` adds the tool's source code hash to the signature, so
-   editing ``process_row`` invalidates the cache. Leave it off in production —
-   use explicit tool/source/environment identity and declared computation inputs. Pass it as
-   ``wf.compute(target, dev_mode=True)`` or ``wf.plan(dev_mode=True)``.
+Normal execution captures actual callable code and supported literal/helper facts before lookup.
+Source-backed managed execution verifies captured source against the resident definition before lookup and retains that origin for dispatch.
+Installed/versioned managed origins remain declared membership/version authority; exact worker/transitive byte closure is unproved.
+No development-only source-hash flag is needed to detect supported executable changes.
+Opaque initializer, mutable global, native/imported dependency and arbitrary instance state remain outside this finite proof.
 
 Cache location
 --------------
@@ -63,8 +61,7 @@ Any of these changes produce a different result key:
 - **Upstream change**: if a parent node's hash changes, all descendants
   recompute
 - **Tool version change**: updating the package version of a tool
-- **Source code change** (``dev_mode`` only): modifying the tool's Python
-  source
+- **Admitted executable change**: actual callable code, supported literal/helper facts, or proof-bearing captured source changes
 
 External file references are path-based in the current cache.
 If an input file is modified in place without changing its path, the cache may still select the existing record.

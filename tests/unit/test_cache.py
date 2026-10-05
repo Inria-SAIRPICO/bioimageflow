@@ -95,8 +95,3 @@ class TestComputeSignatureHash:
         h1 = compute_signature_hash("tool", "1.0", "envhash", {"k": "v"}, {})
         h2 = compute_signature_hash("tool", "1.0", "envhash", {"k": "w"}, {})
         assert h1 != h2
-
-    def test_source_hash_changes_result(self):
-        h1 = compute_signature_hash("tool", "1.0", "env", {}, {})
-        h2 = compute_signature_hash("tool", "1.0", "env", {}, {}, source_hash="abc123")
-        assert h1 != h2
