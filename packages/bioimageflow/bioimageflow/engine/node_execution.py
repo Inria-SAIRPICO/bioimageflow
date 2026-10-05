@@ -151,7 +151,9 @@ class _NodeExecutionMixin:
         try:
             self._raise_if_cancelled(workflow)
             if not isinstance(node, WorkflowNode):
+                self._admit_node_runtime(node, provision=True)
                 self._capture_executable(node)
+                self._validate_node_runtime(node)
             if isinstance(node, WorkflowNode):
                 dataframe, signature_hash = self._execute_workflow_node(
                     node, results, sig_hashes, workflow

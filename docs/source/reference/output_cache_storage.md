@@ -204,7 +204,14 @@ That authority includes the captured instance facades' portable input/output typ
 Captured parameter/default/template values remain separate; arbitrary custom annotation validator closure is unproved.
 Current task/result v4 attests the represented portable IO declaration before the worker scientific method and validates its successful digest before controller output acceptance.
 The declaration contract version joins every executable key, preventing reuse of records from the prior unattested contract.
-A matching cache record reuses that exact contract without provisioning solely to compare a declaration; arbitrary initializer effects, custom validators, post-load mutations and installed/transitive byte equality remain outside this proof.
+A matching cache record reuses that exact declaration contract without starting a worker solely to compare it; arbitrary initializer effects, custom validators and post-load mutations remain outside this declaration proof.
+Managed Processing separately admits a ready runtime content receipt before key computation and lookup, using the dispatch manager's augmented recipe.
+Its semantic content facts and digest join the key, while the recipe/lock binding and generation UUID separately fence dispatch and are recorded as operational provenance.
+Different actual installed local-package content therefore cannot reuse an earlier record merely because the declared recipe and lockfile hashes match.
+An identical-content rebuild preserves reuse despite a new generation UUID, and a ready warm cache hit starts no scientific worker pool.
+Receipt creation validates normalized interpreter, resolved artifact and installed distribution content once at provider publication; ordinary admission reads that owned receipt and validates editable source freshness without a new process or full installed-tree scan.
+Changed editable sources require owned physical drain and recreation, rather than assigning fresh identity to stale resident modules.
+Selected primary-tool attestation and arbitrary external changes outside owned provider publication remain separately qualified.
 Embedded captured bytes provide stronger source authority, but do not seal arbitrary post-load class mutations.
 Declared distribution/version tokens remain manual cache invalidators, including installed import packages whose distribution names differ.
 Capture is memoized only within the owned operation; there is no global cache keyed by mutable source paths.
@@ -674,6 +681,9 @@ It must not silently feed non-current `rec_A` into downstream nodes.
 ## Workflow Planning Semantics
 
 `Workflow.plan()` reports final result keys only when every consumed upstream selected record ID is known.
+For managed Processing, the selected backend must also have a valid ready runtime receipt for its augmented recipe.
+Missing or stale runtime content produces `PENDING_RUNTIME` with no final result key; planning does not provision, start workers, run probes or create runtime-state directories.
+`Workflow.plan(engine=...)` uses a supplied engine's selected manager without taking its lifetime ownership.
 When it reports a final result key, `compute()` must derive the same result key if it consumes the same upstream record references.
 
 If any upstream node would need execution before its selected record is known, the downstream final result key is unknown.
@@ -687,7 +697,7 @@ Recommended plan entry fields:
 ```text
 final_result_key: str | None
 selected_record_id: str | None
-status: CACHED | PRIOR_SELECTION_MISS | UNEXECUTED | SKIPPED | PENDING_UPSTREAM
+status: CACHED | PRIOR_SELECTION_MISS | UNEXECUTED | SKIPPED | PENDING_UPSTREAM | PENDING_RUNTIME
 pending_upstreams: tuple[str, ...]
 ```
 

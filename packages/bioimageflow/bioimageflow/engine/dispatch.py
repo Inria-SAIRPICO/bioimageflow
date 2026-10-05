@@ -144,6 +144,7 @@ class _DispatchMixin:
             row_positions=tuple(range(len(arguments_dicts))),
             row_indexes=row_indexes,
             resources=compiled_node.effective_resources,
+            runtime_receipt=self._node_runtime_receipts.get(compiled_node),
         )
         return self._backend.dispatch(self, request)
 
@@ -259,6 +260,8 @@ class _DispatchMixin:
         invocation_id: str,
         cache_attempt_id: str | None,
         resources: ResourceSpec | None = None,
+        *,
+        runtime_receipt: Any = None,
     ) -> list[OutputGroup]:
         """Dispatch through Wetlands — tool runs in isolated environment workers."""
         from wetlands import ExecutionEventKind, ExecutionState
@@ -330,6 +333,7 @@ class _DispatchMixin:
                     max_workers=max_workers,
                     worker_timeout=worker_timeout,
                     shared_memory_grant=scope,
+                    runtime_receipt=runtime_receipt,
                 )
                 tracker.register([task])
                 if workflow.cancel_requested:
@@ -428,6 +432,7 @@ class _DispatchMixin:
                         max_workers=max_workers,
                         worker_timeout=worker_timeout,
                         shared_memory_grant=scopes[len(tasks)],
+                        runtime_receipt=runtime_receipt,
                     )
                     active.append(task)
                     tasks.append(task)

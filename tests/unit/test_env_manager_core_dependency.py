@@ -26,6 +26,11 @@ from tests.testkit.env_manager_fakes import (
 def _clear_core_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BIOIMAGEFLOW_CORE_SOURCE", raising=False)
     monkeypatch.delenv("BIOIMAGEFLOW_USE_LOCAL_CORE", raising=False)
+    # Source-selection controls explicitly supply the project layout even when
+    # the validation interpreter correctly imports Core from its normal wheel.
+    import bioimageflow_core
+    project = Path(__file__).resolve().parents[2] / "packages" / "bioimageflow-core"
+    monkeypatch.setattr(bioimageflow_core, "__file__", str(project / "bioimageflow_core" / "__init__.py"))
 
 
 
@@ -183,7 +188,7 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
     second = manager.get_or_create(env_spec)
 
     assert first is second
-    assert manager._manager.environment.start_count == 1
+    assert manager._manager.env.start_count == 1
     assert env_spec.dependencies == {
         "python": "3.9",
         "conda": ["bioimageit::simglib=0.1.2"],
@@ -229,6 +234,12 @@ def test_get_or_create_delegates_same_name_validation_to_wetlands() -> None:
         def __init__(self) -> None:
             self.provisioned_specs: list[Any] = []
             self.env = _MutatingWetlandsEnvironment()
+
+        def environment(self, name: str) -> _MutatingWetlandsEnvironment:
+            if not self.provisioned_specs:
+                from wetlands import EnvironmentNotReadyError
+                raise EnvironmentNotReadyError(name)
+            return self.env
 
         def managed_environments(self) -> tuple[Any, ...]:
             return ()

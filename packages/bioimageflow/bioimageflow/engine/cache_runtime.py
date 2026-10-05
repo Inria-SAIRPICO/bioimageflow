@@ -171,6 +171,16 @@ class _CacheRuntimeMixin:
                 "executable": dict(self._capture_executable(node).scientific_key),
                 "executable_qualification": list(self._capture_executable(node).qualification),
                 "observed_dependencies": list(self._capture_executable(node).dependency_provenance()),
+                "managed_runtime": self._runtime_identity(node),
+                "runtime_generation": (
+                    {
+                        "generation_id": receipt.generation_id,
+                        "recipe_hash": receipt.recipe_hash,
+                        "lockfile_hash": receipt.lockfile_hash,
+                    }
+                    if (receipt := self._node_runtime_receipts.get(node)) is not None
+                    else None
+                ),
             },
             "logical_digest": sig_hash,
             "environment_hash": environment_hash,

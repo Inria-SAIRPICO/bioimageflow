@@ -19,6 +19,7 @@ from bioimageflow_core import EnvironmentSpec
 from bioimageflow.backends import WetlandsBackend
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.env_manager import EnvironmentShutdownError
+from wetlands import EnvironmentNotReadyError
 
 
 class _TrackingManager:
@@ -72,6 +73,7 @@ class _SequentialHarness(SequentialEngine):
 
 class _FakeWetlandsEnvironment:
     def __init__(self, *, fail_on_exit: bool = False) -> None:
+        self.generation_id = "lifecycle-generation"
         self.launch_calls: list[dict[str, Any]] = []
         self.close_calls = 0
         self.fail_on_exit = fail_on_exit
@@ -90,6 +92,11 @@ class _FakeWetlandsBackend:
     def __init__(self, env: _FakeWetlandsEnvironment) -> None:
         self.env = env
         self.create_calls = 0
+
+    def environment(self, name: str) -> _FakeWetlandsEnvironment:
+        if not self.create_calls:
+            raise EnvironmentNotReadyError(name)
+        return self.env
 
     def managed_environments(self) -> tuple[Any, ...]:
         return ()

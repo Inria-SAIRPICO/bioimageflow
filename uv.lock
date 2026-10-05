@@ -141,7 +141,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=12.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=2.5.0,<3" },
+    { name = "wetlands", specifier = ">=2.6.0,<3" },
 ]
 provides-extras = ["parsl", "psij", "cluster"]
 
@@ -395,7 +395,7 @@ dev = [
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile", specifier = ">=2023.7.10" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "wetlands", specifier = ">=2.5.0,<3" },
+    { name = "wetlands", specifier = ">=2.6.0,<3" },
 ]
 
 [[package]]
@@ -3161,7 +3161,7 @@ wheels = [
 
 [[package]]
 name = "wetlands"
-version = "2.5.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
@@ -3169,7 +3169,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/37/cdef91ea1fe37f87031c2a19616e9928af7305cd5f44d3047192950078aa/wetlands-2.5.0.tar.gz", hash = "sha256:5172cfb846776763d41e61a8cdfad18d3252d630ec3e47528b4e2fb61099b84e", size = 347271, upload-time = "2026-10-03T10:20:21.489Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/eb/2dbbbae3e140e17de67acd94a291d16d5f076765f05b3908454d53e02985/wetlands-2.6.0.tar.gz", hash = "sha256:4db1abd22cfe6a2e64dfbfaa831a86df368ab15a2a63490fdfd1a32e89da4ab7", size = 361613, upload-time = "2026-10-05T18:54:02.663Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/9a/0ea1c8560339b0baabc8ade1a97ac93a3327baa45714bc89f8156b19d7df/wetlands-2.5.0-py3-none-any.whl", hash = "sha256:17cdfb01e3bba26218b1580dc4b752d7fc86083f5d6e824b7b5781b6d469c062", size = 139267, upload-time = "2026-10-03T10:20:19.795Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/bf/5a29b16b158cf2100d8218e24365fe0c16706a4b106bbc06de41a41b614b/wetlands-2.6.0-py3-none-any.whl", hash = "sha256:9afcb38d70ddeb8123d52433c169d5ae2e924901ce7e2b501de36b733730d425", size = 148228, upload-time = "2026-10-05T18:54:01.128Z" },
 ]

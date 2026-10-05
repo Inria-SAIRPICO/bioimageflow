@@ -61,6 +61,9 @@ This package is the orchestrator. It:
 The implementation keeps those responsibilities in focused ``engine/``,
 ``workflow/``, ``storage/``, ``cache/``, and ``validation/`` packages.
 Their package ``__init__`` modules preserve the public import paths.
+Environment recipe normalization is a pure ``environment_recipe`` boundary after authoritative Core dependency augmentation.
+The typed ``runtime_admission`` service reads provider-owned ready content and validates generation fences before managed cache decisions.
+``WetlandsEnvManager`` retains pool retirement, grant ownership and strict cleanup failures; the admission service receives those operations explicitly and does not own pools or a global identity cache.
 Processing execution is delegated through a small backend contract; direct and
 Wetlands adapters share the same scheduler, and future distributed adapters
 must reuse that scheduler rather than duplicate graph and cache semantics.

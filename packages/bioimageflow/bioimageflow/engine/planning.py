@@ -33,13 +33,11 @@ if TYPE_CHECKING:
 class _PlanningMixin:
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
         """Inspect cache state without running tools or retaining their callbacks."""
-        self._node_executable_captures.clear()
-        self._executable_metadata.clear()
+        self._begin_execution()
         try:
             return self._plan_admitted(workflow)
         finally:
-            self._node_executable_captures.clear()
-            self._executable_metadata.clear()
+            self._end_execution()
 
     def _plan_admitted(self, workflow: Any) -> dict[str, NodePlan]:
         """Return the cache status and diagnostic plan state of every node.
@@ -135,6 +133,24 @@ class _PlanningMixin:
             )
             return
 
+        if (
+            self._use_wetlands
+            and isinstance(node.tool, ProcessingTool)
+            and self._admit_node_runtime(node, provision=False) is None
+        ):
+            sig_hashes[node] = None
+            diagnostic_hash = self._compute_pending_diagnostic_sig_hash(
+                node, diagnostic_hashes, workflow,
+            )
+            diagnostic_hashes[node] = diagnostic_hash
+            plan[node.name] = NodePlan(
+                node.name, diagnostic_hash, NodePlanStatus.PENDING_RUNTIME,
+                tuple(self._plan_upstream_names(node)),
+                diagnostic="The requested managed runtime has no admitted ready content.",
+            )
+            return
+
+        self._validate_node_runtime(node)
         try:
             cached_df, sig_hash = self._check_node_cache(
                 node,
@@ -284,6 +300,8 @@ class _PlanningMixin:
         ]
         if corrupt_entries:
             status = NodePlanStatus.CORRUPT
+        elif NodePlanStatus.PENDING_RUNTIME in internal_statuses:
+            status = NodePlanStatus.PENDING_RUNTIME
         elif any(
             status is NodePlanStatus.PENDING_UPSTREAM for status in internal_statuses
         ):

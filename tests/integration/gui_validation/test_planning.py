@@ -107,16 +107,23 @@ class TestPlan:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import bioimageflow.env_manager as em
+        from wetlands import EnvironmentManager, ManagedEnvironment
 
         def _boom(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Wetlands must not launch during plan()")
 
-        monkeypatch.setattr(em.WetlandsEnvManager, "__init__", _boom)
+        monkeypatch.setattr(EnvironmentManager, "provision", _boom)
+        monkeypatch.setattr(ManagedEnvironment, "start", _boom)
+        managed_root = tmp_path / "missing-runtime"
+        assert not managed_root.exists()
 
-        wf = Workflow(storage_path=tmp_path, engine="wetlands")
+        wf = Workflow(storage_path=tmp_path, engine="wetlands",
+            wetlands_config={"root": managed_root})
         with wf:
             load = FileLoader()(path=str(tmp_path))
             StubSegmenter()(input_image=load["path"])
         plan = wf.plan()
-        assert plan  # ran successfully
+        assert plan
+        assert plan["StubSegmenter_1"].status.value == "pending_runtime"
+        assert plan["StubSegmenter_1"].final_result_key is None
+        assert not managed_root.exists()

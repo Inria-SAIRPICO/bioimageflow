@@ -30,6 +30,14 @@ BioImageFlow keeps this declaration worker-safe and translates ``python``, ``pip
 When ``channels`` is absent, channel-qualified Conda values such as ``bioimageit::atlas>=0`` place their prefix channels first, in dependency order, followed by the fallback ``conda-forge`` channel. With no prefixes, only ``conda-forge`` is used. Duplicate channels are removed in first-occurrence order; earlier channels have higher priority.
 An explicit ``channels`` list keeps its declared order, followed by any prefix channels not already present. It does not gain ``conda-forge`` automatically, so declare it explicitly when desired. Wetlands requires at least one resulting channel.
 The scientific environment dependency hash preserves this list precedence (and other ordered dependency sequences); mapping keys and genuinely unordered sets are canonicalized independently.
+Managed Processing also admits the actual ready runtime content before scientific-key computation or cache lookup, using the same augmented recipe that supplies BioImageFlow Core at dispatch.
+The provider receipt records normalized interpreter, resolved-artifact and installed-distribution content facts; its semantic digest excludes the environment prefix and generation UUID.
+One receipt is shared per augmented recipe in each compute, planning or stepped operation.
+Computation can provision a missing runtime, or strictly drain and recreate an owned runtime whose receipt is unavailable or whose editable sources changed, before looking up its cache record.
+A ready cache hit starts no scientific worker pool, including after an identical-content rebuild with a different generation UUID.
+Planning reads only and reports ``PENDING_RUNTIME`` with no final result key when the requested runtime has no valid ready receipt; ``Workflow.plan(engine=...)`` can inspect a caller-supplied engine without changing its lifetime.
+Dispatch separately verifies the admitted recipe, generation and lock binding before starting or reusing a pool; failed physical close retains the original pool and its grants for retry.
+Editable sources remain live and a changed admitted source requires recreation; receipts do not certify arbitrary external mutation or selected primary-tool byte equality.
 Wetlands 2 rejects qualified Conda dependencies, so the adapter passes the unqualified package name and a separate channel list. For example, ``bioimageit::atlas>=0`` becomes ``atlas>=0`` with channels ``("bioimageit", "conda-forge")`` when no list is declared. The prefix makes a channel available and gives it priority, but does not pin that package to the channel. True source pinning needs Wetlands support for per-package source constraints.
 
 GENERAL_ENV

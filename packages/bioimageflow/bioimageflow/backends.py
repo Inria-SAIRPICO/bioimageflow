@@ -37,6 +37,7 @@ class ProcessingDispatch:
     row_positions: tuple[int, ...]
     row_indexes: tuple[str, ...]
     resources: ResourceSpec
+    runtime_receipt: Any = None
 
 
 class ProcessingBackend(Protocol):
@@ -123,6 +124,7 @@ class WetlandsBackend:
             tool.environment,
             max_workers=max_workers,
             worker_timeout=worker_timeout,
+            runtime_receipt=engine._node_runtime_receipts[node],
         )
 
     def dispatch(
@@ -141,6 +143,7 @@ class WetlandsBackend:
             request.invocation_id,
             request.cache_attempt_id,
             request.resources,
+            runtime_receipt=request.runtime_receipt,
         )
 
     def cleanup_execution(self, engine: "DefaultEngine") -> None:

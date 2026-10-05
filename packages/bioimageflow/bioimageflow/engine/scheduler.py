@@ -167,6 +167,8 @@ class DefaultEngine(
         self._node_selected_results: dict[Node, SelectedResult] = {}
         self._node_result_relations: dict[Node, Any] = {}
         self._node_executable_captures: dict[Node, Any] = {}
+        self._runtime_admissions: dict[tuple[str, str], Any] = {}
+        self._node_runtime_receipts: dict[Node, Any] = {}
         from bioimageflow.worker_origins import ExecutableMetadata
         self._executable_metadata = ExecutableMetadata()
         self._external_cancellation_requested = cancellation_requested
@@ -213,6 +215,8 @@ class DefaultEngine(
                 self._node_selected_results.clear()
                 self._node_result_relations.clear()
                 self._node_executable_captures.clear()
+                self._runtime_admissions.clear()
+                self._node_runtime_receipts.clear()
                 self._executable_metadata.clear()
 
     def _end_execution(self) -> None:
@@ -222,6 +226,8 @@ class DefaultEngine(
                 self._node_selected_results.clear()
                 self._node_result_relations.clear()
                 self._node_executable_captures.clear()
+                self._runtime_admissions.clear()
+                self._node_runtime_receipts.clear()
                 self._executable_metadata.clear()
 
     def _is_cancellation_requested(self, workflow: Any) -> bool:

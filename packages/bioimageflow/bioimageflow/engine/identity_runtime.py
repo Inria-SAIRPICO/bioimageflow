@@ -25,6 +25,35 @@ from .provenance import (
 
 
 class _IdentityRuntimeMixin:
+    def _admit_node_runtime(self, node: Node, *, provision: bool) -> Any:
+        """Share one ready-content admission per augmented recipe and operation."""
+        if not self._use_wetlands or not isinstance(node.tool, ProcessingTool):
+            return None
+        assert self._env_manager is not None
+        receipt = self._env_manager.admit_runtime(
+            node.tool.environment, provision=provision,
+            admissions=self._runtime_admissions,
+        )
+        self._node_runtime_receipts[node] = receipt
+        return receipt
+
+    def _validate_node_runtime(self, node: Node) -> None:
+        if not self._use_wetlands or not isinstance(node.tool, ProcessingTool):
+            return
+        receipt = self._node_runtime_receipts.get(node)
+        if receipt is None:
+            raise RuntimeError("Managed Processing requires an admitted ready runtime")
+        self._env_manager.validate_runtime_receipt(node.tool.environment, receipt)
+
+    def _runtime_identity(self, node: Node) -> dict[str, Any] | None:
+        receipt = self._node_runtime_receipts.get(node)
+        if receipt is None:
+            return None
+        return {
+            "content_digest": receipt.content_digest,
+            "facts": receipt.to_scientific_facts(),
+        }
+
     def _capture_executable(self, node: Node) -> Any:
         """Own one admission per operation, shared by lookup and actual call."""
         from bioimageflow.worker_origins import capture_tool_executable
@@ -101,11 +130,22 @@ class _IdentityRuntimeMixin:
         resolved_params: Any,
         upstream_hashes: dict[str, Any],
         workflow: Any,
+        *,
+        diagnostic: bool = False,
     ) -> str:
         """Compute the logical digest for any node type."""
         capture = self._capture_executable(node)
         from bioimageflow.cache.identity import deterministic_serialize
-        tool_version = deterministic_serialize(dict(capture.scientific_key))
+        tool_facts = dict(capture.scientific_key)
+        if self._use_wetlands and isinstance(node.tool, ProcessingTool):
+            receipt = self._node_runtime_receipts.get(node)
+            if receipt is None:
+                if not diagnostic:
+                    raise RuntimeError("Managed signature requires an admitted ready runtime")
+                tool_facts["managed_runtime"] = {"pending": True}
+            else:
+                tool_facts["managed_runtime"] = self._runtime_identity(node)
+        tool_version = deterministic_serialize(tool_facts)
         from bioimageflow.portable_cells import portable_identity
         from enum import Enum
 
@@ -245,6 +285,7 @@ class _IdentityRuntimeMixin:
                 resolved_params,
                 upstream,
                 workflow,
+                diagnostic=True,
             )
 
         if isinstance(node.tool, ProcessingTool):
@@ -266,6 +307,7 @@ class _IdentityRuntimeMixin:
                 self._processing_signature_params(node, input_annotations),
                 upstream,
                 workflow,
+                diagnostic=True,
             )
 
         raise TypeError(f"Unsupported node type: {type(node.tool).__name__}")

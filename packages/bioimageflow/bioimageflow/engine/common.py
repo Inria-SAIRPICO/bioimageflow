@@ -399,6 +399,9 @@ class NodePlanStatus(str, Enum):
         At least one upstream selected record is not known yet, so the
         node's final result key cannot be determined from a stable
         record graph snapshot.
+    PENDING_RUNTIME
+        Managed Processing has no admitted ready content for its requested
+        runtime. Planning does not provision it or compute a final result key.
     CORRUPT
         Cache metadata or the selected immutable record is corrupt. Planning
         reports the diagnostic, while normal lookup and execution stay strict.
@@ -409,6 +412,7 @@ class NodePlanStatus(str, Enum):
     UNEXECUTED = "unexecuted"
     SKIPPED = "skipped"
     PENDING_UPSTREAM = "pending_upstream"
+    PENDING_RUNTIME = "pending_runtime"
     CORRUPT = "corrupt"
 
 
@@ -576,6 +580,7 @@ class NodeStep:
         self._cached_df: pd.DataFrame | None = None
         self._cached_selection: Any = None
         self._executable_capture: Any = None
+        self._runtime_receipt: Any = None
         self._run_context = getattr(workflow, "_active_run_context", None)
 
     @property
@@ -646,8 +651,11 @@ class NodeStep:
             return self._df
         if self._executable_capture is not None:
             self._engine._node_executable_captures[self._node] = self._executable_capture
+        if self._runtime_receipt is not None:
+            self._engine._node_runtime_receipts[self._node] = self._runtime_receipt
         # Reuse cache result if already checked by prepare() / cached
         self._ensure_cache_checked()
+        self._engine._validate_node_runtime(self._node)
         if self._cached_df is not None:
             from bioimageflow.row_relation import ResultRelation
             relation = None if self._cached_selection is None else ResultRelation.from_dict(self._cached_selection.manifest.row_relation)
@@ -706,10 +714,19 @@ class NodeStep:
     def _ensure_cache_checked(self) -> None:
         """Compute sig_hash and check the cache (at most once)."""
         if self._cache_checked:
+            if not self._executed and self._runtime_receipt is not None:
+                assert self._engine._env_manager is not None
+                assert isinstance(self._node.tool, ProcessingTool)
+                self._engine._env_manager.validate_runtime_receipt(
+                    self._node.tool.environment, self._runtime_receipt,
+                )
             return
-        self._cache_checked = True
+        self._runtime_receipt = self._engine._admit_node_runtime(
+            self._node, provision=True,
+        )
         self._engine._adopt_node_inputs(self._node)
         self._executable_capture = self._engine._capture_executable(self._node)
+        self._engine._validate_node_runtime(self._node)
         cached_df, sig_hash = self._engine._check_node_cache(
             self._node,
             self._results,
@@ -720,3 +737,4 @@ class NodeStep:
         self._cached_selection = self._engine._selected_result(self._node)
         if sig_hash is not None:
             self._sig_hash = sig_hash
+        self._cache_checked = True

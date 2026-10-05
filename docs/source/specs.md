@@ -2616,6 +2616,13 @@ Captured custom-source bytes provide stronger source authority without sealing a
 These bounded checks do not establish arbitrary dynamic-initializer or process-global isolation, complete controller/worker installed-content equality, or transitive dependency closure for installed, shared or versioned origins.
 Existing origin selectors, ordinary programmatic Direct tools and normal caching remain supported; labels, selectors and development-only current-source inspection are not substitutes for actual admitted executable identity.
 
+Before managed Processing cache lookup, the engine admits the selected ready runtime through its public Wetlands owner using the same augmented recipe, including the authoritative Core dependency, that dispatch will consume.
+The public `RuntimeContentReceipt` owns normalized interpreter, installed-content and resolved-artifact facts; its generation, recipe and lockfile identities fence the selected ready owner without substituting for scientific content.
+Ready inspection and planning do not provision, start scientific workers or spawn a content probe; actual execution may prepare a missing or stale owned runtime before deriving the key, while scientific worker startup remains unnecessary for a reusable hit.
+Later managed cache decisions and dispatch validate the admitted receipt's current-generation fence without rescanning installed content, rather than silently switching to another runtime after cache admission.
+This bounded receipt describes owner-managed ready content, not arbitrary external filesystem tampering, native relocation or primary installed-tool controller/worker executable parity.
+Editable source roots require fresh operation-owned live-source admission; a changed admitted footprint is refused until explicit owned retirement and reprovisioning, without hot reloading or claiming arbitrary Python state sealing.
+
 Direct invokes the shared output-normalization path locally.
 Wetlands submits the core task entry point to its selected environment.
 Parsl wraps the same core entry point in an explicit-DFK Python app bound to the selected executor label.
@@ -2671,6 +2678,7 @@ Result-key material includes every value that can affect logical output and cach
 - Node definition identity.
 - Admitted executable identity for the selected execution strategy, together with descriptive tool identity and version.
 - Environment dependency hash.
+- Admitted managed-runtime content for managed Processing execution, when applicable.
 - Normalized parameters and statically declared input bindings or selectors.
 - Selected upstream record references for every cacheable upstream value consumed by the node.
 - Recursive provider/selector recipes for values published through workflow boundaries, resolved to selected real-provider records at runtime.
@@ -2683,6 +2691,9 @@ These declaration facts reuse the effective definition capture rather than copyi
 The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
 ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v1`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
 This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
+For managed Processing execution, `managed_runtime` retains the receipt's detached scientific facts and `content_digest`; generation IDs, raw recipe/lockfile hashes and operational paths are not scientific content salts.
+With the same declared recipe and other key facts, identical admitted content recreated in a new operational generation retains normal reuse, while changed admitted runtime content cannot reuse an earlier computation merely because the declared recipe and lockfile hash are unchanged.
+Nodes sharing one augmented runtime recipe share its admission within one operation; the next operation refreshes that authority rather than inheriting a global memo.
 The supported declaration parity check is specified in Section 5.2; controller key facts do not establish whole-class, constructor/module-initializer or post-load class-state sealing.
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
 Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
@@ -2754,13 +2765,15 @@ Unchanged admitted computation retains normal cache reuse; inspection of a later
 ### 6.4 Limitations
 
 - **Path-based external references:** V1 external reference identity is path-based, not content-based. If an input file is modified without changing its path, the cache may report a false hit. Users can manually invalidate affected nodes when needed.
-- **Transitive dependency changes:** The environment dependency hash catches declared version spec changes, such as `cellpose==3.0` to `cellpose==4.0`. If a dependency changes without a changed declared version, bump the declared tool package version or explicitly invalidate affected nodes.
-  Actual installed/transitive dependency closure remains explicitly unproved by this declared recipe hash; this limitation does not excuse a concrete mismatch between resident callable code or representable referenced literal/helper values and admitted executable authority.
+- **Transitive dependency changes:** The environment dependency hash catches declared version spec changes, such as `cellpose==3.0` to `cellpose==4.0`.
+  Managed Processing also keys the content represented by its admitted ready-runtime receipt, so changed represented content is not excused by an unchanged recipe or lockfile hash.
+  Dependency or process-state closure outside those admitted facts remains unproved; retain manual declared-version invalidation or explicit invalidation for unrepresented changes, without treating this limitation as permission for a concrete mismatch between resident callable code or representable referenced literal/helper values and admitted executable authority.
 
 ### 6.5 Pre-execution Planning
 
 A plan is a fresh diagnostic snapshot, not a guarantee that selection cannot change before compute.
 Execution and publication retain the exact selected-result binding described in Section 6.2, independently of subsequent current-pointer changes.
+An engine owns one active operation: planning through an engine with an active computation or step iterator is refused before mutating that operation's admissions; planning after completion uses a fresh snapshot.
 
 `Workflow.plan()` exposes cache status and selected-record information without executing nodes.
 Callers that need to report cache state should use `plan()` rather than reimplementing result-key composition.
@@ -2785,6 +2798,7 @@ The `cached` and `skipped` booleans are read-only shortcuts (`cached == status i
 | `UNEXECUTED` | No reusable record exists yet for this node/result lineage. |
 | `SKIPPED` | Node is disabled, or its upstream chain contains a disabled node. `final_result_key` and `selected_record_id` are `None`. |
 | `PENDING_UPSTREAM` | At least one consumed upstream selected record is not known until that upstream executes. `final_result_key` is `None`. |
+| `PENDING_RUNTIME` | The configured managed Processing runtime has no current admitted ready content. Planning does not provision or start it; `final_result_key` and `selected_record_id` are `None`. |
 | `CORRUPT` | Planning found corrupt cache metadata or a corrupt selected record for this node. `diagnostic` describes the failure; downstream nodes remain projectable, while cache lookup and execution still raise strictly. |
 
 Nested workflow tools appear under scoped names `"workflow_node/internal_name"`.

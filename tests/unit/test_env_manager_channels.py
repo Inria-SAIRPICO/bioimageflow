@@ -3,7 +3,8 @@
 import pytest
 from wetlands import EnvironmentSpec as WetlandsEnvironmentSpec
 
-from bioimageflow.env_manager import WetlandsEnvManager, _translate_conda
+from bioimageflow.env_manager import WetlandsEnvManager
+from bioimageflow.environment_recipe import _translate_conda
 from bioimageflow_spot_tools.atlas import atlas_env
 
 

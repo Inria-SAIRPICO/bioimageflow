@@ -217,13 +217,17 @@ class _InvalidationMixin:
             queue.extend(reverse.get(nxt, ()))
         return visited
 
-    def plan(self) -> "dict[str, NodePlan]":
+    def plan(self, *, engine: Any = None) -> "dict[str, NodePlan]":
         """Return a per-node cache-status plan.
 
-        Instantiates a non-Wetlands :class:`DefaultEngine` and calls its
-        :meth:`plan`. No tool code runs.
+        Uses the configured backend's read-only runtime admission. A supplied
+        engine retains its caller-owned lifetime; no tool or worker starts.
         """
-        from bioimageflow.engine import DefaultEngine
-
         self._discover_graph(list(self._nodes.values()))
-        return DefaultEngine(use_wetlands=False).plan(self)
+        if engine is not None:
+            return engine.plan(self)
+        owned_engine = self.create_engine()
+        try:
+            return owned_engine.plan(self)
+        finally:
+            owned_engine.close()

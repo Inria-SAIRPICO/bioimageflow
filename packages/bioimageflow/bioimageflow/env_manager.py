@@ -5,17 +5,14 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import math
-import re
 import threading
-import urllib.parse
-import urllib.request
 from asyncio import CancelledError
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from packaging.version import Version
 
@@ -33,11 +30,12 @@ from bioimageflow._core_dependency import (
     core_requirement_conflict,
 )
 from bioimageflow.paths import get_wetlands_path
+from bioimageflow.environment_recipe import to_wetlands_spec
+from bioimageflow.runtime_admission import RuntimeAdmission
 from wetlands import (
     EnvironmentManager,
     EnvironmentNotReadyError,
     EnvironmentSpec,
-    LocalPackage,
     ManagedEnvironment,
     Operation,
     OperationEvent,
@@ -46,12 +44,10 @@ from wetlands import (
 
 logger = logging.getLogger("bioimageflow")
 
+if TYPE_CHECKING:
+    from wetlands import RuntimeContentReceipt
+
 _WORKER_TARGET = "bioimageflow_core.worker:execute_processing_task"
-_LOCAL_PYPI_REFERENCE = re.compile(
-    r"^\s*(?P<name>[A-Za-z0-9_.-]+)"
-    r"(?:\[(?P<extras>[A-Za-z0-9_.,-]+)\])?"
-    r"\s*@\s*(?P<url>file://\S+)\s*$"
-)
 class EnvironmentRecipeState(Enum):
     """Relationship between a requested recipe and Wetlands-managed state."""
 
@@ -166,81 +162,6 @@ def _reset_shared_manager() -> None:
             logger.debug("Failed to close test Wetlands manager", exc_info=True)
 
 
-def _translate_conda(
-    values: list[Any],
-    channels: list[str] | None,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    translated: list[str] = []
-    prefix_channels: list[str] = []
-    for value in values:
-        if not isinstance(value, str):
-            raise TypeError(f"Wetlands 2 Conda dependencies must be strings, got {value!r}.")
-        if "::" in value:
-            channel, value = value.split("::", 1)
-            if channel:
-                prefix_channels.append(channel)
-        translated.append(value)
-    ordered_channels = (
-        [*prefix_channels, "conda-forge"]
-        if channels is None
-        else [*channels, *prefix_channels]
-    )
-    return tuple(translated), tuple(dict.fromkeys(ordered_channels))
-
-
-def _translate_local_dependency(value: Any) -> LocalPackage:
-    if not isinstance(value, dict) or "path" not in value:
-        raise TypeError("Wetlands 2 local dependencies require a mapping with 'path'.")
-    package = LocalPackage(
-        source=Path(str(value["path"])),
-        editable=bool(value.get("editable", False)),
-        extras=tuple(value.get("extras", ())),
-    )
-    declared = value.get("name")
-    if isinstance(declared, str):
-        canonical = declared.replace("_", "-").lower()
-        if canonical != package.distribution_name:
-            raise ValueError(
-                f"Local dependency declares {declared!r}, but its project is "
-                f"{package.distribution_name!r}."
-            )
-    return package
-
-
-def _translate_pypi_dependencies(
-    values: list[Any],
-) -> tuple[tuple[str, ...], tuple[LocalPackage, ...]]:
-    pypi: list[str] = []
-    local: list[LocalPackage] = []
-    for value in values:
-        if not isinstance(value, str):
-            raise TypeError("Wetlands 2 PyPI dependencies must be strings.")
-        match = _LOCAL_PYPI_REFERENCE.fullmatch(value)
-        if match is None:
-            pypi.append(value)
-            continue
-        parsed = urllib.parse.urlparse(match.group("url"))
-        if parsed.scheme != "file" or parsed.query or parsed.fragment:
-            raise ValueError(f"Invalid local file dependency {value!r}.")
-        if parsed.netloc not in {"", "localhost"}:
-            raise ValueError("Local file dependencies must not use a remote host.")
-        source = Path(
-            urllib.request.url2pathname(urllib.parse.unquote(parsed.path))
-        )
-        extras = tuple(
-            extra
-            for extra in (match.group("extras") or "").split(",")
-            if extra
-        )
-        package = LocalPackage(source=source, extras=extras)
-        expected = re.sub(r"[-_.]+", "-", match.group("name")).lower()
-        if expected != package.distribution_name:
-            raise ValueError(
-                f"Local dependency declares {match.group('name')!r}, but its "
-                f"project is {package.distribution_name!r}."
-            )
-        local.append(package)
-    return tuple(pypi), tuple(local)
 
 
 class WetlandsEnvManager:
@@ -348,46 +269,9 @@ class WetlandsEnvManager:
         return deps
 
     def _to_wetlands_spec(
-        self,
-        env_spec: BioImageFlowEnvironmentSpec,
+        self, env_spec: BioImageFlowEnvironmentSpec,
     ) -> EnvironmentSpec:
-        dependencies = self._augment_dependencies(env_spec.dependencies)
-        allowed = {"python", "conda", "pip", "channels", "local"}
-        unknown = sorted(set(dependencies).difference(allowed))
-        if unknown:
-            raise ValueError(
-                "Unsupported BioImageFlow environment dependency section(s) for "
-                f"Wetlands 2: {', '.join(unknown)}."
-            )
-        python = dependencies.get("python", ">=3.9")
-        if not isinstance(python, str):
-            raise TypeError("Environment 'python' must be a version string.")
-        if re.fullmatch(r"[0-9]+\.[0-9]+", python):
-            python = f"{python}.*"
-        raw_conda = list(dependencies.get("conda", []))
-        raw_channels = (
-            list(dependencies["channels"]) if "channels" in dependencies else None
-        )
-        if raw_channels is not None and any(
-            not isinstance(channel, str) for channel in raw_channels
-        ):
-            raise TypeError("Environment channels must be strings.")
-        conda, channels = _translate_conda(raw_conda, raw_channels)
-        pypi, local_from_pypi = _translate_pypi_dependencies(
-            list(dependencies.get("pip", ()))
-        )
-        explicit_local = tuple(
-            _translate_local_dependency(item)
-            for item in dependencies.get("local", ())
-        )
-        local = local_from_pypi + explicit_local
-        return EnvironmentSpec(
-            python=python,
-            conda=conda,
-            pypi=pypi,
-            channels=channels,
-            local=local,
-        )
+        return to_wetlands_spec(self._augment_dependencies(env_spec.dependencies))
 
     def _recipe_state(
         self,
@@ -419,6 +303,33 @@ class WetlandsEnvManager:
                 )
             state, _ = self._recipe_state(env_spec.name, wetlands_spec)
             return state
+
+    def admit_runtime(
+        self, env_spec: BioImageFlowEnvironmentSpec, *, provision: bool,
+        admissions: dict[tuple[str, str], RuntimeContentReceipt | None] | None = None,
+    ) -> RuntimeContentReceipt | None:
+        """Admit actual ready content once per owned operation, without workers."""
+        with self._lock:
+            return RuntimeAdmission(self._manager).admit(
+                env_spec.name, self._to_wetlands_spec(env_spec), provision=provision,
+                admissions=admissions, owned_environment=self._environments.get(env_spec.name),
+                retire_pool=self._retire_runtime_pool,
+            )
+
+    def _retire_runtime_pool(self, name: str) -> ManagedEnvironment | None:
+        _stopped, error = self._stop_pool(name)
+        if error is not None:
+            raise EnvironmentShutdownError(((name, error),)) from error
+        return self._environments.get(name)
+
+    def validate_runtime_receipt(
+        self, env_spec: BioImageFlowEnvironmentSpec, receipt: RuntimeContentReceipt,
+    ) -> ManagedEnvironment:
+        """Fence an admitted semantic identity to its still-ready generation."""
+        with self._lock:
+            return RuntimeAdmission(self._manager).validate(
+                env_spec.name, self._to_wetlands_spec(env_spec), receipt,
+            )
 
     @staticmethod
     def _wait_for_recreation_operation(
@@ -597,6 +508,7 @@ class WetlandsEnvManager:
         on_removal_event: Callable[[OperationEvent], None] | None = None,
         replace_existing: bool = False,
         on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
+        runtime_receipt: RuntimeContentReceipt | None = None,
     ) -> WorkerPool:
         """Provision an environment and return its cached Wetlands 2 pool.
 
@@ -618,8 +530,17 @@ class WetlandsEnvManager:
         wetlands_spec = self._to_wetlands_spec(env_spec)
         config = (max_workers, worker_timeout)
         with self._lock:
+            admitted_environment = (
+                self.validate_runtime_receipt(env_spec, runtime_receipt)
+                if runtime_receipt is not None else None
+            )
             existing = self._pools.get(env_spec.name)
             if existing is not None:
+                current = admitted_environment or self._manager.environment(env_spec.name)
+                if current.generation_id != self._environments[env_spec.name].generation_id:
+                    raise RuntimeError(
+                        f"Environment {env_spec.name!r} changed while its pool remains owned."
+                    )
                 if self._specs[env_spec.name] != wetlands_spec:
                     raise ValueError(
                         f"Environment {env_spec.name!r} was already provisioned "
@@ -658,6 +579,15 @@ class WetlandsEnvManager:
                         existing_recipe_hash=existing_hash,
                     )
                 )
+            if admitted_environment is not None:
+                pool = admitted_environment.start(
+                    workers=config[0], worker_timeout=config[1],
+                )
+                self._environments[env_spec.name] = admitted_environment
+                self._pools[env_spec.name] = pool
+                self._pool_configs[env_spec.name] = config
+                self._specs[env_spec.name] = wetlands_spec
+                return pool
             return self._provision_and_start(
                 env_spec.name, wetlands_spec, config,
                 on_provision_event=on_provision_event,
@@ -671,11 +601,13 @@ class WetlandsEnvManager:
         worker_timeout: float | None = None,
         *,
         shared_memory_grant: Any = None,
+        runtime_receipt: RuntimeContentReceipt | None = None,
     ) -> Any:
         with self._lock:
             try:
                 pool = self.get_or_create(
                     env_spec, max_workers=max_workers, worker_timeout=worker_timeout,
+                    runtime_receipt=runtime_receipt,
                 )
             except BaseException:
                 if shared_memory_grant is not None:

@@ -25,6 +25,7 @@ class _Pool:
 class _MutatingWetlandsEnvironment:
     def __init__(self) -> None:
         self.start_count = 0
+        self.generation_id = "mutating-generation"
         self.pool = _Pool()
 
     def start(self, **kwargs: Any) -> _Pool:
@@ -60,8 +61,13 @@ class _MutatingWetlandsManager:
     def __init__(self) -> None:
         self.provisioned_specs: list[Any] = []
         self.replace_existing: list[bool] = []
-        self.environment = _MutatingWetlandsEnvironment()
+        self.env = _MutatingWetlandsEnvironment()
         self.infos: tuple[Any, ...] = ()
+
+    def environment(self, name: str) -> _MutatingWetlandsEnvironment:
+        if not any(info.name == name for info in self.infos):
+            raise EnvironmentNotReadyError(name)
+        return self.env
 
     def managed_environments(self) -> tuple[Any, ...]:
         return self.infos
@@ -79,7 +85,7 @@ class _MutatingWetlandsManager:
                 recipe_hash=spec.recipe_hash,
             ),
         )
-        return _Operation(self.environment)
+        return _Operation(self.env)
 
 
 def _runtime_manager_with_core_dependency(dependency: object) -> WetlandsEnvManager:
