@@ -196,7 +196,7 @@ def test_source_path_or_shared_array_output_rejects_path_assets_under_shared_nam
             output_templates={"result": "shm/path.txt"},
         )
         with pytest.raises(
-            CacheCorruptionError, match="reserved for shared-array assets"
+            CacheCorruptionError, match="reserved for declared array assets"
         ):
             wf.compute(node)
 

@@ -463,6 +463,9 @@ V1 canonical dataframe digest rules:
 - The index is included as strings in that row sequence.
 - Columns are serialized in deterministic order: declared output schema order first, then additional columns sorted lexicographically by name.
 - Supported scalar cell kinds are null, bool, signed integer, unsigned integer, float, string, record asset reference, and external path reference.
+- Finite list, tuple and ordered primitive-key dictionary cells use `portable_value` logical columns and typed Core container nodes stored as canonical JSON text in Parquet.
+- The neutral portable-cell leaf adapter preserves exact large integers, scalar NumPy dtype/bytes, bytes, nonfinite floats and signed zero; list-valued fields stay one cell independently of an outer list of output rows.
+- Nested Path/native/SharedArray leaves reference exact manifest-owned roles and cell bindings, not task grant locators. Full descriptor and asset-role validation precedes hydration; native leaves use immutable NPY acceptance and SharedArray leaves use the existing scoped result-group lifetime.
 - Integers are serialized as decimal strings with their signedness recorded in the column schema.
 - Floats are serialized using a deterministic representation; NaN, positive infinity, and negative infinity use explicit sentinel strings.
 - Strings are UTF-8 NFC-normalized.
@@ -488,7 +491,8 @@ All supported pandas and PyArrow versions must round-trip to the same logical pa
 Byte-for-byte Parquet equality across dependency versions is not required because transport bytes are integrity metadata rather than content identity.
 
 Root DataFrame inputs use the same canonical logical payload and digest helper.
-For a root DataFrame, Python `Path` cells are normalized absolute `external_path` values, string cells remain strings, supported scalar and datetime cells use the rules above, and unsupported object cells are rejected.
+For a root DataFrame, Python `Path` cells are normalized absolute `external_path` values, string cells remain strings, supported scalar and datetime cells use the rules above, and finite container cells use the same portable structural identity with content-bound native/shared leaves.
+Unsupported arbitrary object cells and unsupported dictionary-key types are rejected; no pickle or generic Python-object serialization is provided.
 A root DataFrame does not contain a `record_asset` value unless the caller supplies an explicit immutable record reference through a separately documented binding contract.
 Input transport paths and Parquet transport digests never enter root DataFrame identity.
 

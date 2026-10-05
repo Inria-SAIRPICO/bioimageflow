@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 import numpy as np
 from bioimageflow_core.shm import _shared_memory_dtype
 from bioimageflow_core.types import SharedArray
 
 _LEAVES = (type(None), bool, int, float, str, bytes)
+_CONTAINERS = {"dict", "list", "tuple"}
+
+
+class _LeafCodec(Protocol):
+    def __call__(self, value: Any, *, is_key: bool) -> Any: ...
 
 
 def _fields(value: dict, fields: set[str]) -> None:
@@ -96,8 +101,8 @@ def _reference(value: dict) -> SharedArray:
     return SharedArray(name=name, shape=tuple(shape), dtype=dtype, scope_id=scope_id)
 
 
-def encode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
-    seen = set() if _seen is None else _seen
+def _admit_leaf(value: Any) -> Any:
+    """Validate one live leaf without copying pixels or stripping its owner."""
     if isinstance(value, np.str_):
         return str(value)
     if isinstance(value, np.bytes_):
@@ -106,14 +111,16 @@ def encode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
         array = _array(np.asarray(value))
         if array.dtype.kind not in "biufc":
             raise TypeError("Only numeric NumPy scalars are processing values.")
-        return {"kind": "numpy_scalar", "value": array.copy()}
+        return value
     if value is None:
         return None
     for primitive in (bool, int, float, str, bytes):
         if isinstance(value, primitive):
             return primitive(cast(Any, value))
     if isinstance(value, Path):
-        return {"kind": "path", "value": str(value)}
+        if "\x00" in str(value):
+            raise ValueError("Path value must contain valid nonempty text.")
+        return value
     if isinstance(value, SharedArray):
         node = {
             "kind": "shared_array",
@@ -123,84 +130,140 @@ def encode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
             "scope_id": value.scope_id,
         }
         _reference(node)
-        return node
+        return value
     if isinstance(value, np.ndarray):
-        return {"kind": "ndarray", "value": _array(value).copy(order="K")}
-    if type(value) not in (dict, list, tuple):
-        raise TypeError(f"Unsupported processing value type: {type(value).__name__}.")
-    identity = id(value)
-    if identity in seen:
-        raise ValueError("Cyclic processing values are not supported.")
-    seen.add(identity)
-    try:
-        if type(value) is dict:
-            pairs = []
-            for key, item in value.items():
-                if type(key) not in _LEAVES:
-                    raise TypeError("Processing dictionaries require primitive keys.")
-                pairs.append([key, encode_processing_value(item, seen)])
-            return {"kind": "dict", "items": pairs}
-        return {
-            "kind": "list" if type(value) is list else "tuple",
-            "items": [encode_processing_value(item, seen) for item in value],
-        }
-    finally:
-        seen.remove(identity)
+        return _array(value)
+    raise TypeError(f"Unsupported processing value type: {type(value).__name__}.")
 
 
-def decode_processing_value(value: Any, _seen: set[int] | None = None) -> Any:
+def _encode_leaf(value: Any, *, is_key: bool) -> Any:
     if type(value) in _LEAVES:
         return value
+    if isinstance(value, Path):
+        return {"kind": "path", "value": str(value)}
+    if isinstance(value, SharedArray):
+        return {"kind": "shared_array", "name": value.name,
+                "shape": list(value.shape), "dtype": value.dtype, "scope_id": value.scope_id}
+    if isinstance(value, np.generic):
+        return {"kind": "numpy_scalar", "value": np.asarray(value).copy()}
+    return {"kind": "ndarray", "value": value.copy(order="K")}
+
+
+def _leaf_node(value: Any) -> None:
+    if type(value) in _LEAVES:
+        return
     if type(value) is not dict or type(value.get("kind")) is not str:
-        raise ValueError("Processing value is not a declared primitive or typed node.")
-    seen = set() if _seen is None else _seen
-    identity = id(value)
-    if identity in seen:
-        raise ValueError("Cyclic processing descriptors are not supported.")
-    seen.add(identity)
-    try:
-        kind = value["kind"]
-        if kind == "shared_array":
-            return _reference(value)
-        if kind in ("ndarray", "numpy_scalar"):
-            _fields(value, {"kind", "value"})
-            array = _array(value["value"])
-            if kind == "numpy_scalar":
-                if array.ndim != 0 or array.dtype.kind not in "biufc":
-                    raise ValueError(
-                        "Numeric scalar requires a numeric zero-dimensional array."
-                    )
-                return array[()]
-            return array
-        if kind == "path":
-            _fields(value, {"kind", "value"})
-            text = value["value"]
-            if type(text) is not str or not text or "\x00" in text:
-                raise ValueError("Path value must contain valid nonempty text.")
-            return Path(text)
-        if kind not in ("dict", "list", "tuple"):
-            raise ValueError(f"Unknown processing value kind: {kind!r}.")
-        _fields(value, {"kind", "items"})
-        items = value["items"]
-        if type(items) is not list:
-            raise ValueError("Processing container items must be an array.")
-        if kind == "dict":
-            result = {}
-            for pair in items:
-                if (
-                    type(pair) is not list
-                    or len(pair) != 2
-                    or type(pair[0]) not in _LEAVES
-                ):
-                    raise ValueError(
-                        "Processing dictionary item must be a primitive-key pair."
-                    )
-                key = pair[0]
-                if key in result:
-                    raise ValueError("Processing dictionary contains duplicate keys.")
-                result[key] = decode_processing_value(pair[1], seen)
-            return result
-        decoded = [decode_processing_value(item, seen) for item in items]
-        return decoded if kind == "list" else tuple(decoded)
-    finally:
-        seen.remove(identity)
+        raise ValueError("Processing leaf is not a declared primitive or typed node.")
+    if value["kind"] in _CONTAINERS:
+        raise ValueError("Processing leaf cannot contain a container node.")
+
+
+def _decode_leaf(value: Any, *, is_key: bool) -> Any:
+    if type(value) in _LEAVES:
+        return value
+    kind = value["kind"]
+    if kind == "shared_array":
+        return _reference(value)
+    if kind in ("ndarray", "numpy_scalar"):
+        _fields(value, {"kind", "value"})
+        array = _array(value["value"])
+        if kind == "numpy_scalar":
+            if array.ndim != 0 or array.dtype.kind not in "biufc":
+                raise ValueError("Numeric scalar requires a numeric zero-dimensional array.")
+            return array[()]
+        return array
+    if kind == "path":
+        _fields(value, {"kind", "value"})
+        text = value["value"]
+        if type(text) is not str or not text or "\x00" in text:
+            raise ValueError("Path value must contain valid nonempty text.")
+        return Path(text)
+    raise ValueError(f"Unknown processing value kind: {kind!r}.")
+
+
+def encode_processing_value(value: Any, *, encode_leaf: _LeafCodec | None = None) -> Any:
+    """Encode one finite value; custom leaves retain live owner authority.
+
+    The leaf callback receives ``is_key`` and cannot replace container grammar.
+    The default callback preserves the current task/result transport.
+    """
+    codec = _encode_leaf if encode_leaf is None else encode_leaf
+    seen: set[int] = set()
+
+    def leaf(item: Any, *, is_key: bool) -> Any:
+        encoded = codec(_admit_leaf(item), is_key=is_key)
+        _leaf_node(encoded)
+        return encoded
+
+    def walk(item: Any) -> Any:
+        if type(item) not in (dict, list, tuple):
+            return leaf(item, is_key=False)
+        identity = id(item)
+        if identity in seen:
+            raise ValueError("Cyclic processing values are not supported.")
+        seen.add(identity)
+        try:
+            if type(item) is dict:
+                pairs = []
+                for key, child in item.items():
+                    if type(key) not in _LEAVES:
+                        raise TypeError("Processing dictionaries require primitive keys.")
+                    pairs.append([leaf(key, is_key=True), walk(child)])
+                return {"kind": "dict", "items": pairs}
+            return {"kind": "list" if type(item) is list else "tuple",
+                    "items": [walk(child) for child in item]}
+        finally:
+            seen.remove(identity)
+
+    return walk(value)
+
+
+def decode_processing_value(value: Any, *, decode_leaf: _LeafCodec | None = None) -> Any:
+    """Decode finite containers and admit every reconstructed leaf without I/O.
+
+    Custom leaf callbacks own their leaf metadata validation and effects.
+    Key callbacks receive ``is_key=True`` before decoding any key leaf.
+    """
+    codec = _decode_leaf if decode_leaf is None else decode_leaf
+    seen: set[int] = set()
+
+    def leaf(item: Any, *, is_key: bool) -> Any:
+        _leaf_node(item)
+        decoded = codec(item, is_key=is_key)
+        if is_key and type(decoded) not in _LEAVES:
+            raise ValueError("Processing dictionaries require primitive keys.")
+        return _admit_leaf(decoded)
+
+    def walk(item: Any) -> Any:
+        if type(item) in _LEAVES:
+            return leaf(item, is_key=False)
+        if type(item) is not dict or type(item.get("kind")) is not str:
+            raise ValueError("Processing value is not a declared primitive or typed node.")
+        kind = item["kind"]
+        if kind not in _CONTAINERS:
+            return leaf(item, is_key=False)
+        identity = id(item)
+        if identity in seen:
+            raise ValueError("Cyclic processing descriptors are not supported.")
+        seen.add(identity)
+        try:
+            _fields(item, {"kind", "items"})
+            items = item["items"]
+            if type(items) is not list:
+                raise ValueError("Processing container items must be an array.")
+            if kind == "dict":
+                result = {}
+                for pair in items:
+                    if type(pair) is not list or len(pair) != 2:
+                        raise ValueError("Processing dictionary item must be a primitive-key pair.")
+                    key = leaf(pair[0], is_key=True)
+                    if key in result:
+                        raise ValueError("Processing dictionary contains duplicate keys.")
+                    result[key] = walk(pair[1])
+                return result
+            decoded = [walk(child) for child in items]
+            return decoded if kind == "list" else tuple(decoded)
+        finally:
+            seen.remove(identity)
+
+    return walk(value)

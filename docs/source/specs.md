@@ -2571,8 +2571,9 @@ Result admission checks consumption associations against the task before exposin
 
 Observation arguments, batch arguments, reference arguments and result outputs use one recursive typed-value grammar.
 `None`, `bool`, `int`, `float`, `str`, and `bytes` are bare leaves.
-Plain dictionaries encode as `{kind: "dict", items: [[key, encoded_value], ...]}` with primitive keys; lists and tuples encode as `{kind: "list" | "tuple", items: [...]}` and preserve their container type and order.
+Plain dictionaries encode as `{kind: "dict", items: [[key, encoded_value], ...]}` with keys of exactly the built-in types `NoneType`, `bool`, `int`, `float`, `str` or `bytes`; lists and tuples encode as `{kind: "list" | "tuple", items: [...]}` and preserve their container type and order.
 Every dictionary is encoded as a dictionary node, so a user dictionary resembling a typed descriptor remains a dictionary.
+NumPy scalar values remain supported leaves; NumPy scalar keys such as `np.int64`, `np.float64` and `np.str_` are refused rather than coerced into built-in keys.
 Paths encode as `{kind: "path", value: string}`.
 A `SharedArray` encodes as `{kind: "shared_array", name: token, shape: [nonnegative_integer, ...], dtype: string, scope_id: token}`; decoding validates the reference and constructs an unbound `SharedArray` without allocating, attaching, reading, registering an owner or deleting storage.
 Allocation names use `[a-zA-Z0-9_-]{1,96}`; actual scope identities are controller-generated UUID tokens.
@@ -2585,6 +2586,8 @@ NumPy arrays encode as `{kind: "ndarray", value: ndarray}` through Wetlands' pub
 NumPy boolean, signed/unsigned integer, floating, and complex scalars encode as `{kind: "numpy_scalar", value: zero_dimensional_ndarray}` and retain dtype, precision, and nonfinite values; NumPy string/bytes scalars normalize to the corresponding bare leaves.
 Object-containing dtypes and dtype metadata are refused; cyclic containers, arbitrary dataclasses, unsupported objects, malformed descriptors, and extra descriptor fields are refused.
 These codecs apply identically to input arguments and output values; they do not change graph-level IOModel validation or ownership.
+Explicit record leaf codecs reuse this same structural traversal: live leaves are admitted before encoding with their original bound owner intact, reconstructed leaves are admitted after decoding, and leaf callbacks cannot introduce a container or unsupported object.
+An asset decoder refuses dictionary-key roles before hydration and validates record asset authority; a task grant locator is not a persisted asset authority.
 Parsl refuses host-local `SharedArray` references anywhere in task input or result output containers, even though the same references are supported between workers on a shared local host.
 Decoders reject unknown schemas or modes, missing or extra fields, malformed origins and paths, invalid scalar types, booleans in integer fields, duplicate positions, and mismatched result correlation.
 
@@ -2716,14 +2719,17 @@ Publication binds the actual first-valid winner selected by that publication dec
 The loaded DataFrame, result key, record ID, detached admitted manifest metadata and exact record address travel together as one selected-result binding.
 Execution outcomes, progress events, downstream identity and provenance, run views and exports use that binding rather than recapturing a later current pointer.
 A pointer change after a record has been loaded affects later independent selections; it does not relabel the already consumed DataFrame or redirect that execution's recorded outputs.
-Binding metadata is owned by the selection. Selected provider frames are not passed as mutable working inputs to DataFrame hooks, and accepted native numeric array cells have independent immutable backing (§8.3); this does not freeze every caller-visible DataFrame, external asset or arbitrary Python object, or revoke existing external writable views.
+Binding metadata is owned by the selection. Selected provider frames are not passed as mutable working inputs to DataFrame hooks; execution owns finite list/tuple/dictionary working values before a custom merge can mutate their contents, while native/shared leaves retain the ownership rules in §8.3.
+This does not freeze every caller-visible DataFrame, external asset or arbitrary Python object, or revoke existing external writable views.
 
 Each reusable record manifest stores `dataframe.logical_digest`, `dataframe.logical_schema`, and `dataframe.transport_digest`.
 Logical fields determine record identity.
 The transport digest validates the Parquet bytes but never changes record identity.
 The worker typed-container grammar in §5.2 is distinct from reusable DataFrame-cell transport.
-Current reusable records admit supported scalar cells, declared paths and admitted shared/native array assets; list, tuple and dictionary object cells are refused at record publication rather than silently coerced.
-This context-specific storage limit does not prohibit those containers in supported task arguments/results or claim that every portable output declaration has a reusable cell representation.
+Reusable records admit finite list, tuple and dictionary cells through the structural grammar in §5.2, preserving container kind, nesting, item order, exact built-in primitive key types and supported scalar facts, including NumPy scalar dtype, nonfinite values, signed zero and bytes.
+A container-valued `Outputs` field occupies one DataFrame cell; an outer `list[Outputs]` instead expands output rows according to the mapped or collective contract.
+Nested paths and native/shared array leaves use the existing validated record asset roles and hydration authority, retaining their scientific values and applicable ownership; persisted records do not replay task grant locators as asset identities.
+Cold publication and warm hydration preserve the same finite values and logical identity without stringification, pickle, arbitrary Python object support or silent coercion.
 Loading validates both the bytes and the recomputed logical values.
 
 ### 6.3 Executable Changes

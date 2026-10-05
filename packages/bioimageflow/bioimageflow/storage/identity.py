@@ -197,6 +197,11 @@ def _datetime_payload(value: datetime | pd.Timestamp) -> dict[str, str]:
 
 def _cell_payload(value: Any, *, column_kind: str = "scalar", dtype: str = "") -> Any:
     from bioimageflow_core import SharedArray
+    from bioimageflow.portable_cells import needs_portable_cell, parse_cell, portable_identity
+    if column_kind == "portable_value":
+        return parse_cell(value)
+    if needs_portable_cell(value):
+        return portable_identity(value)
     if isinstance(value, SharedArray):
         if value.bound_owner is None:
             raise ValueError("Shared dataframe identity requires an admitted owner")

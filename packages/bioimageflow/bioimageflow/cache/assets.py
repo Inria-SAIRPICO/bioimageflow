@@ -84,6 +84,65 @@ def _write_shared_array_asset(
     return relative, entry, path
 
 
+def portable_cell_assets(
+    frame: pd.DataFrame, staging_assets_dir: Path,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path], dict[str, str]]:
+    """Persist finite cells through the shared codec and manifest-owned leaves."""
+    import numpy as np
+    from bioimageflow_core import SharedArray, accept_native_array
+    from bioimageflow.portable_cells import cell_text, encode_cell, needs_portable_cell
+
+    stored = pd.DataFrame(frame, copy=True)
+    outputs: list[dict[str, Any]] = []
+    assets: dict[str, Path] = {}
+    kinds: dict[str, str] = {}
+    seen_outputs: set[tuple[str, str]] = set()
+    for column in frame.columns:
+        if not any(needs_portable_cell(value) for value in frame[column].array):
+            continue
+        kinds[str(column)] = "portable_value"
+        for position, (index, value) in enumerate(frame[column].items()):
+            ordinal = 0
+            def asset(item: Any) -> dict[str, Any]:
+                nonlocal ordinal
+                ordinal += 1
+                if isinstance(item, (SharedArray, np.ndarray)):
+                    role = "shared_array" if isinstance(item, SharedArray) else "native_array"
+                    folder = "shm" if role == "shared_array" else "native"
+                    if isinstance(item, SharedArray):
+                        from bioimageflow_core.shm import open_shared_array
+                        with open_shared_array(item) as pixels:
+                            array = np.array(pixels, copy=True, order="C")
+                    else:
+                        array = accept_native_array(item)
+                    filename = f"{position:06d}_{_safe_asset_segment(index)}_leaf{ordinal}.npy"
+                    relative = f"assets/{folder}/{_safe_asset_segment(column)}/{filename}"
+                    path = staging_assets_dir / folder / _safe_asset_segment(column) / filename
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    np.save(path, array, allow_pickle=False)
+                    size, digest = asset_digest_and_size(path)
+                    outputs.append({"kind": "owned_asset", "asset_role": role,
+                        "asset_type": "file", "path": relative, "size": size, "digest": digest,
+                        "array": {"column": str(column), "row_index": str(index), "format": "npy",
+                                  "order": "C", "shape": list(array.shape), "dtype": str(array.dtype)}})
+                    assets[relative] = path
+                    return {"kind": "asset", "role": role, "path": relative}
+                path = item.expanduser().absolute()
+                try:
+                    path.resolve().relative_to(staging_assets_dir.resolve())
+                except ValueError:
+                    _reject_mutable_workspace_output(path, staging_assets_dir)
+                    if ("external_path", str(path)) not in seen_outputs:
+                        outputs.append({"kind": "external_path", "identity": "path", "path": str(path)})
+                        seen_outputs.add(("external_path", str(path)))
+                    return {"kind": "asset", "role": "external_path", "path": str(path)}
+                relative = _add_processing_owned_asset(path=path, staging_root=staging_assets_dir.resolve(),
+                    outputs=outputs, owned_assets=assets, seen_outputs=seen_outputs)
+                return {"kind": "asset", "role": "owned_path", "path": relative}
+            stored.at[index, column] = cell_text(encode_cell(value, encode_asset=asset))
+    return stored, outputs, assets, kinds
+
+
 def native_array_assets(
     frame: pd.DataFrame, staging_assets_dir: Path,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path], dict[str, str]]:
@@ -91,11 +150,10 @@ def native_array_assets(
     import numpy as np
     from bioimageflow_core import accept_native_array
 
-    stored = pd.DataFrame(frame, copy=True)
-    outputs: list[dict[str, Any]] = []
-    assets: dict[str, Path] = {}
-    kinds: dict[str, str] = {}
+    stored, outputs, assets, kinds = portable_cell_assets(frame, staging_assets_dir)
     for column in frame.columns:
+        if str(column) in kinds:
+            continue
         if not any(isinstance(value, np.ndarray) for value in frame[column].array):
             continue
         kinds[str(column)] = "record_asset"
@@ -281,6 +339,8 @@ def _processing_manifest_entries_and_dataframe(
         column_kinds[column] = kind
 
     for column in shared_array_columns:
+        if column_kinds.get(column) == "portable_value":
+            continue
         if column not in stored.columns:
             continue
         for row_position, index in enumerate(stored.index):
@@ -310,6 +370,8 @@ def _processing_manifest_entries_and_dataframe(
             stored.at[index, column] = record_relative
             observe_column_kind(column, "record_asset")
     for column in path_columns:
+        if column_kinds.get(column) == "portable_value":
+            continue
         if column not in stored.columns:
             continue
         for index in stored.index:

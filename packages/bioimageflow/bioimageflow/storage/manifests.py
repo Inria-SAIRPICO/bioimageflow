@@ -199,6 +199,22 @@ class RecordManifest:
             raise CacheCorruptionError("Invalid record row relation.") from exc
         for output in self.outputs:
             self._validate_output(record_dir, output)
+        from bioimageflow.portable_cells import admit_record_cell
+        referenced: set[str] = set()
+        portable_columns = {str(column["name"]) for column in self.dataframe_logical_schema
+                            if column["kind"] == "portable_value"}
+        try:
+            for column in portable_columns:
+                for index, text in admitted_frame[column].items():
+                    _value, paths = admit_record_cell(text, self.outputs, column=column, row_index=str(index))
+                    referenced.update(paths)
+            expected = {str(output["path"]) for output in self.outputs
+                        if output.get("asset_role") in {"native_array", "shared_array"}
+                        and output["array"]["column"] in portable_columns}
+            if expected != referenced:
+                raise ValueError("Portable array assets are not exactly referenced")
+        except (TypeError, ValueError, KeyError) as exc:
+            raise CacheCorruptionError("Record portable cell authority is invalid") from exc
         if make_record_id(self.to_dict()) != self.record_id:
             raise CacheCorruptionError(
                 "Record ID does not match record manifest content."

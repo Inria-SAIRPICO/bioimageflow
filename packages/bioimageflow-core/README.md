@@ -47,6 +47,10 @@ A SharedArray in any task value requires explicit scope admission; a missing sco
 The public task/result codecs use the same typed grammar for arguments and outputs: primitive leaves, explicit dictionary/list/tuple nodes, Paths, SharedArray references, NumPy arrays, and dtype-preserving numeric NumPy scalars.
 Literal dictionaries cannot collide with typed descriptors, and SharedArray decoding never allocates or attaches memory.
 Unsupported objects, cyclic containers, object-containing dtypes, and malformed descriptors are refused; picklability alone is not sufficient.
+`encode_processing_value(value, encode_leaf=...)` and `decode_processing_value(value, decode_leaf=...)` reuse that single container traversal for explicit leaf representations.
+Leaf callbacks receive `is_key` as a keyword; dictionary keys remain exactly None, bool, int, float, str or bytes, and container kinds/order cannot be replaced by a leaf callback.
+Encoding validates live leaves before the callback, preserving an array's pixels and a SharedArray's bound owner; decoding validates each reconstructed leaf and rejects container or opaque results.
+Custom callbacks own their leaf metadata and asset-role validation, including refusing asset keys before hydration; the default callbacks retain current Task4 wire semantics and pure no-attachment decoding.
 SharedArray references are host-local, so distributed callers such as Parsl must refuse them even though local Wetlands workers can transport the reference.
 
 ### Shared-array ownership

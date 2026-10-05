@@ -13,6 +13,8 @@ from bioimageflow_core.types import (
 )
 from bioimageflow_core._processing_values import accept_native_array as accept_native_array
 from bioimageflow_core._processing_values import accept_native_values as accept_native_values
+from bioimageflow_core._processing_values import encode_processing_value as encode_processing_value
+from bioimageflow_core._processing_values import decode_processing_value as decode_processing_value
 from bioimageflow_core.viewer import (
     NapariRequirement as NapariRequirement,
     PackageRequirement as PackageRequirement,
@@ -140,9 +142,11 @@ __all__ = [
     "collect_input_scopes",
     "decode_processing_result",
     "decode_processing_task",
+    "decode_processing_value",
     "decode_worker_tool_origin",
     "encode_processing_result",
     "encode_processing_task",
+    "encode_processing_value",
     "encode_worker_tool_origin",
     "extract_gui_meta",
     "extract_viewer_spec",

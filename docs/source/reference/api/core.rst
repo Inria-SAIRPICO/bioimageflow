@@ -38,6 +38,13 @@ Batch constants/output paths are available as ``ExecutionContext.batch_arguments
 Portable IOModel annotations are distinct from runtime numeric arrays/scalars, Paths, bytes, literal dictionaries and scoped references.
 See :doc:`/specs` §5.2 for the grammar and refusal rules; no historical DTO aliases or wire fallbacks are required.
 
+``encode_processing_value(value, encode_leaf=...)`` and ``decode_processing_value(value, decode_leaf=...)`` share the exact dictionary/list/tuple traversal with current task/result codecs.
+Each optional callback receives a leaf and the keyword ``is_key``; it owns the explicit leaf representation and its metadata validation, while Core validates live leaves before encoding and reconstructed leaves after decoding.
+Keys remain exactly None, bool, int, float, str or bytes; container nodes are refused in key positions before callbacks, and a decoded leaf cannot introduce a container or an unsupported object.
+Custom asset decoders must refuse key roles before hydration and validate record ownership rather than interpret task grant references as persisted assets.
+The encoding callback sees native arrays without a preliminary copy and SharedArray references with their bound owner intact.
+Default callbacks retain Task4 wire values and pure decoding without attachment; explicit custom callbacks own any leaf I/O they perform.
+
 ``describe_tool_declaration(tool)`` captures the actual concrete Inputs/Outputs semantic declaration through the shared finite annotation grammar.
 ``describe_io_model(model, passthrough=False)`` projects ordered fields without serializing defaults or GUI values; ``None`` remains an explicit absent declaration for controller-only tools.
 ``validate_tool_declaration(value)`` admits a detached concrete processing declaration, ``declaration_digest(value)`` hashes its strictly typed facts, and ``compare_tool_declarations(expected, actual)`` refuses with a field path on mismatch.

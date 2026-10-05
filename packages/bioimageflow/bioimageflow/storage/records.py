@@ -64,6 +64,7 @@ class _ExactRecordsMixin:
             shared_array_columns=declared_shared_array_columns,
         )
         if not hydrate_assets:
+            dataframe = self._decode_portable_cells(dataframe, record_dir, manifest, hydrate=False)
             return manifest, dataframe, record_dir
 
         dataframe = self._rehydrate_record_assets(
@@ -133,8 +134,11 @@ class _ExactRecordsMixin:
             str(column.get("name")): str(column.get("kind"))
             for column in manifest.dataframe_logical_schema
         }
+        portable_columns = {name for name, kind in declared_column_kinds.items() if kind == "portable_value"}
+        self._decode_portable_cells(dataframe, None, manifest, hydrate=False)
         native_outputs = [output for output in manifest.outputs
-                          if output.get("asset_role") == "native_array"]
+                          if output.get("asset_role") == "native_array"
+                          and output["array"]["column"] not in portable_columns]
         native_columns = {str(output["array"]["column"]) for output in native_outputs}
         array_columns = shared_array_columns | native_columns
         unknown = (path_columns | array_columns) - set(declared_column_kinds)
@@ -197,7 +201,8 @@ class _ExactRecordsMixin:
         self, dataframe: pd.DataFrame, record_dir: Path, manifest: RecordManifest, *,
         path_columns: set[str], shared_array_columns: set[str],
     ) -> pd.DataFrame:
-        if not shared_array_columns:
+        has_shared = any(output.get("asset_role") == "shared_array" for output in manifest.outputs)
+        if not shared_array_columns and not has_shared:
             return self._rehydrate_record_assets_bound(dataframe, record_dir, manifest,
                 path_columns=path_columns, shared_array_columns=shared_array_columns)
         import uuid
@@ -228,8 +233,11 @@ class _ExactRecordsMixin:
         shared_array_columns: set[str],
     ) -> pd.DataFrame:
         hydrated = pd.DataFrame(dataframe, copy=True)
+        portable_columns = {str(column["name"]) for column in manifest.dataframe_logical_schema
+                            if column["kind"] == "portable_value"}
         native_outputs = {str(output["path"]): output for output in manifest.outputs
-                          if output.get("asset_role") == "native_array"}
+                          if output.get("asset_role") == "native_array"
+                          and output["array"]["column"] not in portable_columns}
         native_columns = {str(output["array"]["column"]) for output in native_outputs.values()}
         for column in native_columns:
             def rehydrate_native(value: object) -> object:
@@ -254,7 +262,7 @@ class _ExactRecordsMixin:
             if output.get("kind") == "owned_asset"
             and output.get("asset_role") == "shared_array"
         }
-        for column in shared_array_columns:
+        for column in shared_array_columns - portable_columns:
             if column not in hydrated.columns:
                 continue
 
@@ -282,7 +290,7 @@ class _ExactRecordsMixin:
 
             hydrated[column] = hydrated[column].map(rehydrate_shared)
 
-        for column in path_columns:
+        for column in path_columns - portable_columns:
             if column not in hydrated.columns:
                 continue
 
@@ -292,7 +300,49 @@ class _ExactRecordsMixin:
                 return str(self._confined_record_path(record_dir, value))
 
             hydrated[column] = hydrated[column].map(rehydrate_path)
-        return hydrated
+        return self._decode_portable_cells(hydrated, record_dir, manifest, hydrate=True)
+
+    def _decode_portable_cells(
+        self, dataframe: pd.DataFrame, record_dir: Path | None, manifest: RecordManifest, *, hydrate: bool,
+    ) -> pd.DataFrame:
+        from bioimageflow.portable_cells import admit_record_cell
+        import numpy as np
+        from bioimageflow_core import accept_native_array
+        from bioimageflow_core.shm import create_shared_output
+
+        columns = {str(column["name"]) for column in manifest.dataframe_logical_schema
+                   if column["kind"] == "portable_value"}
+        if not columns:
+            return dataframe
+        frame = pd.DataFrame(dataframe, copy=True)
+        referenced: set[str] = set()
+        for column in columns:
+            values = []
+            for index, text in dataframe[column].items():
+                def hydrate_asset(output: dict, role: str) -> object:
+                    assert record_dir is not None
+                    path = self._confined_record_path(record_dir, output["path"])
+                    if role == "owned_path":
+                        return path
+                    array = np.load(path, allow_pickle=False)
+                    if role == "native_array":
+                        return accept_native_array(array.view(_native_record_dtype(output["array"]["dtype"])))
+                    with create_shared_output(array) as reference:
+                        return reference
+                try:
+                    value, paths = admit_record_cell(text, manifest.outputs, column=column, row_index=str(index),
+                        hydrate_asset=hydrate_asset if hydrate else None)
+                    values.append(value)
+                    referenced.update(paths)
+                except (TypeError, ValueError, KeyError, OSError) as exc:
+                    raise CacheCorruptionError(f"Invalid portable cell {column!r} at {index!r}") from exc
+            frame[column] = pd.Series(values, index=dataframe.index, dtype=object)
+        expected = {str(output["path"]) for output in manifest.outputs
+                    if output.get("asset_role") in {"native_array", "shared_array"}
+                    and output["array"]["column"] in columns}
+        if referenced != expected:
+            raise CacheCorruptionError("Portable array assets are not exactly referenced by their cells")
+        return frame
 
     @staticmethod
     def _confined_record_path(record_dir: Path, relative_path: str) -> Path:
