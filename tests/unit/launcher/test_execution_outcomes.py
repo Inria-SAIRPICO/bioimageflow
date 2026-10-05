@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bioimageflow import SequentialEngine, Workflow, WorkflowExecutionContext
+from bioimageflow import SequentialEngine, Workflow, WorkflowExecutionContext, result_groups
 from bioimageflow.storage import CacheCorruptionError, Storage
 from bioimageflow_core import (
     Arguments,
@@ -13,15 +13,18 @@ from bioimageflow_core import (
     IOModel,
     ProcessingTool,
     RowConsumption,
+    SharedMemoryContext,
     Template,
 )
 from bioimageflow_core.types import SharedArray
 from tests.testkit.runtime_cache import CountingTable, SourceAssetWriter
 
 
-class _TransientAssetWriter(ProcessingTool):
+class _SelectedAssetWriter(ProcessingTool):
     row_consumption = RowConsumption.MAPPED
-    environment = EnvironmentSpec(name="transient_outcome_writer", dependencies={})
+    environment = EnvironmentSpec(name="selected_outcome_writer", dependencies={})
+
+    calls: list[int] = []
 
     class Inputs(IOModel):
         value: int
@@ -36,6 +39,7 @@ class _TransientAssetWriter(ProcessingTool):
         context: ExecutionContext | None = None,
     ):
         assert context is not None
+        type(self).calls.append(arguments.value)
         asset = Path(arguments.asset)
         asset.write_text(str(arguments.value))
         return self.Outputs(asset=asset)
@@ -67,18 +71,6 @@ class _SharedArrayWriter(ProcessingTool):
         ) as reference:
             type(self).created_names.append(reference.name)
             return self.Outputs(image=reference)
-
-
-def _unlink_shared_memory(names: set[str]) -> None:
-    from multiprocessing.shared_memory import SharedMemory
-
-    for name in names:
-        try:
-            shared = SharedMemory(name=name)
-        except FileNotFoundError:
-            continue
-        shared.close()
-        shared.unlink()
 
 
 def test_scoped_record_outcome_loads_exact_record_without_current(
@@ -182,28 +174,35 @@ def test_exact_record_rehydrates_declared_shared_array_outcome(
         shared_array_columns=outcome.shared_array_columns,
     )
     assert str(raw.loc["0", "image"]).startswith("assets/shm/")
-    hydrated = storage.load_record_dataframe(
-        outcome.result_key,
-        outcome.record_id,
-        shared_array_columns=outcome.shared_array_columns,
-        hydrate_assets=True,
-    )
-    returned_reference = result.loc["0", "image"]
-    exact_reference = hydrated.loc["0", "image"]
+    owner = SharedMemoryContext(tmp_path / "exact-record-owner")
+    hydrated = None
     try:
+        with owner.activate():
+            hydrated = storage.load_record_dataframe(
+                outcome.result_key,
+                outcome.record_id,
+                shared_array_columns=outcome.shared_array_columns,
+                hydrate_assets=True,
+            )
+        returned_reference = result.loc["0", "image"]
+        exact_reference = hydrated.loc["0", "image"]
+        assert returned_reference.bound_owner is not exact_reference.bound_owner
         with open_shared_array(exact_reference) as array:
             assert array.tolist() == [[6, 6], [6, 6]]
+        del array
+        with open_shared_array(returned_reference) as array:
+            assert array.tolist() == [[6, 6], [6, 6]]
+        del array
     finally:
-        _unlink_shared_memory(
-            {
-                *_SharedArrayWriter.created_names,
-                returned_reference.name,
-                exact_reference.name,
-            }
-        )
+        for frame in (result, hydrated):
+            if frame is not None:
+                for group in result_groups(frame):
+                    group.release()
+        assert owner.close().state == "closed"
+        assert workflow.shared_memory_context.close().state == "closed"
 
 
-def test_transient_processing_outcome_records_exact_invocation(
+def test_processing_refuses_unavailable_identity_before_scientific_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,36 +210,44 @@ def test_transient_processing_outcome_records_exact_invocation(
     workflow = Workflow(storage_path=storage_path, engine="direct")
     with workflow:
         source = CountingTable()(value=9, name="source")
-        writer = _TransientAssetWriter()(value=source["value"], name="writer")
-
+        writer = _SelectedAssetWriter()(value=source["value"], name="writer")
+    _SelectedAssetWriter.calls.clear()
     engine = SequentialEngine()
-    monkeypatch.setattr(
-        engine,
-        "_compute_processing_sig_hash",
-        lambda *args, **kwargs: None,
-    )
-    context = WorkflowExecutionContext("run_abcdef0123456789abcdef0123456789")
+    monkeypatch.setattr(engine, "_compute_processing_sig_hash", lambda *args, **kwargs: None)
+    context = WorkflowExecutionContext()
 
-    result = workflow.compute(writer, engine=engine, run_context=context)
+    with pytest.raises(RuntimeError, match="requires admitted upstream selected-record identity"):
+        workflow.compute(writer, engine=engine, run_context=context)
 
-    outcomes = {outcome.node_key: outcome for outcome in context.execution_outcomes}
-    outcome = outcomes["writer"]
-    assert outcome.storage_kind == "transient"
-    assert outcome.result_key is None
-    assert outcome.record_id is None
-    assert outcome.transient_invocation_id is not None
-    assert outcome.path_columns == ("asset",)
-    assert outcome.owned_path_columns == ("asset",)
-    assert outcome.shared_array_columns == ()
+    assert _SelectedAssetWriter.calls == []
+    assert context.terminal_status == "failed"
+    assert {outcome.node_key for outcome in context.execution_outcomes} == {"source"}
+    assert not (Storage(storage_path).cache_root / "transient").exists()
+    assert not list(storage_path.rglob("value_*.txt"))
 
-    invocation_dir = Storage(storage_path).transient_invocation_dir(
-        context.run_id,
-        "writer",
-        outcome.transient_invocation_id,
-    )
-    assert invocation_dir.is_dir()
-    assert Path(result.loc["row", "asset"]).parent == invocation_dir / "assets"
 
+def test_processing_outcome_retains_selected_record_and_warm_reuse(tmp_path: Path) -> None:
+    storage_path = tmp_path / "results"
+    workflow = Workflow(storage_path=storage_path, engine="direct")
+    with workflow:
+        source = CountingTable()(value=9, name="source")
+        writer = _SelectedAssetWriter()(value=source["value"], name="writer")
+    _SelectedAssetWriter.calls.clear()
+    contexts = [WorkflowExecutionContext(), WorkflowExecutionContext()]
+    values = [workflow.compute(writer, run_context=context) for context in contexts]
+    outcomes = [{outcome.node_key: outcome for outcome in context.execution_outcomes}["writer"]
+                for context in contexts]
+
+    assert _SelectedAssetWriter.calls == [9]
+    assert {outcome.storage_kind for outcome in outcomes} == {"record"}
+    assert {(outcome.result_key, outcome.record_id) for outcome in outcomes} == {
+        (outcomes[0].result_key, outcomes[0].record_id)
+    }
+    assert all(outcome.result_key and outcome.record_id for outcome in outcomes)
+    assert all(outcome.transient_invocation_id is None for outcome in outcomes)
+    assert all(outcome.path_columns == ("asset",) and outcome.owned_path_columns == ("asset",)
+               for outcome in outcomes)
+    assert all(Path(value.loc["row", "asset"]).read_text() == "9" for value in values)
 
 
 def test_parallel_nested_branches_record_distinct_scoped_outcomes(tmp_path: Path) -> None:

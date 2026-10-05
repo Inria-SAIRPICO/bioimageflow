@@ -391,13 +391,15 @@ V1 still keeps the first valid record current and records alternates diagnostica
 
 ### `transient/runs/`
 
-`cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/` is the only workspace for a non-reusable `ProcessingTool` invocation.
+`cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/` is the confined workspace allocated by explicit public `Storage.create_transient_invocation()` calls.
+Its metadata and retained assets remain supported by public Storage operations and launcher return persistence.
+Ordinary admitted Workflow processing requires concrete pinned upstream identities and uses reusable attempts; unavailable selection raises an invariant error before scientific dispatch rather than silently switching to transient execution.
 The node key is the validated scoped node path, represented as individually validated path segments.
 The run ID and invocation ID are validated storage-safe segments.
 
 The directory has these semantics:
 
-- `assets/` contains engine-owned declared outputs and is the only location beneath the invocation that may be returned as an owned runtime path.
+- `assets/` contains caller-declared owned outputs and is the only location beneath the invocation that may be returned as an owned runtime path.
 - `work/` contains scratch files and is never a declared output.
 - `invocation.json` contains non-content diagnostics: schema, run ID, scoped node key, invocation ID, effective engine, start time, terminal status, and terminal time.
 - `failed.json` may contain normalized failure diagnostics.

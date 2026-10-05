@@ -45,7 +45,6 @@ from .common import (
 class _ProviderExecutionResult:
     dataframe: pd.DataFrame
     signature_hash: str | None
-    transient_invocation_id: str | None = None
     selection: SelectedResult | None = None
 
 def _reject_reserved_source_indexes(
@@ -233,7 +232,7 @@ class _NodeExecutionMixin:
             node_key=node.name,
             result_key=result_key,
             record_id=record_id,
-            transient_invocation_id=outcome.transient_invocation_id,
+            transient_invocation_id=None,
             path_columns=_path_output_columns(node.tool),
             owned_path_columns=_explicit_template_output_columns(node),
             shared_array_columns=_shared_array_output_columns(node.tool),
@@ -580,73 +579,54 @@ class _NodeExecutionMixin:
             workflow,
         )
 
+        if sig_hash is None:
+            raise RuntimeError(
+                "Processing execution requires admitted upstream selected-record identity."
+            )
+
         # --- Cache check ---
         path_output_columns = _path_output_columns(node.tool)
         shared_array_output_columns = _shared_array_output_columns(node.tool)
-        result_key = (
-            processing_result_key(node.name, sig_hash) if sig_hash is not None else None
+        result_key = processing_result_key(node.name, sig_hash)
+        cached = processing_lookup(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            path_output_columns,
+            shared_array_columns=shared_array_output_columns,
         )
-        if sig_hash is not None:
-            cached = processing_lookup(
-                workflow.storage_path,
+        if cached is not None:
+            self._pin_selected_result(node, cached)
+            self._set_node_cache_hit(node, True)
+            self._emit_progress(
+                workflow,
                 node.name,
-                sig_hash,
-                path_output_columns,
-                shared_array_columns=shared_array_output_columns,
+                "cached",
+                result_key=result_key,
+                record_id=self._pinned_record_id(node),
             )
-            if cached is not None:
-                self._pin_selected_result(node, cached)
-                self._set_node_cache_hit(node, True)
-                self._emit_progress(
-                    workflow,
-                    node.name,
-                    "cached",
-                    result_key=result_key,
-                    record_id=self._pinned_record_id(node),
-                )
-                df = cached.dataframe
-                return _ProviderExecutionResult(
-                    self._normalize_path_output_columns(df, node.tool),
-                    sig_hash,
-                    selection=cached,
-                )
+            df = cached.dataframe
+            return _ProviderExecutionResult(
+                self._normalize_path_output_columns(df, node.tool),
+                sig_hash,
+                selection=cached,
+            )
 
         # --- Resolve arguments ---
         self._emit_progress(workflow, node.name, "started", result_key=result_key)
         storage = Storage(workflow.storage_path)
         run_id = str(workflow._run_view_context["run_id"])
         invocation_id = storage.new_invocation_id()
-        attempt_id: str | None = None
-        transient = sig_hash is None
-        if transient:
-            invocation_id, staging_dir, real_assets_dir = (
-                storage.create_transient_invocation(
-                    run_id,
-                    node.name,
-                    invocation_id=invocation_id,
-                    engine=self._effective_engine_name(workflow),
-                )
-            )
-        else:
-            assert sig_hash is not None
-            result_key, attempt_id, staging_dir, real_assets_dir = (
-                processing_prepare_attempt(
-                    workflow.storage_path,
-                    node.name,
-                    sig_hash,
-                    run_id=run_id,
-                    invocation_id=invocation_id,
-                    engine=self._effective_engine_name(workflow),
-                    tool_identity=(
-                        f"{type(node.tool).__module__}:{type(node.tool).__qualname__}"
-                    ),
-                )
-            )
-
-        failure = None
-        if not transient:
-            assert result_key is not None and attempt_id is not None
-            failure = AttemptFailure.capture(storage, result_key, attempt_id)
+        result_key, attempt_id, staging_dir, real_assets_dir = processing_prepare_attempt(
+            workflow.storage_path,
+            node.name,
+            sig_hash,
+            run_id=run_id,
+            invocation_id=invocation_id,
+            engine=self._effective_engine_name(workflow),
+            tool_identity=f"{type(node.tool).__module__}:{type(node.tool).__qualname__}",
+        )
+        failure = AttemptFailure.capture(storage, result_key, attempt_id)
         try:
             path_input_fields = [
                 n for n, a in input_annotations.items() if is_path_type(a)
@@ -694,88 +674,53 @@ class _NodeExecutionMixin:
             df = assembled.dataframe
             self._node_result_relations[node] = assembled.relation
             self._raise_if_cancelled(workflow)
-            if not transient:
-                assert sig_hash is not None
-                assert result_key is not None
-                assert attempt_id is not None
-                owned_path_columns = _explicit_template_output_columns(node)
-                declared_path_columns = set(templates)
-                selection = processing_publish(
-                    workflow.storage_path,
-                    node.name,
-                    sig_hash,
+            owned_path_columns = _explicit_template_output_columns(node)
+            declared_path_columns = set(templates)
+            selection = processing_publish(
+                workflow.storage_path,
+                node.name,
+                sig_hash,
+                df,
+                result_key=result_key,
+                attempt_id=attempt_id,
+                run_id=run_id,
+                staging_dir=staging_dir,
+                staging_assets_dir=real_assets_dir,
+                path_columns=path_output_columns,
+                owned_path_columns=owned_path_columns,
+                shared_array_columns=shared_array_output_columns,
+                declared_owned_artifact_paths=_declared_owned_artifact_paths(
+                    arguments_dicts,
+                    execution_index,
                     df,
-                    result_key=result_key,
-                    attempt_id=attempt_id,
-                    run_id=run_id,
-                    staging_dir=staging_dir,
-                    staging_assets_dir=real_assets_dir,
-                    path_columns=path_output_columns,
-                    owned_path_columns=owned_path_columns,
-                    shared_array_columns=shared_array_output_columns,
-                    declared_owned_artifact_paths=_declared_owned_artifact_paths(
-                        arguments_dicts,
-                        execution_index,
-                        df,
-                        declared_path_columns,
-                    ),
-                    row_relation=assembled.relation.to_dict(),
+                    declared_path_columns,
+                ),
+                row_relation=assembled.relation.to_dict(),
                 declared_scalar_outputs=_declared_zero_row_scalar_outputs(
-                        node.tool,
-                        raw_results,
-                        execution_index,
-                    ),
-                )
-                self._pin_selected_result(node, selection)
-                df = selection.dataframe
+                    node.tool,
+                    raw_results,
+                    execution_index,
+                ),
+            )
+            self._pin_selected_result(node, selection)
+            df = selection.dataframe
             df = self._normalize_path_output_columns(df, node.tool)
         except BaseException as exc:
-            if transient:
-                storage.finish_transient_invocation(
-                    run_id,
-                    node.name,
-                    invocation_id,
-                    status=(
-                        "cancelled"
-                        if isinstance(exc, WorkflowCancelledError)
-                        else "failed"
-                    ),
-                    error=(None if isinstance(exc, WorkflowCancelledError) else exc),
-                )
-            else:
-                assert failure is not None
-                failure.finish(exc, getattr(workflow, "_active_run_context", None))
+            failure.finish(exc, getattr(workflow, "_active_run_context", None))
             raise
 
-        if transient:
-            storage.finish_transient_invocation(
-                run_id,
-                node.name,
-                invocation_id,
-                status="succeeded",
-            )
-        else:
-            assert result_key is not None
-            assert attempt_id is not None
-            storage.finish_cache_attempt(
-                result_key,
-                attempt_id,
-                status="succeeded",
-            )
+        storage.finish_cache_attempt(result_key, attempt_id, status="succeeded")
 
         self._emit_progress(
             workflow,
             node.name,
             "completed",
             result_key=result_key,
-            record_id=(
-                self._pinned_record_id(node) if result_key is not None else None
-            ),
+            record_id=self._pinned_record_id(node),
         )
         self._set_node_cache_hit(node, False)
         return _ProviderExecutionResult(
             df,
             sig_hash,
-            transient_invocation_id=invocation_id if transient else None,
-            selection=None if transient else self._selected_result(node),
+            selection=self._selected_result(node),
         )

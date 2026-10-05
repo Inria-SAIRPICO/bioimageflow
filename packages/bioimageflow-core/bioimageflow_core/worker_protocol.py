@@ -302,11 +302,21 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
     consumption = _require_consumption(task["row_consumption"])
     _require_consumption_mode(mode, consumption)
     rows = _decode_rows(task["rows"], _decode_row_invocation, "task rows")
+    for index, row in enumerate(rows):
+        if row.context is not None:
+            if row.context["row_dir"] is None:
+                raise ValueError(f"rows[{index}].context must be a row context.")
+            if row.context["row_index"] != row.row_index:
+                raise ValueError(
+                    f"rows[{index}].context.row_index must match rows[{index}].row_index."
+                )
     batch_context = _decode_context(task["batch_context"], "batch context")
     if mode == "row_chunk" and batch_context is not None:
         raise ValueError("row_chunk tasks must not define batch_context.")
     if mode == "process_batch" and batch_context is None:
         raise ValueError("process_batch tasks require batch_context.")
+    if batch_context is not None and batch_context["batch_dir"] is None:
+        raise ValueError("batch_context must be a batch context.")
     batch_arguments = _require_plain_dict(
         decode_processing_value(task["batch_arguments"]), "batch arguments"
     )

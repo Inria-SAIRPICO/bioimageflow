@@ -697,6 +697,8 @@ class ExecutionContext:
 ```
 
 `context.work_dir` is shared by every call for the node and always points to `run_dir/work/`. `context.rows_dir` is the shared row scratch parent, `run_dir/work/rows/`. For `process_row`, `context.row_dir` is the private scratch directory for that row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.batch_dir` is the private batch scratch directory: `run_dir/work/batch/`.
+A supplied row context must use the row-directory role and carry the exact corresponding `RowInvocation.row_index`; a supplied batch context must use the batch-directory role with no row index.
+An absent optional row context remains valid; present contexts are correlated without coercing or normalizing row indices.
 
 Runtime scratch directories are for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.row_dir` from `process_row` or `cwd=context.batch_dir` from `process_batch` to `subprocess.run()` or equivalent. Shared generated runtime resources that are reused across rows should be placed under `context.work_dir`, preferably in a tool-named child directory. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
 
@@ -2540,9 +2542,9 @@ When `node.compute()` is called:
 
    1. **Index Alignment:** Collect all upstream nodes referenced via column bindings. Compute the aligned index — the finest-grained index that is compatible with all upstream indices (see [Section 5.3](#53-dataframe-semantics)). If upstream indices are incompatible (no common lineage), raise `IndexAlignmentError`.
    2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations. Path-typed values are converted to absolute runtime paths in the orchestrator.
-   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The orchestrator resolves paths before dispatch beneath the selected reusable-attempt or transient invocation `assets/` directory.
-   4. **Cache Check:** Resolve the optional reusable result key from node identity, resolved arguments, tool/environment identity, and selected provider/selector record references. A valid selected record is loaded immediately. When the resolver returns `None`, execution uses the run-scoped transient path and creates no reusable cache state.
-   5. **Execution Context:** Allocate a required invocation ID. Reusable work uses `cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/`; non-reusable work uses `cache/v1/transient/runs/<run-id>/nodes/<node-key>/<invocation-id>/`. Build one `ExecutionContext` per input row and one batch context with shared `assets/`, `work/`, and `rows/` roots plus private row/batch directories.
+   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). Ordinary admitted Workflow Processing resolves paths before dispatch beneath the selected reusable-attempt `assets/` directory.
+   4. **Cache Check:** Resolve the concrete scientific key from node identity, resolved arguments, admitted tool/environment identity, and pinned provider/selector record references. A valid selected record is loaded immediately. An unavailable upstream selection is an invariant error before scientific dispatch or workspace acquisition, not a silent non-reusable Processing fallback.
+   5. **Execution Context:** Allocate a required invocation ID and use `cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/`. Build one `ExecutionContext` per input row and one batch context with shared `assets/`, `work/`, and `rows/` roots plus private row/batch directories. Public Storage transient workspaces remain a separate explicit caller contract.
    6. **Serialization:** Encode each worker-boundary call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
    7. **Backend Preparation:** Direct acquires no remote resource. Wetlands prepares the selected environment. Parsl completes route validation, archive materialization, DFK acquisition, and executor preflight before processing submission.
    8. **Dispatch:** If `process_batch` was overridden, call one whole-node batch operation. Otherwise, dispatch row calls or explicit row chunks. Wetlands and Parsl use the same core protocol, origin resolver, worker entry point, and worker-instance cache. Parsl submission is bounded and results are collected by aligned position rather than completion order.
@@ -2550,7 +2552,7 @@ When `node.compute()` is called:
    **Accepted target — S06:** Mapped per-row returns retain exact input-position correspondence; collective results retain explicit association to all consumed inputs and aggregate lineage, including configured empty-input artifacts.
    The current all-consumed output-group contract applies to collective dispatch; no forced aggregate duplication or main-process relocation is permitted.
    9. **DataFrame Construction:** Build the output DataFrame from the tool's results. The output contains **only** the columns declared in `Outputs` (no upstream columns are carried forward). Mapped outputs preserve the aligned input index, with explosion for 1-to-N outputs (see Section 5.3). Collective aggregates use one group containing the ordered actual consumed rows and a separate node/result-key-qualified aggregate output domain, including an empty consumed association. This DataFrame is the node's graph-level output and may be passed as a positional upstream input to a `DataFrameTool`; individual declared columns remain addressable through `ColumnRef` bindings. If a tool writes a resolved declared template output but returns zero dataframe rows, the dataframe remains empty; the asset is published through the record manifest, not by adding a sentinel row. If a table-only tool declares `zero_row_scalar_outputs`, each input row that returns zero dataframe rows publishes those scalar values as manifest-only `scalar_output` metadata; the values are included in record identity and run views but are not rehydrated into dataframe rows.
-   10. **Caching:** Reusable work publishes the canonical logical dataframe and assets as an immutable record, selects through `first-valid`, and updates views from the selected record. Non-reusable work returns transient outputs without a record, pointer, latest view, or output projection.
+   10. **Caching:** Ordinary admitted Processing publishes the canonical logical dataframe and assets as an immutable record, selects through `first-valid`, and updates views from that selected record.
 
 #### ProcessingTool Backend Interaction (ProcessingTool Steps 6-10)
 
@@ -2568,6 +2570,7 @@ The controller verifies the successful result's declaration digest against that 
 Declaration mismatch is an execution error through the existing exception channel, not a nullable digest or an error-shaped successful result.
 This ProcessingTool admission does not narrow local DataFrameTool dynamic/no-Outputs, known-empty or Passthrough contracts, and does not sandbox constructor/module-initializer effects or seal arbitrary later class and process-global state.
 A task contains the actual ordered observation `rows`, a separate typed `batch_arguments` dictionary and ordered genuine `reference_rows`; its filesystem `batch_context` remains a path-only projection.
+Pure Task4 decoding enforces the scratch-context role/index correlations from §3.4 before tool import or scientific callbacks; `process_batch` requires its batch-role context, while optional per-row contexts may remain `None`.
 A result contains `groups`, each with ordered `consumed_rows` entries `(position, row_index)` and an output tuple.
 Mapped results contain exactly one group per task observation with its exact singleton consumed identity, permitting zero, one or many outputs.
 Collective execution requires `process_batch` physical mode and returns exactly one group associated with all actual task observations in order; an empty task has one group with `consumed_rows=()` and may still return outputs.
@@ -2966,7 +2969,7 @@ workspace/
 
 `cache/v1/` is the canonical machine-readable cache root.
 Reusable records are immutable once published.
-Non-reusable `ProcessingTool` invocations use the confined `cache/v1/transient/runs/` tree, create no records or views, and remain until explicit writer-safe transient cleanup.
+Explicit public Storage transient workspaces and launcher-returned transient assets remain confined and retained until caller-owned writer-safe cleanup; ordinary admitted Workflow Processing does not select this mode.
 Reusable attempts carry required running and terminal lifecycle metadata in `attempt.json`.
 An allocated DataFrame publication attempt becomes failed or cancelled when publication fails; a transform failure before attempt allocation does not invent an attempt.
 After correlation checks, an identical terminal status and error type may be written idempotently; conflicting terminal facts refuse, and owned persistence retry checks the captured attempt-directory identity before writing.
