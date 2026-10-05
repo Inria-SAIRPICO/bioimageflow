@@ -8,6 +8,9 @@ import pytest
 from bioimageflow_core import (
     ArchiveModuleOriginV1,
     InstalledModuleOriginV1,
+    IOModel,
+    describe_tool_declaration,
+    declaration_digest,
     ProcessingTaskResult,
     ProcessingTask,
     RowInvocation,
@@ -51,6 +54,13 @@ def _context(tmp_path, *, row: bool) -> dict[str, str | None]:
     }
 
 
+class _CodecTool:
+    class Inputs(IOModel):
+        value: int
+    class Outputs(IOModel):
+        value: int
+
+
 def _task(tmp_path) -> ProcessingTask:
     return ProcessingTask(
         task_id="task_0000000000000000",
@@ -61,6 +71,7 @@ def _task(tmp_path) -> ProcessingTask:
         mode="row_chunk",
         row_consumption="mapped",
         tool=_source_origin(tmp_path),
+        declaration=describe_tool_declaration(_CodecTool()),
         rows=(
             RowInvocation(
                 position=0,
@@ -81,6 +92,7 @@ def _result(task: ProcessingTask) -> ProcessingTaskResult:
         task_retry=task.task_retry,
         mode=task.mode,
         row_consumption=task.row_consumption,
+        declaration_digest=declaration_digest(task.declaration),
         groups=(
             OutputGroup(
                 consumed_rows=(ConsumedRow(0, "sample"),),
@@ -128,7 +140,7 @@ def test_processing_result_has_exact_round_trip(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_task.v4"),
+        lambda payload: payload.update(schema="bioimageflow.processing_task.v5"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_id="task_1"),
         lambda payload: payload.update(invocation_id="run_" + "1" * 32),
@@ -159,7 +171,7 @@ def test_batch_requires_batch_context(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_result.v4"),
+        lambda payload: payload.update(schema="bioimageflow.processing_result.v5"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_retry=True),
         lambda payload: payload.update(extra=True),
@@ -193,6 +205,20 @@ def test_result_correlation_must_match_exactly(tmp_path) -> None:
                 groups=(replace(result.groups[0], consumed_rows=(ConsumedRow(0,"different"),)),),
             ),
         )
+
+
+@pytest.mark.parametrize("digest", [None, True, "f" * 63, "F" * 64])
+def test_success_result_requires_strict_declaration_digest(tmp_path, digest):
+    payload = encode_processing_result(_result(_task(tmp_path)))
+    payload["declaration_digest"] = digest
+    with pytest.raises(ValueError, match="declaration_digest"):
+        decode_processing_result(payload)
+
+
+def test_result_declaration_mismatch_is_refused_before_acceptance(tmp_path):
+    task = _task(tmp_path)
+    with pytest.raises(ValueError, match="declaration digest"):
+        validate_processing_result(task, replace(_result(task), declaration_digest="f" * 64))
 
 
 def test_every_origin_variant_has_an_exact_round_trip(tmp_path) -> None:

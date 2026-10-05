@@ -14,6 +14,8 @@ from .shared_arrays import SharedTaskScope
 
 from bioimageflow_core import (
     ConsumedRow,
+    compare_tool_declarations,
+    describe_tool_declaration,
     OutputGroup,
     ReferenceRow,
     ProcessingTask,
@@ -179,7 +181,9 @@ class _DispatchMixin:
     ) -> list[OutputGroup]:
         """Direct dispatch — tool runs in the main process."""
         node = next(node for node in self._compiled_ordinals if node.name == node_name)
-        callbacks = self._capture_executable(node).callbacks
+        capture = self._capture_executable(node)
+        compare_tool_declarations(capture.scientific_key["declaration"], describe_tool_declaration(tool))
+        callbacks = capture.callbacks
         if has_batch:
             if not arguments_dicts and tool.row_consumption.value == "mapped":
                 return []
@@ -260,7 +264,8 @@ class _DispatchMixin:
             return []
         env_spec = tool.environment
         node = next(node for node in self._compiled_ordinals if node.name == node_name)
-        origin = self._capture_executable(node).worker_origin
+        capture = self._capture_executable(node)
+        origin = capture.worker_origin
         if origin is None:
             raise RuntimeError("Managed dispatch requires a captured worker origin")
         max_workers, worker_timeout = self._resolve_worker_config(tool, workflow)
@@ -282,6 +287,7 @@ class _DispatchMixin:
                     mode="process_batch",
                     row_consumption=tool.row_consumption.value,
                     tool=origin,
+                    declaration=cast(dict[str, Any], capture.scientific_key["declaration"]),
                     rows=tuple(
                         RowInvocation(
                             position=position,
@@ -368,6 +374,7 @@ class _DispatchMixin:
                     mode="row_chunk",
                     row_consumption=tool.row_consumption.value,
                     tool=origin,
+                    declaration=cast(dict[str, Any], capture.scientific_key["declaration"]),
                     rows=(
                         RowInvocation(
                             position=position,

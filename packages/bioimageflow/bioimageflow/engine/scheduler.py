@@ -159,7 +159,8 @@ class DefaultEngine(
         self._node_selected_results: dict[Node, SelectedResult] = {}
         self._node_result_relations: dict[Node, Any] = {}
         self._node_executable_captures: dict[Node, Any] = {}
-        self._executable_distribution_versions: dict[str, tuple[str, str] | None] = {}
+        from bioimageflow.worker_origins import ExecutableMetadata
+        self._executable_metadata = ExecutableMetadata()
         self._external_cancellation_requested = cancellation_requested
         self._env_manager = env_manager
         if use_wetlands:
@@ -204,7 +205,7 @@ class DefaultEngine(
                 self._node_selected_results.clear()
                 self._node_result_relations.clear()
                 self._node_executable_captures.clear()
-                self._executable_distribution_versions.clear()
+                self._executable_metadata.clear()
 
     def _end_execution(self) -> None:
         with self._lifecycle_lock:
@@ -213,7 +214,7 @@ class DefaultEngine(
                 self._node_selected_results.clear()
                 self._node_result_relations.clear()
                 self._node_executable_captures.clear()
-                self._executable_distribution_versions.clear()
+                self._executable_metadata.clear()
 
     def _is_cancellation_requested(self, workflow: Any) -> bool:
         external = self._external_cancellation_requested

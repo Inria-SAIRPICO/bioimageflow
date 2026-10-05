@@ -56,7 +56,10 @@ Cold source loading verifies the captured digest; an already admitted warm worke
 Embedded single-file sources with the same logical ID and different bytes occupy different content-qualified namespaces.
 Installed/versioned managed origins retain their declared membership/version authority and remain usable; exact worker/transitive installed byte closure is still unproved.
 These checks do not freeze arbitrary mutable globals, opaque initializers or imported native dependency state.
-The current task has no controller IO-schema token; ordinary managed class/declaration/module-initializer IO parity remains unproved even when the selected primary callable matches.
+Current task/result v4 carries the captured portable Inputs/Outputs declaration and the successful worker declaration digest.
+The loaded instance must match ordered types, requiredness, nullability, image constraints and supported bounds before the scientific method; the controller validates the digest before accepting or publishing outputs.
+Direct ProcessingTools apply the same comparison before calling the retained callback.
+Arbitrary initializer effects, post-load class mutations, custom validator behavior and installed/transitive byte closure remain unproved.
 A ProcessingTool that implements whole-node ``process_batch()`` occupies one worker task for the batch.
 
 The local engine enforces the effective ``max_concurrent`` limit for each node.

@@ -19,7 +19,11 @@ from bioimageflow.parsl.submission import (
 from bioimageflow_core import (
     ProcessingTaskResult,
     RowInvocation,
-    RowResult,
+    ConsumedRow,
+    OutputGroup,
+    IOModel,
+    describe_io_model,
+    declaration_digest,
     SourceFileOriginV1,
     encode_processing_result,
 )
@@ -31,6 +35,11 @@ ORIGIN = SourceFileOriginV1(
     source_hash="a" * 64,
     class_name="Tool",
 )
+class Declaration(IOModel):
+    value: int
+
+
+DECLARATION = {"inputs": describe_io_model(Declaration), "outputs": describe_io_model(Declaration)}
 INVOCATION_ID = "inv_" + "1" * 32
 ATTEMPT_ID = "att_" + "2" * 32
 
@@ -54,12 +63,11 @@ def _result(task, *, value_offset: int = 0):
             cache_attempt_id=task.cache_attempt_id,
             task_retry=task.task_retry,
             mode=task.mode,
-            rows=tuple(
-                RowResult(
-                    position=row.position,
-                    row_index=row.row_index,
-                    outputs=({"value": row.position + value_offset},),
-                )
+            row_consumption=task.row_consumption,
+            declaration_digest=declaration_digest(task.declaration),
+            groups=tuple(
+                OutputGroup((ConsumedRow(row.position, row.row_index),),
+                            ({"value": row.position + value_offset},))
                 for row in task.rows
             ),
         )
@@ -81,6 +89,7 @@ def test_row_tasks_are_consecutive_explicit_chunks() -> None:
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(5),
             row_chunk_size=2,
         )
@@ -105,6 +114,7 @@ def test_batch_task_is_one_whole_node_envelope() -> None:
         invocation_id=INVOCATION_ID,
         cache_attempt_id=None,
         tool=ORIGIN,
+            declaration=DECLARATION,
         rows=_rows(3),
         batch_context={
             "run_dir": "/shared/run",
@@ -129,6 +139,7 @@ def test_collector_is_bounded_and_emits_row_completion_in_position_order() -> No
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(6),
             row_chunk_size=1,
         )
@@ -176,6 +187,7 @@ def test_collector_stops_submission_cancels_and_drains_after_failure() -> None:
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(8),
             row_chunk_size=1,
         )
@@ -223,6 +235,7 @@ def test_collector_validates_result_correlation_before_acceptance() -> None:
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(1),
             row_chunk_size=1,
         )
@@ -251,6 +264,7 @@ def test_cancellation_stops_before_submission() -> None:
         invocation_id=INVOCATION_ID,
         cache_attempt_id=None,
         tool=ORIGIN,
+            declaration=DECLARATION,
         rows=_rows(2),
         row_chunk_size=1,
     )
@@ -272,6 +286,7 @@ def test_runtime_shared_array_is_rejected_before_submission() -> None:
             invocation_id=INVOCATION_ID,
             cache_attempt_id=None,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=[
                 RowInvocation(
                     position=0,
@@ -301,6 +316,7 @@ def test_late_runtime_validation_failure_cancels_and_drains_prior_future() -> No
             invocation_id=INVOCATION_ID,
             cache_attempt_id=None,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=[
                 RowInvocation(
                     position=0,
@@ -354,6 +370,7 @@ def test_cancellation_stops_partial_window_and_drains_running_futures() -> None:
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(5),
             row_chunk_size=1,
         )
@@ -410,6 +427,7 @@ def test_sibling_collectors_report_late_failures_for_deterministic_selection(
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(1),
             row_chunk_size=1,
         )
@@ -420,6 +438,7 @@ def test_sibling_collectors_report_late_failures_for_deterministic_selection(
             invocation_id=INVOCATION_ID,
             cache_attempt_id=ATTEMPT_ID,
             tool=ORIGIN,
+            declaration=DECLARATION,
             rows=_rows(1),
             row_chunk_size=1,
         )

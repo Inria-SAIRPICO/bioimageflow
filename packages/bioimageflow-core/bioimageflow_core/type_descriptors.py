@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from types import UnionType
+import types
 from typing import Annotated, Any, Literal, Union, cast, get_args, get_origin
 
 import numpy as np
-from bioimageflow_core import SharedArray
+from .types import SharedArray
 
 _ATOMS = {
     "any": Any,
@@ -33,7 +33,7 @@ def encode_annotation(annotation: Any) -> dict[str, Any]:
     for name, value in _ATOMS.items():
         if annotation is value:
             return {"kind": name}
-    if origin in (Union, UnionType):
+    if origin is Union or (getattr(types, "UnionType", None) is not None and origin is getattr(types, "UnionType", None)):
         return {"kind": "union", "members": [encode_annotation(item) for item in args]}
     if (
         origin is Literal

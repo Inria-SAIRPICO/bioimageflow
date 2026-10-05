@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from bioimageflow_core import (
     ProcessingTask,
+    IOModel,
+    describe_io_model,
     RowInvocation,
     SourceFileOriginV1,
     decode_processing_result,
@@ -39,6 +41,12 @@ def _context(run_dir: Path, *, row_index: str | None) -> dict[str, str | None]:
         ),
         "row_index": row_index,
     }
+
+
+def _declaration(inputs=None, outputs=None):
+    def model(fields):
+        return type("Declaration", (IOModel,), {"__annotations__": fields or {}})
+    return {"inputs": describe_io_model(model(inputs)), "outputs": describe_io_model(model(outputs))}
 
 
 def _origin(source: Path) -> SourceFileOriginV1:
@@ -76,6 +84,7 @@ class ContextTool(ProcessingTool):
         task_retry=0,
         mode="row_chunk", row_consumption="mapped",
         tool=_origin(source),
+        declaration=_declaration({"value": str}, {"seen": str}),
         rows=(
             RowInvocation(
                 position=0,
@@ -123,6 +132,7 @@ class ContextTool(ProcessingTool):
         task_retry=0,
         mode="process_batch", row_consumption="mapped",
         tool=_origin(source),
+        declaration=_declaration({"value": str}, {"seen": str}),
         rows=tuple(
             RowInvocation(
                 position=position,
@@ -162,6 +172,7 @@ Path({str(marker)!r}).write_text("executed")
         task_retry=0,
         mode="row_chunk", row_consumption="mapped",
         tool=_origin(source),
+        declaration=_declaration(),
         rows=(),
     )
     payload = encode_processing_task(invocation)
@@ -181,7 +192,7 @@ def test_unadmitted_scope_is_refused_before_trusted_tool_import(tmp_path, locati
     source.write_text(f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('executed')\n")
     invocation = ProcessingTask(
         task_id="task_0000000000000000", node_name="scope", invocation_id="inv_" + "1" * 32,
-        cache_attempt_id=None, task_retry=0, mode="row_chunk", row_consumption="mapped", tool=_origin(source),
+        cache_attempt_id=None, task_retry=0, mode="row_chunk", row_consumption="mapped", tool=_origin(source), declaration=_declaration(),
         rows=(RowInvocation(position=0, row_index="sample", arguments={
             "reference": SharedArray("valid", (1,), "u1", "unadmitted"),
         }, context=None),),
@@ -227,7 +238,7 @@ class ContextTool(ProcessingTool):
     invocation = ProcessingTask(
         task_id="task_0000000000000000", node_name="aggregate",
         invocation_id="inv_" + "1" * 32, cache_attempt_id=None,
-        task_retry=0, mode="process_batch", row_consumption="collective", tool=_origin(source),
+        task_retry=0, mode="process_batch", row_consumption="collective", tool=_origin(source), declaration=_declaration({"value": int}, {"total": int}),
         rows=tuple(RowInvocation(position=i, row_index=f"sample-{i}",
                                  arguments={"value": value}, context=None)
                    for i, value in enumerate(values)),
@@ -260,7 +271,7 @@ class ContextTool(ProcessingTool):
     invocation = ProcessingTask(
         task_id="task_" + "0" * 16, node_name="expansion", invocation_id="inv_" + "1" * 32,
         cache_attempt_id=None, task_retry=0, mode="process_batch", row_consumption=consumption,
-        tool=_origin(source), rows=tuple(RowInvocation(i, f"sample-{i}", {}, None) for i in range(3)),
+        tool=_origin(source), declaration=_declaration(outputs={"value": int}), rows=tuple(RowInvocation(i, f"sample-{i}", {}, None) for i in range(3)),
         batch_context=_context((tmp_path / "run").resolve(), row_index=None),
     )
     result = decode_processing_result(execute_processing_task(encode_processing_task(invocation)))
@@ -293,7 +304,7 @@ class ContextTool(ProcessingTool):
     invocation = ProcessingTask(
         task_id="task_" + "0" * 16, node_name="empty", invocation_id="inv_" + "1" * 32,
         cache_attempt_id=None, task_retry=0, mode="process_batch", row_consumption="collective",
-        tool=_origin(source), rows=(), batch_context=_context((tmp_path / "run").resolve(), row_index=None),
+        tool=_origin(source), declaration=_declaration(outputs={"value": int, "path": str}), rows=(), batch_context=_context((tmp_path / "run").resolve(), row_index=None),
         batch_arguments={"offset": 7, "output": output},
         reference_rows=(ReferenceRow(0, "reference-image", {"pixels": 11}),),
     )

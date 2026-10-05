@@ -154,7 +154,7 @@ def _annotation_schema(annotation: Any) -> dict[str, Any] | None:
     )
     from bioimageflow_core.viewer import extract_viewer_spec
 
-    from bioimageflow.validation.type_descriptors import encode_annotation
+    from bioimageflow_core.type_descriptors import encode_annotation
     result = {
         "type": _display_type_name(annotation),
         "type_spec": encode_annotation(annotation),

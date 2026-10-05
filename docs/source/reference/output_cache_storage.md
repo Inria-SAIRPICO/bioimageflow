@@ -199,10 +199,14 @@ Installed/versioned managed tools retain `declared_installation` authority with 
 Node provenance records the exact admitted executable authority and its qualifications, separately from a descriptive declared version.
 That authority includes the captured instance facades' portable input/output types, requiredness, nullability, image constraints and supported declared bounds, preserving dynamic outputs and Passthrough as distinct states.
 Captured parameter/default/template values remain separate; arbitrary custom annotation validator closure is unproved.
-The current worker task carries no controller IO-schema token: primary callable/literal/helper matching does not prove ordinary managed class/declaration/module-initializer IO parity.
+Current task/result v4 attests the represented portable IO declaration before the worker scientific method and validates its successful digest before controller output acceptance.
+The declaration contract version joins every executable key, preventing reuse of records from the prior unattested contract.
+A matching cache record reuses that exact contract without provisioning solely to compare a declaration; arbitrary initializer effects, custom validators, post-load mutations and installed/transitive byte equality remain outside this proof.
 Embedded captured bytes provide stronger source authority, but do not seal arbitrary post-load class mutations.
 Declared distribution/version tokens remain manual cache invalidators, including installed import packages whose distribution names differ.
 Capture is memoized only within the owned operation; there is no global cache keyed by mutable source paths.
+Distribution discovery shares one package map across import roots within that operation, while version and absent metadata facts refresh on the next compute, plan or stepped operation.
+Selected version-store metadata remains tied to its exact root.
 
 The result key should be encoded as a namespaced digest token, for example:
 

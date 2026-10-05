@@ -2530,10 +2530,16 @@ When `node.compute()` is called:
 The immutable backend dispatch request contains resolved arguments and contexts, ordered aligned positions, the scoped node, active run context, required invocation identity, and optional reusable-attempt identity.
 The scheduler owns cache lookup, publication, dataframe construction, progress, cancellation, and failure semantics around this request.
 
-Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v3`.
-The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v3`.
+Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v4`.
+The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v4`.
 Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, physical mode and logical `row_consumption` exactly.
 The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup` and `ProcessingTaskResult`; there are no historical task/result DTO aliases or wire fallbacks.
+A task carries the mandatory portable `declaration` captured from the admitted tool instance's Inputs/Outputs; a successful result carries the actual loaded instance's `declaration_digest`.
+The shared semantic projection retains ordered fields, finite portable type descriptors, separate requiredness and nullability, ImageSpec and supported declared bounds; it excludes Python class identity, GUI descriptions and default-object values.
+After origin admission and construction, the worker compares its loaded instance's declaration with the task declaration before invoking the scientific row or batch method.
+The controller verifies the successful result's declaration digest against that same captured contract before accepting output values or publishing a reusable record.
+Declaration mismatch is an execution error through the existing exception channel, not a nullable digest or an error-shaped successful result.
+This ProcessingTool admission does not narrow local DataFrameTool dynamic/no-Outputs, known-empty or Passthrough contracts, and does not sandbox constructor/module-initializer effects or seal arbitrary later class and process-global state.
 A task contains the actual ordered observation `rows`, a separate typed `batch_arguments` dictionary and ordered genuine `reference_rows`; its filesystem `batch_context` remains a path-only projection.
 A result contains `groups`, each with ordered `consumed_rows` entries `(position, row_index)` and an output tuple.
 Mapped results contain exactly one group per task observation with its exact singleton consumed identity, permitting zero, one or many outputs.
@@ -2572,7 +2578,7 @@ Captured custom-source bytes provide one content authority for Direct and manage
 Direct identity describes actual callable code and constants, nested code, defaults and closure values, and representable referenced literal globals and same-source helper functions.
 Plain managed-source admission captures source bytes and compares the resident controller callable, literal values and same-source helpers with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
 Installed and versioned managed origins instead retain declared-installation authority: admitted distribution membership and version, declared recipe and actual controller admission facts, without claiming that those worker DTOs carry captured controller source bytes.
-The current processing task carries origin, arguments and execution correlation rather than a controller I/O-schema attestation, and the worker uses its loaded tool declarations; ordinary managed whole-class/declaration and module-initializer parity remains an open MAIN C04 obligation beyond the bounded primary-callable comparison.
+The current processing task attests the supported portable Inputs/Outputs declaration against the loaded instance before scientific computation; it does not attest the whole class implementation, constructor/module-initializer behavior or arbitrary post-admission state.
 Captured custom-source bytes provide stronger source authority without sealing arbitrary later class or module state.
 These bounded checks do not establish arbitrary dynamic-initializer or process-global isolation, complete controller/worker installed-content equality, or transitive dependency closure for installed, shared or versioned origins.
 Existing origin selectors, ordinary programmatic Direct tools and normal caching remain supported; labels, selectors and development-only current-source inspection are not substitutes for actual admitted executable identity.
@@ -2641,7 +2647,8 @@ Result-key material includes every value that can affect logical output and cach
 
 The key retains the captured declared tool/distribution version token and the instance's semantic Inputs/Outputs contract: portable `type_spec`, requiredness, nullability, image metadata and supported declared bounds, distinguishing dynamic Outputs absence, known-empty schemas and Passthrough declarations without hashing GUI descriptions or invoking a dynamic resolver merely for identity.
 These declaration facts reuse the effective definition capture rather than copying default values or shared-array owners again; arbitrary custom annotation-validator closure remains explicitly unproved.
-Controller declaration-key facts do not certify ordinary managed declaration parity or post-load class-state sealing, as qualified in Section 5.2.
+The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
+The supported declaration parity check is specified in Section 5.2; controller key facts do not establish whole-class, constructor/module-initializer or post-load class-state sealing.
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
 Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
 Adjacent large integers remain distinct even beside floating-point columns; signed and unsigned values retain the existing dtype-aware logical representation.
@@ -3295,7 +3302,7 @@ from bioimageflow_core import (
     Arguments,
     # Strict remote-processing protocol and origins
     ProcessingTask, RowInvocation,
-    ProcessingTaskResult, RowResult,
+    ProcessingTaskResult, ConsumedRow, OutputGroup,
     InstalledModuleOriginV1, VersionedModuleOriginV1,
     SharedModuleOriginV1, SourceFileOriginV1, ArchiveModuleOriginV1,
 )

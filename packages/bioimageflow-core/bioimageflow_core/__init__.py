@@ -63,6 +63,14 @@ from bioimageflow_core.worker_origins import (
     encode_worker_tool_origin as encode_worker_tool_origin,
     worker_tool_origin_identity as worker_tool_origin_identity,
 )
+from bioimageflow_core.declarations import (
+    DECLARATION_CONTRACT_VERSION as DECLARATION_CONTRACT_VERSION,
+    compare_tool_declarations as compare_tool_declarations,
+    declaration_digest as declaration_digest,
+    describe_io_model as describe_io_model,
+    describe_tool_declaration as describe_tool_declaration,
+    validate_tool_declaration as validate_tool_declaration,
+)
 from bioimageflow_core.worker_protocol import (
     ProcessingTaskResult as ProcessingTaskResult,
     ProcessingTask as ProcessingTask,
@@ -81,6 +89,7 @@ __all__ = [
     "Arguments",
     "BaseTool",
     "Category",
+    "DECLARATION_CONTRACT_VERSION",
     "CleanupStatus",
     "SharedArrayLease",
     "Connectable",
@@ -119,6 +128,10 @@ __all__ = [
     "WorkerGrant",
     "WorkerToolOriginV1",
     "check_compatibility",
+    "compare_tool_declarations",
+    "declaration_digest",
+    "describe_io_model",
+    "describe_tool_declaration",
     "coerce_viewer_spec",
     "collect_input_scopes",
     "decode_processing_result",
@@ -134,6 +147,7 @@ __all__ = [
     "run_external_command",
     "run_external_command_with_staged_output",
     "validate_processing_result",
+    "validate_tool_declaration",
     "validate_scope_descriptor",
     "worker_tool_origin_identity",
 ]

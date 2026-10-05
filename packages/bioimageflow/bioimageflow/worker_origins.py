@@ -8,7 +8,7 @@ import inspect
 import json
 from pathlib import Path
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
@@ -49,10 +49,12 @@ def _distribution_imports(distribution: importlib.metadata.Distribution) -> set[
 
 
 def _find_distribution(
-    import_package: str, *, root: Path | None = None
+    import_package: str, *, root: Path | None = None,
+    package_map: Mapping[str, list[str]] | None = None,
 ) -> tuple[str, str]:
     if root is None:
-        names = importlib.metadata.packages_distributions().get(import_package, [])
+        packages = importlib.metadata.packages_distributions() if package_map is None else package_map
+        names = packages.get(import_package, [])
         candidates = []
         for name in names:
             try:
@@ -78,6 +80,32 @@ def _find_distribution(
             f"{import_package!r} in {location!r}."
         )
     return unique[0]
+
+
+@dataclass
+class ExecutableMetadata:
+    """Metadata facts owned by one admission operation, never a global cache."""
+
+    _packages: Mapping[str, list[str]] | None = None
+    _versions: dict[tuple[str, str], tuple[str, str] | None] = field(default_factory=dict)
+
+    def resolve(self, import_root: str, distribution: str | None) -> tuple[str, str] | None:
+        key = ("distribution", distribution) if distribution is not None else ("package", import_root)
+        if key not in self._versions:
+            if distribution is not None:
+                self._versions[key] = (_canonical_distribution(distribution), importlib.metadata.version(distribution))
+            else:
+                if self._packages is None:
+                    self._packages = importlib.metadata.packages_distributions()
+                try:
+                    self._versions[key] = _find_distribution(import_root, package_map=self._packages)
+                except ValueError:
+                    self._versions[key] = None
+        return self._versions[key]
+
+    def clear(self) -> None:
+        self._packages = None
+        self._versions.clear()
 
 
 def _verify_declared_distribution(
@@ -251,53 +279,22 @@ class ExecutableCapture:
 
 
 def _declaration_identity(tool: Any) -> dict[str, Any]:
-    """Reuse the captured facade's portable contract, without copying defaults."""
+    """Use the same portable projection as the actual Processing worker."""
+    from bioimageflow_core.declarations import describe_io_model, describe_tool_declaration
     from bioimageflow.dataframe_tool import Passthrough
-    from bioimageflow.validation.schema import extract_image_spec, serialize_image_spec
-    from bioimageflow.validation.serialization import _is_nullable
-    from bioimageflow.validation.type_descriptors import encode_annotation
-    from bioimageflow_core.types import annotation_metadata, extract_gui_meta
 
-    def constraints(annotation: Any) -> dict[str, Any]:
-        facts: dict[str, Any] = {}
-        gui = extract_gui_meta(annotation)
-        if gui is not None:
-            facts.update({name: getattr(gui, name) for name in ("min", "max") if getattr(gui, name) is not None})
-        metadata = annotation_metadata(annotation)
-        for item in metadata:
-            if type(item).__module__ == "pydantic.fields":
-                items = item.metadata
-            else:
-                items = (item,)
-            for constraint in items:
-                if type(constraint).__module__ != "annotated_types":
-                    continue
-                for name in ("gt", "ge", "lt", "le", "multiple_of", "min_length", "max_length"):
-                    if hasattr(constraint, name):
-                        facts[name] = getattr(constraint, name)
-        return facts
-
-    def model_identity(model: Any) -> Any:
-        if model is None:
-            return None
-        return {
-            "passthrough": issubclass(model, Passthrough),
-            "field_names": list(model._get_all_annotations()),
-            "fields": {
-                name: {"type_spec": encode_annotation(annotation),
-                       "required": not hasattr(model, name),
-                       "nullable": _is_nullable(annotation),
-                       "constraints": constraints(annotation),
-                       "image_spec": serialize_image_spec(extract_image_spec(annotation))}
-                for name, annotation in model._get_all_annotations().items()
-            },
-        }
-    return {"inputs": model_identity(tool.Inputs), "outputs": model_identity(tool.Outputs)}
+    if isinstance(tool, ProcessingTool):
+        return describe_tool_declaration(tool)
+    outputs = tool.Outputs
+    return {
+        "inputs": describe_io_model(tool.Inputs),
+        "outputs": describe_io_model(outputs, passthrough=outputs is not None and issubclass(outputs, Passthrough)),
+    }
 
 
 def capture_tool_executable(
     tool: Any, *, managed: bool, canonicalize: Callable[[Any], str],
-    declared_versions: dict[str, tuple[str, str] | None] | None = None,
+    metadata: ExecutableMetadata | None = None,
 ) -> ExecutableCapture:
     """Capture actual callbacks before lookup; never infer code from a version label.
 
@@ -307,6 +304,7 @@ def capture_tool_executable(
     Opaque initializers and transitive imported dependencies remain qualified.
     """
     from bioimageflow.executable_identity import runtime_callable_identity, validate_source_callables
+    from bioimageflow_core.declarations import DECLARATION_CONTRACT_VERSION
 
     klass = type(tool)
     if isinstance(tool, ProcessingTool):
@@ -319,22 +317,15 @@ def capture_tool_executable(
     declared_distribution = getattr(klass, "_bif_worker_distribution", None)
     if declared_version is None and not getattr(klass, "_bif_custom_source_hash", None):
         import_root = canonical_module.split(".", 1)[0]
-        versions = {} if declared_versions is None else declared_versions
-        if declared_distribution is not None:
-            declared_version = importlib.metadata.version(declared_distribution)
-        else:
-            if import_root not in versions:
-                try:
-                    versions[import_root] = _find_distribution(import_root)
-                except ValueError:
-                    versions[import_root] = None
-            fact = versions[import_root]
-            if fact is not None:
-                declared_distribution, declared_version = fact
+        admission_metadata = ExecutableMetadata() if metadata is None else metadata
+        fact = admission_metadata.resolve(import_root, declared_distribution)
+        if fact is not None:
+            declared_distribution, declared_version = fact
     key: dict[str, Any] = {"module": canonical_module, "class": klass.__qualname__,
                            "declared_version": declared_version,
                            "declared_distribution": declared_distribution,
-                           "declaration": _declaration_identity(tool)}
+                           "declaration": _declaration_identity(tool),
+                           "declaration_contract": DECLARATION_CONTRACT_VERSION}
     custom_hash = getattr(klass, "_bif_custom_source_hash", None)
     origin = None
     if managed or isinstance(custom_hash, str):
@@ -365,7 +356,7 @@ def capture_tool_executable(
         qualification = tuple(sorted(set(qualification) | {"opaque initializer/transitive dependency closure unproved"}))
         if managed:
             qualification = tuple(sorted(set(qualification) | {
-                "controller/worker class-declaration/module-initializer IO parity unproved",
+                "module initializer/arbitrary post-load class state closure unproved",
             }))
     else:
         evidence = runtime_callable_identity(callbacks, canonicalize=canonicalize)

@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple, cast
 
 from bioimageflow_core.arguments import ExecutionContext, ReferenceRow
+from bioimageflow_core.declarations import declaration_digest, validate_tool_declaration
 from bioimageflow_core.shared_memory import validate_scope_descriptor
 from bioimageflow_core._processing_values import (
     decode_processing_value,
@@ -22,11 +23,12 @@ from bioimageflow_core.worker_origins import (
 )
 
 
-TASK_SCHEMA = "bioimageflow.processing_task.v3"
-RESULT_SCHEMA = "bioimageflow.processing_result.v3"
+TASK_SCHEMA = "bioimageflow.processing_task.v4"
+RESULT_SCHEMA = "bioimageflow.processing_result.v4"
 _TASK_ID_RE = re.compile(r"^task_[0-9a-f]{16}$")
 _INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
 _ATTEMPT_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
+_DECLARATION_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODES = {"row_chunk", "process_batch"}
 _CONTEXT_FIELDS = {
     "run_dir",
@@ -57,12 +59,13 @@ class ProcessingTask:
     mode: Literal["row_chunk", "process_batch"]
     row_consumption: Literal["mapped", "collective"]
     tool: WorkerToolOriginV1
+    declaration: Dict[str, Any]
     rows: Tuple[RowInvocation, ...]
     batch_context: Optional[Dict[str, Any]] = None
     batch_arguments: Dict[str, Any] = field(default_factory=dict)
     reference_rows: Tuple[ReferenceRow, ...] = ()
     shared_memory_context: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_task.v3"] = field(
+    schema: Literal["bioimageflow.processing_task.v4"] = field(
         default=TASK_SCHEMA, init=False
     )
 
@@ -88,9 +91,10 @@ class ProcessingTaskResult:
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
     row_consumption: Literal["mapped", "collective"]
+    declaration_digest: str
     groups: Tuple[OutputGroup, ...]
     metrics: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_result.v3"] = field(
+    schema: Literal["bioimageflow.processing_result.v4"] = field(
         default=RESULT_SCHEMA, init=False
     )
 
@@ -247,6 +251,7 @@ def encode_processing_task(task: ProcessingTask) -> Dict[str, Any]:
         "mode": task.mode,
         "row_consumption": task.row_consumption,
         "tool": encode_worker_tool_origin(task.tool),
+        "declaration": validate_tool_declaration(task.declaration),
         "rows": [
             {
                 "position": row.position,
@@ -280,6 +285,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         "mode",
         "row_consumption",
         "tool",
+        "declaration",
         "rows",
         "batch_context",
         "batch_arguments",
@@ -318,6 +324,7 @@ def decode_processing_task(payload: Mapping[str, Any]) -> ProcessingTask:
         mode=mode,
         row_consumption=consumption,
         tool=decode_worker_tool_origin(task["tool"]),
+        declaration=validate_tool_declaration(task["declaration"]),
         rows=rows,
         batch_context=batch_context,
         batch_arguments=batch_arguments,
@@ -370,6 +377,7 @@ def encode_processing_result(result: ProcessingTaskResult) -> Dict[str, Any]:
         "task_retry": result.task_retry,
         "mode": result.mode,
         "row_consumption": result.row_consumption,
+        "declaration_digest": _require_identifier(result.declaration_digest, _DECLARATION_DIGEST_RE, "declaration_digest"),
         "groups": [
             {"consumed_rows": [
                 {"position": row.position, "row_index": row.row_index}
@@ -393,6 +401,7 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
         "task_retry",
         "mode",
         "row_consumption",
+        "declaration_digest",
         "groups",
         "metrics",
     }
@@ -430,6 +439,7 @@ def decode_processing_result(payload: Mapping[str, Any]) -> ProcessingTaskResult
         task_retry=retry,
         mode=mode,
         row_consumption=consumption,
+        declaration_digest=_require_identifier(result["declaration_digest"], _DECLARATION_DIGEST_RE, "declaration_digest"),
         groups=groups,
         metrics=metrics,
     )
@@ -459,6 +469,8 @@ def validate_processing_result(
     )
     if task_fields != result_fields:
         raise ValueError("Processing result correlation does not match its task.")
+    if declaration_digest(task.declaration) != result.declaration_digest:
+        raise ValueError("Processing result declaration digest does not match the admitted task.")
     task_rows = tuple((row.position, row.row_index) for row in task.rows)
     result_rows = tuple(
         tuple((row.position, row.row_index) for row in group.consumed_rows)

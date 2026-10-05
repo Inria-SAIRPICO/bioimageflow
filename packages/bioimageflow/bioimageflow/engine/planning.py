@@ -34,12 +34,12 @@ class _PlanningMixin:
     def plan(self, workflow: Any) -> dict[str, NodePlan]:
         """Inspect cache state without running tools or retaining their callbacks."""
         self._node_executable_captures.clear()
-        self._executable_distribution_versions.clear()
+        self._executable_metadata.clear()
         try:
             return self._plan_admitted(workflow)
         finally:
             self._node_executable_captures.clear()
-            self._executable_distribution_versions.clear()
+            self._executable_metadata.clear()
 
     def _plan_admitted(self, workflow: Any) -> dict[str, NodePlan]:
         """Return the cache status and diagnostic plan state of every node.

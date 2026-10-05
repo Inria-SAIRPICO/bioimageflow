@@ -33,7 +33,11 @@ Postponed and inherited annotations retain their metadata without importing unav
 Numeric creation/mapping helpers reject object-containing NumPy dtypes before backing allocation or mapping.
 Numeric data and Path/str image dispatch retain their essential behavior; explicit owners and live reader/worker grants control file lifetime.
 
-Current processing transport uses `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup`, and `ProcessingTaskResult` with explicit task/result v3 envelopes.
+Current processing transport uses `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup`, and `ProcessingTaskResult` with explicit task/result v4 envelopes.
+Each task carries the captured semantic Inputs/Outputs declaration: ordered fields, portable types, requiredness, nullability, image constraints and supported bounds.
+The loaded worker instance must match that declaration before the scientific method runs; a successful result carries its actual declaration digest, checked before accepting outputs.
+The shared declaration projector excludes class/module names, GUI hints and default values; effective defaults and resolved templates remain task argument values.
+This attests the represented IO declaration without proving arbitrary initializer, custom validator or installed/transitive dependency behavior.
 Physical task `mode` is separate from required `row_consumption`: mapped groups consume exactly one ordered input each and can emit zero, one or many outputs; a collective batch emits one group consuming the complete ordered input, including an empty input.
 Collective `process_batch` returns a flat list of Outputs, without repeating an aggregate for each consumed row.
 `ExecutionContext.batch_arguments` exposes admitted constants/defaults and resolved output paths as `Arguments`; `reference_rows` holds actual auxiliary `ReferenceRow(position, row_index, arguments)` records separately from consumed observation rows.

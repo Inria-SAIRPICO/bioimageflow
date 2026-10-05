@@ -142,7 +142,10 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
     from bioimageflow_core import (
         ProcessingTask, RowInvocation, SourceFileOriginV1, collect_input_scopes,
         decode_processing_result, encode_processing_task, validate_processing_result,
+        describe_tool_declaration,
     )
+
+    from bioimageflow_core.worker_origins import load_worker_tool
 
     label = "failure" if fail else "success"
     input_ref = owner.publish(input_ref)
@@ -154,6 +157,9 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
         cache_attempt_id=None, task_retry=0, mode="row_chunk", row_consumption="mapped",
         tool=SourceFileOriginV1(path=str(source), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
                               class_name="ArrayLifetimeTool"),
+        declaration=describe_tool_declaration(load_worker_tool(SourceFileOriginV1(
+            path=str(source), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
+            class_name="ArrayLifetimeTool"))),
         rows=(RowInvocation(position=0, row_index="sample",
                             arguments={"reference": input_ref, "fail": fail}, context=None),),
         shared_memory_context={"output": task_scope.descriptor(), "inputs": list(collect_input_scopes((input_ref,)))},

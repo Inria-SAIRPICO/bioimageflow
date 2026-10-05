@@ -36,7 +36,7 @@ class _IdentityRuntimeMixin:
                 capture = capture_tool_executable(
                     node.tool, managed=self._use_wetlands and isinstance(node.tool, ProcessingTool),
                     canonicalize=deterministic_serialize,
-                    declared_versions=self._executable_distribution_versions,
+                    metadata=self._executable_metadata,
                 )
                 self._node_executable_captures[node] = capture
             return capture

@@ -58,6 +58,7 @@ def iter_row_tasks(
     invocation_id: str,
     cache_attempt_id: str | None,
     tool: WorkerToolOriginV1,
+    declaration: dict[str, Any],
     rows: Iterable[RowInvocation],
     row_chunk_size: int,
 ) -> Iterator[ProcessingTask]:
@@ -79,6 +80,7 @@ def iter_row_tasks(
             mode="row_chunk",
             row_consumption="mapped",
             tool=tool,
+            declaration=declaration,
             rows=tuple(chunk),
         )
         sequence += 1
@@ -93,6 +95,7 @@ def iter_row_tasks(
             mode="row_chunk",
             row_consumption="mapped",
             tool=tool,
+            declaration=declaration,
             rows=tuple(chunk),
         )
 
@@ -103,6 +106,7 @@ def make_batch_task(
     invocation_id: str,
     cache_attempt_id: str | None,
     tool: WorkerToolOriginV1,
+    declaration: dict[str, Any],
     rows: Iterable[RowInvocation],
     batch_context: dict[str, Any],
 ) -> ProcessingTask:
@@ -116,6 +120,7 @@ def make_batch_task(
         mode="process_batch",
         row_consumption="mapped",
         tool=tool,
+        declaration=declaration,
         rows=tuple(rows),
         batch_context=batch_context,
     )

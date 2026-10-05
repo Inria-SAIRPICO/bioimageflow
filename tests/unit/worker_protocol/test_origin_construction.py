@@ -276,3 +276,56 @@ def test_optional_wrapped_declared_bounds_change_admitted_key(tmp_path, monkeypa
     assert Source.calls == [4, 4]
     assert workflow.compute(node)["value"].tolist() == [4]
     assert Source.calls == [4, 4]
+
+
+def test_processing_key_includes_current_declaration_attestation_contract():
+    from bioimageflow.cache.identity import deterministic_serialize
+    from bioimageflow.worker_origins import capture_tool_executable
+    from bioimageflow_core import DECLARATION_CONTRACT_VERSION, EnvironmentSpec, IOModel, RowConsumption
+
+    class Source(ProcessingTool):
+        row_consumption = RowConsumption.MAPPED
+        environment = EnvironmentSpec("attestation", {})
+        class Inputs(IOModel):
+            pass
+        class Outputs(IOModel):
+            value: int
+        def process_row(self, arguments):
+            return self.Outputs(value=4)
+
+    capture = capture_tool_executable(Source(), managed=False, canonicalize=deterministic_serialize)
+    assert capture.scientific_key["declaration_contract"] == DECLARATION_CONTRACT_VERSION
+    un_attested = dict(capture.scientific_key)
+    del un_attested["declaration_contract"]
+    assert deterministic_serialize(dict(capture.scientific_key)) != deterministic_serialize(un_attested)
+
+
+def test_direct_processing_refuses_changed_instance_declaration_before_method(tmp_path):
+    from bioimageflow import Workflow
+    from bioimageflow_core import EnvironmentSpec, IOModel, RowConsumption
+
+    class Source(ProcessingTool):
+        row_consumption = RowConsumption.MAPPED
+        environment = EnvironmentSpec("direct-declaration", {})
+        calls = []
+        class Inputs(IOModel):
+            pass
+        class Outputs(IOModel):
+            value: int
+        def process_row(self, arguments):
+            self.calls.append(4)
+            return self.Outputs(value=4)
+
+    with Workflow(engine="direct", storage_path=tmp_path / "records") as workflow:
+        node = Source()(name="contract")
+    steps = workflow.compute_steps(node)
+    step = next(steps)
+    assert not step.cached
+    capture = step._executable_capture
+    class Changed(IOModel):
+        value: float
+    capture.callbacks["process_row"].__self__.Outputs = Changed
+    with pytest.raises(ValueError, match=r"outputs.*value.*type_spec"):
+        step.execute()
+    assert Source.calls == []
+    steps.close()

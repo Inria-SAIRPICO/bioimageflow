@@ -28,7 +28,7 @@ Current processing contracts
 ----------------------------
 
 The public logical DTOs are ``ProcessingTask``, ``RowInvocation``, ``ConsumedRow``, ``OutputGroup`` and ``ProcessingTaskResult``.
-Task/result v3 codecs preserve one current typed grammar and exact correlation, including row consumption and the ordered consumed-row identities;
+Task/result v4 codecs preserve one current typed grammar and exact correlation, including row consumption, declaration attestation and the ordered consumed-row identities;
 decode is pure and cannot attach, allocate or register owners.
 Physical ``mode`` chooses row-chunk or batch execution independently of mapped or collective input meaning.
 Mapped results have one singleton-consumption group per input and retain zero/one/many output expansion.
@@ -37,6 +37,14 @@ Batch constants/output paths are available as ``ExecutionContext.batch_arguments
 ``ReferenceRow.arguments`` is a dictionary of current typed values.
 Portable IOModel annotations are distinct from runtime numeric arrays/scalars, Paths, bytes, literal dictionaries and scoped references.
 See :doc:`/specs` §5.2 for the grammar and refusal rules; no historical DTO aliases or wire fallbacks are required.
+
+``describe_tool_declaration(tool)`` captures the actual concrete Inputs/Outputs semantic declaration through the shared finite annotation grammar.
+``describe_io_model(model, passthrough=False)`` projects ordered fields without serializing defaults or GUI values; ``None`` remains an explicit absent declaration for controller-only tools.
+``validate_tool_declaration(value)`` admits a detached concrete processing declaration, ``declaration_digest(value)`` hashes its strictly typed facts, and ``compare_tool_declarations(expected, actual)`` refuses with a field path on mismatch.
+The worker compares after tool construction and before the scientific method; its successful result digest must match the task before output acceptance.
+Different Python IOModel class names do not change semantic equality, while boolean/integer/float literal distinctions and field order remain authoritative.
+``DECLARATION_CONTRACT_VERSION`` distinguishes attested cache records from records produced before this contract.
+These APIs do not attest arbitrary initializers, custom validators, later process-global mutation or installed dependency content.
 
 Supported external-command helpers
 -----------------------------------

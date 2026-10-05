@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow_core.declarations import describe_tool_declaration
+
 from collections.abc import Callable
 from dataclasses import replace
 import threading
@@ -127,6 +129,7 @@ class ParslBackend:
                     invocation_id=request.invocation_id,
                     cache_attempt_id=request.cache_attempt_id,
                     tool=route.requirement.tool_origin,
+                    declaration=describe_tool_declaration(request.tool),
                     rows=rows,
                     batch_context=request.batch_context.to_dict(),
                 ),
@@ -138,6 +141,7 @@ class ParslBackend:
                     invocation_id=request.invocation_id,
                     cache_attempt_id=request.cache_attempt_id,
                     tool=route.requirement.tool_origin,
+                    declaration=describe_tool_declaration(request.tool),
                     rows=rows,
                     row_chunk_size=self._task_policy.row_chunk_size,
                 )

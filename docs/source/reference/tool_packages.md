@@ -57,6 +57,8 @@ Reusable cache lookup and execution consume one admitted executable capture rath
 Captured custom tools retain their admitted source content and canonical module/class identity; loading another single-file source with the same logical ID must not retarget the earlier definition.
 Ordinary Direct tools remain supported and cacheable from their actual retained primary callbacks and represented code, defaults, closed literal state and same-source helper facts, with configured values and declarations supplied by the effective definition capture.
 Managed source admission compiles captured bytes without executing imports and refuses proven resident/source primary, literal-global, helper or default mismatches before lookup; these controller-local bytecode comparisons are not cross-Python worker tokens.
+Current ProcessingTask/result v4 uses the shared Core declaration projector: the loaded instance must match the requested portable IO contract before the scientific method, and the controller checks the successful digest before output acceptance.
+This does not prove arbitrary constructor/module initializer effects, custom validator behavior or installed/transitive dependency bytes.
 Retaining a callback prevents later method replacement from selecting another function, but does not freeze arbitrary module globals or closures after admission.
 Mutable observational globals, dynamic initializers, opaque imported/native modules and installed transitive dependencies remain explicitly qualified; current paths, package labels and matching primary code alone are not complete executable-content proof.
 

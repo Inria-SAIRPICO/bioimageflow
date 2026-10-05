@@ -21,7 +21,7 @@ from .common import (
     get_args,
     get_origin,
 )
-from .type_descriptors import encode_annotation
+from bioimageflow_core.type_descriptors import encode_annotation
 
 from .schema import (
     _input_connectable,

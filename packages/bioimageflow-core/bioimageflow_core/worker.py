@@ -8,6 +8,7 @@ import inspect
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
+from bioimageflow_core.declarations import compare_tool_declarations, declaration_digest, describe_tool_declaration
 from bioimageflow_core.shared_memory import SharedMemoryContext, collect_input_scopes
 from bioimageflow_core.tool import IOModel, ProcessingTool
 from bioimageflow_core.worker_origins import load_worker_tool
@@ -157,10 +158,12 @@ def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
     tool = load_worker_tool(invocation.tool)
     if tool.row_consumption.value != invocation.row_consumption:
         raise ValueError("Task row_consumption does not match the admitted tool declaration.")
+    declaration = describe_tool_declaration(tool)
+    compare_tool_declarations(invocation.declaration, declaration)
     output_type = tool.Outputs
     if output_type is None:
         raise TypeError(f"{type(tool).__name__} does not declare Outputs.")
-    fields = tuple(output_type._get_all_annotations())
+    fields = tuple(declaration["outputs"]["field_names"])
     if invocation.mode == "row_chunk":
         groups = _execute_rows(invocation, tool, output_type, fields, task)
     else:
@@ -173,5 +176,6 @@ def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
         task_retry=invocation.task_retry,
         mode=invocation.mode,
         row_consumption=invocation.row_consumption,
+        declaration_digest=declaration_digest(declaration),
         groups=groups,
     ))

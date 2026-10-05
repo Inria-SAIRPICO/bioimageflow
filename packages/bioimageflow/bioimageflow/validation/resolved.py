@@ -19,7 +19,7 @@ from bioimageflow_core import (
 )
 from bioimageflow_core.viewer import ViewerSpec
 from .models import SchemaSerializationError
-from .type_descriptors import decode_annotation, encode_annotation
+from bioimageflow_core.type_descriptors import decode_annotation, encode_annotation
 
 
 @dataclass(frozen=True)
