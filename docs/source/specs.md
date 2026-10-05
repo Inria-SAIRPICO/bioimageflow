@@ -2695,7 +2695,10 @@ This value projection does not replace the separate structural authorities for b
 These rules preserve the existing scalar, dtype and nonfinite-value identity grammar and do not claim verified executable-content identity from a class selector or package label.
 Compilation retains provider/selector recipes without substituting workflow-boundary diagnostic signatures.
 Planning reports `PENDING_UPSTREAM` while a recipe depends on an unresolved selection.
-At runtime, if any consumed value has no selected immutable provider record, the resolver returns `None`; that node and every dependent consumer execute without reusable lookup or publication unless a later explicit contract creates a selected record.
+Compilation and planning may retain an optional signature and report `PENDING_UPSTREAM` until provider selections exist.
+During actual Workflow Processing execution, an unavailable consumed provider selection is an invariant error before attempt-workspace acquisition or scientific dispatch (§5.2).
+When a local DataFrameTool's selected-provider identity is unavailable, its current execution path performs no reusable lookup or publication; downstream Processing still requires its own admitted selection.
+This does not redefine the independent public Storage transient-workspace or launcher transient-return contracts.
 
 Result keys are stored under the canonical cache root:
 
