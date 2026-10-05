@@ -124,7 +124,7 @@ def dataframe_publish(
             destination = candidate / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, destination)
-        (candidate / "dataframe.parquet").write_bytes(staging_parquet.read_bytes())
+        shutil.copyfile(staging_parquet, candidate / "dataframe.parquet")
         manifest = RecordManifest(
             result_key=result_key,
             record_id=record_id,
