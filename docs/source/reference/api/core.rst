@@ -46,6 +46,18 @@ Different Python IOModel class names do not change semantic equality, while bool
 ``DECLARATION_CONTRACT_VERSION`` distinguishes attested cache records from records produced before this contract.
 These APIs do not attest arbitrary initializers, custom validators, later process-global mutation or installed dependency content.
 
+Versioned import authority
+--------------------------
+
+``bioimageflow_core.import_context.admit_import_root(root, import_package=..., dependency_authority=...)`` captures declared import selection facts without importing tool code.
+``selected_import_root(admission)`` serializes owned import contexts and restores caller search paths on success or error.
+``selected_installation`` admits loaded distribution membership and exact dependency versions when present in the selected installation; host-only active requirements use compatible metadata-owned providers.
+``managed_runtime`` uses compatible actual worker dependencies while keeping the selected tool under its synthetic package path.
+Unknown ownership or incompatible active declarations refuse without purging foreign modules.
+``ImportRootAdmission.to_scientific_facts()`` returns detached declared dependency versions, while ``observed_dependencies`` reports current executor authority without claiming byte equality.
+Inactive package-wide dependencies do not force orchestrator packages into Core-only scientific workers.
+Successful-return validation covers newly imported dependencies; arbitrary external threads, initializer side effects, dependency contents and complete solver-generation attestation remain outside this finite contract.
+
 Supported external-command helpers
 -----------------------------------
 

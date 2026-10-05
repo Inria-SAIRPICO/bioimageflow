@@ -13,11 +13,15 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 from bioimageflow.paths import get_tool_store_path
+from bioimageflow_core.import_context import admit_import_root, selected_import_root
+
+from bioimageflow.installation import admit_installation, installation_target, publish_installation, validate_installation_selectors
 
 logger = logging.getLogger("bioimageflow")
 
@@ -39,12 +43,17 @@ def load_versioned_package(
     """
     if store_path is None:
         store_path = get_tool_store_path()
-    pkg_dir = store_path / package / version / package
+    validate_installation_selectors(package, version, None)
+    target = installation_target(store_path, package, version)
+    pkg_dir = target / package
     if not pkg_dir.exists():
         raise FileNotFoundError(
             f"Versioned package not found: {pkg_dir}. "
             f"Install with: bioimageflow install {package}=={version}"
         )
+
+    admit_installation(target, package, version)
+    admission = admit_import_root(target, import_package=package)
 
     scoped_name = _scoped_name(package, version)
 
@@ -66,15 +75,8 @@ def load_versioned_package(
     if scoped_name in previous:
         cached = previous[scoped_name]
         assert cached is not None
-        return cached
-
-    # Add the version directory to sys.path so transitive dependencies
-    # installed alongside the package (via uv pip install --target) are
-    # importable by main-process code (DataFrameTools, __init__.py, etc.)
-    version_dir = str(store_path / package / version)
-    added_path = version_dir not in sys.path
-    if added_path:
-        sys.path.insert(0, version_dir)
+        with selected_import_root(admission):
+            return cached
 
     # Register top-level package
     init_path = pkg_dir / "__init__.py"
@@ -94,10 +96,11 @@ def load_versioned_package(
     sys.meta_path.insert(0, hook)
     try:
         try:
-            assert spec.loader is not None
-            spec.loader.exec_module(mod)
-            _materialize_public_exports(mod)
-            _stamp_tool_classes(package, version)
+            with selected_import_root(admission):
+                assert spec.loader is not None
+                spec.loader.exec_module(mod)
+                _materialize_public_exports(mod)
+                _stamp_tool_classes(package, version)
         except BaseException:
             owned = {
                 name: module
@@ -108,8 +111,6 @@ def load_versioned_package(
             for name, module in owned.items():
                 if sys.modules.get(name) is module:
                     sys.modules.pop(name)
-            if added_path and version_dir in sys.path:
-                sys.path.remove(version_dir)
             raise
     finally:
         sys.meta_path.remove(hook)
@@ -135,8 +136,8 @@ def _require_selected_root(module: ModuleType, expected: Path) -> None:
 def unload_versioned_package(package: str, version: str) -> None:
     """Remove all sys.modules entries for a scoped package version.
 
-    Also removes canonical name aliases and the sys.path entry for
-    transitive dependencies.
+    Also removes canonical name aliases owned by those exact module objects.
+    Caller search paths are preserved.
     """
     prefix = _scoped_name(package, version)
 
@@ -157,10 +158,6 @@ def unload_versioned_package(package: str, version: str) -> None:
     for k in canonical_to_remove:
         del sys.modules[k]
 
-    # Remove sys.path entries for transitive deps
-    # Match any path ending with <package>/<version>
-    suffix = str(Path(package) / version)
-    sys.path[:] = [p for p in sys.path if not p.endswith(suffix)]
 
 
 def get_tool_package_info(tool: Any) -> tuple[str | None, str | None, str]:
@@ -322,11 +319,12 @@ def _register_canonical_names(package: str, version: str) -> None:
     needed (the typical PEP 723 use-case).
     """
     prefix = _scoped_name(package, version)
-    for scoped_key in list(sys.modules):
-        if scoped_key == prefix or scoped_key.startswith(f"{prefix}."):
-            # "dummy_tools__1_0_0.alpha" -> "dummy_tools.alpha"
-            canonical = package + scoped_key[len(prefix) :]
-            sys.modules[canonical] = sys.modules[scoped_key]
+    aliases = {package + name[len(prefix):]: module for name, module in tuple(sys.modules.items())
+               if name == prefix or name.startswith(prefix + ".")}
+    for canonical, module in aliases.items():
+        if canonical in sys.modules and sys.modules[canonical] is not module:
+            raise ImportError(f"Canonical tool alias {canonical!r} already has a foreign owner")
+    sys.modules.update(aliases)
 
 
 # ── PEP 723 parsing ─────────────────────────────────────────────────
@@ -419,45 +417,43 @@ def ensure_installed(
     dependencies can set ``install_dependencies=False`` to install only the
     tool distribution. Worker dependencies remain owned by ``EnvironmentSpec``.
     """
-    pkg_dir = store_path / pkg_name / version / pkg_name
-    if pkg_dir.exists():
+    validate_installation_selectors(pkg_name, version, pypi_name)
+    target = installation_target(store_path, pkg_name, version)
+    if target.exists() or target.is_symlink():
+        admit_installation(target, pkg_name, version, distribution=pypi_name)
         return
-
-    target = store_path / pkg_name / version
-    target.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Installing %s==%s into tool store (%s)", pypi_name, version, target)
-
+    target.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{version}-install-", dir=target.parent))
+    logger.info("Installing %s==%s into owned staging (%s)", pypi_name, version, stage)
+    primary: BaseException | None = None
     try:
-        command = [sys.executable, "-m", "pip", "install", "--target", str(target)]
+        command = [sys.executable, "-m", "pip", "install", "--target", str(stage)]
         if not install_dependencies:
             command.append("--no-deps")
         command.append(f"{pypi_name}=={version}")
-        subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        shutil.rmtree(target, ignore_errors=True)
-        details = (
-            exc.stderr.strip()
-            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
-            else str(exc)
-        )
-        raise RuntimeError(
-            f"Failed to install {pypi_name}=={version} into tool store.\n{details}"
-        ) from exc
-
-    # Verify the package appeared
-    if not pkg_dir.exists():
-        shutil.rmtree(target, ignore_errors=True)
-        raise RuntimeError(
-            f"Installation of {pypi_name}=={version} succeeded but "
-            f"expected module '{pkg_name}' not found in {target}. "
-            f"Check that the PyPI package name maps to module '{pkg_name}'."
-        )
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            details = (exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError)
+                       and exc.stderr else str(exc))
+            raise RuntimeError(
+                f"Failed to install {pypi_name}=={version} into tool store.\n{details}"
+            ) from exc
+        admit_installation(stage, pkg_name, version, distribution=pypi_name)
+        publish_installation(stage, target)
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        # stage is this invocation's exclusive namespace; never delete target.
+        try:
+            shutil.rmtree(stage)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            if primary is None:
+                raise
+            logger.exception("Owned installation staging cleanup failed: %s", stage)
 
 
 # ── Top-level API ────────────────────────────────────────────────────

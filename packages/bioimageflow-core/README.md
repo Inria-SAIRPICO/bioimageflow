@@ -80,3 +80,12 @@ A cached version-scoped package from a different store root is refused rather th
 Failed initialization or construction does not publish a tool instance; only newly admitted source/version-scoped modules are removed on failure, preserving preexisting modules.
 These checks establish local selected-source membership; installed/versioned selectors still do not prove identical full content or transitive dependencies across controller and worker environments.
 Ordinary programmatic Direct tools and existing origin variants remain supported.
+Versioned local loading uses `bioimageflow_core.import_context.admit_import_root` and `selected_import_root` with `selected_installation` dependency authority.
+A loaded dependency must have actual installed RECORD or supported editable-project membership and satisfy active declarations.
+When the dependency is present in the selected installation, its exact selected distribution version must match; host-only providers use compatible metadata-owned versions.
+Unknown or mismatched ownership refuses without replacing caller modules.
+Managed workers explicitly use `managed_runtime`: the selected tool remains under its exact synthetic package path, while active dependencies come from the worker runtime and satisfy declared requirements without requiring controller/worker NumPy equality.
+Managed loading never adds the entire controller tool-store root to the worker search path.
+The shared context covers initialization, construction and scientific callbacks, restores caller search paths, and validates newly imported dependencies before successful return.
+A primary tool error remains primary; post-return checks do not promise that arbitrary lazy imports were refused before method execution or initializer side effects.
+Declared dependency versions and observed executor authority are distinct from dependency-byte equality and complete resolved recipe-generation proof.

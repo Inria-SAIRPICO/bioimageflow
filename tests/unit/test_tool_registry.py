@@ -59,6 +59,10 @@ def tool_store(tmp_path):
         "    def process_row(self, arguments: Arguments):\n"
         "        return self.Outputs(result='ok-v2')\n"
     )
+    from tests.testkit.tool_loader import record_distribution
+
+    for version in ("1.0.0", "2.0.0"):
+        record_distribution(store / "dummy_tools" / version, "dummy_tools", version)
     return store
 
 
@@ -97,6 +101,9 @@ def tool_store_lazy_exports(tmp_path):
         "    def process_row(self, arguments: Arguments):\n"
         "        return self.Outputs(result='ok')\n"
     )
+    from tests.testkit.tool_loader import record_distribution
+
+    record_distribution(pkg_dir.parent, "lazy_tools", "1.0.0")
     return store
 
 
@@ -269,6 +276,9 @@ def tool_store_absolute_imports(tmp_path):
         "    def process_row(self, arguments: Arguments):\n"
         "        return self.Outputs(result='ok')\n"
     )
+    from tests.testkit.tool_loader import record_distribution
+
+    record_distribution(pkg_dir.parent, "abs_tools", "1.0.0")
     yield store
     for k in [k for k in sys.modules if k.startswith("abs_tools")]:
         del sys.modules[k]
@@ -304,6 +314,9 @@ def test_registration_refuses_schema_failure_without_partial_publication(tool_st
         "    class Inputs(IOModel):\n"
         "        value: 'UndefinedAnnotation'\n"
     )
+    from tests.testkit.tool_loader import record_distribution
+
+    record_distribution(package.parent, "dummy_tools", "1.0.0")
     registry = ToolRegistry(store_path=tool_store)
     with pytest.raises((NameError, TypeError, ValueError)):
         registry.register_package("dummy_tools", "1.0.0")
@@ -321,6 +334,9 @@ def test_registry_skips_processing_family_keeps_dynamic_and_owns_metadata(tool_s
             "class Dynamic(DataFrameTool):\n"
             "    class Inputs(IOModel):\n        values: list = [1]\n"
         )
+    from tests.testkit.tool_loader import record_distribution
+
+    record_distribution(package.parent, "dummy_tools", "1.0.0")
     registry = ToolRegistry(store_path=tool_store)
     discovered = registry.register_package("dummy_tools", "1.0.0")
     assert {item.class_name for item in discovered} == {"AlphaTool", "Dynamic"}

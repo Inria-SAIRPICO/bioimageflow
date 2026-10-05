@@ -9,9 +9,10 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from bioimageflow_core.arguments import Arguments, ExecutionContext
 from bioimageflow_core.declarations import compare_tool_declarations, declaration_digest, describe_tool_declaration
+from bioimageflow_core.import_context import admit_import_root, selected_import_root
 from bioimageflow_core.shared_memory import SharedMemoryContext, collect_input_scopes
 from bioimageflow_core.tool import IOModel, ProcessingTool
-from bioimageflow_core.worker_origins import load_worker_tool
+from bioimageflow_core.worker_origins import VersionedModuleOriginV1, _load_worker_tool, load_worker_tool
 from bioimageflow_core.worker_protocol import (
     ConsumedRow,
     OutputGroup,
@@ -155,7 +156,18 @@ def execute_processing_task(
 
 
 def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
-    tool = load_worker_tool(invocation.tool)
+    origin = invocation.tool
+    if isinstance(origin, VersionedModuleOriginV1):
+        admission = admit_import_root(origin.store_root, import_package=origin.import_package,
+                                      dependency_authority="managed_runtime")
+        with selected_import_root(admission):
+            return _execute_admitted(invocation, task=task, admission=admission)
+    return _execute_admitted(invocation, task=task)
+
+
+def _execute_admitted(invocation: ProcessingTask, *, task: Any, admission: Any = None) -> Dict[str, Any]:
+    tool = (_load_worker_tool(invocation.tool, admission=admission) if admission is not None
+            else load_worker_tool(invocation.tool, dependency_authority="managed_runtime"))
     if tool.row_consumption.value != invocation.row_consumption:
         raise ValueError("Task row_consumption does not match the admitted tool declaration.")
     declaration = describe_tool_declaration(tool)

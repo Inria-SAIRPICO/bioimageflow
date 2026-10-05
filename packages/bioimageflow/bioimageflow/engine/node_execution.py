@@ -284,9 +284,7 @@ class _NodeExecutionMixin:
             else None
         )
 
-        result_key = (
-            dataframe_result_key(node.name, sig_hash) if sig_hash is not None else None
-        )
+        result_key = dataframe_result_key(node.name, sig_hash) if sig_hash is not None else None
         if sig_hash is not None:
             cached = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
             if cached is not None:
@@ -310,9 +308,10 @@ class _NodeExecutionMixin:
 
         if len(dfs) > 1:
             dfs = self._align_dataframes_for_merge(dfs)
-        callbacks = self._capture_executable(node).callbacks
-        merged = callbacks["merge_dataframes"](dfs, arguments)
-        df = callbacks["transform"](merged, arguments)
+        capture = self._capture_executable(node)
+        with capture.execution_context():
+            merged = capture.callbacks["merge_dataframes"](dfs, arguments)
+            df = capture.callbacks["transform"](merged, arguments)
         df = self._normalize_path_output_columns(df, node.tool)
         df.index = df.index.astype(str)
         if not dfs:

@@ -258,6 +258,8 @@ def test_failed_package_preserves_preexisting_path_and_allows_retry(
         load_versioned_package("broken_lazy_tools", "1.0.0", broken_lazy_tool_store)
     assert str(version_dir) in sys.path
     (version_dir / "broken_lazy_tools" / "__init__.py").write_text("READY = 7\n")
+    from tests.testkit.tool_loader import record_distribution
+    record_distribution(version_dir, "broken_lazy_tools", "1.0.0")
     assert (
         load_versioned_package(
             "broken_lazy_tools", "1.0.0", broken_lazy_tool_store
@@ -275,6 +277,8 @@ def test_cached_namespace_subpackage_keeps_selected_root(tool_store):
     (namespace / "child.py").write_text("VALUE = 7\n")
     init = package / "__init__.py"
     init.write_text(init.read_text() + "\nfrom .namespace.child import VALUE\n")
+    from tests.testkit.tool_loader import record_distribution
+    record_distribution(package.parent, "dummy_tools", "1.0.0")
     first = load_versioned_package("dummy_tools", "1.0.0", tool_store)
     assert first.VALUE == 7
     assert load_versioned_package("dummy_tools", "1.0.0", tool_store) is first

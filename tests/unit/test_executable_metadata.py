@@ -4,6 +4,8 @@ import importlib.metadata
 
 from bioimageflow.worker_origins import ExecutableMetadata
 
+pytest_plugins = ("tests.testkit.tool_loader",)
+
 
 def test_package_map_shared_across_roots_and_refreshed_next_operation(monkeypatch):
     calls = []
@@ -48,3 +50,27 @@ def test_explicit_distribution_facts_do_not_use_package_discovery(monkeypatch):
     assert metadata.resolve("first", "same-dist") == ("same-dist", "4")
     assert metadata.resolve("second", "same-dist") == ("same-dist", "4")
     assert calls == ["same-dist"]
+
+
+def test_selected_root_admission_shared_and_refreshed_next_operation(tool_store, monkeypatch):
+    from bioimageflow import worker_origins
+    from bioimageflow_core.import_context import admit_import_root
+
+    calls = []
+    def admit(root, *, import_package):
+        calls.append((root, import_package))
+        return admit_import_root(root, import_package=import_package)
+    monkeypatch.setattr(worker_origins, "admit_import_root", admit)
+    metadata = ExecutableMetadata()
+    root = str(tool_store / "dummy_tools" / "1.0.0")
+    first = metadata.import_admission(root, "dummy_tools")
+    assert metadata.import_admission(root, "dummy_tools") is first
+    assert first.to_scientific_facts() == {"dependency_versions": {"dep-pkg": "1.0.0"}}
+    assert len(calls) == 1
+    dependency_metadata = tool_store / "dummy_tools" / "1.0.0" / "dep_pkg-1.0.0.dist-info" / "METADATA"
+    dependency_metadata.write_text(dependency_metadata.read_text().replace("Version: 1.0.0", "Version: 9.0.0"))
+    assert metadata.import_admission(root, "dummy_tools") is first
+    metadata.clear()
+    refreshed = metadata.import_admission(root, "dummy_tools")
+    assert refreshed.to_scientific_facts() == {"dependency_versions": {"dep-pkg": "9.0.0"}}
+    assert len(calls) == 2

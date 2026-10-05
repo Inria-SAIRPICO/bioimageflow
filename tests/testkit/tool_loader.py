@@ -3,6 +3,10 @@
 # ruff: noqa: F401
 
 import inspect
+import base64
+import csv
+import hashlib
+from pathlib import Path
 
 import json
 
@@ -13,6 +17,26 @@ import pytest
 from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec
 
 from bioimageflow.dataframe_tool import DataFrameTool
+
+
+def record_distribution(root: Path, package: str, version: str) -> None:
+    """Write standard distribution facts for the fixture's actual files."""
+    info = root / f"{package}-{version}.dist-info"
+    info.mkdir(exist_ok=True)
+    (info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {package.replace('_', '-')}\nVersion: {version}\n"
+    )
+    (info / "top_level.txt").write_text(package + "\n")
+    record = info / "RECORD"
+    with record.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path == record or "__pycache__" in path.parts or path.relative_to(root).parts[0] not in {package, info.name}:
+                continue
+            content = path.read_bytes()
+            digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+            writer.writerow((path.relative_to(root).as_posix(), "sha256=" + digest, len(content)))
+        writer.writerow((record.relative_to(root).as_posix(), "", ""))
 
 
 @pytest.fixture
@@ -113,6 +137,8 @@ def tool_store(tmp_path):
         utils_dir.mkdir()
         (utils_dir / "__init__.py").write_text("from .helpers import helper_func\n")
         (utils_dir / "helpers.py").write_text("def helper_func():\n    return 42\n")
+        record_distribution(pkg_dir.parent, "dummy_tools", version)
+        record_distribution(pkg_dir.parent, "dep_pkg", "1.0.0")
 
     return store
 
@@ -172,6 +198,8 @@ def lazy_tool_store(tmp_path):
             "        return pd.DataFrame({'value': list(range(arguments.count))})\n"
         )
 
+        record_distribution(pkg_dir.parent, "lazy_tools", version)
+
     return store
 
 
@@ -186,6 +214,7 @@ def broken_lazy_tool_store(tmp_path):
         "def __getattr__(name: str):\n"
         "    raise RuntimeError(f'cannot load {name}')\n"
     )
+    record_distribution(pkg_dir.parent, "broken_lazy_tools", "1.0.0")
     return store
 
 
@@ -204,6 +233,7 @@ def _cleanup_sys_modules():
                 "lazy_tools",
                 "broken_lazy_tools__",
                 "broken_lazy_tools",
+                "dep_pkg",
             )
         )
     ]
@@ -219,6 +249,7 @@ def _cleanup_sys_modules():
                 "dummy_tools",
                 "lazy_tools",
                 "broken_lazy_tools",
+                "dep_pkg",
             )
         )
     ]

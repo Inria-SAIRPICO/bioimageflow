@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import re
 from dataclasses import dataclass, field
+from contextlib import nullcontext
+from bioimageflow_core.import_context import ImportRootAdmission, admit_import_root, selected_import_root
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
@@ -86,8 +88,18 @@ def _find_distribution(
 class ExecutableMetadata:
     """Metadata facts owned by one admission operation, never a global cache."""
 
+    _imports: dict[tuple[str, str, str | None], ImportRootAdmission] = field(default_factory=dict)
     _packages: Mapping[str, list[str]] | None = None
     _versions: dict[tuple[str, str], tuple[str, str] | None] = field(default_factory=dict)
+
+    def import_admission(self, root: str, package: str, version: str | None = None) -> ImportRootAdmission:
+        """Share one metadata admission per immutable selection in this operation."""
+        key = (str(Path(root).resolve()), package, version)
+        if key not in self._imports:
+            if version is not None and _find_distribution(package, root=Path(key[0]))[1] != version:
+                raise ValueError("Selected installation version changed before executable admission")
+            self._imports[key] = admit_import_root(key[0], import_package=package)
+        return self._imports[key]
 
     def resolve(self, import_root: str, distribution: str | None) -> tuple[str, str] | None:
         key = ("distribution", distribution) if distribution is not None else ("package", import_root)
@@ -104,6 +116,7 @@ class ExecutableMetadata:
         return self._versions[key]
 
     def clear(self) -> None:
+        self._imports.clear()
         self._packages = None
         self._versions.clear()
 
@@ -276,6 +289,13 @@ class ExecutableCapture:
     callbacks: Mapping[str, Callable[..., Any]]
     worker_origin: WorkerToolOriginV1 | None
     qualification: tuple[str, ...]
+    import_admission: ImportRootAdmission | None = None
+
+    def execution_context(self):
+        return nullcontext() if self.import_admission is None else selected_import_root(self.import_admission)
+
+    def dependency_provenance(self) -> tuple[dict[str, str], ...]:
+        return () if self.import_admission is None else self.import_admission.observed_dependencies
 
 
 def _declaration_identity(tool: Any) -> dict[str, Any]:
@@ -328,6 +348,14 @@ def capture_tool_executable(
                            "declaration_contract": DECLARATION_CONTRACT_VERSION}
     custom_hash = getattr(klass, "_bif_custom_source_hash", None)
     origin = None
+    import_admission = None
+    package = getattr(klass, "_bif_package", None)
+    if isinstance(package, str) and declared_version is not None:
+        source_file = Path(inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
+        selected_root = _versioned_store_root(source_file, package, declared_version)
+        admission_metadata = ExecutableMetadata() if metadata is None else metadata
+        import_admission = admission_metadata.import_admission(str(selected_root), package, declared_version)
+        key.update(import_admission.to_scientific_facts())
     if managed or isinstance(custom_hash, str):
         path = Path(getattr(klass, "_bif_admitted_source_file", None) or inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
         source = path.read_bytes()
@@ -368,4 +396,4 @@ def capture_tool_executable(
         # objects or execution resources.
         key["declared_dependencies"] = json.loads(canonicalize(environment.dependencies))
     qualification = tuple(sorted(set(qualification) | {"custom annotation validator closure unproved"}))
-    return ExecutableCapture(MappingProxyType(key), MappingProxyType(callbacks), origin, qualification)
+    return ExecutableCapture(MappingProxyType(key), MappingProxyType(callbacks), origin, qualification, import_admission)

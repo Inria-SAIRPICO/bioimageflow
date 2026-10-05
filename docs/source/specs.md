@@ -1571,6 +1571,17 @@ The Direct test backend executes ProcessingTools in the current interpreter, so 
 This tool-store operation is intentionally independent of the Wetlands 2 environment lifecycle.
 Set `BIOIMAGEFLOW_TOOL_STORE` when a workflow needs an explicit shared or project-local store.
 
+Installation readiness admits the requested canonical distribution name and version, its RECORD integrity and concrete recorded import-member resolution under the selected target root; directory existence alone is not readiness.
+Import-package identifiers and PEP 440 version selectors are validated before directory creation or pip; prerelease/local versions remain valid, and a package child resolving outside the selected store is refused without altering its files.
+The explicitly selected store may itself resolve to a configured location; this does not authorize escaping links beneath it.
+A validated completed installation is reused without another pip invocation.
+An incomplete, wrong-version or foreign occupied target is refused with a `ValueError` identifying the requested package, version and target, without running pip or replacing/deleting its preexisting files.
+Fresh installations write to unique task-owned staging, validate readiness there, then publish the complete tree atomically without replacing an existing target.
+A publication collision raises `FileExistsError` and preserves the winner, including an empty directory created by another owner.
+Failed pip installation retains its detailed `RuntimeError` and original cause; failure cleanup removes only that attempt's owned staging, not an occupied final target or another attempt's files.
+This installation admission resolves the import member without executing its initializer; actual loading and construction remain subsequent gates that preserve preexisting namespace owners and do not sandbox arbitrary trusted initializer effects.
+This bounded requested-distribution readiness does not establish controller/worker installed-byte equality or full transitive dependency closure, which remain qualified separately in Sections 5.2 and 6.4.
+
 #### Versioned Loading
 
 `load_versioned_package(package, version, store_path)` loads a tool package from the tool store into an **isolated namespace** in `sys.modules`. The package is scoped under a synthetic name (e.g., `simpleitk_tools__1_0_0`) so that two loads of the same package at different versions produce **distinct class objects** that share `bioimageflow-core` base classes (since those come from the orchestrator's own environment).
@@ -1634,14 +1645,18 @@ The `get_tool_version()` function (used by the cache system) checks `_bif_packag
 
 #### Cleanup
 
-`unload_versioned_package(package, version)` removes all `sys.modules` entries for a scoped package version, including any canonical name aliases created by `require_tool_packages`. It also removes the corresponding `sys.path` entry for transitive dependencies. After unloading, `load_versioned_package` for the same version loads fresh module and class objects.
+`unload_versioned_package(package, version)` removes the selected scoped package entries and canonical aliases pointing to those module objects, without purging unrelated third-party dependencies.
+After unloading, `load_versioned_package` for the same version loads fresh module and class objects.
 
 #### Transitive Dependencies
 
-**Accepted target — S11:** Scoped tool classes do not imply that conflicting ordinary third-party dependencies are independently isolated in the orchestrator.
-Admit a coherent host dependency set or refuse conflicts explicitly, while preserving trusted Python relative imports/helpers/assets.
-
-When a versioned package is loaded, its version directory (e.g., `~/.bioimageflow/tool_packages/simpleitk_tools/1.0.0/`) is prepended to `sys.path`. This makes third-party libraries installed alongside the package by default importable by main-process code. With `install_dependencies=False`, `DataFrameTool` classes and package import code instead use dependencies supplied by the host. The entry is removed on `unload_versioned_package`.
+Scoped tool classes do not imply independently isolated ordinary third-party dependencies.
+Controller/local `selected_installation` admission permits already loaded dependencies only when actual distribution membership and version are compatible with the selected installation and applicable declared requirements; unequal or unknown ownership is refused without replacing the foreign modules.
+Selected-root loading, initialization and tool callbacks use a shared locked context that temporarily exposes the installation path and restores the caller's `sys.path` on success or failure; trusted relative imports/helpers/assets remain available.
+With `install_dependencies=False`, dependencies supplied by the host remain subject to applicable declaration and ownership checks rather than being copied into the tool store.
+Managed `managed_runtime` admission resolves dependencies in the actual child environment and validates active imported membership and applicable requirements; it does not prepend the whole controller installation as a dependency fallback or require inactive package-wide dependencies solely because they appear in metadata.
+New lazy imports are validated before successful publication, while a primary tool exception remains the primary failure.
+These checks preserve preexisting namespace owners and report observed dependency authority, but do not solve environments, attest all transitive dependency bytes, isolate external Python threads or sandbox arbitrary initializer/global mutations.
 
 #### Shareable Workflow Scripts (PEP 723)
 

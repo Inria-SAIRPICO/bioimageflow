@@ -62,6 +62,24 @@ This does not prove arbitrary constructor/module initializer effects, custom val
 Retaining a callback prevents later method replacement from selecting another function, but does not freeze arbitrary module globals or closures after admission.
 Mutable observational globals, dynamic initializers, opaque imported/native modules and installed transitive dependencies remain explicitly qualified; current paths, package labels and matching primary code alone are not complete executable-content proof.
 
+## Tool Store Installation Readiness
+
+`ToolRegistry.install_package()` reuses a completed installation only after admitting the requested canonical distribution/version, RECORD integrity and concrete recorded import member under the selected target root.
+A package directory alone does not establish readiness.
+Invalid import-package identifiers or PEP 440 versions are refused before filesystem writes or pip, while valid prerelease/local versions are supported.
+The configured store may resolve to its chosen location, but a child link cannot redirect installation outside that store.
+Incomplete, wrong-version or foreign occupied targets raise `ValueError` with the requested package, version and target; installation does not overwrite or delete their files.
+Fresh installs run in unique owned staging and validate the resulting package before atomic publication without replacement.
+A racing existing target, including an empty directory, raises `FileExistsError` and remains intact.
+Pip failure preserves the detailed `RuntimeError` and original cause while cleaning only the attempt's staging.
+Installation admission resolves the import member without executing its initializer; actual loading/construction are later gates, and arbitrary initializer side effects are not sandboxed.
+These checks establish bounded requested-package readiness rather than universal dependency isolation or controller/worker installed-content equality.
+
+Versioned controller/local loading uses `selected_installation` dependency authority: compatible preloaded distributions need actual membership/version evidence, and unequal or unknown ownership is refused without purging foreign modules.
+Loading, initialization and tool callbacks use a scoped locked search-path context that restores caller paths; managed workers use `managed_runtime` authority in their own environment, without falling back to the entire controller store for dependencies.
+Active imports and applicable requirements are checked before successful publication, preserving the primary tool exception on failure.
+This is bounded dependency admission, not an environment solver, universal transitive-byte proof or sandbox for arbitrary trusted initializer/global effects.
+
 ## Package-Owned Documentation Contract
 
 Each package owns its README, `docs/index.md`, tool pages, workflow pages, tests, fixtures, examples, and small runtime assets.

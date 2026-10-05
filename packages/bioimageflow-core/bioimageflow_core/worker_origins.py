@@ -17,6 +17,7 @@ import threading
 from typing import Any, Dict, Iterator, Literal, Mapping, Optional, Tuple, Type, Union
 from urllib.parse import unquote, urlparse
 
+from bioimageflow_core.import_context import admit_import_root, selected_import_root
 from bioimageflow_core.tool import ProcessingTool
 
 
@@ -612,8 +613,7 @@ def _import_versioned(
         package.__package__ = scoped_root
         sys.modules[scoped_root] = package
         spec.loader.exec_module(package)
-    with _temporary_import_root(origin.store_root):
-        module = importlib.import_module(origin.scoped_module)
+    module = importlib.import_module(origin.scoped_module)
     module_file = getattr(module, "__file__", None)
     if not isinstance(module_file, str) or Path(module_file).resolve(
         strict=True
@@ -736,8 +736,20 @@ def _load_origin_class(
         return candidate
 
 
-def load_worker_tool(origin: WorkerToolOriginV1) -> ProcessingTool:
-    """Load and cache one tool instance by its complete canonical origin."""
+def load_worker_tool(
+    origin: WorkerToolOriginV1, *, dependency_authority: str = "selected_installation",
+) -> ProcessingTool:
+    """Load one instance with explicit selected-installation or worker authority."""
+    if isinstance(origin, VersionedModuleOriginV1):
+        admission = admit_import_root(origin.store_root, import_package=origin.import_package,
+                                      dependency_authority=dependency_authority)
+        with selected_import_root(admission):
+            return _load_worker_tool(origin, admission=admission)
+    return _load_worker_tool(origin)
+
+
+def _load_worker_tool(origin: WorkerToolOriginV1, *, admission: Any = None) -> ProcessingTool:
+    """Publish a cached instance only after successful admitted construction."""
     validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
     identity = worker_tool_origin_identity(validated)
     with _instance_lock:
@@ -758,6 +770,8 @@ def load_worker_tool(origin: WorkerToolOriginV1) -> ProcessingTool:
             }
             try:
                 instance = _load_origin_class(validated, identity)()
+                if admission is not None:
+                    _ = admission.observed_dependencies  # Validate before instance publication.
             except BaseException:
                 if prefix is not None:
                     for name in list(sys.modules):

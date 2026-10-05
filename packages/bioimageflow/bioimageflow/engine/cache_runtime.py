@@ -170,6 +170,7 @@ class _CacheRuntimeMixin:
                 "version": self._capture_executable(node).scientific_key.get("declared_version"),
                 "executable": dict(self._capture_executable(node).scientific_key),
                 "executable_qualification": list(self._capture_executable(node).qualification),
+                "observed_dependencies": list(self._capture_executable(node).dependency_provenance()),
             },
             "logical_digest": sig_hash,
             "environment_hash": environment_hash,

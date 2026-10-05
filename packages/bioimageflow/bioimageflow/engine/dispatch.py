@@ -158,9 +158,11 @@ class _DispatchMixin:
             with borrowed.activate():
                 arguments, batch_values, reference_values = borrowed.bind_value(scope.inputs)
                 bound_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=tuple(ReferenceRow(row.position, row.row_index, values) for row, values in zip(batch_context.reference_rows, reference_values, strict=True)))
-                outputs = self._dispatch_direct_bound(
-                    tool, arguments, workflow, node_name, has_batch, row_contexts, bound_context,
-                )
+                node = next(node for node in self._compiled_ordinals if node.name == node_name)
+                with self._capture_executable(node).execution_context():
+                    outputs = self._dispatch_direct_bound(
+                        tool, arguments, workflow, node_name, has_batch, row_contexts, bound_context,
+                    )
             bound = scope.accept_outputs([list(group.outputs) for group in outputs])
             return [replace(group, outputs=tuple({field: getattr(output, field) for field in output._get_all_annotations()} for output in values)) for group, values in zip(outputs, bound, strict=True)]
         except BaseException:
