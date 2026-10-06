@@ -267,6 +267,28 @@ def test_release_set_publishes_validated_artifacts_in_dependency_order(
     assert all("--trusted-publishing" in command for command in commands)
 
 
+def test_release_set_validates_later_artifacts_before_any_upload(tmp_path: Path) -> None:
+    root = _create_release_set_repository(tmp_path)
+    plan = validate_release_set(
+        ["demo-core-v1.2.3", "demo-app-v2.0.0"], root=root,
+    )
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    first = next(item for item in plan.items if item.package.name == "demo-core")
+    _write_artifacts(
+        artifact_root / f"release-{first.package.name}-{first.version}", first.package,
+    )
+    commands: list[list[str]] = []
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    with pytest.raises(ReleaseError, match="Artifact directory does not exist"):
+        publish_release_set(plan, artifact_root, runner=runner)
+    assert commands == []
+
+
 def test_status_uses_package_specific_tag_to_detect_changes(tmp_path: Path) -> None:
     root, package = _create_release_repository(tmp_path)
 

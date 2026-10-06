@@ -1,7 +1,10 @@
 """DownloadImages — download images from URLs."""
 
 from pathlib import Path
+from hashlib import sha256
+import re
 from typing import Annotated, Any
+from urllib.parse import unquote, urlsplit
 
 from bioimageflow_core import (
     Arguments,
@@ -84,8 +87,13 @@ class DownloadImages(ProcessingTool):
         results = []
 
         for url in urls:
-            filename = url.rstrip("/").split("/")[-1]
-            dest = output_dir / filename
+            filename = unquote(urlsplit(url).path.rstrip("/").split("/")[-1]) or "download"
+            asset_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
+            if asset_name in {".", ".."}:
+                asset_name = "download"
+            url_dir = output_dir / sha256(url.encode("utf-8")).hexdigest()
+            url_dir.mkdir(parents=True, exist_ok=True)
+            dest = url_dir / asset_name
 
             if not dest.exists():
                 print(f"Downloading {url} ...")

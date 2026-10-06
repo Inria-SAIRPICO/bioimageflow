@@ -168,6 +168,20 @@ def _forbidden_members(members: list[str]) -> list[str]:
     return sorted(offenders)
 
 
+def test_core_source_declares_pep561_type_information() -> None:
+    assert (ROOT / "packages/bioimageflow-core/bioimageflow_core/py.typed").is_file()
+
+
+def test_core_type_marker_is_in_wheel_and_sdist(request: pytest.FixtureRequest) -> None:
+    name = "bioimageflow-core"
+    if name not in _distribution_names():
+        pytest.skip(f"{name} is not the selected release package")
+    artifacts = request.getfixturevalue("built_artifacts")
+    member = "bioimageflow_core/py.typed"
+    assert member in _wheel_members(_wheel_path(artifacts, name))
+    assert member in _sdist_members(_sdist_path(artifacts, name))
+
+
 def test_relative_prebuilt_artifact_dir_resolves_from_repo_root() -> None:
     assert _artifact_dir_from_env({PREBUILT_ARTIFACTS_ENV: "dist/packages"}) == (
         ROOT / "dist/packages"

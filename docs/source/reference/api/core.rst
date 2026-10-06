@@ -7,6 +7,7 @@ orchestrator-only dependencies such as pandas and pydantic.
 Core supports scientific worker Python >=3.9; the orchestrator floor is >=3.10.
 The declaration and current typed-value contracts are defined in :doc:`/specs`; generated member documentation is navigation, not a claim that every internal helper is supported.
 Public exported symbols and explicitly documented APIs form the curated support boundary.
+The source package declares ``py.typed`` for PEP 561 type discovery; the packaging tier checks its inclusion in actual wheels and source distributions.
 
 Types
 -----
@@ -106,6 +107,10 @@ Exact public helper signatures and conformance remain mapped by the ordered test
 
 Viewer Requirements
 -------------------
+
+Python ``NapariRequirement`` constructors accept package strings and requirement objects as authoring shorthand.
+Portable package collections are lists of strict ``PackageRequirement`` dictionaries; constructor shorthand is not portable wire grammar.
+Exported viewing manifests retain detached entries and return fresh ``outputs`` and ``to_dict()`` projections without changing held completeness.
 
 .. automodule:: bioimageflow_core.viewer
    :members:

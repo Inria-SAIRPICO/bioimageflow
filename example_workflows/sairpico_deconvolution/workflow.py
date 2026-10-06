@@ -42,8 +42,13 @@ class DeconvolutionMetrics(DataFrameTool):
         if len(dfs) != 2:
             raise ValueError("DeconvolutionMetrics expects combined PSF/denoised and deconvolved tables.")
         psf_denoised, deconvolved_table = (pd.DataFrame(df) for df in dfs)
+        if not psf_denoised.index.is_unique or not deconvolved_table.index.is_unique:
+            raise ValueError("DeconvolutionMetrics requires unique paired row indices.")
+        if len(psf_denoised) != len(deconvolved_table) or not psf_denoised.index.isin(deconvolved_table.index).all():
+            raise ValueError("DeconvolutionMetrics requires matching paired row indices.")
+        deconvolved_table = deconvolved_table.reindex(psf_denoised.index)
         rows = []
-        for index in range(min(len(psf_denoised), len(deconvolved_table))):
+        for index in range(len(psf_denoised)):
             input_path = str(arguments.input_image)
             psf_path = str(psf_denoised.iloc[index]["output_image_left"])
             denoised_path = str(psf_denoised.iloc[index]["output_image_right"])
@@ -62,7 +67,7 @@ class DeconvolutionMetrics(DataFrameTool):
                     "denoised_residual_noise": float(np.std(denoised - input_image)),
                 }
             )
-        return pd.DataFrame(rows)
+        return pd.DataFrame(rows, index=psf_denoised.index)
 
     def transform(self, df: Any, arguments: Any) -> pd.DataFrame:
         return pd.DataFrame(df)

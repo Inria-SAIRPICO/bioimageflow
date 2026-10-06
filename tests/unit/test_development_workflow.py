@@ -52,6 +52,7 @@ def test_parsl_import_boundaries_cover_core_and_shared_platform_layers(
     failures = import_boundary_violations(tmp_path)
 
     assert len(failures) == 4
+    assert len({failure.split(": forbidden import", 1)[0] for failure in failures}) == 4
     assert all("forbidden import" in failure for failure in failures)
 
 
@@ -85,6 +86,37 @@ def test_external_parsl_import_is_lazy_outside_the_parsl_package(
 
 def test_every_orchestrator_module_has_affected_test_ownership() -> None:
     assert unowned_platform_paths(root=ROOT) == []
+
+
+def test_relative_imports_and_guarded_worker_imports_respect_actual_boundaries(
+    tmp_path: Path,
+) -> None:
+    sources = {
+        "packages/bioimageflow/bioimageflow/storage/relative.py": (
+            "from .. import engine\nfrom ..engine import scheduler\n"
+        ),
+        "packages/bioimageflow-core/bioimageflow_core/worker.py": (
+            "try:\n    import pandas\nexcept ImportError:\n    pass\n"
+            "def invoke():\n    from bioimageflow import Workflow\n"
+        ),
+        "packages/bioimageflow-core/bioimageflow_core/declaration.py": (
+            "if True:\n    import pydantic\n"
+            "def scientific_callback():\n    import pandas\n"
+        ),
+    }
+    for relative, source in sources.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+
+    failures = import_boundary_violations(tmp_path)
+
+    assert len({item.split(": forbidden import", 1)[0] for item in failures}) == 5
+    assert any("relative.py:1: forbidden import bioimageflow.engine" in item for item in failures)
+    assert any("relative.py:2: forbidden import bioimageflow.engine" in item for item in failures)
+    assert any("worker.py:2: forbidden import pandas" in item for item in failures)
+    assert any("worker.py:6: forbidden import bioimageflow" in item for item in failures)
+    assert any("declaration.py:2: forbidden import pydantic" in item for item in failures)
 
 
 def test_every_orchestrator_module_has_exactly_one_source_owner() -> None:

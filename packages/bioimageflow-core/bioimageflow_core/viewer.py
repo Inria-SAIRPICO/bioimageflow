@@ -124,6 +124,12 @@ def _package_tuple(value: Any, *, field_name: str) -> tuple[PackageRequirement, 
     return tuple(result)
 
 
+def _wire_package_tuple(value: Any, *, field_name: str) -> tuple[PackageRequirement, ...]:
+    if not isinstance(value, list):
+        raise TypeError(f"{field_name} wire value must be a list of package objects.")
+    return tuple(PackageRequirement.from_dict(item) for item in value)
+
+
 @dataclass(frozen=True)
 class NapariRequirement:
     """Portable requirements for opening one output in napari."""
@@ -193,8 +199,12 @@ class NapariRequirement:
                 f"{sorted(fields)}; got {sorted(value)}."
             )
         return cls(
-            required_packages=value["required_packages"],
-            recommended_packages=value["recommended_packages"],
+            required_packages=_wire_package_tuple(
+                value["required_packages"], field_name="NapariRequirement.required_packages",
+            ),
+            recommended_packages=_wire_package_tuple(
+                value["recommended_packages"], field_name="NapariRequirement.recommended_packages",
+            ),
             napari_version=value["napari_version"],
             reader_id=value["reader_id"],
         )

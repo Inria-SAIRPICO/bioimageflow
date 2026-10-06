@@ -276,6 +276,22 @@ class _RunViewsMixin:
     def read_run_node_result(self, run_id: str, node_key: str) -> RunNodeResult:
         """Validate and return one retained run/node result through public APIs."""
         payload = self._validate_run_node_view(run_id, node_key)
+        return self._run_node_result(payload)
+
+    def read_latest_node_result(self, node_key: str) -> RunNodeResult | None:
+        """Capture the current per-node selection, or return None if absent."""
+        latest_path = self._latest_node_path(node_key)
+        try:
+            latest_path.lstat()
+        except FileNotFoundError:
+            return None
+        payload = self._latest_node_payload(latest_path)
+        if payload["node_key"] != node_key:
+            raise CacheCorruptionError("Latest node pointer selects a different node.")
+        return self._run_node_result(payload)
+
+    @staticmethod
+    def _run_node_result(payload: dict[str, Any]) -> RunNodeResult:
         viewers = payload.get("viewers", {})
         from bioimageflow_core import ViewerSpec
 

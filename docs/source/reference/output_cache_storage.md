@@ -11,6 +11,8 @@ The human-facing output tree is a derived view over the canonical cache.
 A first-valid loser consumes the selected winner; linked views are read-only projections and never another writable result authority.
 Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address through one exact record admission.
 The public `Storage.load_record(result_key, record_id)` returns the admitted manifest, dataframe and record directory.
+`Storage.read_latest_node_result(node_key)` returns the admitted typed latest per-node result, or `None` only when that pointer is absent.
+Preview consumers select once and load that exact record once for table values, metadata and path addresses; later selections may observe a newer per-node result from another run.
 Cold publication selecting its own candidate may retain already accepted sealed SharedArray allocations from the exact emitted assets, including nested portable leaves, after the same canonical record and asset validation.
 Exact path, column, row, shape, dtype and asset metadata must agree; scalar, path, container and index values still come from the canonical stored frame.
 This avoids another hydration allocation while preserving independent group leases; a different first-valid winner, mutable or unverified references, warm lookup and public exact reads retain normal asset hydration.

@@ -119,9 +119,14 @@ class ParameterSweepResults(DataFrameTool):
             raise ValueError(
                 "ParameterSweepResults expects parameter, detection, count, and mosaic tables."
             )
-        parameters = pd.DataFrame(dfs[0]).reset_index(drop=True)
-        detections = pd.DataFrame(dfs[1]).reset_index(drop=True)
-        counts = pd.DataFrame(dfs[2]).reset_index(drop=True)
+        parameters, detections, counts = (pd.DataFrame(df) for df in dfs[:3])
+        if any(not frame.index.is_unique for frame in (parameters, detections, counts)):
+            raise ValueError("ParameterSweepResults requires unique paired row indices.")
+        for frame in (detections, counts):
+            if len(frame) != len(parameters) or not parameters.index.isin(frame.index).all():
+                raise ValueError("ParameterSweepResults requires matching paired row indices.")
+        detections = detections.reindex(parameters.index)
+        counts = counts.reindex(parameters.index)
         mosaic = pd.DataFrame(dfs[3])
         results = pd.concat(
             [

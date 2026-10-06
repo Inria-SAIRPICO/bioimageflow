@@ -21,6 +21,8 @@ class ViewingRequirementEntry:
     reason: str | None = None
 
     def __post_init__(self) -> None:
+        if self.viewer is not None and not isinstance(self.viewer, ViewerSpec):
+            raise TypeError("Viewing requirement viewer must be ViewerSpec or None.")
         if self.status not in {"known", "unknown"}:
             raise ValueError("Viewing requirement status must be known or unknown.")
         if self.status == "known" and self.reason is not None:
@@ -53,27 +55,51 @@ class ViewingRequirementEntry:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ViewingRequirementsManifest:
-    """Versioned export snapshot readable without loading tool packages."""
+    """Versioned detached export snapshot without loading tool packages."""
 
-    outputs: Mapping[str, ViewingRequirementEntry] = field(default_factory=dict)
+    _outputs: dict[str, ViewingRequirementEntry] = field(repr=False)
     complete: bool = True
     schema: str = VIEWING_REQUIREMENTS_SCHEMA
 
-    def __post_init__(self) -> None:
-        if self.schema != VIEWING_REQUIREMENTS_SCHEMA:
+    def __init__(
+        self,
+        outputs: Mapping[str, ViewingRequirementEntry] | None = None,
+        complete: bool = True,
+        schema: str = VIEWING_REQUIREMENTS_SCHEMA,
+    ) -> None:
+        if schema != VIEWING_REQUIREMENTS_SCHEMA:
             raise ValueError("Unsupported viewing requirements manifest schema.")
+        if not isinstance(complete, bool):
+            raise TypeError("Viewing requirement completeness must be a boolean.")
+        if outputs is None:
+            outputs = {}
+        if not isinstance(outputs, Mapping):
+            raise TypeError("Manifest outputs must be a mapping.")
         normalized: dict[str, ViewingRequirementEntry] = {}
-        for identity, entry in self.outputs.items():
+        for identity, entry in outputs.items():
             if not isinstance(identity, str) or not identity:
                 raise ValueError("Scoped output identities must be non-empty strings.")
             if not isinstance(entry, ViewingRequirementEntry):
                 raise TypeError("Manifest outputs must contain ViewingRequirementEntry values.")
             normalized[identity] = entry
-        if self.complete != all(entry.status == "known" for entry in normalized.values()):
+        if complete != all(entry.status == "known" for entry in normalized.values()):
             raise ValueError("Manifest completeness does not match its output entries.")
-        object.__setattr__(self, "outputs", normalized)
+        object.__setattr__(self, "_outputs", normalized)
+        object.__setattr__(self, "complete", complete)
+        object.__setattr__(self, "schema", schema)
+
+    @property
+    def outputs(self) -> dict[str, ViewingRequirementEntry]:
+        """Return an independent projection of immutable output entries."""
+        return dict(self._outputs)
+
+    def __repr__(self) -> str:
+        return (
+            f"ViewingRequirementsManifest(outputs={self._outputs!r}, "
+            f"complete={self.complete!r}, schema={self.schema!r})"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,7 +107,7 @@ class ViewingRequirementsManifest:
             "complete": self.complete,
             "outputs": {
                 identity: entry.to_dict()
-                for identity, entry in sorted(self.outputs.items())
+                for identity, entry in sorted(self._outputs.items())
             },
         }
 

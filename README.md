@@ -245,6 +245,7 @@ uv run sphinx-autobuild docs/source docs/_build/html
 ```
 
 Open the live preview at <http://127.0.0.1:8000/>.
+Package documentation reads full `pyproject.toml` metadata and uses declared project identity rather than checkout directory names.
 
 For a one-shot Sphinx build through the docs Makefile:
 
@@ -352,6 +353,7 @@ uv run python scripts/package_status.py
 
 Package-specific releases use annotated tags such as `bioimageflow-core-v0.5.0` and an explicitly dispatched coordinated GitHub Actions publication workflow after exact-head CI and selected runtime validation.
 `scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
+Release-set publication validates all selected artifact pairs before the first upload and then follows dependency order.
 The declared current candidate cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.5.0,<3`; first-party tools declare those bounds.
 Selected local artifact proofs do not certify all supported OS/interpreter/scientific recipes or establish current candidate availability on PyPI; the deep S/T/C library milestone precedes publication.
 See the [release operator guide](docs/source/reference/releasing.md) for setup, actual deployment controls and release steps.

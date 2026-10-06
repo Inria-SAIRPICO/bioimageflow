@@ -25,7 +25,12 @@ The repository root project is workspace-only: it exists to coordinate local pac
 Its `dev` dependency group therefore installs the workspace members and repository-only test, lint, and documentation tools.
 Runtime dependencies belong in the `[project].dependencies` table of each distributable package, where every third-party requirement declares an explicit compatible lower bound.
 Package-local documentation is source-only and is not part of the installed runtime API.
+Documentation discovery parses complete TOML and uses the valid declared `[project].name`, normalized under PEP 503, as package identity and wrapper slug; checkout directory spelling is not distribution identity.
+The Core source package declares the PEP 561 `py.typed` marker with its public typed API; actual wheel/source-distribution inclusion is a separate package-artifact check.
 Public package exports are explicit through each package's `__all__`; names not exported there are internal unless documented otherwise.
+Import-boundary checks resolve package-relative imports and include imports in guarded module/class bodies.
+The canonical Core worker entry also excludes orchestrator, pandas and pydantic imports from deferred bodies; ordinary scientific callbacks may retain their supported function-scoped imports.
+Coordinated release publication validates every selected wheel/source-distribution pair before its first upload, then publishes in dependency order.
 
 ### 1.1 Wetlands Integration
 
@@ -2513,6 +2518,8 @@ The system has an orchestrator context and optional isolated processing workers.
 Its merge boundary receives execution-owned working inputs preserving each positional provider table's actual index labels and cardinality.
 The engine passes those operands to the chosen merge method without first expanding coarser rows to finer descendant indexes.
 For example, root rows `0=A, 1=B` and a related filtered branch `0::0=I, 0::1=J` give `CrossJoin` exactly `A/I, A/J, B/I, B/J`; the default literal index inner join has no matching rows.
+Example `ParameterSweepResults` and `DeconvolutionMetrics` pair subordinate tables by unique actual index keys, preserving the first table's order and labels.
+Missing, extra or duplicate keys refuse before metrics or image reads; parameter-sweep mosaic aggregation and scientific formulas retain their declared behavior.
 
 | Aspect          | Orchestrator (Main Process)                            | Isolated Processing Worker                             |
 |----------------|--------------------------------------------------------|--------------------------------------------------------|
@@ -2903,6 +2910,9 @@ The module-level helper `bioimageflow.validate_parameters(tool_class, parameters
 
 ## 7. File Management
 
+The example URL downloaders store files under managed assets using the complete source URL, including its query, as identity and a safe parsed-path basename for the file.
+Distinct same-basename URLs cannot reuse each other's bytes; an identical URL may reuse its owned local file without a remote freshness claim.
+
 ### 7.1 Output Templating Engine
 
 BioImageFlow enforces structured file naming to prevent overwrites and maintain order. Path output fields in `ProcessingTool.Outputs` with `Template(...)` defaults are treated as path templates, resolved by the engine before dispatch. (DataFrameTool does not use output templating — it returns DataFrames directly.)
@@ -3028,6 +3038,9 @@ After correlation checks, an identical terminal status and error type may be wri
 If terminal metadata persistence fails, the exact owned run or attempt remains pending cleanup with detached diagnostics and explicit retry authority, without claiming successful publication or physical resource retirement.
 Backend task metadata is terminalized after future observation under `diagnostics/v1/` and never contributes to result keys or immutable record IDs.
 `views/runs/` and `views/latest/` are portable JSON views over selected cache records and must not be used to decide cache hits.
+`Storage.read_latest_node_result(node_key)` admits the latest successful per-node view and returns a typed `RunNodeResult`, or `None` only when its latest pointer is absent.
+That per-node view may select different runs for different nodes; it is separate from the latest fully successful workflow run.
+Documentation preview operations hold one selected result key and record ID, then use one `Storage.load_record` admission for the table, metadata and path addresses; a later pointer update affects later operations only.
 Run and latest views use pointer files by default (`*.bioimageflow-link.json`) so the layout works on filesystems and platforms where symlinks are unavailable or inconvenient.
 `outputs/runs/` and `outputs/latest/` contain optional materialized human-facing files created by `Workflow(storage_path=..., output_view=...)`, `Workflow.export_outputs(...)`, the top-level `bioimageflow.export_outputs(...)` function, or the `bioimageflow export-outputs` CLI.
 Supported materialization modes are `pointer`, `symlink`, `copy`, and `hardlink`; `none` creates no `outputs/` projection and leaves only the canonical portable pointers under `views/`.
@@ -3540,6 +3553,8 @@ Unknown variants, extra fields, unsupported schemas, malformed endpoints, duplic
 
 `PackageRequirement` preserves an author's Python distribution spelling, exposes its PEP 503 `normalized_name`, and validates its optional PEP 440 `version` constraint.
 `NapariRequirement` contains required and recommended package lists, an optional PEP 440 `napari_version`, and an optional opaque `reader_id`.
+Python constructors accept package strings and `PackageRequirement` objects as authoring shorthand.
+Portable `required_packages` and `recommended_packages` fields are actual lists of strict package-requirement objects; strings, Python requirement instances and tuples are not wire forms.
 `ViewerSpec(napari=...)` attaches this metadata to one `Outputs` annotation without importing napari or performing manifest discovery.
 Per-node and public-output additions combine additively with tool declarations, and published outputs inherit resolved requirements recursively.
 Viewer requirements are distinct from processing dependencies, environment recipes, resource requirements, and every computation/cache identity.
@@ -3575,6 +3590,8 @@ Graph-level external path references retain their existing reference semantics; 
 Captured source roots stay valid for all live compiled owners and relative helper/asset reads; eager staging deletion is not permitted merely because initial import finished.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
+The manifest captures its entries independently of the constructor mapping; each `outputs` or `to_dict()` projection is detached, so caller edits cannot change held entries or completeness.
+Manifest completeness is boolean, and each entry carries a `ViewerSpec` or `None`; a known entry with no additional viewer requirements remains valid.
 `Workflow.to_archive_dict()` and ZIP export produce this artifact form, while `Workflow.to_dict()` remains the editable graph boundary.
 JSON export likewise remains an editable graph when no custom sources exist and becomes an artifact envelope when embedded custom sources require one.
 **Accepted target — S01:** Archive import uses the one current strict envelope and refuses unsupported schemas or undeclared fields; historical conversion is not a current feature requirement.

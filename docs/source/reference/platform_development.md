@@ -28,6 +28,8 @@ The ``parsl`` package owns the attached execution backend and the managed factor
 The enforced dependency direction is storage → cache → engine → workflow.
 Storage must not import cache, engine, backends, or workflow; cache must not import engine, backends, or workflow; engine must not import workflow.
 The worker-safe `bioimageflow-core` package must not import pandas, pydantic, or the orchestrator at module import time.
+The guard resolves package-relative imports and visits guarded module/class bodies while leaving ordinary deferred scientific imports available.
+The canonical Core worker entry excludes those dependencies in deferred bodies as well.
 
 ## Execution backend seam
 

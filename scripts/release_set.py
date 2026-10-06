@@ -526,15 +526,16 @@ def publish_release_set(
 ) -> list[str]:
     run = subprocess.run if runner is None else runner
     by_name = {item.package.name: item for item in plan.items}
-    published: list[str] = []
+    admitted_artifacts: dict[str, list[Path]] = {}
     for package_name in plan.publish_order:
         item = by_name[package_name]
         artifact_dir = artifact_root / f"release-{item.package.name}-{item.version}"
-        artifacts = validate_release_artifacts(
-            artifact_dir,
-            item.package,
-            item.version,
+        admitted_artifacts[package_name] = validate_release_artifacts(
+            artifact_dir, item.package, item.version,
         )
+    published: list[str] = []
+    for package_name in plan.publish_order:
+        artifacts = admitted_artifacts[package_name]
         run(
             [
                 "uv",

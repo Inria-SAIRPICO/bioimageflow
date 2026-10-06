@@ -9,6 +9,7 @@ import pytest
 
 from bioimageflow import Workflow, inspect_viewing_requirements, serialize_output_schema
 from bioimageflow.launcher.payload import serialize_workflow_payload
+from bioimageflow.viewing import ViewingRequirementEntry, ViewingRequirementsManifest
 from bioimageflow_core import (
     EnvironmentSpec,
     IOModel,
@@ -82,6 +83,45 @@ def test_additive_merge_intersects_versions_and_required_wins() -> None:
         "other-plugin"
     ]
     assert merged.napari.napari_version == "<0.7,>=0.5"
+
+
+@pytest.mark.parametrize("field", ["required_packages", "recommended_packages"])
+def test_viewer_wire_refuses_authoring_package_shorthand(field: str) -> None:
+    authoring = NapariRequirement(**{field: ["reader"]})
+    assert NapariRequirement.from_dict(authoring.to_dict()) == authoring
+    for shorthand in (["reader"], [PackageRequirement("reader")], (PackageRequirement("reader").to_dict(),)):
+        wire = authoring.to_dict()
+        wire[field] = shorthand
+        with pytest.raises((TypeError, ValueError)):
+            NapariRequirement.from_dict(wire)
+
+
+def test_viewing_manifest_keeps_original_and_public_projections_detached() -> None:
+    entry = ViewingRequirementEntry("known", DECLARED)
+    original = {"image": entry}
+    manifest = ViewingRequirementsManifest(original, complete=True)
+    original.clear()
+    projection = manifest.outputs
+    projection.clear()
+    wire = manifest.to_dict()
+    wire["outputs"]["image"]["viewer"]["napari"]["required_packages"].clear()
+
+    assert manifest.complete is True
+    assert manifest.outputs == {"image": entry}
+    assert manifest.to_dict()["outputs"]["image"] == entry.to_dict()
+    assert ViewingRequirementsManifest.from_dict(manifest.to_dict()) == manifest
+
+
+def test_viewing_snapshot_constructor_admits_only_immutable_typed_entries() -> None:
+    with pytest.raises((TypeError, ValueError)):
+        ViewingRequirementEntry("known", {"napari": None})
+    entry = ViewingRequirementEntry("known", None)
+    with pytest.raises((TypeError, ValueError)):
+        ViewingRequirementsManifest({"image": entry}, complete=1)
+    manifest = ViewingRequirementsManifest({"image": entry}, complete=True)
+    assert manifest.outputs == {"image": entry}
+    assert manifest.complete is True
+    assert ViewingRequirementsManifest.from_dict(manifest.to_dict()) == manifest
 
 
 def test_output_introspection_includes_strict_viewer_wire_metadata() -> None:

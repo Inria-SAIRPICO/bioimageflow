@@ -25,6 +25,9 @@ Fast tests should:
 - cover public tool schemas, core mechanisms, successful execution paths, output contracts, and important failure modes;
 - write outputs only under pytest temporary directories.
 
+Portable viewer grammar, metadata projections, package TOML parsing, upload preflight and import-direction checks use finite ordinary fixtures in the fast tier.
+The Core source type-marker check is separate from the packaging tier's actual wheel/source-distribution closure; source presence alone does not certify built artifacts.
+
 CI runs the backend-neutral fast selector with deterministic non-fast, real Parsl, and complete/resource tiers excluded:
 
 ```bash

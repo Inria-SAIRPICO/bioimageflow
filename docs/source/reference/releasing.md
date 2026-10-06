@@ -237,6 +237,7 @@ The workflow performs only release-specific work:
 5. It waits until every requested version is visible on PyPI.
 
 If publication stops partway through, rerun the same workflow with the same release set.
+The release-set publisher admits every selected wheel/source-distribution pair before its first upload; an invalid later pair causes no earlier package upload.
 The publisher checks PyPI before uploading, so already published identical files are skipped and remaining packages continue in dependency order.
 Never move or reuse a release tag, and never attempt to replace an existing PyPI file.
 

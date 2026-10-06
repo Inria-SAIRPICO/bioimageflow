@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import imageio.v3 as iio
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
+
+from bioimageflow.storage import RecordManifest, RunNodeResult, Storage
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -25,7 +28,7 @@ class WorkflowArtifactError(RuntimeError):
     """Raised when a required real workflow artifact is unavailable."""
 
 
-def _font(size: int = 18) -> ImageFont.ImageFont:
+def _font(size: int = 18) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype("Arial.ttf", size)
     except OSError:
@@ -146,7 +149,7 @@ def _save_grid(workflow: str, name: str, panels: list[Image.Image], columns: int
 def _save_image_grid(
     workflow: str,
     name: str,
-    images: list[np.ndarray | Image.Image],
+    images: Sequence[np.ndarray | Image.Image],
     columns: int = 2,
     gap: int = 8,
     background: tuple[int, int, int] = (8, 10, 14),
@@ -267,6 +270,7 @@ class WorkflowArtifacts:
     def __init__(self, workflow: str) -> None:
         self.workflow = workflow
         self.storage_root = self._find_storage_root()
+        self.storage = Storage(self.storage_root)
 
     def _find_storage_root(self) -> Path:
         candidates = [OUTPUTS_ROOT / self.workflow, OUTPUTS_ROOT / self.workflow / "bif"]
@@ -301,13 +305,18 @@ class WorkflowArtifacts:
         return runs[-1]
 
     def latest_node_dir(self, node_key: str) -> Path:
-        latest_link = self.latest_root.joinpath(*node_key.split("/")).with_suffix(".bioimageflow-link.json")
-        if latest_link.exists():
-            return _resolve_link(latest_link, kind="directory")
-        node_dir = self.latest_run_dir() / "nodes" / node_key
-        if (node_dir / "result.json").exists():
-            return node_dir
-        raise WorkflowArtifactError(f"No latest run view found for node {self.workflow}/{node_key}.")
+        selected = self._selected_node_result(node_key)
+        return self.storage.run_node_dir(selected.run_id, selected.node_key)
+
+    def _selected_node_result(self, node_key: str) -> RunNodeResult:
+        selected = self.storage.read_latest_node_result(node_key)
+        if selected is not None:
+            return selected
+        run_id = self.latest_run_dir().name
+        node_dir = self.storage.run_node_dir(run_id, node_key)
+        if not (node_dir / "result.json").exists():
+            raise WorkflowArtifactError(f"No latest run view found for node {self.workflow}/{node_key}.")
+        return self.storage.read_run_node_result(run_id, node_key)
 
     def node_keys(self) -> list[str]:
         run_nodes = self.latest_run_dir() / "nodes"
@@ -319,34 +328,18 @@ class WorkflowArtifacts:
         )
 
     def record_dir(self, node_key: str) -> Path:
-        node_dir = self.latest_node_dir(node_key)
-        result_path = node_dir / "result.json"
-        payload = json.loads(result_path.read_text())
-        canonical = payload.get("canonical")
-        if isinstance(canonical, str) and canonical:
-            return (result_path.parent / canonical).resolve()
-        record_link = node_dir / "record.bioimageflow-link.json"
-        if record_link.exists():
-            return _resolve_link(record_link, kind="directory")
-        raise WorkflowArtifactError(f"Node result has no canonical record: {self.workflow}/{node_key}")
+        return self.load_record(node_key)[2]
+
+    def load_record(
+        self, node_key: str, *, path_columns: tuple[str, ...] = (),
+    ) -> tuple[RecordManifest, pd.DataFrame, Path]:
+        selected = self._selected_node_result(node_key)
+        return self.storage.load_record(
+            selected.result_key, selected.record_id, path_columns=path_columns,
+        )
 
     def dataframe(self, node_key: str) -> pd.DataFrame:
-        record_dir = self.record_dir(node_key)
-        manifest_path = record_dir / "manifest.json"
-        dataframe_path = record_dir / "dataframe.parquet"
-        if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text())
-            dataframe = manifest.get("dataframe")
-            if isinstance(dataframe, dict) and isinstance(dataframe.get("path"), str):
-                dataframe_path = record_dir / dataframe["path"]
-        if dataframe_path.exists():
-            if dataframe_path.suffix == ".csv":
-                return pd.read_csv(dataframe_path)
-            return pd.read_parquet(dataframe_path)
-        csv_path = record_dir / "dataframe.csv"
-        if csv_path.exists():
-            return pd.read_csv(csv_path)
-        raise WorkflowArtifactError(f"No dataframe found for {self.workflow}/{node_key} in {record_dir}.")
+        return self.load_record(node_key)[1]
 
     def node_with_columns(
         self,
@@ -381,8 +374,7 @@ class WorkflowArtifacts:
         )
 
     def path_from_column(self, node_key: str, column: str, row: int = 0) -> Path:
-        record_dir = self.record_dir(node_key)
-        df = self.dataframe(node_key)
+        _, df, record_dir = self.load_record(node_key, path_columns=(column,))
         if column not in df.columns:
             raise WorkflowArtifactError(f"{self.workflow}/{node_key} has no column {column!r}.")
         if len(df) <= row:
@@ -393,8 +385,7 @@ class WorkflowArtifacts:
         return self._resolve_record_path(record_dir, Path(str(value)))
 
     def paths_from_column(self, node_key: str, column: str) -> list[Path]:
-        record_dir = self.record_dir(node_key)
-        df = self.dataframe(node_key)
+        _, df, record_dir = self.load_record(node_key, path_columns=(column,))
         if column not in df.columns:
             raise WorkflowArtifactError(f"{self.workflow}/{node_key} has no column {column!r}.")
         paths = [self._resolve_record_path(record_dir, Path(str(value))) for value in df[column].dropna()]
@@ -403,14 +394,14 @@ class WorkflowArtifacts:
         return paths
 
     def _resolve_record_path(self, record_dir: Path, value: Path) -> Path:
-        candidates: list[Path]
-        if value.is_absolute():
-            candidates = [value]
-        else:
-            candidates = [record_dir / value, self.storage_root / value, SOURCE_ROOT / value, ROOT / value]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate.resolve()
+        candidate = value if value.is_absolute() else record_dir / value
+        if not value.is_absolute():
+            try:
+                candidate.resolve().relative_to(record_dir.resolve())
+            except ValueError as error:
+                raise WorkflowArtifactError(f"Record-relative output escapes its selected record: {value}") from error
+        if candidate.exists():
+            return candidate.resolve()
         raise FileNotFoundError(
             f"Path-valued workflow output does not exist for {self.workflow}: {value}"
         )
@@ -589,11 +580,12 @@ def cell_counting_assets() -> None:
 
 def restoration_assets() -> None:
     artifacts = WorkflowArtifacts("low_snr_restoration")
-    results = artifacts.dataframe("restoration_results")
+    _, results, record_dir = artifacts.load_record(
+        "restoration_results", path_columns=("clean_image", "degraded_image", "restored_image"),
+    )
     if results.empty:
         raise WorkflowArtifactError("low_snr_restoration/restoration_results is empty.")
     row = results.iloc[0]
-    record_dir = artifacts.record_dir("restoration_results")
     clean = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["clean_image"])))), 420)
     degraded = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["degraded_image"])))), 420)
     restored = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["restored_image"])))), 420)
@@ -625,11 +617,13 @@ def restoration_assets() -> None:
 
 def sairpico_assets() -> None:
     artifacts = WorkflowArtifacts("sairpico_deconvolution")
-    metrics = artifacts.dataframe("sairpico_deconvolution_metrics")
+    _, metrics, record_dir = artifacts.load_record(
+        "sairpico_deconvolution_metrics",
+        path_columns=("input_image", "psf_image", "denoised_image", "deconvolved_image"),
+    )
     if metrics.empty:
         raise WorkflowArtifactError("sairpico_deconvolution/sairpico_deconvolution_metrics is empty.")
     row = metrics.iloc[0]
-    record_dir = artifacts.record_dir("sairpico_deconvolution_metrics")
     input_image = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["input_image"])))), 420)
     psf = _normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["psf_image"]))))
     denoised = _center_crop(_normalize(_read_image(artifacts._resolve_record_path(record_dir, Path(row["denoised_image"])))), 420)
@@ -697,8 +691,8 @@ def tracking_assets() -> None:
     for index, (track_id, table) in enumerate(tracks_df.groupby("track_id")):
         points = []
         for _, point in table.sort_values("frame").iterrows():
-            x = int(round(float(point["x"]) - x0))
-            y = int(round(float(point["y"]) - y0))
+            x = int(round(float(cast(float, point["x"])) - x0))
+            y = int(round(float(cast(float, point["y"])) - y0))
             if 0 <= x < 420 and 0 <= y < 420:
                 points.append((x, y))
         if len(points) >= 2:

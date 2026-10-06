@@ -5,9 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
+from importlib import import_module
 import os
 import re
 import sys
+from typing import Any
+
+from packaging.utils import canonicalize_name
+
+tomllib = import_module("tomllib" if sys.version_info >= (3, 11) else "tomli")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,19 +83,21 @@ def main() -> int:
 def discover_package_docs() -> list[PackageDocs]:
     packages = []
     seen = set()
+    visited_dirs: set[Path] = set()
 
     for name in FIRST_PARTY_ORDER:
         package_dir = PACKAGES_DIR / name
+        visited_dirs.add(package_dir)
         docs = docs_from_package_dir(package_dir, first_party=True)
-        if docs is not None:
+        if docs is not None and docs.name not in seen:
             packages.append(docs)
             seen.add(docs.name)
 
     for package_dir in sorted(PACKAGES_DIR.glob("*")):
-        if package_dir.name in seen:
+        if package_dir in visited_dirs:
             continue
         docs = docs_from_package_dir(package_dir, first_party=True)
-        if docs is not None:
+        if docs is not None and docs.name not in seen:
             packages.append(docs)
             seen.add(docs.name)
 
@@ -106,7 +114,17 @@ def discover_package_docs() -> list[PackageDocs]:
 
 def docs_from_package_dir(package_dir: Path, *, first_party: bool) -> PackageDocs | None:
     pyproject = package_dir / "pyproject.toml"
-    metadata = read_docs_metadata(pyproject)
+    if not pyproject.is_file():
+        return None
+    project = _load_pyproject(pyproject)
+    metadata = _docs_metadata(project)
+    declared = project.get("project")
+    if not isinstance(declared, dict):
+        raise TypeError("Documentation package [project] must be a TOML table.")
+    declared_name = declared.get("name")
+    if not isinstance(declared_name, str):
+        raise TypeError("Documentation package project.name must be a string.")
+    name = str(canonicalize_name(declared_name, validate=True))
     docs_root = metadata.get("root", "docs")
     index = metadata.get("index", f"{docs_root}/index.md")
     include = metadata.get("include_in_main_docs", first_party)
@@ -119,9 +137,9 @@ def docs_from_package_dir(package_dir: Path, *, first_party: bool) -> PackageDoc
     index_path = package_dir / str(index)
     if not index_path.exists():
         if external_url:
-            title = str(metadata.get("title") or package_dir.name)
+            title = str(metadata.get("title") or declared_name)
             return PackageDocs(
-                name=package_dir.name,
+                name=name,
                 title=title,
                 package_dir=package_dir,
                 docs_dir=docs_dir,
@@ -133,8 +151,8 @@ def docs_from_package_dir(package_dir: Path, *, first_party: bool) -> PackageDoc
         return None
 
     return PackageDocs(
-        name=package_dir.name,
-        title=str(metadata.get("title") or markdown_title(index_path) or package_dir.name),
+        name=name,
+        title=str(metadata.get("title") or markdown_title(index_path) or declared_name),
         package_dir=package_dir,
         docs_dir=docs_dir,
         index=index_path,
@@ -144,33 +162,24 @@ def docs_from_package_dir(package_dir: Path, *, first_party: bool) -> PackageDoc
     )
 
 
-def read_docs_metadata(pyproject: Path) -> dict[str, object]:
+def _load_pyproject(pyproject: Path) -> dict[str, Any]:
     if not pyproject.exists():
         return {}
+    return tomllib.loads(pyproject.read_text())
 
-    text = pyproject.read_text()
-    match = re.search(r"(?ms)^\[tool\.bioimageflow\.docs\]\s*(.*?)(?=^\[|\Z)", text)
-    if match is None:
-        return {}
 
-    metadata: dict[str, object] = {}
-    for line in match.group(1).splitlines():
-        line = line.split("#", 1)[0].strip()
-        if not line or "=" not in line:
-            continue
-        key, value = [part.strip() for part in line.split("=", 1)]
-        metadata[key] = parse_toml_scalar(value)
+def _docs_metadata(project: dict[str, Any]) -> dict[str, Any]:
+    metadata = project
+    for key in ("tool", "bioimageflow", "docs"):
+        metadata = metadata.get(key, {})
+        if not isinstance(metadata, dict):
+            raise TypeError("tool.bioimageflow.docs must contain TOML tables.")
     return metadata
 
 
-def parse_toml_scalar(value: str) -> object:
-    if value in {"true", "false"}:
-        return value == "true"
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        return value[1:-1]
-    if re.fullmatch(r"\d+", value):
-        return int(value)
-    return value
+def read_docs_metadata(pyproject: Path) -> dict[str, object]:
+    """Read package-owned documentation settings with the complete TOML parser."""
+    return _docs_metadata(_load_pyproject(pyproject))
 
 
 def markdown_pages(directory: Path) -> tuple[Path, ...]:

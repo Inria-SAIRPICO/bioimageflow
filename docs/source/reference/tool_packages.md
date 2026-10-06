@@ -90,4 +90,5 @@ Keep whole-batch isolated inference/training/aggregation with explicit consumed-
 The main docs include first-party package docs through generated wrapper pages, but the source of truth remains in each package directory.
 
 Custom packages can opt into local documentation builds with `[tool.bioimageflow.docs]` metadata in their `pyproject.toml`.
+Discovery parses complete TOML and uses the valid declared project name, normalized under PEP 503, for package identity, deduplication and wrapper paths; the checkout directory can have a different name.
 See the [custom tool package how-to guide](../how-to/custom_tool_package) for the package layout, documentation contract, and test expectations.

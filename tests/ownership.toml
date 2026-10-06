@@ -1,8 +1,44 @@
 version = 1
 
 [[areas]]
+name = "portable-metadata-support"
+sources = [
+    "packages/bioimageflow-core/bioimageflow_core/viewer.py",
+    "packages/bioimageflow-core/bioimageflow_core/py.typed",
+    "docs/generate_tool_package_docs.py",
+    "scripts/release_set.py",
+    "scripts/check_import_boundaries.py",
+]
+edit_tests = [
+    "tests/unit/test_viewer_requirements.py",
+    "tests/unit/test_tool_package_doc_metadata.py",
+    "tests/unit/test_release_tooling.py",
+    "tests/unit/test_release_tagging.py",
+    "tests/unit/test_development_workflow.py",
+    "tests/unit/test_core_python39_compat.py",
+]
+precommit_suites = ["unit"]
+
+[[areas]]
+name = "example-source-pairing"
+sources = [
+    "example_workflows/fish_analysis/tools/download_images.py",
+    "example_workflows/parameter_space_exploration/parameter_tools/download_images.py",
+    "example_workflows/parameter_space_exploration/parameter_tools/metrics.py",
+    "example_workflows/sairpico_deconvolution/workflow.py",
+    "docs/source/workflows/images/generate_workflow_previews.py",
+]
+edit_tests = [
+    "tests/unit/test_example_download_tools.py",
+    "tests/unit/test_example_metric_pairing.py",
+    "tests/unit/test_workflow_preview_binding.py",
+]
+precommit_suites = ["unit"]
+
+[[areas]]
 name = "environment-recipe"
 sources = [
+    "packages/bioimageflow/bioimageflow/environment_recipe.py",
     "packages/bioimageflow-core/bioimageflow_core/environment.py",
     "packages/bioimageflow-core/bioimageflow_core/defaults.py",
 ]
@@ -44,6 +80,8 @@ precommit_suites = ["unit", "integration"]
 [[areas]]
 name = "engine"
 sources = [
+    "packages/bioimageflow/bioimageflow/execution_state.py",
+    "packages/bioimageflow/bioimageflow/runtime_admission.py",
     "packages/bioimageflow/bioimageflow/backends.py",
     "packages/bioimageflow/bioimageflow/_core_dependency.py",
     "packages/bioimageflow/bioimageflow/engine",
@@ -60,7 +98,8 @@ edit_tests = [
     "tests/integration/test_engine_injection.py",
     "tests/integration/test_explicit_merge_operands.py",
     "tests/integration/test_execution_context.py",
-    "tests/unit/test_progress_serialization.py",
+    "tests/unit/test_progress_dispatch.py",
+    "tests/unit/test_workflow_execution_context.py",
     "tests/integration/test_progress_monitoring.py",
     "tests/integration/test_resource_constraints.py",
     "tests/integration/test_wetlands_task_api.py",
@@ -91,11 +130,20 @@ precommit_suites = ["unit", "integration"]
 [[areas]]
 name = "storage-cache"
 sources = [
+    "packages/bioimageflow/bioimageflow/filesystem.py",
+    "packages/bioimageflow/bioimageflow/portable_cells.py",
+    "packages/bioimageflow/bioimageflow/result_groups.py",
+    "packages/bioimageflow/bioimageflow/row_relation.py",
     "packages/bioimageflow/bioimageflow/cache",
     "packages/bioimageflow/bioimageflow/storage",
     "packages/bioimageflow/bioimageflow/record_shared_assets.py",
 ]
 edit_tests = [
+    "tests/unit/test_workflow_preview_binding.py",
+    "tests/unit/storage/test_portable_cells.py",
+    "tests/unit/test_shared_memory_context.py",
+    "tests/integration/test_collective_processing.py",
+    "tests/integration/runtime_cache/test_output_export_destination.py",
     "tests/unit/test_cache.py",
     "tests/unit/test_shared_publication.py",
     "tests/unit/storage",
@@ -141,6 +189,7 @@ precommit_suites = ["unit", "integration"]
 [[areas]]
 name = "tool-loading"
 sources = [
+    "packages/bioimageflow/bioimageflow/installation.py",
     "packages/bioimageflow/bioimageflow/registry.py",
     "packages/bioimageflow/bioimageflow/tool_loader.py",
 ]
