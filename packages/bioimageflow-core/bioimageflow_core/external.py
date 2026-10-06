@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -52,15 +55,27 @@ def _run_subprocess(
     run_kwargs: dict[str, Any],
 ) -> subprocess.CompletedProcess[Any]:
     resolved_command = list(command)
+    if not resolved_command:
+        raise ValueError("External commands require a non-empty argv.")
     executable = resolved_command[0]
-    if (
-        executable
-        and Path(executable).name == executable
-        and shutil.which(executable) is None
-    ):
-        environment_executable = Path(sys.executable).resolve().parent / executable
-        if environment_executable.is_file():
-            resolved_command[0] = str(environment_executable)
+    if executable and Path(executable).name == executable:
+        supplied_env = run_kwargs.get("env")
+        environment = os.environ if supplied_env is None else supplied_env
+        search_path = environment.get("PATH", os.defpath)
+        directory = Path(run_kwargs.get("cwd") or Path.cwd()).absolute()
+        search_path = os.pathsep.join(
+            str(Path(entry) if Path(entry).is_absolute() else directory / entry)
+            for entry in search_path.split(os.pathsep)
+        )
+        selected = shutil.which(executable, path=search_path)
+        if supplied_env is not None:
+            if selected is None:
+                raise FileNotFoundError(f"Executable is absent from supplied PATH: {executable}")
+            resolved_command[0] = selected
+        elif selected is None:
+            environment_executable = Path(sys.executable).resolve().parent / executable
+            if environment_executable.is_file():
+                resolved_command[0] = str(environment_executable)
     return subprocess.run(resolved_command, **run_kwargs)
 
 
@@ -151,6 +166,9 @@ def run_external_command(
 
     Parameters are forwarded to :func:`subprocess.run`. The command values are
     stringified before execution so tools can pass ``Path`` and numeric options.
+    A supplied environment's PATH controls bare executable lookup, with relative
+    entries resolved from ``cwd``. Windows extension matching follows the host
+    ``shutil.which`` PATHEXT policy.
     """
 
     command_values = [str(value) for value in command]
@@ -196,27 +214,108 @@ def _default_staging_parent() -> Path:
     return Path(tempfile.gettempdir())
 
 
-def _replace_file_from_staged_output(staged_output: Path, final_output: Path) -> None:
-    if staged_output.is_dir():
-        raise IsADirectoryError(
-            "External command staged output is a directory; "
-            "run_external_command_with_staged_output only supports single-file outputs: "
-            f"{staged_output}"
-        )
-    if not staged_output.exists():
+def _path_identity(path: Path) -> Optional[tuple[int, int, int]]:
+    try:
+        value = path.lstat()
+    except FileNotFoundError:
+        return None
+    return (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
+
+
+@dataclass
+class _ExternalCommandCleanup:
+    owned: dict[Path, tuple[int, int, int]] = field(default_factory=dict)
+    published_output: Optional[Path] = None
+
+    def own(self, path: Path, value: Optional[os.stat_result] = None) -> None:
+        value = path.lstat() if value is None else value
+        self.owned[path] = (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
+
+    @property
+    def pending_paths(self) -> tuple[Path, ...]:
+        return tuple(self.owned)
+
+    def close(self) -> None:
+        failures: list[BaseException] = []
+        for path, expected in reversed(tuple(self.owned.items())):
+            try:
+                actual = _path_identity(path)
+                if actual is None:
+                    del self.owned[path]
+                    continue
+                if actual != expected:
+                    raise RuntimeError(f"External command cleanup path identity changed: {path}")
+                if stat.S_ISDIR(actual[2]):
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                del self.owned[path]
+            except BaseException as error:
+                try:
+                    if _path_identity(path) is None:
+                        self.owned.pop(path, None)
+                except BaseException:
+                    pass
+                failures.append(error)
+        if failures:
+            raise failures[0]
+
+    def report(self, primary: BaseException, failure: BaseException) -> None:
+        if self.pending_paths:
+            try:
+                setattr(primary, "_external_command_cleanup", self)
+            except Exception:
+                pass
+        try:
+            setattr(primary, "external_cleanup", {
+                "pending_paths": [str(path) for path in self.pending_paths],
+                "published_output": None if self.published_output is None else str(self.published_output),
+            })
+        except Exception:
+            pass
+        message = f"External command cleanup failed: {failure}"
+        if self.pending_paths:
+            message += f". Cleanup remains pending for {self.pending_paths}"
+        if self.published_output is not None:
+            message += f". Output was published at {self.published_output}; no rollback was attempted."
+        add_note = getattr(primary, "add_note", None)
+        try:
+            if add_note is not None:
+                add_note(message)
+        except Exception:
+            pass
+        try:
+            logging.getLogger("bioimageflow_core").warning(message)
+        except Exception:
+            pass
+
+
+def _publish_staged_output(
+    staged_output: Path, final_output: Path, cleanup: _ExternalCommandCleanup,
+) -> None:
+    expected = _path_identity(staged_output)
+    if expected is None:
         raise FileNotFoundError(
             "External command completed but did not create staged output: "
             f"{staged_output}. Intended final output: {final_output}"
         )
-
-    final_output.parent.mkdir(parents=True, exist_ok=True)
-    final_temp = final_output.with_name(f".{final_output.name}.tmp-{os.getpid()}")
-    try:
-        shutil.copy2(staged_output, final_temp)
-        os.replace(final_temp, final_output)
-    finally:
-        if final_temp.exists():
-            final_temp.unlink()
+    if not stat.S_ISREG(expected[2]):
+        raise ValueError(f"External command staged output must be a regular file, not a symlink: {staged_output}")
+    source_fd = os.open(staged_output, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(source_fd, "rb") as source:
+        actual = os.fstat(source.fileno())
+        if (actual.st_dev, actual.st_ino, stat.S_IFMT(actual.st_mode)) != expected:
+            raise ValueError(f"External command staged output changed during admission: {staged_output}")
+        final_output.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{final_output.name}.tmp-", dir=final_output.parent)
+        final_temp = Path(temporary)
+        with os.fdopen(descriptor, "wb") as target:
+            cleanup.own(final_temp, os.fstat(target.fileno()))
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+    if _path_identity(final_temp) != cleanup.owned[final_temp]:
+        raise ValueError(f"External command publication path identity changed: {final_temp}")
+    os.link(final_temp, final_output)
+    cleanup.published_output = final_output
 
 
 def run_external_command_with_staged_output(
@@ -234,15 +333,23 @@ def run_external_command_with_staged_output(
     Some external native tools fail when asked to write directly to long or
     symlink-expanded paths. This helper replaces the requested output path in
     ``command`` with a short temporary file, runs the command, then copies the
-    produced file back to the requested final path.
+    produced file to an absent final path with atomic no-replace publication.
+    A nonzero result with ``check=False`` is diagnostic and publishes nothing.
+    Completion covers the synchronous subprocess, not arbitrary descendants.
     """
 
     final_output = Path(output_path)
+    if _path_identity(final_output) is not None:
+        raise FileExistsError(f"External command final output is already occupied: {final_output}")
     final_output_text = str(final_output)
     parent = Path(staging_parent) if staging_parent is not None else _default_staging_parent()
     parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="bif-external-", dir=parent) as temp_dir:
+    cleanup = _ExternalCommandCleanup()
+    primary: Optional[BaseException] = None
+    try:
+        temp_dir = Path(tempfile.mkdtemp(prefix="bif-external-", dir=parent))
+        cleanup.own(temp_dir)
         staged_output = Path(temp_dir) / final_output.name
         staged_command: list[Any] = []
         replaced = False
@@ -266,5 +373,17 @@ def run_external_command_with_staged_output(
             context=context,
             **kwargs,
         )
-        _replace_file_from_staged_output(staged_output, final_output)
+        if result.returncode != 0:
+            return result
+        _publish_staged_output(staged_output, final_output, cleanup)
         return result
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        try:
+            cleanup.close()
+        except BaseException as failure:
+            cleanup.report(failure if primary is None else primary, failure)
+            if primary is None:
+                raise

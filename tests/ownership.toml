@@ -1,6 +1,12 @@
 version = 1
 
 [[areas]]
+name = "native-output-publication"
+sources = ["packages/bioimageflow-core/bioimageflow_core/external.py"]
+edit_tests = ["tests/unit/test_external_command_errors.py", "tests/unit/test_core_python39_compat.py"]
+precommit_suites = ["unit"]
+
+[[areas]]
 name = "portable-metadata-support"
 sources = [
     "packages/bioimageflow-core/bioimageflow_core/viewer.py",

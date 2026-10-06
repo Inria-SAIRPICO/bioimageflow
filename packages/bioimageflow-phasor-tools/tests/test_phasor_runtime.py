@@ -1,5 +1,6 @@
 """Optional real PhasorPy runtime acceptance tests."""
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -80,3 +81,85 @@ def test_real_phasorpy_ometiff_filter_and_lifetime_roundtrip(tmp_path: Path) -> 
 
     phase_image = tifffile.imread(phase)
     assert np.allclose(phase_image, 1.9894, rtol=0.01)
+
+
+def _coordinate(tau, harmonic):
+    omega_tau = 2 * math.pi * 80 * harmonic * 1e-3 * tau
+    return complex(1 / (1 + omega_tau**2), omega_tau / (1 + omega_tau**2))
+
+
+def _write(path, value, harmonic):
+    from phasorpy.io import phasor_to_ometiff
+
+    phasor_to_ometiff(
+        path,
+        np.ones((2, 3)),
+        np.full((2, 3), value.real),
+        np.full((2, 3), value.imag),
+        frequency=80,
+        harmonic=harmonic,
+    )
+
+
+@pytest.mark.parametrize("harmonic", [1, 2])
+def test_real_lifetime_uses_selected_harmonic_without_changing_fundamental(
+    tmp_path, harmonic
+):
+    source = tmp_path / "sample.ome.tif"
+    _write(source, _coordinate(2, harmonic), harmonic)
+    output = PhasorToApparentLifetime().process_row(
+        Arguments(
+            phasor_ome_tiff=source,
+            phase_lifetime=tmp_path / "phase.tif",
+            modulation_lifetime=tmp_path / "modulation.tif",
+        )
+    )
+    assert output.frequency_mhz == 80
+    import tifffile
+
+    for path in (output.phase_lifetime, output.modulation_lifetime):
+        image = tifffile.imread(path)
+        assert image.dtype == np.float32
+        np.testing.assert_allclose(image, 2, atol=1e-5)
+
+
+def test_real_harmonic_calibration_removes_known_instrument_distortion(tmp_path):
+    true = _coordinate(2, 2)
+    distortion = 0.82 * complex(math.cos(0.17), math.sin(0.17))
+    sample, reference = tmp_path / "sample.ome.tif", tmp_path / "reference.ome.tif"
+    _write(sample, true * distortion, 2)
+    _write(reference, _coordinate(1.5, 2) * distortion, 2)
+    output = CalibratePhasor().process_row(
+        Arguments(
+            phasor_ome_tiff=sample,
+            reference_ome_tiff=reference,
+            reference_lifetime_ns=1.5,
+            reference_center_method="mean",
+            calibrated_ome_tiff=tmp_path / "calibrated.ome.tif",
+        )
+    )
+    from phasorpy.io import phasor_from_ometiff
+
+    _, real, imag, metadata = phasor_from_ometiff(output.calibrated_ome_tiff)
+    np.testing.assert_allclose(real, true.real, atol=1e-6)
+    np.testing.assert_allclose(imag, true.imag, atol=1e-6)
+    assert output.frequency_mhz == metadata["frequency"] == 80
+    assert output.harmonic == int(metadata["harmonic"]) == 2
+
+
+def test_real_undefined_phasors_remain_nan_float32(tmp_path):
+    source = tmp_path / "undefined.ome.tif"
+    _write(source, complex(float("nan"), float("nan")), 2)
+    output = PhasorToApparentLifetime().process_row(
+        Arguments(
+            phasor_ome_tiff=source,
+            phase_lifetime=tmp_path / "phase.tif",
+            modulation_lifetime=tmp_path / "modulation.tif",
+        )
+    )
+    import tifffile
+
+    for path in (output.phase_lifetime, output.modulation_lifetime):
+        image = tifffile.imread(path)
+        assert image.dtype == np.float32
+        assert np.isnan(image).all()

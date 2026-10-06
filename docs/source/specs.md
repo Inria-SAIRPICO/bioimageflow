@@ -3128,6 +3128,18 @@ Package-local `data/` directories are read-only static resources shipped with th
 
 External command wrappers must avoid process-CWD pollution. If a row-level binary writes implicit files such as `LoG.tif`, the wrapper passes `cwd=context.row_dir` to `subprocess.run()` or equivalent. Batch-level wrappers use `cwd=context.batch_dir`. Shared generated runtime resources go under `context.work_dir`, preferably in a tool-named child directory. The engine does not change the process working directory globally.
 
+`run_external_command_with_staged_output` admits an absent lexical final file before launching the synchronous child, requires a regular staged output through a held descriptor, and copies through a unique same-parent temporary file before atomic no-replace publication.
+An existing or late-created final owner, including a broken symlink, is preserved; staged symlinks are refused and predictable temporary names do not carry ownership authority.
+A nonzero `CompletedProcess` under `check=False` returns its diagnostics without publishing partial output.
+An explicitly supplied environment's PATH selects the executable, including relative entries resolved against the requested child directory; a neighboring interpreter executable cannot override it.
+Cleanup removes only captured owned paths and preserves the primary failure; pending cleanup paths and any already-published output are reported, with an attached retry owner when the exception permits it.
+These guarantees cover the synchronous child and cooperating publication path, not arbitrary descendant processes or hostile external filesystem mutation.
+
+Scientific image adapters preserve reader facts rather than infer color from a width of three or four.
+Explicit scalar TIFF axes determine scalar photometric output; actual TIFF sample axes and compatible ImageIO color-mode/sample evidence remain usable, while matching partial axes retain their known dimensions.
+`ReadImageMetadata.pixel_sizes` preserves the original OME numerical values and `pixel_size_units` separately reports X/Y/Z units without conversion: an explicit unit is preserved, a present size without a unit uses the OME default µm, and absent calibration reports `None` for both projections.
+Phasor calibration uses the selected harmonic with the fundamental frequency; apparent lifetime conversion uses their product and reports nanosecond float32 values, retaining the fundamental frequency metadata and representing undefined results as NaN.
+
 The exhaustive storage contract is specified in [Output and Cache Storage Specification](reference/output_cache_storage.md).
 
 ---

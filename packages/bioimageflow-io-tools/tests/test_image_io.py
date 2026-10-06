@@ -95,7 +95,7 @@ def test_read_image_metadata_reports_shape_dtype_and_axes(tmp_path: Path) -> Non
 
     data = np.arange(2 * 3 * 4 * 5, dtype=np.uint16).reshape(2, 3, 4, 5)
     source = tmp_path / "czyx.tif"
-    iio.imwrite(source, data, photometric="minisblack")
+    iio.imwrite(source, data, photometric="minisblack", metadata={"axes": "QQYX"})
 
     metadata = bioimageflow_io_tools.ReadImageMetadata().process_row(
         Arguments(input_image=source)

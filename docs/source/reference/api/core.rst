@@ -9,6 +9,15 @@ The declaration and current typed-value contracts are defined in :doc:`/specs`; 
 Public exported symbols and explicitly documented APIs form the curated support boundary.
 The source package declares ``py.typed`` for PEP 561 type discovery; the packaging tier checks its inclusion in actual wheels and source distributions.
 
+External commands
+-----------------
+
+``run_external_command_with_staged_output`` publishes one successful regular staged file only to an absent final path, using exclusive installation.
+Existing and late owners are preserved; nonzero ``check=False`` results retain diagnostics and publish nothing.
+An explicitly supplied environment's PATH is authoritative, including paths relative to the requested child directory.
+Pending owned cleanup and any committed output are reported without masking a primary failure; exceptions that accept attributes retain an explicit cleanup retry owner.
+The contract covers the synchronous child and does not supervise arbitrary descendants.
+
 Types
 -----
 

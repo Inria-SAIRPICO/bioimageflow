@@ -1,7 +1,7 @@
 # ReadImageMetadata
 
 `ReadImageMetadata` inspects image headers without loading the full pixel array when the reader supports it.
-It reports reader-provided `shape`, `dtype`, axes, channel names, and physical pixel sizes.
+It reports reader-provided `shape`, `dtype`, axes, channel names, and physical pixel sizes with a separate unit projection.
 
 ## Inputs
 
@@ -10,10 +10,10 @@ It reports reader-provided `shape`, `dtype`, axes, channel names, and physical p
 ## Outputs
 
 - `shape`, `dtype`, and `ndim`: array metadata read from the file.
-- `axes`: reader-provided axes, `YXS` for channel-last RGB(A), and `?` for each ambiguous dimension.
+- `axes`: reader-provided axes, sample axes supported by actual TIFF or compatible ImageIO color evidence, and `?` for each ambiguous dimension; matching partial axes keep their known dimensions.
 - `channel_names`: metadata names, generated C-axis names, or RGB(A) sample names when available.
-- `pixel_sizes`: X, Y, and Z physical pixel sizes when TIFF metadata exposes
-  them; otherwise `None`.
+- `pixel_sizes`: unchanged X, Y, and Z OME physical size numbers when available; otherwise `None`.
+- `pixel_size_units`: separate X, Y, and Z unit strings, preserving explicit OME units; a present size without an explicit unit defaults to µm, while absent calibration has unit `None`.
 
 ## Dependencies and Core Libraries
 

@@ -31,6 +31,7 @@ imageio, tifffile, and NumPy.
 The input array is already in the desired pixel type. The tool changes
 container format and metadata, and can remove declared scene/channel/Z/T
 dimensions. It does not reorder axes or rescale intensities.
+Explicit scalar TIFF axes determine scalar photometric output even when the final dimension has three or four pixels; declared sample axes retain color output.
 
 Use it for deterministic workflow-local format conversion without adding
 Bio-Formats or a full NGFF stack to the lightweight package environment.

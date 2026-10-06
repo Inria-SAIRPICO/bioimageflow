@@ -54,8 +54,9 @@ def write_raster(
     )
     kwargs: dict[str, Any] = {}
     if is_tiff_path(path):
-        if normalized_axes is not None and normalized_axes.endswith("S"):
-            kwargs["photometric"] = "rgb"
+        if normalized_axes is not None:
+            kwargs["photometric"] = "rgb" if normalized_axes.endswith("S") else "minisblack"
+            kwargs["metadata"] = {"axes": normalized_axes}
         elif is_grayscale_stack(array):
             kwargs["photometric"] = "minisblack"
     iio.imwrite(path, array, **kwargs)

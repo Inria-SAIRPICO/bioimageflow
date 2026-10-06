@@ -29,6 +29,7 @@ class ImageMetadata:
     axes: str
     channel_names: tuple[str, ...]
     pixel_sizes: dict[str, float | None]
+    pixel_size_units: dict[str, str | None]
 
 
 class ReadImageMetadata(ProcessingTool):
@@ -37,7 +38,7 @@ class ReadImageMetadata(ProcessingTool):
     row_consumption = RowConsumption.MAPPED
     display_name = "Read Image Metadata"
     documentation = (
-        "Report reader-provided shape, dtype, axes, channels, and physical pixel sizes. "
+        "Report reader-provided shape, dtype, axes, channels, and physical pixel sizes with units. "
         "Unknown axes are reported as '?'."
     )
     category = Category.CONVERSION
@@ -62,6 +63,9 @@ class ReadImageMetadata(ProcessingTool):
         axes: Annotated[str, GUIMeta(display_name="Axes")]
         channel_names: Annotated[list[str], GUIMeta(display_name="Channel names")]
         pixel_sizes: Annotated[dict[str, float | None], GUIMeta(display_name="Pixel sizes")]
+        pixel_size_units: Annotated[
+            dict[str, str | None], GUIMeta(display_name="Pixel size units")
+        ]
 
     def process_row(self, arguments: Arguments, *, context: Any = None) -> Any:
         metadata = inspect_image(arguments.input_image)
@@ -72,6 +76,7 @@ class ReadImageMetadata(ProcessingTool):
             axes=metadata.axes,
             channel_names=list(metadata.channel_names),
             pixel_sizes=metadata.pixel_sizes,
+            pixel_size_units=metadata.pixel_size_units,
         )
 
 
@@ -98,9 +103,10 @@ def _inspect_tiff(path: Path) -> ImageMetadata:
         shape = tuple(int(size) for size in series.shape)
         axes = _reported_axes(str(series.axes), shape)
         pixel_sizes = _empty_pixel_sizes()
+        pixel_size_units = _empty_pixel_size_units()
         channel_names: tuple[str, ...] = ()
         if tif.ome_metadata:
-            pixel_sizes, ome_channel_names = _parse_ome_xml(tif.ome_metadata)
+            pixel_sizes, pixel_size_units, ome_channel_names = _parse_ome_xml(tif.ome_metadata)
             channel_names = tuple(ome_channel_names)
         if not channel_names:
             channel_names = _default_channel_names(shape, axes)
@@ -110,6 +116,7 @@ def _inspect_tiff(path: Path) -> ImageMetadata:
             axes=axes,
             channel_names=channel_names,
             pixel_sizes=pixel_sizes,
+            pixel_size_units=pixel_size_units,
         )
 
 
@@ -126,12 +133,25 @@ def _inspect_imageio(path: Path) -> ImageMetadata:
         if isinstance(reader_axes, str)
         else _conservative_axes(shape)
     )
+    mode = metadata.get("mode") if hasattr(metadata, "get") else None
+    if "?" in axes and len(shape) >= 3:
+        # Palette mode qualifies only when ImageIO exposes decoded color samples.
+        samples = (
+            {"RGB": {3}, "RGBA": {4}, "P": {3, 4}}.get(mode, set())
+            if isinstance(mode, str) else set()
+        )
+        if shape[-1] in samples:
+            if not isinstance(reader_axes, str) or len(reader_axes) != len(shape):
+                axes = f"{'?' * (len(shape) - 3)}YXS"
+            elif axes.endswith("YX?"):
+                axes = axes[:-1] + "S"
     return ImageMetadata(
         shape=shape,
         dtype=str(np.dtype(properties.dtype)),
         axes=axes,
         channel_names=_default_channel_names(shape, axes),
         pixel_sizes=_empty_pixel_sizes(),
+        pixel_size_units=_empty_pixel_size_units(),
     )
 
 
@@ -140,16 +160,12 @@ def _reported_axes(reader_axes: str, shape: tuple[int, ...]) -> str:
         return _conservative_axes(shape)
     known = {"T", "C", "Z", "Y", "X", "S"}
     normalized = "".join(axis if axis in known else "?" for axis in reader_axes.upper())
-    if normalized.endswith("YX?") and shape[-1] in {3, 4}:
-        normalized = f"{normalized[:-1]}S"
     return normalized
 
 
 def _conservative_axes(shape: tuple[int, ...]) -> str:
     if len(shape) == 2:
         return "YX"
-    if len(shape) >= 3 and shape[-1] in {3, 4}:
-        return f"{'?' * (len(shape) - 3)}YXS"
     if len(shape) >= 2:
         return f"{'?' * (len(shape) - 2)}YX"
     return "?" * len(shape)
@@ -168,18 +184,25 @@ def _empty_pixel_sizes() -> dict[str, float | None]:
     return {"X": None, "Y": None, "Z": None}
 
 
+def _empty_pixel_size_units() -> dict[str, str | None]:
+    return {"X": None, "Y": None, "Z": None}
+
+
 def _parse_ome_xml(
     ome_xml: str,
-) -> tuple[dict[str, float | None], list[str]]:
+) -> tuple[dict[str, float | None], dict[str, str | None], list[str]]:
     pixel_sizes = _empty_pixel_sizes()
+    pixel_size_units = _empty_pixel_size_units()
     root = ET.fromstring(ome_xml)
     pixels = root.find(".//{*}Pixels")
     if pixels is None:
-        return pixel_sizes, []
+        return pixel_sizes, pixel_size_units, []
     for axis in pixel_sizes:
         value = pixels.attrib.get(f"PhysicalSize{axis}")
         pixel_sizes[axis] = float(value) if value is not None else None
+        if value is not None:
+            pixel_size_units[axis] = pixels.attrib.get(f"PhysicalSize{axis}Unit", "µm")
     channel_names = []
     for index, channel in enumerate(pixels.findall("{*}Channel")):
         channel_names.append(channel.attrib.get("Name") or f"channel_{index}")
-    return pixel_sizes, channel_names
+    return pixel_sizes, pixel_size_units, channel_names

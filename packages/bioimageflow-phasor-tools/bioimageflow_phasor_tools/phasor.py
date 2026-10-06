@@ -26,7 +26,7 @@ phasorpy_env = EnvironmentSpec(
         "pip": [
             "numpy==2.4.2",
             "phasorpy==0.12",
-            "tifffile==2026.3.3",
+            "tifffile==2026.6.1",
         ],
     },
 )
@@ -193,6 +193,7 @@ class CalibratePhasor(_PhasorTool):
             ref_imag,
             frequency=frequency,
             lifetime=lifetime,
+            harmonic=harmonic,
             method=center_method,
         )
         output = Path(arguments.calibrated_ome_tiff)
@@ -308,12 +309,12 @@ class PhasorToApparentLifetime(_PhasorTool):
         from phasorpy.lifetime import phasor_to_apparent_lifetime  # type: ignore
 
         _, real, imag, attrs = _read_phasor(arguments.phasor_ome_tiff)
-        frequency, _ = _metadata(attrs)
+        frequency, harmonic = _metadata(attrs)
         with np.errstate(divide="ignore", invalid="ignore"):
             phase, modulation = phasor_to_apparent_lifetime(
                 real,
                 imag,
-                frequency=frequency,
+                frequency=frequency * harmonic,
             )
         phase = np.asarray(phase, dtype=np.float32)
         modulation = np.asarray(modulation, dtype=np.float32)
