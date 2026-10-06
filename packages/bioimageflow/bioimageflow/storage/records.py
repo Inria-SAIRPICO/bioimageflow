@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bioimageflow.record_shared_assets import RecordSharedAssets
+
 from .common import Path, pd
 from .identity import _native_record_dtype, validate_relative_posix_path
 from .manifests import RecordManifest
@@ -47,6 +52,17 @@ class _ExactRecordsMixin:
         Transport/logical identity, assets and path containment are validated
         together, with one parquet read and no current-pointer consultation.
         """
+        return self._load_record_with_shared_assets(
+            result_key, record_id, path_columns=path_columns,
+            shared_array_columns=shared_array_columns, hydrate_assets=hydrate_assets,
+        )
+
+    def _load_record_with_shared_assets(
+        self, result_key: str, record_id: str, *,
+        path_columns: Iterable[str] = (), shared_array_columns: Iterable[str] = (),
+        hydrate_assets: bool = False, accepted_shared_assets: RecordSharedAssets | None = None,
+    ) -> tuple[RecordManifest, pd.DataFrame, Path]:
+        """Use emitted own-winner references only after the same exact admission."""
         manifest, dataframe, record_dir = self._admit_record(result_key, record_id)
 
         declared_path_columns = self._normalize_record_columns(
@@ -73,6 +89,7 @@ class _ExactRecordsMixin:
             manifest,
             path_columns=declared_path_columns,
             shared_array_columns=declared_shared_array_columns,
+            accepted_shared_assets=accepted_shared_assets,
         )
 
         return manifest, dataframe, record_dir
@@ -200,11 +217,13 @@ class _ExactRecordsMixin:
     def _rehydrate_record_assets(
         self, dataframe: pd.DataFrame, record_dir: Path, manifest: RecordManifest, *,
         path_columns: set[str], shared_array_columns: set[str],
+        accepted_shared_assets: RecordSharedAssets | None = None,
     ) -> pd.DataFrame:
         has_shared = any(output.get("asset_role") == "shared_array" for output in manifest.outputs)
         if not shared_array_columns and not has_shared:
             return self._rehydrate_record_assets_bound(dataframe, record_dir, manifest,
-                path_columns=path_columns, shared_array_columns=shared_array_columns)
+                path_columns=path_columns, shared_array_columns=shared_array_columns,
+                accepted_shared_assets=accepted_shared_assets)
         import uuid
         from bioimageflow_core import get_shared_memory_context
         from bioimageflow.result_groups import map_shared_values as publish_frame
@@ -214,7 +233,8 @@ class _ExactRecordsMixin:
         try:
             with scope.activate():
                 hydrated = self._rehydrate_record_assets_bound(dataframe, record_dir, manifest,
-                    path_columns=path_columns, shared_array_columns=shared_array_columns)
+                    path_columns=path_columns, shared_array_columns=shared_array_columns,
+                    accepted_shared_assets=accepted_shared_assets)
             sealed = publish_frame(hydrated, scope.publish_value)
             sealed, _group = bind_result_group(sealed, node_name="record", group_id=scope.scope_id)
             scope.discard_unreturned()
@@ -231,6 +251,7 @@ class _ExactRecordsMixin:
         *,
         path_columns: set[str],
         shared_array_columns: set[str],
+        accepted_shared_assets: RecordSharedAssets | None = None,
     ) -> pd.DataFrame:
         hydrated = pd.DataFrame(dataframe, copy=True)
         portable_columns = {str(column["name"]) for column in manifest.dataframe_logical_schema
@@ -266,7 +287,7 @@ class _ExactRecordsMixin:
             if column not in hydrated.columns:
                 continue
 
-            def rehydrate_shared(value: object) -> object:
+            def rehydrate_shared(index: object, value: object) -> object:
                 if not isinstance(value, str) or not value.startswith("assets/shm/"):
                     return value
                 output = shared_outputs.get(value)
@@ -275,6 +296,10 @@ class _ExactRecordsMixin:
                         f"Exact shared-array asset is missing metadata: {value}"
                     )
                 path = self._confined_record_path(record_dir, value)
+                if accepted_shared_assets is not None:
+                    reference = accepted_shared_assets.resolve(output, column=column, row_index=str(index))
+                    if reference is not None:
+                        return reference
                 try:
                     import numpy as np
 
@@ -288,7 +313,9 @@ class _ExactRecordsMixin:
                 with create_shared_output(array) as reference:
                     return reference
 
-            hydrated[column] = hydrated[column].map(rehydrate_shared)
+            hydrated[column] = pd.Series(
+                [rehydrate_shared(index, value) for index, value in hydrated[column].items()],
+                index=hydrated.index, dtype=object)
 
         for column in path_columns - portable_columns:
             if column not in hydrated.columns:
@@ -300,10 +327,12 @@ class _ExactRecordsMixin:
                 return str(self._confined_record_path(record_dir, value))
 
             hydrated[column] = hydrated[column].map(rehydrate_path)
-        return self._decode_portable_cells(hydrated, record_dir, manifest, hydrate=True)
+        return self._decode_portable_cells(hydrated, record_dir, manifest, hydrate=True,
+            accepted_shared_assets=accepted_shared_assets)
 
     def _decode_portable_cells(
         self, dataframe: pd.DataFrame, record_dir: Path | None, manifest: RecordManifest, *, hydrate: bool,
+        accepted_shared_assets: RecordSharedAssets | None = None,
     ) -> pd.DataFrame:
         from bioimageflow.portable_cells import admit_record_cell
         import numpy as np
@@ -324,6 +353,10 @@ class _ExactRecordsMixin:
                     path = self._confined_record_path(record_dir, output["path"])
                     if role == "owned_path":
                         return path
+                    if role == "shared_array" and accepted_shared_assets is not None:
+                        reference = accepted_shared_assets.resolve(output, column=column, row_index=str(index))
+                        if reference is not None:
+                            return reference
                     array = np.load(path, allow_pickle=False)
                     if role == "native_array":
                         return accept_native_array(array.view(_native_record_dtype(output["array"]["dtype"])))

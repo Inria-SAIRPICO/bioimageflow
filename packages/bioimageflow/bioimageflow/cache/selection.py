@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from bioimageflow.record_shared_assets import RecordSharedAssets
 from bioimageflow.storage import RecordManifest, Storage
 
 
@@ -36,14 +37,18 @@ def selected_result(
     path_columns: Iterable[str] = (),
     shared_array_columns: Iterable[str] = (),
     hydrate_assets: bool = False,
+    accepted_shared_assets: RecordSharedAssets | None = None,
 ) -> SelectedResult:
     """Read an exact admitted record; never consult the current pointer."""
-    manifest, dataframe, record_dir = storage.load_record(
+    load = storage.load_record if accepted_shared_assets is None else storage._load_record_with_shared_assets
+    bindings = {} if accepted_shared_assets is None else {"accepted_shared_assets": accepted_shared_assets}
+    manifest, dataframe, record_dir = load(
         result_key,
         record_id,
         path_columns=path_columns,
         shared_array_columns=shared_array_columns,
         hydrate_assets=hydrate_assets,
+        **bindings,
     )
     return SelectedResult(
         dataframe=dataframe,

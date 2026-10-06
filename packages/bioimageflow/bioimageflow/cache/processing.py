@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow.record_shared_assets import RecordSharedAssets
+
 from .selection import SelectedResult, selected_result
 from bioimageflow.row_relation import ResultRelation
 
@@ -54,100 +56,103 @@ def processing_publish(
     row_relation: dict[str, Any],
 ) -> SelectedResult:
     """Publish a source ProcessingTool attempt as an immutable record."""
-    relation = ResultRelation.from_dict(row_relation)
-    indices = tuple(index for group in relation.row_associations for index in group.output_indices)
-    if indices != tuple(str(index) for index in df.index):
-        raise ValueError("Result relation does not identify the supplied dataframe rows.")
-    row_relation = relation.to_dict()
-    storage = Storage(storage_path)
-    stored_df, outputs, owned_assets, column_kinds = (
-        _processing_manifest_entries_and_dataframe(
-            df,
-            path_columns,
-            owned_path_columns,
-            staging_assets_dir,
-            shared_array_columns,
-            declared_owned_artifact_paths,
-            declared_scalar_outputs,
-        )
-    )
-    staging_parquet = staging_dir / "dataframe.parquet"
-    _write_canonical_parquet(stored_df, staging_parquet)
-    logical_schema, logical_digest = canonical_dataframe_identity(
-        stored_df,
-        declared_columns=[str(column) for column in stored_df.columns],
-        column_kinds=column_kinds,
-    )
-    transport_digest = _file_sha256(staging_parquet)
-    manifest_material = {
-        "schema": "bioimageflow.cache.record.v2",
-        "result_key": result_key,
-        "dataframe": {
-            "path": "dataframe.parquet",
-            "format": "parquet",
-            "logical_digest": logical_digest,
-            "logical_schema": logical_schema,
-            "transport_digest": transport_digest,
-        },
-        "outputs": outputs,
-        "row_relation": row_relation,
-    }
-    record_id = make_record_id(manifest_material)
-    result_dir = storage.result_dir(result_key)
-    _write_processing_result_metadata(
-        result_dir,
-        node_name=node_name,
-        sig_hash=sig_hash,
-        result_key=result_key,
-        attempt_id=attempt_id,
-    )
-    candidate = create_record_candidate(
-        storage,
-        result_key,
-        attempt_id,
-        record_id,
-    )
-    for relative, source in owned_assets.items():
-        parts = validate_relative_posix_path(relative).split("/")
-        if parts[0] != "assets":
-            raise CacheCorruptionError("Owned asset path must be under assets/.")
-        destination_parent = candidate
-        for part in parts[:-1]:
-            destination_parent = _ensure_record_child_dir(
-                destination_parent,
-                part,
-                "Record asset directory",
+    with RecordSharedAssets() as accepted_shared_assets:
+        relation = ResultRelation.from_dict(row_relation)
+        indices = tuple(index for group in relation.row_associations for index in group.output_indices)
+        if indices != tuple(str(index) for index in df.index):
+            raise ValueError("Result relation does not identify the supplied dataframe rows.")
+        row_relation = relation.to_dict()
+        storage = Storage(storage_path)
+        stored_df, outputs, owned_assets, column_kinds = (
+            _processing_manifest_entries_and_dataframe(
+                df,
+                path_columns,
+                owned_path_columns,
+                staging_assets_dir,
+                shared_array_columns,
+                declared_owned_artifact_paths,
+                declared_scalar_outputs,
+                accepted_shared_assets,
             )
-        destination = destination_parent / parts[-1]
-        if source.is_dir():
-            shutil.copytree(source, destination)
-        else:
-            shutil.copy2(source, destination)
-    shutil.copy2(staging_parquet, candidate / "dataframe.parquet")
-    manifest = RecordManifest(
-        result_key=result_key,
-        record_id=record_id,
-        dataframe_logical_digest=logical_digest,
-        dataframe_transport_digest=transport_digest,
-        dataframe_logical_schema=logical_schema,
-        outputs=outputs,
-        row_relation=row_relation,
-    )
-    (candidate / "manifest.json").write_text(
-        json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
-    )
-    install_record_candidate(storage, result_key, record_id, candidate)
-    pointer = storage.select_current_record(
-        result_key,
-        candidate_record_id=record_id,
-        attempt_id=attempt_id,
-        run_id=run_id,
-    )
-    return selected_result(
-        storage,
-        result_key,
-        pointer.record_id,
-        path_columns=path_columns,
-        shared_array_columns=shared_array_columns or (),
-        hydrate_assets=True,
-    )
+        )
+        staging_parquet = staging_dir / "dataframe.parquet"
+        _write_canonical_parquet(stored_df, staging_parquet)
+        logical_schema, logical_digest = canonical_dataframe_identity(
+            stored_df,
+            declared_columns=[str(column) for column in stored_df.columns],
+            column_kinds=column_kinds,
+        )
+        transport_digest = _file_sha256(staging_parquet)
+        manifest_material = {
+            "schema": "bioimageflow.cache.record.v2",
+            "result_key": result_key,
+            "dataframe": {
+                "path": "dataframe.parquet",
+                "format": "parquet",
+                "logical_digest": logical_digest,
+                "logical_schema": logical_schema,
+                "transport_digest": transport_digest,
+            },
+            "outputs": outputs,
+            "row_relation": row_relation,
+        }
+        record_id = make_record_id(manifest_material)
+        result_dir = storage.result_dir(result_key)
+        _write_processing_result_metadata(
+            result_dir,
+            node_name=node_name,
+            sig_hash=sig_hash,
+            result_key=result_key,
+            attempt_id=attempt_id,
+        )
+        candidate = create_record_candidate(
+            storage,
+            result_key,
+            attempt_id,
+            record_id,
+        )
+        for relative, source in owned_assets.items():
+            parts = validate_relative_posix_path(relative).split("/")
+            if parts[0] != "assets":
+                raise CacheCorruptionError("Owned asset path must be under assets/.")
+            destination_parent = candidate
+            for part in parts[:-1]:
+                destination_parent = _ensure_record_child_dir(
+                    destination_parent,
+                    part,
+                    "Record asset directory",
+                )
+            destination = destination_parent / parts[-1]
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+        shutil.copy2(staging_parquet, candidate / "dataframe.parquet")
+        manifest = RecordManifest(
+            result_key=result_key,
+            record_id=record_id,
+            dataframe_logical_digest=logical_digest,
+            dataframe_transport_digest=transport_digest,
+            dataframe_logical_schema=logical_schema,
+            outputs=outputs,
+            row_relation=row_relation,
+        )
+        (candidate / "manifest.json").write_text(
+            json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
+        )
+        install_record_candidate(storage, result_key, record_id, candidate)
+        pointer = storage.select_current_record(
+            result_key,
+            candidate_record_id=record_id,
+            attempt_id=attempt_id,
+            run_id=run_id,
+        )
+        return selected_result(
+            storage,
+            result_key,
+            pointer.record_id,
+            path_columns=path_columns,
+            shared_array_columns=shared_array_columns or (),
+            hydrate_assets=True,
+            accepted_shared_assets=accepted_shared_assets if pointer.record_id == record_id else None,
+        )

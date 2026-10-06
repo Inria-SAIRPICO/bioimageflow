@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bioimageflow.record_shared_assets import RecordSharedAssets
+
 from .common import (
     Any,
     CacheCorruptionError,
@@ -32,6 +34,7 @@ def _write_shared_array_asset(
     row_index: Any,
     row_position: int,
     staging_assets_dir: Path,
+    accepted_shared_assets: RecordSharedAssets | None = None,
 ) -> tuple[str, dict[str, Any], Path]:
     from bioimageflow_core.shm import open_shared_array
     from bioimageflow_core.types import SharedArray
@@ -81,11 +84,14 @@ def _write_shared_array_asset(
         "path": relative,
         "size": size,
     }
+    if accepted_shared_assets is not None:
+        accepted_shared_assets.capture(value, entry)
     return relative, entry, path
 
 
 def portable_cell_assets(
     frame: pd.DataFrame, staging_assets_dir: Path,
+    accepted_shared_assets: RecordSharedAssets | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path], dict[str, str]]:
     """Persist finite cells through the shared codec and manifest-owned leaves."""
     import numpy as np
@@ -126,6 +132,8 @@ def portable_cell_assets(
                         "array": {"column": str(column), "row_index": str(index), "format": "npy",
                                   "order": "C", "shape": list(array.shape), "dtype": str(array.dtype)}})
                     assets[relative] = path
+                    if isinstance(item, SharedArray) and accepted_shared_assets is not None:
+                        accepted_shared_assets.capture(item, outputs[-1])
                     return {"kind": "asset", "role": role, "path": relative}
                 path = item.expanduser().absolute()
                 try:
@@ -145,12 +153,13 @@ def portable_cell_assets(
 
 def native_array_assets(
     frame: pd.DataFrame, staging_assets_dir: Path,
+    accepted_shared_assets: RecordSharedAssets | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Path], dict[str, str]]:
     """Persist native array cells as owned NPY assets with explicit runtime kind."""
     import numpy as np
     from bioimageflow_core import accept_native_array
 
-    stored, outputs, assets, kinds = portable_cell_assets(frame, staging_assets_dir)
+    stored, outputs, assets, kinds = portable_cell_assets(frame, staging_assets_dir, accepted_shared_assets)
     for column in frame.columns:
         if str(column) in kinds:
             continue
@@ -305,13 +314,14 @@ def _processing_manifest_entries_and_dataframe(
     declared_owned_artifact_paths: Iterable[tuple[str, Any, str | os.PathLike[str]]]
     | None = None,
     declared_scalar_outputs: Iterable[tuple[str, Any, Any]] | None = None,
+    accepted_shared_assets: RecordSharedAssets | None = None,
 ) -> tuple[
     pd.DataFrame,
     list[dict[str, Any]],
     dict[str, Path],
     dict[str, str],
 ]:
-    stored, outputs, owned_assets, native_kinds = native_array_assets(df, staging_assets_dir)
+    stored, outputs, owned_assets, native_kinds = native_array_assets(df, staging_assets_dir, accepted_shared_assets)
     seen_outputs: set[tuple[str, str]] = set()
     seen_scalar_outputs: set[tuple[str, str, str]] = set()
     staging_root = staging_assets_dir.resolve()
@@ -359,6 +369,7 @@ def _processing_manifest_entries_and_dataframe(
                 row_index=index,
                 row_position=row_position,
                 staging_assets_dir=staging_assets_dir,
+                accepted_shared_assets=accepted_shared_assets,
             )
             if record_relative in owned_assets:
                 raise CacheCorruptionError(

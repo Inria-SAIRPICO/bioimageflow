@@ -234,3 +234,44 @@ def test_structured_numeric_seal_obeys_captured_header_budget(tmp_path: Path) ->
     del pixels
     gc.collect()
     assert owner.close().state == "closed"
+
+
+def test_receipt_cleanup_preserves_primary_and_failed_pin_retry(tmp_path, monkeypatch):
+    """Contingent cancellation fault composition, not a reproduced SDK failure."""
+    from bioimageflow.record_shared_assets import RecordSharedAssets
+    from bioimageflow.result_groups import bind_result_group
+    from bioimageflow_core.shared_memory import SharedArrayLease
+
+    owner = SharedMemoryContext(tmp_path)
+    references = {name: owner.publish(owner.create(np.array([value], dtype=np.int64)))
+                  for name, value in (("a", 4), ("b", 9))}
+    references, source_group = bind_result_group(references, node_name="source", group_id="source")
+    primary = RuntimeError("exact record admission refused")
+    cancellation = SharedArrayLease.cancel_retention
+    attempts = []
+
+    def fail_once(lease):
+        attempts.append(lease)
+        if len(attempts) == 1:
+            raise OSError("controlled receipt pin cancellation failure")
+        return cancellation(lease)
+
+    monkeypatch.setattr(SharedArrayLease, "cancel_retention", fail_once)
+    try:
+        with pytest.raises(RuntimeError) as observed:
+            with RecordSharedAssets() as receipt:
+                for name, reference in references.items():
+                    receipt.capture(reference, {"path": f"assets/shm/{name}.npy"})
+                raise primary
+        assert observed.value is primary and "cleanup remains pending" in primary.__notes__[0]
+        assert len(attempts) == 2 and owner.status().pending_leases == 3
+        getattr(primary, "_record_shared_assets_cleanup").close()
+        assert len(attempts) == 3 and owner.status().pending_leases == 2
+        assert not source_group.released
+        for name, reference in references.items():
+            with open_shared_array(reference) as view:
+                assert view.tolist() == [4 if name == "a" else 9]
+            del view
+    finally:
+        source_group.release()
+        assert owner.close().state == "closed"

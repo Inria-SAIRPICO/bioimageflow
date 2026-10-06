@@ -77,9 +77,11 @@ name = "storage-cache"
 sources = [
     "packages/bioimageflow/bioimageflow/cache",
     "packages/bioimageflow/bioimageflow/storage",
+    "packages/bioimageflow/bioimageflow/record_shared_assets.py",
 ]
 edit_tests = [
     "tests/unit/test_cache.py",
+    "tests/unit/test_shared_publication.py",
     "tests/unit/storage",
     "tests/integration/runtime_cache",
     "tests/integration/test_caching.py",

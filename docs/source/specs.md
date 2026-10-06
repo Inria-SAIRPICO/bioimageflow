@@ -2771,6 +2771,9 @@ Publication validates a complete private `records/.candidate.<attempt-id>.<nonce
 Current selection uses an atomic hard-link create-if-absent operation; a losing publisher validates and loads the selected winner before continuing downstream.
 Lookup captures one current pointer, then admits the exact selected record through its manifest and record DataFrame reads without consulting the current pointer again.
 Publication binds the actual first-valid winner selected by that publication decision, including when another candidate wins.
+When its own candidate is selected, cold publication may reuse already accepted sealed SharedArray allocations represented by the emitted assets, including finite nested leaves, after exact record admission validates the canonical stored frame, manifest, asset bytes and record address.
+Reuse requires the exact emitted asset path and matching column, row, shape, dtype and asset metadata; it preserves the canonical stored scalar, path, container and index values rather than substituting the producer DataFrame.
+Another selected candidate hydrates the winner's assets normally, and corrupt own-candidate records still refuse before reuse.
 The loaded DataFrame, result key, record ID, detached admitted manifest metadata and exact record address travel together as one selected-result binding.
 Execution outcomes, progress events, downstream identity and provenance, run views and exports use that binding rather than recapturing a later current pointer.
 A pointer change after a record has been loaded affects later independent selections; it does not relabel the already consumed DataFrame or redirect that execution's recorded outputs.
@@ -3153,6 +3156,8 @@ Direct processing uses the same admitted borrowed-context semantics; DataFrame e
 The pure typed decoder never attaches or transfers ownership.
 Accepted producer arrays are published once into independent sealed backing before scientific/cache acceptance; retained writable producer mappings cannot mutate that published value.
 Already sealed pass-through values keep the same physical locator and exact original bound owner without another byte copy.
+Cold own-candidate record admission can retain those same sealed allocations without an extra hydration allocation; temporary publication retentions and independent record/provider group leases preserve their exact ownership through selection and binding.
+Mutable or unverified references use normal value acceptance and hydration, while warm lookup and public exact record reads continue to hydrate from validated durable assets.
 Local per-group descriptor projections can be distinct Python objects while retaining identical resource identity; owner, lease and group bindings are excluded from equality, scientific cache identity and wire data.
 A Workflow lazily retains its owner and may receive `shared_memory_context=` explicitly; a `WorkflowExecutionContext` can provide the same captured owner but cannot retarget an existing Workflow owner.
 Temporary parent Workflows inherit that owner, and returned DataFrames keep it reachable through their references after Workflow collection.

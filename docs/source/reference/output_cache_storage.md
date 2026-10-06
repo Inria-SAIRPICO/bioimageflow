@@ -9,7 +9,11 @@ The human-facing output tree is a derived view over the canonical cache.
 
 **Accepted target — S07/S08:** Capture each validated selected record together with its dataframe, assets and provenance as one immutable downstream binding.
 A first-valid loser consumes the selected winner; linked views are read-only projections and never another writable result authority.
-Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address once through `Storage.load_record(result_key, record_id)`, which returns the admitted manifest, dataframe and record directory.
+Current lookup and first-valid publication bind the actually loaded dataframe to its exact result key, record ID, validated manifest and record address through one exact record admission.
+The public `Storage.load_record(result_key, record_id)` returns the admitted manifest, dataframe and record directory.
+Cold publication selecting its own candidate may retain already accepted sealed SharedArray allocations from the exact emitted assets, including nested portable leaves, after the same canonical record and asset validation.
+Exact path, column, row, shape, dtype and asset metadata must agree; scalar, path, container and index values still come from the canonical stored frame.
+This avoids another hydration allocation while preserving independent group leases; a different first-valid winner, mutable or unverified references, warm lookup and public exact reads retain normal asset hydration.
 This public exact-record admission validates path containment, Parquet transport and logical identity, declared assets and the result relation together, reading the Parquet file once; manifest/dataframe accessors use the same admission boundary.
 Progress, run views, provider outcomes, downstream identity and export use that captured selection; a later current-pointer change affects a later selection, not the provenance of an already consumed frame.
 Manifest inspection returns detached metadata.
