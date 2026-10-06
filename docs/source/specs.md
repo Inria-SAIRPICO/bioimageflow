@@ -3087,7 +3087,11 @@ The function and CLI default to `mode="copy"` and `scope="latest"`.
 `Workflow.export_outputs(...)` defaults to `mode="symlink"`.
 An explicit destination is a complete output root containing `latest/` and/or `runs/<run-id>/`.
 It must be disjoint from source storage and is installed from a sibling staging tree.
-Existing destinations require explicit replacement, and an installation failure restores the previous tree.
+Existing destinations require explicit replacement of the exact root admitted before materialization; a root substituted or created later is preserved and export refuses.
+Installation uses exclusive publication even with replacement; an initially absent destination is never permission to replace a later owner.
+An installation failure restores the admitted original only to an absent destination.
+If a late owner prevents restoration, export preserves that owner and the recoverable original backup, reports the backup address with the failure, and cleans only its owned staging tree.
+If deleting the superseded backup fails after installation, the new export remains installed and the same cleanup error reports its destination and the pending backup path and identity; a partially deleted backup is not promised to contain the complete original tree.
 The `replace` flag is invalid without an explicit destination.
 
 `run.json` records the effective injected backend and effective parallel or sequential scheduling policy.

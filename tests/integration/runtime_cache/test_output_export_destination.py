@@ -1,7 +1,7 @@
 """External output-root export integration tests."""
 
-import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ from bioimageflow.storage import (
     asset_digest_and_size,
     make_result_key,
 )
+from bioimageflow.storage import exports as export_module
 
 from tests.testkit.runtime_cache import SourceAssetWriter, _run_dirs
 from tests.testkit.storage import _write_record
@@ -223,15 +224,15 @@ def test_destination_replacement_rolls_back_and_cleans_staging(
     destination.mkdir()
     marker = destination / "previous.txt"
     marker.write_text("previous")
-    real_replace = os.replace
+    real_publish = export_module.publish_no_replace
 
     def fail_install(source: str | Path, target: str | Path) -> None:
         source_path = Path(source)
         if Path(target) == destination and source_path.name.endswith(".tmp"):
             raise OSError("simulated export installation failure")
-        real_replace(source, target)
+        real_publish(Path(source), Path(target))
 
-    monkeypatch.setattr(os, "replace", fail_install)
+    monkeypatch.setattr(export_module, "publish_no_replace", fail_install)
     with pytest.raises(OSError, match="simulated export installation failure"):
         export_outputs(
             storage_path,
@@ -305,3 +306,116 @@ def test_export_no_replace_preserves_late_winner(tmp_path, monkeypatch):
     assert error is not None, observed
     assert observed['inode'] == winner['inode'], observed
     assert observed['sentinel'] == 'foreign winner', observed
+
+
+@pytest.mark.parametrize("initially_present", [False, True], ids=["absent-then-created", "present-then-substituted"])
+def test_export_replace_preserves_materialization_late_owner(tmp_path, monkeypatch, initially_present):
+    storage, _, _ = _computed_output(tmp_path)
+    target = tmp_path / "late-replacement"
+    displaced = tmp_path / "admitted-original"
+    original_inode = None
+    if initially_present:
+        target.mkdir()
+        (target / "original.txt").write_text("original admitted target")
+        original_inode = target.stat().st_ino
+    materialize = Storage.materialize_latest_outputs
+    winner = {}
+
+    def materialize_then_replace_owner(self, mode):
+        paths = materialize(self, mode)
+        if initially_present:
+            target.rename(displaced)
+        target.mkdir()
+        (target / "sentinel").write_text("unrelated late winner")
+        winner["inode"] = target.stat().st_ino
+        return paths
+
+    monkeypatch.setattr(Storage, "materialize_latest_outputs", materialize_then_replace_owner)
+    with pytest.raises(FileExistsError):
+        export_outputs(storage, destination=target, mode="copy", replace=True)
+
+    assert target.stat().st_ino == winner["inode"]
+    assert (target / "sentinel").read_text() == "unrelated late winner"
+    assert list(target.iterdir()) == [target / "sentinel"]
+    if initially_present:
+        assert displaced.stat().st_ino == original_inode
+        assert (displaced / "original.txt").read_text() == "original admitted target"
+    assert not list(tmp_path.glob(".late-replacement.*"))
+
+
+def test_export_replace_late_installation_owner_keeps_recoverable_original(tmp_path, monkeypatch, caplog):
+    storage, _, _ = _computed_output(tmp_path)
+    target = tmp_path / "late-installation"
+    target.mkdir()
+    (target / "original.txt").write_text("admitted original")
+    original_inode = target.stat().st_ino
+    publish = export_module.publish_no_replace
+    winner = {}
+
+    def publish_after_late_owner(source, destination):
+        if Path(destination) == target and Path(source).name.endswith(".tmp"):
+            backups = list(tmp_path.glob(".late-installation.*.backup"))
+            assert len(backups) == 1 and backups[0].stat().st_ino == original_inode
+            assert not target.exists(), "the admitted original must already be backed up"
+            target.mkdir()
+            (target / "sentinel").write_text("installation winner")
+            winner["inode"] = target.stat().st_ino
+        try:
+            publish(Path(source), Path(destination))
+        except FileExistsError as error:
+            if Path(source).name.endswith(".tmp"):
+                winner["failure"] = error
+            raise
+
+    monkeypatch.setattr(export_module, "publish_no_replace", publish_after_late_owner)
+    with pytest.raises(FileExistsError) as failure:
+        export_outputs(storage, destination=target, mode="copy", replace=True)
+
+    assert failure.value is winner["failure"]
+    assert target.stat().st_ino == winner["inode"]
+    assert (target / "sentinel").read_text() == "installation winner"
+    assert list(target.iterdir()) == [target / "sentinel"]
+    [backup] = tmp_path.glob(".late-installation.*.backup")
+    assert backup.stat().st_ino == original_inode
+    assert (backup / "original.txt").read_text() == "admitted original"
+    diagnostic = " ".join([str(failure.value), *getattr(failure.value, "__notes__", ()), caplog.text])
+    assert str(backup) in diagnostic, "the preserved original must have a reported recovery address"
+    assert not list(tmp_path.glob(".late-installation.*.tmp"))
+
+
+def test_export_installed_tree_survives_pending_backup_cleanup(tmp_path, monkeypatch, caplog):
+    storage, node_name, _ = _computed_output(tmp_path)
+    target = tmp_path / "pending-cleanup"
+    target.mkdir()
+    (target / "original.txt").write_text("original before cleanup")
+    original = target.lstat()
+    remove = export_module._remove_path
+    cleanup_error = OSError("controlled failure before superseded backup deletion")
+    attempted = []
+
+    def fail_backup_cleanup(path):
+        if Path(path).name.endswith(".backup"):
+            attempted.append(Path(path))
+            raise cleanup_error
+        remove(path)
+
+    monkeypatch.setattr(export_module, "_remove_path", fail_backup_cleanup)
+    with pytest.raises(OSError) as failure:
+        export_outputs(storage, destination=target, mode="copy", replace=True)
+
+    assert failure.value is cleanup_error
+    assert target.stat().st_ino != original.st_ino
+    assert (target / "latest" / node_name / "mask_0.txt").read_text() == "exported"
+    assert not (target / "original.txt").exists()
+    [backup] = attempted
+    assert list(tmp_path.glob(".pending-cleanup.*.backup")) == [backup]
+    assert backup.stat().st_ino == original.st_ino
+    assert (backup / "original.txt").read_text() == "original before cleanup"
+    assert failure.value.export_cleanup == {
+        "installed_destination": str(target),
+        "pending_backup": {"path": str(backup),
+                           "identity": (original.st_dev, original.st_ino, stat.S_IFMT(original.st_mode))},
+    }
+    diagnostic = " ".join([str(failure.value), *getattr(failure.value, "__notes__", ()), caplog.text])
+    assert str(target) in diagnostic and str(backup) in diagnostic
+    assert not list(tmp_path.glob(".pending-cleanup.*.tmp"))

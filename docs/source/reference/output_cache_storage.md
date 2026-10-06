@@ -1081,8 +1081,12 @@ bioimageflow export-outputs <storage-path> --mode copy --scope runs --run-id <ru
 Passing `destination=<path>` or `--destination <path>` installs a complete external output root containing `latest/` and/or `runs/<run-id>/`.
 External exports are always rebuilt from canonical run views and immutable records, never from a disposable tree already present under `outputs/`.
 The complete tree is staged beside the destination before installation.
-An existing destination raises `FileExistsError` unless `replace=True` or `--replace` is provided; failed replacement restores the previous tree and removes staging artifacts.
-Without replacement, native exclusive publication also refuses a destination created after materialization, preserving that winner's inode and contents.
+An existing destination raises `FileExistsError` unless `replace=True` or `--replace` is provided.
+Replacement admits the exact initial root before materialization; substitution of that root or creation of a previously absent destination raises without replacing the later owner's inode or contents.
+Native exclusive publication installs the staged tree with or without replacement.
+After the admitted original is backed up, an installation failure restores it only when the destination is absent; a late owner remains untouched, the original backup stays recoverable, and its address is reported with the failure.
+Failed exports remove their owned staging tree without deleting a preserved recovery backup.
+A superseded-backup cleanup failure after installation leaves the new export installed and reports that destination and the pending backup path and identity with the same error; partial deletion does not promise recovery of the complete original tree.
 Passing `replace=True` without an explicit destination raises `ValueError`.
 The destination may not equal, contain, or be contained by the source storage root.
 Returned paths always identify the installed destination rather than its staging directory.

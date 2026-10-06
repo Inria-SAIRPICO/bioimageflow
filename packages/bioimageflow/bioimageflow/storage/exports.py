@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import stat
 import shutil
 import uuid
 from pathlib import Path
@@ -76,6 +78,30 @@ def _validate_external_destination(storage_path: Path, destination: Path) -> Non
         )
 
 
+def _path_identity(path: Path) -> tuple[int, int, int] | None:
+    try:
+        found = path.lstat()
+    except FileNotFoundError:
+        return None
+    return found.st_dev, found.st_ino, stat.S_IFMT(found.st_mode)
+
+
+def _diagnose(primary: BaseException, message: str) -> None:
+    add_note = getattr(primary, "add_note", None)
+    if callable(add_note):
+        add_note(message)
+    logging.getLogger("bioimageflow").warning(message)
+
+
+def _report_recovery(
+    primary: BaseException, backup: Path, identity: tuple[int, int, int], rollback: BaseException,
+) -> None:
+    # Detached diagnostics retain no storage, reader or execution owner.
+    setattr(primary, "export_recovery", {"path": str(backup), "identity": identity})
+    _diagnose(primary, f"Export backup remains recoverable at {backup} "
+        f"(identity {identity}); restoration refused: {rollback!r}")
+
+
 def _export_to_destination(
     storage_path: Path,
     destination: Path,
@@ -87,65 +113,72 @@ def _export_to_destination(
 ) -> list[Path]:
     destination = Path(os.path.abspath(destination))
     _validate_external_destination(storage_path, destination)
-    if destination.exists() or destination.is_symlink():
-        if not replace:
-            raise FileExistsError(
-                f"Output export destination already exists: {destination}"
-            )
+    admitted = _path_identity(destination)
+    if admitted is not None and not replace:
+        raise FileExistsError(f"Output export destination already exists: {destination}")
 
     selected_run_id = run_id
     if scope in {"runs", "both"} and selected_run_id is None:
         selected_run_id = Storage(storage_path).latest_success_run_id()
         if selected_run_id is None:
-            raise CacheCorruptionError(
-                "No successful run view is available for output export."
-            )
+            raise CacheCorruptionError("No successful run view is available for output export.")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp"
     backup = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.backup"
-    moved_previous = False
+    temporary_identity = backup_identity = None
     installed = False
+    primary = None
     try:
         temporary.mkdir()
+        temporary_identity = _path_identity(temporary)
         storage = _DestinationStorage(storage_path, temporary)
-        temporary_paths = _materialize(
-            storage,
-            mode=mode,
-            scope=scope,
-            run_id=selected_run_id,
-        )
+        temporary_paths = _materialize(storage, mode=mode, scope=scope, run_id=selected_run_id)
         relative_paths = [path.relative_to(temporary) for path in temporary_paths]
 
-        if replace and (destination.exists() or destination.is_symlink()):
-            os.replace(destination, backup)
-            moved_previous = True
-        try:
-            if replace:
-                os.replace(temporary, destination)
-            else:
-                publish_no_replace(temporary, destination)
-            installed = True
-        except BaseException:
-            if moved_previous:
-                os.replace(backup, destination)
-                moved_previous = False
-            raise
-        if moved_previous:
+        if admitted is not None:
+            if _path_identity(destination) != admitted:
+                raise FileExistsError(f"Output export destination owner changed: {destination}")
+            publish_no_replace(destination, backup)
+            backup_identity = _path_identity(backup)
+            if backup_identity != admitted:
+                raise FileExistsError(f"Output export destination changed during backup: {destination}")
+        # Initial absence and the gap after backup confer no overwrite authority.
+        publish_no_replace(temporary, destination)
+        installed = True
+        if backup_identity is not None:
+            if _path_identity(backup) != admitted:
+                raise FileExistsError(f"Output export backup owner changed: {backup}")
             _remove_path(backup)
-            moved_previous = False
+            backup_identity = None
         return [destination / path for path in relative_paths]
+    except BaseException as error:
+        primary = error
+        if backup_identity is not None and not installed:
+            try:
+                if _path_identity(backup) != backup_identity:
+                    raise FileExistsError(f"Output export backup owner changed: {backup}")
+                publish_no_replace(backup, destination)
+                backup_identity = None
+            except BaseException as rollback:
+                _report_recovery(error, backup, backup_identity, rollback)
+        elif backup_identity is not None and installed:
+            setattr(error, "export_cleanup", {
+                "installed_destination": str(destination),
+                "pending_backup": {"path": str(backup), "identity": backup_identity},
+            })
+            _diagnose(error, f"Output export was installed at {destination}; superseded backup "
+                f"cleanup remains pending at {backup} (identity {backup_identity}). "
+                "The backup may be partially deleted; automatic rollback was not attempted.")
+        raise
     finally:
-        _remove_path(temporary)
-        if (
-            moved_previous
-            and not installed
-            and not (destination.exists() or destination.is_symlink())
-        ):
-            os.replace(backup, destination)
-            moved_previous = False
-        if not moved_previous:
-            _remove_path(backup)
+        if temporary_identity is not None and _path_identity(temporary) == temporary_identity:
+            try:
+                _remove_path(temporary)
+            except BaseException as cleanup:
+                if primary is None:
+                    raise
+                _diagnose(primary, f"Owned export staging cleanup remains pending at {temporary}: {cleanup!r}")
 
 
 def export_outputs(
