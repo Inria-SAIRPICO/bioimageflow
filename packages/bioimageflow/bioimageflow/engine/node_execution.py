@@ -308,8 +308,6 @@ class _NodeExecutionMixin:
 
         from bioimageflow.result_groups import working_dataframe
         dfs = [working_dataframe(frame) for frame in dfs]
-        if len(dfs) > 1:
-            dfs = self._align_dataframes_for_merge(dfs)
         capture = self._capture_executable(node)
         with capture.execution_context():
             merged = capture.callbacks["merge_dataframes"](dfs, arguments)

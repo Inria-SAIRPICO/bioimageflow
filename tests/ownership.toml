@@ -40,6 +40,7 @@ edit_tests = [
     "tests/unit/worker_timeout",
     "tests/integration/test_compute_steps.py",
     "tests/integration/test_engine_injection.py",
+    "tests/integration/test_explicit_merge_operands.py",
     "tests/integration/test_execution_context.py",
     "tests/unit/test_progress_serialization.py",
     "tests/integration/test_progress_monitoring.py",

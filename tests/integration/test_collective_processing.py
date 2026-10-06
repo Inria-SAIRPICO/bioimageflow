@@ -8,7 +8,7 @@ import pytest
 
 from bioimageflow import DataFrameTool, IndexAlignmentError, Workflow, WorkflowExecutionContext
 from bioimageflow.storage import Storage
-from bioimageflow_common_tools import Collect, CrossJoin
+from bioimageflow_common_tools import CrossJoin
 from bioimageflow_core import Arguments, GENERAL_ENV, IOModel, ProcessingTool, RowConsumption, Template
 
 
@@ -170,13 +170,31 @@ class ExpandRows(ProcessingTool):
         return [self.Outputs(copy_number=0), self.Outputs(copy_number=1)]
 
 
+class EchoAlignedRows(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
+    environment = GENERAL_ENV
+
+    class Inputs(IOModel):
+        value: int
+        weight: float
+        copy_number: int
+
+    class Outputs(IOModel):
+        value: int
+        weight: float
+        copy_number: int
+
+    def process_row(self, arguments: Arguments) -> Any:
+        return self.Outputs(value=arguments.value, weight=arguments.weight, copy_number=arguments.copy_number)
+
+
 def test_parent_expansion_preserves_integer_dtype_and_order(tmp_path: Path) -> None:
     values = [2**62 + 1, 2**62 + 3]
     with Workflow(engine="direct", storage_path=tmp_path / "results") as workflow:
         source = MixedNumericValues()(values=values)
         expanded = ExpandRows()(value=source["value"])
-        collected = Collect()(source, expanded)
-        result = workflow.compute(collected)
+        echoed = EchoAlignedRows()(value=source["value"], weight=source["weight"], copy_number=expanded["copy_number"])
+        result = workflow.compute(echoed)
     assert result["value"].tolist() == [values[0], values[0], values[1], values[1]]
     assert result["value"].dtype == "int64"
     assert result["weight"].tolist() == [0.25] * 4

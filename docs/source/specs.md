@@ -840,6 +840,8 @@ Genuinely dynamic tools without `Outputs` remain supported; discovery reports un
 `DataFrameTool` is the base class for tools that transform DataFrames in the main process (no isolated environment). It provides two methods: `merge_dataframes` for combining upstream DataFrames, and `transform` for operating on the merged result. It lives in the `bioimageflow` package.
 
 DataFrameTool calls use **positional arguments** for upstream nodes (whose output DataFrames are passed to `merge_dataframes`) and **keyword arguments** for `Inputs` parameters (constants).
+Each positional occurrence supplies its actual selected table's row values, index labels and cardinality in argument order, including repeated upstream arguments.
+The chosen `merge_dataframes` method defines their combination: the default inner join matches literal index labels, `CrossJoin` forms the product of the supplied rows, and `Concat` stacks those rows in positional order.
 Column references and node shorthand are rejected as DataFrameTool keyword values during construction and recursive workflow validation; no implicit column-to-DataFrame conversion is performed.
 Published field inputs may provide constant parameter values, but binding such an input to an upstream column must be rejected when it ultimately targets a DataFrameTool parameter.
 
@@ -2508,6 +2510,9 @@ The session storage path remains runtime-only and is absent from the returned di
 The system has an orchestrator context and optional isolated processing workers.
 `ProcessingTool` spans the boundary for Wetlands and Parsl; direct execution calls the same tool contract locally.
 `DataFrameTool` runs entirely in the orchestrator.
+Its merge boundary receives execution-owned working inputs preserving each positional provider table's actual index labels and cardinality.
+The engine passes those operands to the chosen merge method without first expanding coarser rows to finer descendant indexes.
+For example, root rows `0=A, 1=B` and a related filtered branch `0::0=I, 0::1=J` give `CrossJoin` exactly `A/I, A/J, B/I, B/J`; the default literal index inner join has no matching rows.
 
 | Aspect          | Orchestrator (Main Process)                            | Isolated Processing Worker                             |
 |----------------|--------------------------------------------------------|--------------------------------------------------------|
@@ -2711,7 +2716,7 @@ These declaration facts reuse the effective definition capture rather than copyi
 The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
 Managed Processing keys include the admitted portable primary-content facts and their proof grammar; an earlier record without represented primary admission cannot bypass this contract.
 Changed selected member bytes or inherited executable owners require a new clean controller admission and key; a stale controller is refused before reusable lookup rather than labeling its retained callable with newer source bytes.
-ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v1`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
+ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v2`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
 This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
 For managed Processing execution, `managed_runtime` retains the receipt's detached scientific facts and `content_digest`; generation IDs, raw recipe/lockfile hashes and operational paths are not scientific content salts.
 With the same declared recipe and other key facts, identical admitted content recreated in a new operational generation retains normal reuse, while changed admitted runtime content cannot reuse an earlier computation merely because the declared recipe and lockfile hash are unchanged.
