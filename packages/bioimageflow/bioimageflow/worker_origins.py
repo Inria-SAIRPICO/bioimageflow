@@ -365,6 +365,12 @@ def capture_tool_executable(
     else:
         names = ("merge_dataframes", "transform")
     callbacks = {name: getattr(tool, name) for name in names}
+    identity_callbacks = callbacks
+    if isinstance(tool, ProcessingTool) and not managed:
+        identity_callbacks = dict(callbacks)
+        for name in ("process_row", "process_batch"):
+            if name not in identity_callbacks:
+                identity_callbacks[name] = getattr(tool, name)
     canonical_module = getattr(klass, "_bif_canonical_module", klass.__module__)
     declared_version = getattr(klass, "_bif_package_version", None)
     declared_distribution = getattr(klass, "_bif_worker_distribution", None)
@@ -400,9 +406,13 @@ def capture_tool_executable(
         else:
             source = path.read_bytes()
             source_digest = hashlib.sha256(source).hexdigest()
-            local_callbacks = {name: callback for name, callback in callbacks.items()
+            local_callbacks = {name: callback for name, callback in identity_callbacks.items()
                                if Path(getattr(callback, "__func__", callback).__code__.co_filename).resolve() == path}
             qualification = validate_source_callables(source, local_callbacks, canonicalize=canonicalize)
+            if isinstance(tool, ProcessingTool):
+                evidence = runtime_callable_identity(identity_callbacks, canonicalize=canonicalize)
+                key["runtime_digest"] = evidence["digest"]
+                qualification = tuple(sorted(set(qualification) | set(evidence["unresolved"])))
         key.update(authority="captured_source", source_hash=custom_hash or source_digest)
         if isinstance(custom_hash, str) and getattr(klass, "_bif_admitted_source_file", None) and source_digest != custom_hash:
             raise ValueError("Admitted custom source bytes changed before executable capture")
@@ -420,7 +430,7 @@ def capture_tool_executable(
                 "module initializer/arbitrary post-load class state closure unproved",
             }))
     else:
-        evidence = runtime_callable_identity(callbacks, canonicalize=canonicalize)
+        evidence = runtime_callable_identity(identity_callbacks, canonicalize=canonicalize)
         key.update(authority="runtime_callable", runtime_digest=evidence["digest"])
         qualification = tuple(evidence["unresolved"])
     environment = getattr(tool, "environment", None)

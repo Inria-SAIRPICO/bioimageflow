@@ -19,6 +19,7 @@ edit_tests = [
     "tests/unit/test_executable_identity.py",
     "tests/unit/test_executable_metadata.py",
     "tests/integration/runtime_cache/test_executable_source_identity.py",
+    "tests/integration/runtime_cache/test_direct_batch_delegate_identity.py",
     "tests/integration/runtime_cache/test_selected_primary_identity.py",
 ]
 precommit_suites = ["unit", "integration"]

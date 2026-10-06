@@ -1,10 +1,49 @@
 """Operation-local distribution admission shares discovery without stale versions."""
 
 import importlib.metadata
+import hashlib
+import json
+from pathlib import Path
 
-from bioimageflow.worker_origins import ExecutableMetadata
+import pytest
+
+from bioimageflow.worker_origins import ExecutableMetadata, capture_tool_executable
+from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption
 
 pytest_plugins = ("tests.testkit.tool_loader",)
+
+
+@pytest.mark.parametrize("source_bound", [False, True])
+def test_direct_delegate_identity_preserves_selected_batch_dispatch(source_bound):
+    def factory(value):
+        class Tool(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
+
+            class Inputs(IOModel):
+                pass
+
+            class Outputs(IOModel):
+                value: int
+
+            def process_row(self, arguments):
+                return self.Outputs(value=value)
+
+            def process_batch(self, arguments_list):
+                return [self.process_row(arguments) for arguments in arguments_list]
+
+        if source_bound:
+            Tool._bif_custom_source_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        return Tool()
+
+    one, nine = factory(1), factory(9)
+    first = capture_tool_executable(one, managed=False, canonicalize=json.dumps)
+    second = capture_tool_executable(nine, managed=False, canonicalize=json.dumps)
+    assert first.scientific_key["runtime_digest"] != second.scientific_key["runtime_digest"]
+    assert tuple(first.callbacks) == ("process_batch",)
+    assert first.callbacks["process_batch"].__self__ is one
+    assert second.callbacks["process_batch"].__self__ is nine
+    assert [output.value for output in first.callbacks["process_batch"]([Arguments()])] == [1]
+    assert [output.value for output in second.callbacks["process_batch"]([Arguments()])] == [9]
 
 
 def test_package_map_shared_across_roots_and_refreshed_next_operation(monkeypatch):
