@@ -2635,7 +2635,7 @@ Direct identity describes actual callable code and constants, nested code, defau
 For a Direct ProcessingTool, that identity includes both actual supported `process_row` and `process_batch` callbacks even when dispatch selects an overridden batch callback.
 An unchanged batch callback delegating to `self.process_row` therefore retains the row callback's supported code and closure authority; changing its captured factor selects a new scientific key and record.
 Dispatch still selects the declared row or batch strategy independently of which callback roots contribute to identity.
-A source-bound Direct ProcessingTool carries those supported runtime callback facts alongside its admitted source digest.
+A source-bound Direct tool carries its supported runtime callback facts alongside its admitted source digest; a DataFrameTool includes both actual `merge_dataframes` and `transform` callbacks, including inherited owners outside the selected source file.
 Managed primary admission captures represented source bytes and compares the resident controller callable, literal values and same-source helpers, including inherited owner members, with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
 Versioned and explicitly selected installed origins carry that same portable primary-content authority together with their admitted distribution membership and version, declared recipe and controller admission facts.
 Source, shared, versioned and archive origins are selected automatically through their usual Workflow paths.
@@ -3556,7 +3556,7 @@ Portable source paths reject colon, backslash and Windows reserved device compon
 Staging consumes captured immutable bytes and paths; invalid later records cannot cause earlier custom sources to execute or partially stage.
 Executable namespaces for both single-file sources and package bundles distinguish captured content as well as logical source ID, so a later different body under the same ID cannot replace the authority of a retained earlier definition.
 Direct and managed execution of a captured custom source use that source's admitted content authority; mutable runtime module paths or a newer same-ID source are not its executable identity.
-Direct Processing also retains the actual supported row and batch callback authority described in Section 5.2, including represented inherited callbacks outside the selected source file.
+Direct tools also retain the actual supported callback authority described in Section 5.2: row and batch for ProcessingTool, merge and transform for DataFrameTool, including represented inherited callbacks outside the selected source file.
 Managed archive execution carries the represented primary-content proof from Section 5.2, including inherited executable owner members; source-table containment and declaration parity alone are not its resident executable attestation.
 Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
 Embedded Python remains trusted executable code; contained staging is not a Python sandbox.

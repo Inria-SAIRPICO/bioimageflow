@@ -409,10 +409,9 @@ def capture_tool_executable(
             local_callbacks = {name: callback for name, callback in identity_callbacks.items()
                                if Path(getattr(callback, "__func__", callback).__code__.co_filename).resolve() == path}
             qualification = validate_source_callables(source, local_callbacks, canonicalize=canonicalize)
-            if isinstance(tool, ProcessingTool):
-                evidence = runtime_callable_identity(identity_callbacks, canonicalize=canonicalize)
-                key["runtime_digest"] = evidence["digest"]
-                qualification = tuple(sorted(set(qualification) | set(evidence["unresolved"])))
+            evidence = runtime_callable_identity(identity_callbacks, canonicalize=canonicalize)
+            key["runtime_digest"] = evidence["digest"]
+            qualification = tuple(sorted(set(qualification) | set(evidence["unresolved"])))
         key.update(authority="captured_source", source_hash=custom_hash or source_digest)
         if isinstance(custom_hash, str) and getattr(klass, "_bif_admitted_source_file", None) and source_digest != custom_hash:
             raise ValueError("Admitted custom source bytes changed before executable capture")
