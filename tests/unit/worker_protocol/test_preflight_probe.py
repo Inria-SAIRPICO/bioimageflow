@@ -10,13 +10,14 @@ import sys
 import textwrap
 
 import pytest
+from tests.testkit.primary_content import source_proof
 
 from bioimageflow_core.preflight import (
     PREFLIGHT_SCHEMA,
     execute_executor_preflight,
 )
 from bioimageflow_core.worker_origins import (
-    SourceFileOriginV1,
+    SourceFileOrigin,
     encode_worker_tool_origin,
     worker_tool_origin_identity,
 )
@@ -28,7 +29,7 @@ CURRENT_CORE_REQUIREMENT = (
 )
 
 
-def _write_tool(source: Path, marker: Path) -> SourceFileOriginV1:
+def _write_tool(source: Path, marker: Path) -> SourceFileOrigin:
     source.write_text(
         f"""
 from pathlib import Path
@@ -48,17 +49,18 @@ class ProbeTool(ProcessingTool):
 """,
         encoding="utf-8",
     )
-    return SourceFileOriginV1(
+    return SourceFileOrigin(
         path=str(source.resolve()),
         source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
         class_name="ProbeTool",
+        primary=source_proof(source, "ProbeTool"),
     )
 
 
 def _request(
     tmp_path: Path,
     *,
-    origin: SourceFileOriginV1 | None = None,
+    origin: SourceFileOrigin | None = None,
     readable_paths: list[str] | None = None,
 ) -> dict[str, object]:
     storage = tmp_path / "storage"
@@ -89,12 +91,13 @@ def test_probe_returns_exact_success_evidence_without_invoking_tool(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
-    origin = SourceFileOriginV1(
+    origin = SourceFileOrigin(
         path=str((tmp_path / "probe_tool.py").resolve()),
         source_hash=hashlib.sha256(
             (tmp_path / "probe_tool.py").read_bytes()
         ).hexdigest(),
         class_name="ProbeTool",
+        primary=source_proof(tmp_path / "probe_tool.py", "ProbeTool"),
     )
 
     result = execute_executor_preflight(request)
@@ -102,7 +105,7 @@ def test_probe_returns_exact_success_evidence_without_invoking_tool(
     assert result == {
         "schema": "bioimageflow.parsl.executor_preflight_result.v1",
         "executor_label": "cpu",
-        "worker_api": "bioimageflow.processing_task.v2",
+        "worker_api": "bioimageflow.processing_task.v4",
         "core_version": importlib.metadata.version("bioimageflow-core"),
         "core_requirements": [CURRENT_CORE_REQUIREMENT],
         "core_compatible": True,
@@ -137,10 +140,11 @@ def test_probe_reports_path_and_origin_failures_and_cleans_sentinel(
 ) -> None:
     source = tmp_path / "probe_tool.py"
     origin = _write_tool(source, tmp_path / "tool_invoked")
-    mismatched = SourceFileOriginV1(
+    mismatched = SourceFileOrigin(
         path=origin.path,
         source_hash="0" * 64,
         class_name=origin.class_name,
+        primary=origin.primary,
     )
     missing = str((tmp_path / "missing").resolve())
     storage = str((tmp_path / "storage").resolve())

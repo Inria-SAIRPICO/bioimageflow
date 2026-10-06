@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from bioimageflow_core.worker_origins import (
-    ArchiveModuleOriginV1,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    VersionedModuleOriginV1,
-    WorkerToolOriginV1,
+    ArchiveModuleOrigin,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    VersionedModuleOrigin,
+    WorkerToolOrigin,
     encode_worker_tool_origin,
     worker_tool_origin_identity,
 )
@@ -284,14 +284,14 @@ class ExecutorPreflightResultV1:
         )
 
 
-def _origin_paths(origin: WorkerToolOriginV1) -> tuple[str, ...]:
-    if isinstance(origin, VersionedModuleOriginV1):
+def _origin_paths(origin: WorkerToolOrigin) -> tuple[str, ...]:
+    if isinstance(origin, VersionedModuleOrigin):
         return (origin.store_root,)
-    if isinstance(origin, SharedModuleOriginV1):
+    if isinstance(origin, SharedModuleOrigin):
         return (origin.import_root,)
-    if isinstance(origin, SourceFileOriginV1):
+    if isinstance(origin, SourceFileOrigin):
         return (origin.path,)
-    if isinstance(origin, ArchiveModuleOriginV1):
+    if isinstance(origin, ArchiveModuleOrigin):
         return (origin.materialization_root,)
     return ()
 
@@ -306,7 +306,7 @@ class PreflightExpectation:
     storage_root: str
     sentinel_path: str
     readable_paths: tuple[str, ...]
-    origins: tuple[WorkerToolOriginV1, ...]
+    origins: tuple[WorkerToolOrigin, ...]
     expected_core_version: str | None = None
 
     @property

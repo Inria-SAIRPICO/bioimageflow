@@ -17,9 +17,11 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from packaging.version import Version
 
 from bioimageflow.paths import get_tool_store_path
 from bioimageflow_core.import_context import admit_import_root, selected_import_root
+from bioimageflow_core.primary_content import capture_primary_package, primary_import_context
 
 from bioimageflow.filesystem import publish_no_replace
 from bioimageflow.installation import admit_installation, installation_target, validate_installation_selectors
@@ -57,6 +59,7 @@ def load_versioned_package(
     admission = admit_import_root(target, import_package=package)
 
     scoped_name = _scoped_name(package, version)
+    primary = capture_primary_package(scoped_name, pkg_dir)
 
     # Admit every cached namespace member before exposing a selected root.
     previous = {
@@ -76,7 +79,7 @@ def load_versioned_package(
     if scoped_name in previous:
         cached = previous[scoped_name]
         assert cached is not None
-        with selected_import_root(admission):
+        with selected_import_root(admission), primary_import_context(primary):
             return cached
 
     # Register top-level package
@@ -89,6 +92,7 @@ def load_versioned_package(
     assert spec is not None
     mod = importlib.util.module_from_spec(spec)
     mod.__package__ = scoped_name
+    primary.own_module(mod)
     sys.modules[scoped_name] = mod
 
     # Install an import hook so that `from .alpha import X` resolves
@@ -97,9 +101,9 @@ def load_versioned_package(
     sys.meta_path.insert(0, hook)
     try:
         try:
-            with selected_import_root(admission):
+            with selected_import_root(admission), primary_import_context(primary):
                 assert spec.loader is not None
-                spec.loader.exec_module(mod)
+                exec(compile(primary.sources[scoped_name], str(init_path), "exec", dont_inherit=True), vars(mod))
                 _materialize_public_exports(mod)
                 _stamp_tool_classes(package, version)
         except BaseException:
@@ -108,6 +112,7 @@ def load_versioned_package(
                 for name, module in sys.modules.items()
                 if (name == scoped_name or name.startswith(scoped_name + "."))
                 and name not in previous
+                and primary.owned_modules.get(name) is module
             }
             for name, module in owned.items():
                 if sys.modules.get(name) is module:
@@ -207,7 +212,10 @@ def resolve_tool_class(
 
 def _scoped_name(package: str, version: str) -> str:
     """Convert package + version into a scoped module name."""
-    return f"{package}__{version.replace('.', '_')}"
+    # Canonical PEP 440 has no underscores or adjacent separator dots, so
+    # doubled-underscore markers encode epoch/local boundaries injectively.
+    encoded = str(Version(version)).replace(".", "_").replace("+", "__local__").replace("!", "__epoch__")
+    return f"{package}__{encoded}"
 
 
 class _ScopedImporter:

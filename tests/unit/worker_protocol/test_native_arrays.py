@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from tests.testkit.primary_content import source_proof
 
 from bioimageflow_core import SharedMemoryContext, accept_native_array
 from bioimageflow_core._processing_values import decode_processing_value, encode_processing_value
@@ -88,7 +89,7 @@ def test_whole_native_publication_deduplicates_data_but_not_descriptors(tmp_path
 def test_worker_accepts_each_native_row_before_next_callback_mutates_producer(tmp_path):
     import hashlib
     from bioimageflow_core import (
-        IOModel, ProcessingTask, RowInvocation, SourceFileOriginV1,
+        IOModel, ProcessingTask, RowInvocation, SourceFileOrigin,
         describe_tool_declaration, encode_processing_task, decode_processing_result,
         validate_processing_result,
     )
@@ -123,7 +124,7 @@ class ReusedNative(ProcessingTool):
     task = ProcessingTask(task_id="task_0000000000000001", node_name="native-row-capture",
         invocation_id="inv_" + "1" * 32, cache_attempt_id=None, task_retry=0,
         mode="row_chunk", row_consumption="mapped", declaration=describe_tool_declaration(Controller()),
-        tool=SourceFileOriginV1(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="ReusedNative"),
+        tool=SourceFileOrigin(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="ReusedNative", primary=source_proof(source, "ReusedNative")),
         rows=tuple(RowInvocation(i, f"actual-{i}", {"value": value, "length": length}, None)
                    for i, (value, length) in enumerate([(4, 1), (7, 2), (9, 1)])))
     result = decode_processing_result(execute_processing_task(encode_processing_task(task)))
@@ -139,7 +140,7 @@ class ReusedNative(ProcessingTool):
 def test_worker_accepts_each_shared_row_before_next_callback_mutates_producer(tmp_path):
     import hashlib
     from bioimageflow_core import (
-        IOModel, ProcessingTask, RowInvocation, SourceFileOriginV1, SharedArray,
+        IOModel, ProcessingTask, RowInvocation, SourceFileOrigin, SharedArray,
         describe_tool_declaration, encode_processing_task, decode_processing_result,
         validate_processing_result,
     )
@@ -177,7 +178,7 @@ class ReusedShared(ProcessingTool):
     task = ProcessingTask(task_id="task_0000000000000002", node_name="shared-row-capture",
         invocation_id="inv_" + "2" * 32, cache_attempt_id=None, task_retry=0,
         mode="row_chunk", row_consumption="mapped", declaration=describe_tool_declaration(Controller()),
-        tool=SourceFileOriginV1(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="ReusedShared"),
+        tool=SourceFileOrigin(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="ReusedShared", primary=source_proof(source, "ReusedShared")),
         rows=tuple(RowInvocation(i, f"actual-{i}", {"value": value}, None)
                    for i, value in enumerate([4, 7, 9])),
         shared_memory_context={"output": scope.descriptor(), "inputs": []})
@@ -198,7 +199,7 @@ class ReusedShared(ProcessingTool):
 def test_worker_publication_budget_failure_keeps_unreturned_backing_until_grant_drain(tmp_path):
     import hashlib
     from bioimageflow_core import (
-        IOModel, ProcessingTask, RowInvocation, SourceFileOriginV1, SharedArray,
+        IOModel, ProcessingTask, RowInvocation, SourceFileOrigin, SharedArray,
         describe_tool_declaration, encode_processing_task,
     )
     from bioimageflow_core.worker import execute_processing_task
@@ -230,7 +231,7 @@ class BudgetedOutput(ProcessingTool):
     task = ProcessingTask(task_id="task_0000000000000003", node_name="budgeted-row",
         invocation_id="inv_" + "3" * 32, cache_attempt_id=None, task_retry=0,
         mode="row_chunk", row_consumption="mapped", declaration=describe_tool_declaration(Controller()),
-        tool=SourceFileOriginV1(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="BudgetedOutput"),
+        tool=SourceFileOrigin(path=str(source.resolve()), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(), class_name="BudgetedOutput", primary=source_proof(source, "BudgetedOutput")),
         rows=(RowInvocation(0, "actual-row", {}, None),),
         shared_memory_context={"output": scope.descriptor(), "inputs": []})
     with pytest.raises(ValueError, match="captured byte budget"):

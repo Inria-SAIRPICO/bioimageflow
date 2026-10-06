@@ -721,11 +721,11 @@ class NodeStep:
                     self._node.tool.environment, self._runtime_receipt,
                 )
             return
+        self._executable_capture = self._engine._capture_executable(self._node)
         self._runtime_receipt = self._engine._admit_node_runtime(
             self._node, provision=True,
         )
         self._engine._adopt_node_inputs(self._node)
-        self._executable_capture = self._engine._capture_executable(self._node)
         self._engine._validate_node_runtime(self._node)
         cached_df, sig_hash = self._engine._check_node_cache(
             self._node,

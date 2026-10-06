@@ -9,9 +9,10 @@ import sys
 from types import ModuleType
 
 import pytest
-from bioimageflow_core import Arguments, VersionedModuleOriginV1
+from bioimageflow_core import Arguments, VersionedModuleOrigin
 from bioimageflow_core.import_context import admit_import_root, selected_import_root
 from bioimageflow_core.worker_origins import clear_worker_tool_instances, load_worker_tool
+from tests.testkit.primary_content import source_proof
 
 
 def _distribution(root, name, version, sources, requirements=()):
@@ -49,8 +50,9 @@ class WitnessTool(ProcessingTool):
 ''',
     }, (requirement,))
     _distribution(root, 'witness_dependency', '9.0.0', {'witness_dependency.py': 'VALUE=9\n'}, dependency_requirements)
-    return VersionedModuleOriginV1(package.replace('_','-'), package, '1.0.0',
-        package + '.worker', package + '__1_0_0.worker', str(root), 'WitnessTool')
+    return VersionedModuleOrigin(package.replace('_','-'), package, '1.0.0',
+        package + '.worker', package + '__1_0_0.worker', str(root), 'WitnessTool',
+        source_proof(root / package / 'worker.py', 'WitnessTool', module=package + '__1_0_0.worker', package_root=root / package))
 
 
 @pytest.fixture(autouse=True)

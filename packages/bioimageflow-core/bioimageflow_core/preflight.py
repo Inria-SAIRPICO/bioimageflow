@@ -9,8 +9,8 @@ import re
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from bioimageflow_core.worker_origins import (
-    WorkerToolOriginV1,
-    _load_origin_class,
+    WorkerToolOrigin,
+    _admit_origin_class,
     decode_worker_tool_origin,
     worker_tool_origin_identity,
 )
@@ -100,7 +100,7 @@ def _canonical_path_list(value: Any) -> Tuple[str, ...]:
     return paths
 
 
-def _origins(value: Any) -> Tuple[WorkerToolOriginV1, ...]:
+def _origins(value: Any) -> Tuple[WorkerToolOrigin, ...]:
     if type(value) is not list:
         raise ValueError("origins must be a JSON array.")
     decoded = tuple(decode_worker_tool_origin(item) for item in value)
@@ -223,7 +223,7 @@ def _decode_payload(
     str,
     str,
     Tuple[str, ...],
-    Tuple[WorkerToolOriginV1, ...],
+    Tuple[WorkerToolOrigin, ...],
 ]:
     data = _exact_dict(
         payload,
@@ -334,11 +334,11 @@ def _sentinel_result(
     return wrote, read, deleted
 
 
-def _origin_result(origin: WorkerToolOriginV1) -> Dict[str, Any]:
+def _origin_result(origin: WorkerToolOrigin) -> Dict[str, Any]:
     identity = worker_tool_origin_identity(origin)
     resolved = False
     try:
-        _load_origin_class(origin, identity)
+        _admit_origin_class(origin)
         resolved = True
     except Exception:
         resolved = False

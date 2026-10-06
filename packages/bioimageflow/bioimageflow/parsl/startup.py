@@ -12,7 +12,7 @@ from bioimageflow.engine.common import _is_shared_array_type
 from bioimageflow.node import Node, scoped_node_names
 from bioimageflow.worker_origins import resolve_worker_tool_origin
 from bioimageflow_core import ProcessingTool
-from bioimageflow_core.worker_origins import ArchiveModuleOriginV1
+from bioimageflow_core.worker_origins import ArchiveModuleOrigin
 
 from .materialization import (
     archive_origin_from_source_record,
@@ -136,9 +136,13 @@ def _worker_origin(
         _captured_source_records(workflow),
         source_id,
     )
+    primary_origin = resolve_worker_tool_origin(tool)
+    if not isinstance(primary_origin, ArchiveModuleOrigin):
+        raise ValueError("Captured archive source requires an admitted archive origin.")
     return archive_origin_from_source_record(
         record,
         class_name=type(tool).__name__,
+        primary_origin=primary_origin,
         shared_runtime_root=shared_runtime_root,
     )
 
@@ -151,7 +155,7 @@ def _materialize_archives(
     archives = {
         requirement.tool_origin.source_id: requirement.tool_origin
         for requirement in requirements
-        if isinstance(requirement.tool_origin, ArchiveModuleOriginV1)
+        if isinstance(requirement.tool_origin, ArchiveModuleOrigin)
     }
     if not archives:
         return

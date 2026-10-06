@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Optional, Protocol, cast
 import numpy as np
 from bioimageflow_core.shm import _shared_memory_dtype
 from bioimageflow_core.types import SharedArray
@@ -181,7 +181,7 @@ def _decode_leaf(value: Any, *, is_key: bool) -> Any:
     raise ValueError(f"Unknown processing value kind: {kind!r}.")
 
 
-def encode_processing_value(value: Any, *, encode_leaf: _LeafCodec | None = None) -> Any:
+def encode_processing_value(value: Any, *, encode_leaf: Optional[_LeafCodec] = None) -> Any:
     """Encode one finite value; custom leaves retain live owner authority.
 
     The leaf callback receives ``is_key`` and cannot replace container grammar.
@@ -218,7 +218,7 @@ def encode_processing_value(value: Any, *, encode_leaf: _LeafCodec | None = None
     return walk(value)
 
 
-def decode_processing_value(value: Any, *, decode_leaf: _LeafCodec | None = None) -> Any:
+def decode_processing_value(value: Any, *, decode_leaf: Optional[_LeafCodec] = None) -> Any:
     """Decode finite containers and admit every reconstructed leaf without I/O.
 
     Custom leaf callbacks own their leaf metadata validation and effects.

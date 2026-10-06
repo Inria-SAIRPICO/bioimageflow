@@ -11,13 +11,14 @@ from bioimageflow_core import (
     IOModel,
     describe_io_model,
     RowInvocation,
-    SourceFileOriginV1,
+    SourceFileOrigin,
     decode_processing_result,
     encode_processing_task,
     validate_processing_result,
 )
 from bioimageflow_core.worker import execute_processing_task
 from bioimageflow_core.worker_origins import clear_worker_tool_instances
+from tests.testkit.primary_content import source_proof
 
 
 @pytest.fixture(autouse=True)
@@ -49,11 +50,12 @@ def _declaration(inputs=None, outputs=None):
     return {"inputs": describe_io_model(model(inputs)), "outputs": describe_io_model(model(outputs))}
 
 
-def _origin(source: Path) -> SourceFileOriginV1:
-    return SourceFileOriginV1(
+def _origin(source: Path) -> SourceFileOrigin:
+    return SourceFileOrigin(
         path=str(source.resolve()),
         source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
         class_name="ContextTool",
+        primary=source_proof(source, "ContextTool"),
     )
 
 

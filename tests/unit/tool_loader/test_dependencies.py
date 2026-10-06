@@ -146,12 +146,12 @@ class TestTransitiveDeps:
     ):
         from bioimageflow.tool_loader import load_versioned_package
         from bioimageflow.worker_origins import resolve_worker_tool_origin
-        from bioimageflow_core import VersionedModuleOriginV1
+        from bioimageflow_core import VersionedModuleOrigin
         from bioimageflow_core.worker_origins import load_worker_tool
 
         package = load_versioned_package("dummy_tools", "1.0.0", tool_store)
         origin = resolve_worker_tool_origin(package.AlphaTool)
-        assert isinstance(origin, VersionedModuleOriginV1)
+        assert isinstance(origin, VersionedModuleOrigin)
         assert origin.distribution == "dummy-tools"
         assert origin.import_package == "dummy_tools"
         assert origin.canonical_module == "dummy_tools.alpha"

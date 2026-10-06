@@ -14,7 +14,7 @@ from bioimageflow import tool_loader
 from bioimageflow_core import Arguments
 
 
-def _write_distribution(target, package, *, version="1.2.3", metadata=True, import_marker=None):
+def _write_distribution(target, package, *, version="1.2.3", metadata=True, import_marker=None, value=4):
     package_dir = target / package
     package_dir.mkdir(parents=True, exist_ok=True)
     prefix = "" if import_marker is None else f"from pathlib import Path\nPath({str(import_marker)!r}).write_text('imported')\n"
@@ -25,7 +25,7 @@ class ReadyTool(ProcessingTool):
     class Inputs(IOModel): pass
     class Outputs(IOModel): value: int
     def process_row(self, arguments): return self.Outputs(value=4)
-''')
+'''.replace("value=4", f"value={value}"))
     if metadata:
         info = target / f"{package}-{version}.dist-info"
         info.mkdir()
@@ -48,7 +48,7 @@ def _package(tmp_path):
     return "readiness_" + tmp_path.name.replace("-", "_")
 
 
-@pytest.mark.parametrize("version", ["1.2.3", "1.2.3rc1+local.1"])
+@pytest.mark.parametrize("version", ["1.2.3", "1.2.3rc1+local.1", "1!1.2.3rc1+local.1"])
 def test_successful_install_registers_actual_matching_distribution(tmp_path, monkeypatch, version):
     package = _package(tmp_path)
     calls = []
@@ -69,6 +69,33 @@ def test_successful_install_registers_actual_matching_distribution(tmp_path, mon
         assert len(calls) == 1
     finally:
         tool_loader.unload_versioned_package(package, version)
+
+
+def test_epoch_and_local_versions_keep_actual_callbacks_independent(tmp_path, monkeypatch):
+    package = _package(tmp_path)
+    versions = {"1.2.3rc1+local.1": 13, "1!1.2.3rc1+local.1": 29}
+
+    def install(command, **kwargs):
+        target = Path(command[command.index("--target") + 1])
+        version = command[-1].split("==", 1)[1]
+        _write_distribution(target, package, version=version, value=versions[version])
+
+    monkeypatch.setattr(tool_loader.subprocess, "run", install)
+    registry = ToolRegistry(store_path=tmp_path)
+    selected = []
+    try:
+        for version, expected in versions.items():
+            registry.install_package(package, version)
+            registry.register_package(package, version)
+            tool = registry.get_class("ReadyTool", package=package, version=version)
+            assert tool is not None
+            selected.append(tool)
+            assert tool().process_row(Arguments()).value == expected
+        assert selected[0] is not selected[1]
+        assert [tool().process_row(Arguments()).value for tool in selected] == [13, 29]
+    finally:
+        for version in versions:
+            tool_loader.unload_versioned_package(package, version)
 
 
 @pytest.mark.parametrize("package,version", [

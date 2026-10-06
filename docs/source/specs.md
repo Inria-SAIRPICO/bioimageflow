@@ -1584,7 +1584,7 @@ Fresh installations write to unique task-owned staging, validate readiness there
 A publication collision raises `FileExistsError` and preserves the winner, including an empty directory created by another owner.
 Failed pip installation retains its detailed `RuntimeError` and original cause; failure cleanup removes only that attempt's owned staging, not an occupied final target or another attempt's files.
 This installation admission resolves the import member without executing its initializer; actual loading and construction remain subsequent gates that preserve preexisting namespace owners and do not sandbox arbitrary trusted initializer effects.
-This bounded requested-distribution readiness does not establish controller/worker installed-byte equality or full transitive dependency closure, which remain qualified separately in Sections 5.2 and 6.4.
+This bounded requested-distribution readiness is distinct from the selected primary-content admission in Section 5.2 and does not establish full transitive dependency closure.
 
 #### Versioned Loading
 
@@ -1620,6 +1620,8 @@ The loading mechanism:
 
 A cached version-scoped namespace belongs to its selected store root; a same-name/version request from another root refuses rather than substituting or evicting the previously loaded package.
 Cached package members are admitted against their actual selected module locations before returning the package.
+Loading captures the selected finite Python members and imports their admitted bytes without substituting timestamp-valid cached bytecode.
+Before reusing a resident namespace, the loader compares represented class, constructor and scientific callback owners with their selected member bytes; a concrete stale or unproven owner refuses without unloading or replacing that namespace.
 Failed initialization, public-export materialization or class stamping removes only new scoped modules and the import-path entry introduced by that attempt, preserving preexisting module/path ownership and leaving the store files intact.
 Trusted package Python can have its own side effects; this cleanup is not a sandbox or a claim to undo arbitrary initializer effects.
 
@@ -2598,29 +2600,47 @@ An asset decoder refuses dictionary-key roles before hydration and validates rec
 Parsl refuses host-local `SharedArray` references anywhere in task input or result output containers, even though the same references are supported between workers on a shared local host.
 Decoders reject unknown schemas or modes, missing or extra fields, malformed origins and paths, invalid scalar types, booleans in integer fields, duplicate positions, and mismatched result correlation.
 
-The independently versioned current `WorkerToolOriginV1` has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
+The independently versioned current `WorkerToolOrigin` grammar is `bioimageflow.worker_tool_origin.v2` and has exactly five variants: installed module, versioned module, shared module, source file, and materialized archive module.
+The public classes are `InstalledModuleOrigin`, `VersionedModuleOrigin`, `SharedModuleOrigin`, `SourceFileOrigin` and `ArchiveModuleOrigin`; there are no earlier-origin aliases or wire fallbacks.
 Every remote backend uses the same strict origin resolver and processing entry point.
-The worker caches tool instances by the SHA-256 digest of canonical JSON for the complete origin including class name, so equal class or module names from different origins cannot collide.
-Fresh standalone source-file loading reads one byte sequence, verifies its source hash, and compiles and executes those same bytes without an importlib reread or cached bytecode substitution.
+Each origin carries a mandatory `PrimaryContentProof` with portable content digests, explicit owner selectors and represented import locators; operation-owned captured bytes remain separate from this wire proof.
+Its scientific projection excludes operational file paths and installation locators while retaining represented member content and owner authority.
+The proof represents the selected defining module, its selected finite Python package members and ancestors, and actual inherited constructor and row/batch callback owners, including explicitly represented framework or immutable builtin owners.
+An overridden batch callback and its inherited row delegate retain separate owner authority; hashing only the subclass file is insufficient.
+Externally defined represented owners retain explicit admitted locators rather than being silently assigned to the selected package.
+The worker caches tool instances by the SHA-256 digest of canonical JSON for the complete origin including class name and primary proof, so equal class or module names from different origins cannot collide.
+Before importing selected Python, the worker captures and verifies the represented member bytes and compiles and executes those held bytes without an importlib reread or cached-bytecode substitution.
+`execute_processing_task` retains one held-byte admission and its import finder through row or batch callbacks and result handling, including first-time imports of represented primary helpers during scientific execution.
+These finder scopes serialize within one process; separate WorkerPool processes remain parallel.
+`load_worker_tool` covers admission, construction and instance reuse within its own scope, which ends when it returns the instance.
+The proof's content facts are portable across supported Python minors; resident-code comparison is local to each interpreter and never requires the controller's bytecode digest to equal worker bytecode.
 The selected module and the tool class's actual defining module must belong to the selected source file, package root or installed distribution members; a re-export does not bypass that admission.
 Single-file shared/archive origins retain exact single-file membership rather than requiring a nonexistent package directory.
 An unadmitted preexisting synthetic source namespace is not executable authority merely because its file path matches; refusal preserves that module, while any reuse must retain the exact owning loader's source admission.
 Only successful tool admission and construction publishes an instance into the worker cache; failed loading or construction removes new source/version-scoped modules without removing preexisting namespace owners.
+Before construction, the worker admits the represented resident class and constructor/callback owners against the captured member bytes.
+After construction and on every instance-cache reuse, it validates the instance's actual bound scientific callbacks against that same proof before invoking the method.
+A changed selected member, stale resident callback or concrete constructor-induced callback replacement is refused before the applicable import, constructor or scientific method; an unchanged proven resident instance remains reusable.
+Refusal preserves preexisting namespace owners instead of unloading them to conceal a conflict; fresh owned failed-import publication retains the existing explicit retry contract.
+Shared origins with one canonical module name and conflicting roots therefore refuse the later root while retaining the first proven namespace and instance; they do not promise generic same-name Shared coexistence.
+Versioned private namespaces and archive content-scoped namespaces retain their independent coexistence contract.
 Before reusable cache lookup, the controller admits the actual executable authority for the selected local execution strategy.
 Captured custom-source bytes provide one content authority for Direct and managed execution; ordinary Direct runtime-callable authority and ordinary source-backed managed captured-source authority are distinct.
 Direct identity describes actual callable code and constants, nested code, defaults and closure values, and representable referenced literal globals and same-source helper functions.
-Plain managed-source admission captures source bytes and compares the resident controller callable, literal values and same-source helpers with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
-Installed and versioned managed origins instead retain declared-installation authority: admitted distribution membership and version, declared recipe and actual controller admission facts, without claiming that those worker DTOs carry captured controller source bytes.
-The current processing task attests the supported portable Inputs/Outputs declaration against the loaded instance before scientific computation; it does not attest the whole class implementation, constructor/module-initializer behavior or arbitrary post-admission state.
+Managed primary admission captures represented source bytes and compares the resident controller callable, literal values and same-source helpers, including inherited owner members, with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
+Versioned and explicitly selected installed origins carry that same portable primary-content authority together with their admitted distribution membership and version, declared recipe and controller admission facts.
+Source, shared, versioned and archive origins are selected automatically through their usual Workflow paths.
+Installed origins remain explicit through `resolve_worker_tool_origin(tool, installed_distribution=...)` in `bioimageflow.worker_origins` and the SDK loader/task surface; discovering installed metadata does not silently select an Installed origin for a Workflow.
+The processing task also attests the supported portable Inputs/Outputs declaration against the loaded instance before scientific computation; neither declaration nor primary proof attests arbitrary class state or undoes initializer/constructor side effects.
 Captured custom-source bytes provide stronger source authority without sealing arbitrary later class or module state.
-These bounded checks do not establish arbitrary dynamic-initializer or process-global isolation, complete controller/worker installed-content equality, or transitive dependency closure for installed, shared or versioned origins.
+These bounded checks establish represented primary-content parity or precise conflict refusal, not arbitrary dynamic-initializer or process-global isolation, whole-installed-environment equality, or unrepresented transitive dependency closure for installed, shared or versioned origins.
 Existing origin selectors, ordinary programmatic Direct tools and normal caching remain supported; labels, selectors and development-only current-source inspection are not substitutes for actual admitted executable identity.
 
 Before managed Processing cache lookup, the engine admits the selected ready runtime through its public Wetlands owner using the same augmented recipe, including the authoritative Core dependency, that dispatch will consume.
 The public `RuntimeContentReceipt` owns normalized interpreter, installed-content and resolved-artifact facts; its generation, recipe and lockfile identities fence the selected ready owner without substituting for scientific content.
 Ready inspection and planning do not provision, start scientific workers or spawn a content probe; actual execution may prepare a missing or stale owned runtime before deriving the key, while scientific worker startup remains unnecessary for a reusable hit.
 Later managed cache decisions and dispatch validate the admitted receipt's current-generation fence without rescanning installed content, rather than silently switching to another runtime after cache admission.
-This bounded receipt describes owner-managed ready content, not arbitrary external filesystem tampering, native relocation or primary installed-tool controller/worker executable parity.
+This bounded receipt describes owner-managed ready content, independently of the selected primary-content proof; it does not describe arbitrary external filesystem tampering or universal native relocation.
 Editable source roots require fresh operation-owned live-source admission; a changed admitted footprint is refused until explicit owned retirement and reprovisioning, without hot reloading or claiming arbitrary Python state sealing.
 
 Direct invokes the shared output-normalization path locally.
@@ -2689,12 +2709,14 @@ Result-key material includes every value that can affect logical output and cach
 The key retains the captured declared tool/distribution version token and the instance's semantic Inputs/Outputs contract: portable `type_spec`, requiredness, nullability, image metadata and supported declared bounds, distinguishing dynamic Outputs absence, known-empty schemas and Passthrough declarations without hashing GUI descriptions or invoking a dynamic resolver merely for identity.
 These declaration facts reuse the effective definition capture rather than copying default values or shared-array owners again; arbitrary custom annotation-validator closure remains explicitly unproved.
 The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
+Managed Processing keys include the admitted portable primary-content facts and their proof grammar; an earlier record without represented primary admission cannot bypass this contract.
+Changed selected member bytes or inherited executable owners require a new clean controller admission and key; a stale controller is refused before reusable lookup rather than labeling its retained callable with newer source bytes.
 ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v1`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
 This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
 For managed Processing execution, `managed_runtime` retains the receipt's detached scientific facts and `content_digest`; generation IDs, raw recipe/lockfile hashes and operational paths are not scientific content salts.
 With the same declared recipe and other key facts, identical admitted content recreated in a new operational generation retains normal reuse, while changed admitted runtime content cannot reuse an earlier computation merely because the declared recipe and lockfile hash are unchanged.
 Nodes sharing one augmented runtime recipe share its admission within one operation; the next operation refreshes that authority rather than inheriting a global memo.
-The supported declaration parity check is specified in Section 5.2; controller key facts do not establish whole-class, constructor/module-initializer or post-load class-state sealing.
+The supported declaration and represented primary parity checks are specified in Section 5.2; controller key facts do not establish whole-class, constructor/module-initializer or arbitrary post-load class-state sealing.
 The result key must not include run IDs, invocation IDs, attempt IDs, task IDs, executor or scheduler metadata, wall-clock timestamps, hostnames, process IDs, absolute runtime paths, Parquet transport digests, shared-memory segment names, or human-facing run-view paths.
 Logical DataFrame identity reads exact cells within each column, preserving its declared dtype and value rather than promoting a mixed numeric row to floating point.
 Adjacent large integers remain distinct even beside floating-point columns; signed and unsigned values retain the existing dtype-aware logical representation.
@@ -2767,6 +2789,7 @@ Unchanged admitted computation retains normal cache reuse; inspection of a later
 - **Path-based external references:** V1 external reference identity is path-based, not content-based. If an input file is modified without changing its path, the cache may report a false hit. Users can manually invalidate affected nodes when needed.
 - **Transitive dependency changes:** The environment dependency hash catches declared version spec changes, such as `cellpose==3.0` to `cellpose==4.0`.
   Managed Processing also keys the content represented by its admitted ready-runtime receipt, so changed represented content is not excused by an unchanged recipe or lockfile hash.
+  Selected primary Python members and inherited represented callback/constructor owners use the separate primary proof in Section 5.2; selectors, unchanged package versions and resident namespace membership cannot substitute for that content authority.
   Dependency or process-state closure outside those admitted facts remains unproved; retain manual declared-version invalidation or explicit invalidation for unrepresented changes, without treating this limitation as permission for a concrete mismatch between resident callable code or representable referenced literal/helper values and admitted executable authority.
 
 ### 6.5 Pre-execution Planning
@@ -3392,8 +3415,9 @@ from bioimageflow_core import (
     # Strict remote-processing protocol and origins
     ProcessingTask, RowInvocation,
     ProcessingTaskResult, ConsumedRow, OutputGroup,
-    InstalledModuleOriginV1, VersionedModuleOriginV1,
-    SharedModuleOriginV1, SourceFileOriginV1, ArchiveModuleOriginV1,
+    InstalledModuleOrigin, VersionedModuleOrigin,
+    SharedModuleOrigin, SourceFileOrigin, ArchiveModuleOrigin,
+    PrimaryContentProof,
 )
 from bioimageflow_core.io import load_image, save_image
 from bioimageflow_core.shm import create_shared_output, open_shared_array
@@ -3523,6 +3547,7 @@ Portable source paths reject colon, backslash and Windows reserved device compon
 Staging consumes captured immutable bytes and paths; invalid later records cannot cause earlier custom sources to execute or partially stage.
 Executable namespaces for both single-file sources and package bundles distinguish captured content as well as logical source ID, so a later different body under the same ID cannot replace the authority of a retained earlier definition.
 Direct and managed execution of a captured custom source use that source's admitted content authority; mutable runtime module paths or a newer same-ID source are not its executable identity.
+Managed archive execution carries the represented primary-content proof from Section 5.2, including inherited executable owner members; source-table containment and declaration parity alone are not its resident executable attestation.
 Safe nested helper modules and assets, Unicode and hyphenated IDs, existing filename/root-package defaults, and ordered bundle hashing remain supported.
 Embedded Python remains trusted executable code; contained staging is not a Python sandbox.
 Outer archive entry admission checks the complete member set and workflow JSON/envelope before extraction; malformed later entries cannot leave earlier extracted files.

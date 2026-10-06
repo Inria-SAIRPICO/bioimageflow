@@ -17,9 +17,10 @@ from bioimageflow.parsl.materialization import (
     source_record_by_id,
 )
 from bioimageflow_core.worker_origins import (
-    ArchiveModuleOriginV1,
+    ArchiveModuleOrigin,
     load_worker_tool,
 )
+from tests.testkit.primary_content import literal_proof
 
 
 TOOL_SOURCE = """\
@@ -231,13 +232,14 @@ def test_record_must_exactly_match_archive_origin(
     evidence: str,
 ) -> None:
     record = _single_record()
-    origin = ArchiveModuleOriginV1(
+    origin = ArchiveModuleOrigin(
         source_id=str(record["id"]),
         source_hash=str(record["source_hash"]),
         canonical_module=str(record["module"]),
         scoped_module=f"bioimageflow_custom_tools_{record['id']}",
         materialization_root=str(tmp_path.resolve()),
         class_name="ArchivedTool",
+        primary=literal_proof(class_name="ArchivedTool"),
     )
     mutated = {**record, **mutation}
 

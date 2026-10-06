@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from tests.testkit.primary_content import literal_proof, source_proof
+from bioimageflow_core.primary_content import encode_primary_content
 from bioimageflow_core import (
-    ArchiveModuleOriginV1,
-    InstalledModuleOriginV1,
+    ArchiveModuleOrigin,
+    InstalledModuleOrigin,
     IOModel,
     describe_tool_declaration,
     declaration_digest,
@@ -17,9 +20,9 @@ from bioimageflow_core import (
     ConsumedRow,
     OutputGroup,
     ReferenceRow,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    VersionedModuleOriginV1,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    VersionedModuleOrigin,
     decode_processing_result,
     decode_processing_task,
     decode_worker_tool_origin,
@@ -31,13 +34,14 @@ from bioimageflow_core import (
 )
 
 
-def _source_origin(tmp_path) -> SourceFileOriginV1:
+def _source_origin(tmp_path) -> SourceFileOrigin:
     source = tmp_path / "tool.py"
     source.write_text("# worker tool\n", encoding="utf-8")
-    return SourceFileOriginV1(
+    return SourceFileOrigin(
         path=str(source.resolve()),
         source_hash="a" * 64,
         class_name="ExampleTool",
+        primary=source_proof(source, "ExampleTool"),
     )
 
 
@@ -223,14 +227,16 @@ def test_result_declaration_mismatch_is_refused_before_acceptance(tmp_path):
 
 def test_every_origin_variant_has_an_exact_round_trip(tmp_path) -> None:
     root = str(tmp_path.resolve())
+    primary = _source_origin(tmp_path).primary
     origins = (
-        InstalledModuleOriginV1(
+        InstalledModuleOrigin(
             distribution="example-tools",
             version="1.2.3",
             module="example_tools.processing",
             class_name="ExampleTool",
+            primary=primary,
         ),
-        VersionedModuleOriginV1(
+        VersionedModuleOrigin(
             distribution="example-tools",
             import_package="example_tools",
             version="1.2.3",
@@ -238,25 +244,29 @@ def test_every_origin_variant_has_an_exact_round_trip(tmp_path) -> None:
             scoped_module="example_tools__1_2_3.processing",
             store_root=root,
             class_name="ExampleTool",
+            primary=primary,
         ),
-        SharedModuleOriginV1(
+        SharedModuleOrigin(
             module="shared_tools.processing",
             import_root=root,
             source_hash="a" * 64,
             class_name="ExampleTool",
+            primary=primary,
         ),
-        SourceFileOriginV1(
+        SourceFileOrigin(
             path=str((tmp_path / "tool.py").resolve()),
             source_hash="b" * 64,
             class_name="ExampleTool",
+            primary=primary,
         ),
-        ArchiveModuleOriginV1(
+        ArchiveModuleOrigin(
             source_id="m_1234567890abcdef",
             source_hash="c" * 64,
             canonical_module="tools.processing",
             scoped_module="bioimageflow_custom_tools_m_1234567890abcdef.tools.processing",
             materialization_root=root,
             class_name="ExampleTool",
+            primary=primary,
         ),
     )
     for origin in origins:
@@ -268,17 +278,21 @@ def test_every_origin_variant_has_an_exact_round_trip(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutation",
     [
-        {"schema": "bioimageflow.worker_tool_origin.v2"},
+        {"schema": "bioimageflow.worker_tool_origin.v1"},
         {"kind": "future"},
         {"source_hash": "ABC"},
         {"class_name": "not-a-class"},
         {"path": "relative.py"},
         {"extra": True},
+        {"primary": {**encode_primary_content(literal_proof()), "callbacks": []}},
     ],
 )
-def test_origin_malformed_payloads_fail_closed(tmp_path, mutation) -> None:
+def test_origin_malformed_payloads_fail_closed(tmp_path, monkeypatch, mutation) -> None:
     payload = encode_worker_tool_origin(_source_origin(tmp_path))
     payload.update(mutation)
+    def forbidden_read(*args, **kwargs):
+        pytest.fail("Pure origin refusal read selected Python")
+    monkeypatch.setattr(Path, "read_bytes", forbidden_read)
     with pytest.raises(ValueError):
         decode_worker_tool_origin(payload)
 

@@ -24,7 +24,8 @@ from bioimageflow_core import (
     RowConsumption,
     ResourceSpec,
 )
-from bioimageflow_core.worker_origins import InstalledModuleOriginV1
+from bioimageflow_core.worker_origins import InstalledModuleOrigin
+from tests.testkit.primary_content import literal_proof
 
 
 class RequirementTool(ProcessingTool):
@@ -61,12 +62,13 @@ class RequirementTool(ProcessingTool):
         raise AssertionError("requirement construction must not execute tools")
 
 
-def _origin() -> InstalledModuleOriginV1:
-    return InstalledModuleOriginV1(
+def _origin() -> InstalledModuleOrigin:
+    return InstalledModuleOrigin(
         distribution="example-tools",
         version="1.0.0",
         module="example_tools.worker",
         class_name="RequirementTool",
+        primary=literal_proof("example_tools.worker", "RequirementTool"),
     )
 
 

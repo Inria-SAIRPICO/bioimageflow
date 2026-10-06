@@ -32,10 +32,11 @@ from bioimageflow.parsl.types import (
     WorkerSlotCapacity,
 )
 from bioimageflow_core.worker_origins import (
-    InstalledModuleOriginV1,
-    SourceFileOriginV1,
+    InstalledModuleOrigin,
+    SourceFileOrigin,
 )
 from bioimageflow_core.preflight import execute_executor_preflight
+from tests.testkit.primary_content import literal_proof, source_proof
 
 
 CORE_REQUIREMENT = "bioimageflow-core>=0.1.7,<0.2"
@@ -83,16 +84,18 @@ def _expectation(tmp_path: Path) -> PreflightExpectation:
     source.write_text("class Tool: pass\n")
     dependency = tmp_path / "environment"
     dependency.mkdir()
-    installed = InstalledModuleOriginV1(
+    installed = InstalledModuleOrigin(
         distribution="example-tools",
         version="1.0.0",
         module="example_tools.worker",
         class_name="InstalledTool",
+        primary=literal_proof("example_tools.worker", "InstalledTool"),
     )
-    source_origin = SourceFileOriginV1(
+    source_origin = SourceFileOrigin(
         path=str(source.resolve()),
         source_hash="b" * 64,
         class_name="SourceTool",
+        primary=literal_proof(class_name="SourceTool", path=str(source.resolve())),
     )
     requirements = [
         _requirement(
@@ -193,10 +196,11 @@ class ProbeTool(ProcessingTool):
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     storage = tmp_path / "storage"
     storage.mkdir()
-    origin = SourceFileOriginV1(
+    origin = SourceFileOrigin(
         path=str(source.resolve()),
         source_hash=source_hash,
         class_name="ProbeTool",
+        primary=source_proof(source, "ProbeTool"),
     )
     expectation = PreflightExpectation(
         executor_label="cpu",

@@ -15,13 +15,16 @@ import re
 import sys
 import threading
 from typing import Any, Dict, Iterator, Literal, Mapping, Optional, Tuple, Type, Union
-from urllib.parse import unquote, urlparse
 
-from bioimageflow_core.import_context import admit_import_root, selected_import_root
+from bioimageflow_core.import_context import _import_names, _owns, admit_import_root, selected_import_root
 from bioimageflow_core.tool import ProcessingTool
+from bioimageflow_core.primary_content import (
+    PrimaryContentProof, admit_primary_content, decode_primary_content,
+    encode_primary_content, primary_import_context, require_primary_coverage,
+)
 
 
-ORIGIN_SCHEMA = "bioimageflow.worker_tool_origin.v1"
+ORIGIN_SCHEMA = "bioimageflow.worker_tool_origin.v2"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _DISTRIBUTION_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -30,19 +33,20 @@ _CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
-class InstalledModuleOriginV1:
+class InstalledModuleOrigin:
     distribution: str
     version: str
     module: str
     class_name: str
-    schema: Literal["bioimageflow.worker_tool_origin.v1"] = field(
+    primary: PrimaryContentProof
+    schema: Literal["bioimageflow.worker_tool_origin.v2"] = field(
         default=ORIGIN_SCHEMA, init=False
     )
     kind: Literal["installed_module"] = field(default="installed_module", init=False)
 
 
 @dataclass(frozen=True)
-class VersionedModuleOriginV1:
+class VersionedModuleOrigin:
     distribution: str
     import_package: str
     version: str
@@ -50,64 +54,68 @@ class VersionedModuleOriginV1:
     scoped_module: str
     store_root: str
     class_name: str
-    schema: Literal["bioimageflow.worker_tool_origin.v1"] = field(
+    primary: PrimaryContentProof
+    schema: Literal["bioimageflow.worker_tool_origin.v2"] = field(
         default=ORIGIN_SCHEMA, init=False
     )
     kind: Literal["versioned_module"] = field(default="versioned_module", init=False)
 
 
 @dataclass(frozen=True)
-class SharedModuleOriginV1:
+class SharedModuleOrigin:
     module: str
     import_root: str
     source_hash: str
     class_name: str
-    schema: Literal["bioimageflow.worker_tool_origin.v1"] = field(
+    primary: PrimaryContentProof
+    schema: Literal["bioimageflow.worker_tool_origin.v2"] = field(
         default=ORIGIN_SCHEMA, init=False
     )
     kind: Literal["shared_module"] = field(default="shared_module", init=False)
 
 
 @dataclass(frozen=True)
-class SourceFileOriginV1:
+class SourceFileOrigin:
     path: str
     source_hash: str
     class_name: str
-    schema: Literal["bioimageflow.worker_tool_origin.v1"] = field(
+    primary: PrimaryContentProof
+    schema: Literal["bioimageflow.worker_tool_origin.v2"] = field(
         default=ORIGIN_SCHEMA, init=False
     )
     kind: Literal["source_file"] = field(default="source_file", init=False)
 
 
 @dataclass(frozen=True)
-class ArchiveModuleOriginV1:
+class ArchiveModuleOrigin:
     source_id: str
     source_hash: str
     canonical_module: str
     scoped_module: str
     materialization_root: str
     class_name: str
-    schema: Literal["bioimageflow.worker_tool_origin.v1"] = field(
+    primary: PrimaryContentProof
+    schema: Literal["bioimageflow.worker_tool_origin.v2"] = field(
         default=ORIGIN_SCHEMA, init=False
     )
     kind: Literal["archive_module"] = field(default="archive_module", init=False)
 
 
-WorkerToolOriginV1 = Union[
-    InstalledModuleOriginV1,
-    VersionedModuleOriginV1,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    ArchiveModuleOriginV1,
+WorkerToolOrigin = Union[
+    InstalledModuleOrigin,
+    VersionedModuleOrigin,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    ArchiveModuleOrigin,
 ]
 
 _ORIGIN_TYPES: Dict[str, Tuple[Type[Any], Tuple[str, ...]]] = {
     "installed_module": (
-        InstalledModuleOriginV1,
-        ("distribution", "version", "module", "class_name"),
+        InstalledModuleOrigin,
+        ("distribution", "version", "module", "class_name", "primary"),
     ),
     "versioned_module": (
-        VersionedModuleOriginV1,
+        VersionedModuleOrigin,
         (
             "distribution",
             "import_package",
@@ -116,18 +124,19 @@ _ORIGIN_TYPES: Dict[str, Tuple[Type[Any], Tuple[str, ...]]] = {
             "scoped_module",
             "store_root",
             "class_name",
+            "primary",
         ),
     ),
     "shared_module": (
-        SharedModuleOriginV1,
-        ("module", "import_root", "source_hash", "class_name"),
+        SharedModuleOrigin,
+        ("module", "import_root", "source_hash", "class_name", "primary"),
     ),
     "source_file": (
-        SourceFileOriginV1,
-        ("path", "source_hash", "class_name"),
+        SourceFileOrigin,
+        ("path", "source_hash", "class_name", "primary"),
     ),
     "archive_module": (
-        ArchiveModuleOriginV1,
+        ArchiveModuleOrigin,
         (
             "source_id",
             "source_hash",
@@ -135,6 +144,7 @@ _ORIGIN_TYPES: Dict[str, Tuple[Type[Any], Tuple[str, ...]]] = {
             "scoped_module",
             "materialization_root",
             "class_name",
+            "primary",
         ),
     ),
 }
@@ -211,13 +221,14 @@ def _require_safe_id(value: Any, label: str) -> str:
     return text
 
 
-def encode_worker_tool_origin(origin: WorkerToolOriginV1) -> Dict[str, Any]:
+def encode_worker_tool_origin(origin: WorkerToolOrigin) -> Dict[str, Any]:
     """Encode one origin to its exact plain-dictionary representation."""
     if not isinstance(
         origin, tuple(origin_type for origin_type, _ in _ORIGIN_TYPES.values())
     ):
-        raise TypeError("origin must be a WorkerToolOriginV1 value.")
+        raise TypeError("origin must be a WorkerToolOrigin value.")
     payload = asdict(origin)
+    payload["primary"] = encode_primary_content(origin.primary)
     return {
         key: payload[key]
         for key in (
@@ -232,8 +243,8 @@ def encode_worker_tool_origin(origin: WorkerToolOriginV1) -> Dict[str, Any]:
     }
 
 
-def decode_worker_tool_origin(payload: Mapping[str, Any]) -> WorkerToolOriginV1:
-    """Decode an origin and reject every non-v1 or non-canonical payload."""
+def decode_worker_tool_origin(payload: Mapping[str, Any]) -> WorkerToolOrigin:
+    """Decode an origin and reject every non-current or non-canonical payload."""
     if type(payload) is not dict:
         raise ValueError("Worker tool origin must be a plain object.")
     if payload.get("schema") != ORIGIN_SCHEMA:
@@ -247,6 +258,9 @@ def decode_worker_tool_origin(payload: Mapping[str, Any]) -> WorkerToolOriginV1:
     _require_exact_keys(payload, fields, f"{kind} origin")
 
     values = {name: payload[name] for name in fields}
+    values["primary"] = decode_primary_content(values["primary"])
+    if not values["primary"].callbacks:
+        raise ValueError("Worker origin requires effective primary callback owners.")
     if "distribution" in values:
         values["distribution"] = _require_distribution(values["distribution"])
     if "version" in values:
@@ -280,7 +294,7 @@ def decode_worker_tool_origin(payload: Mapping[str, Any]) -> WorkerToolOriginV1:
     return origin_type(**values)
 
 
-def worker_tool_origin_identity(origin: WorkerToolOriginV1) -> str:
+def worker_tool_origin_identity(origin: WorkerToolOrigin) -> str:
     """Return the canonical complete-origin SHA-256 instance identity."""
     validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
     canonical = json.dumps(
@@ -325,48 +339,6 @@ def _distribution_version(distribution: str, path: Optional[str] = None) -> str:
     return matches[0].version
 
 
-def _distribution_imports(distribution: importlib.metadata.Distribution) -> set:
-    declared = distribution.read_text("top_level.txt")
-    if declared:
-        return {
-            line.strip()
-            for line in declared.splitlines()
-            if line.strip() and not line.startswith("#")
-        }
-    roots = set()
-    for file in distribution.files or ():
-        first = file.parts[0] if file.parts else ""
-        if first and not first.endswith((".dist-info", ".data", ".pth")):
-            roots.add(first.removesuffix(".py"))
-    return roots
-
-
-def _editable_distribution_provides(
-    distribution: importlib.metadata.Distribution,
-    module_name: str,
-) -> bool:
-    direct_url = distribution.read_text("direct_url.json")
-    if not direct_url:
-        return False
-    parsed = json.loads(direct_url)
-    url = parsed.get("url")
-    if not isinstance(url, str):
-        return False
-    location = urlparse(url)
-    if location.scheme != "file":
-        return False
-    project_root = Path(unquote(location.path)).resolve(strict=True)
-    module_parts = module_name.split(".")
-    for source_root in (project_root, project_root / "src"):
-        module_path = source_root.joinpath(*module_parts)
-        if (
-            module_path.with_suffix(".py").is_file()
-            or (module_path / "__init__.py").is_file()
-        ):
-            return True
-    return False
-
-
 def _verify_distribution(
     distribution: str, version: str, path: Optional[str] = None
 ) -> None:
@@ -409,36 +381,6 @@ def _require_class_root(candidate: Type[ProcessingTool], root: Path) -> None:
         )
 
 
-def _distribution_owns_module(
-    distribution: importlib.metadata.Distribution, module: Any
-) -> bool:
-    source = _module_source(module)
-    if any(
-        Path(str(distribution.locate_file(member))).resolve() == source
-        for member in distribution.files or ()
-    ):
-        return True
-    direct_url = distribution.read_text("direct_url.json")
-    if not direct_url:
-        return False
-    parsed = json.loads(direct_url)
-    if not parsed.get("dir_info", {}).get("editable", False):
-        return False
-    location = urlparse(parsed.get("url", ""))
-    if location.scheme != "file":
-        return False
-    root = Path(unquote(location.path))
-    parts = module.__name__.split(".")
-    return any(
-        source == candidate.resolve()
-        for source_root in (root, root / "src")
-        for candidate in (
-            source_root.joinpath(*parts).with_suffix(".py"),
-            source_root.joinpath(*parts) / "__init__.py",
-        )
-    )
-
-
 @contextmanager
 def _temporary_import_root(root: str) -> Iterator[None]:
     sys.path.insert(0, root)
@@ -451,11 +393,14 @@ def _temporary_import_root(root: str) -> Iterator[None]:
             pass
 
 
-def _load_source_file(origin: SourceFileOriginV1, identity: str) -> Any:
+def _load_source_file(origin: SourceFileOrigin, identity: str, primary: Any) -> Any:
     path = Path(origin.path)
     if not path.is_file():
         raise ImportError(f"Worker source file does not exist: {path}.")
-    contents = path.read_bytes()
+    selected = next((name for name, member_path in primary.paths.items() if member_path == path.resolve(strict=True)), None)
+    if selected is None:
+        raise ImportError("Selected source file has no primary content member.")
+    contents = primary.sources[selected]
     if hashlib.sha256(contents).hexdigest() != origin.source_hash:
         raise ImportError(f"Worker source file hash mismatch: {path}.")
     module_name = f"_bioimageflow_worker_{identity}"
@@ -472,9 +417,10 @@ def _load_source_file(origin: SourceFileOriginV1, identity: str) -> Any:
             )
         return previous
     module = importlib.util.module_from_spec(spec)
+    primary.own_module(module)
     sys.modules[module_name] = module
     try:
-        exec(compile(contents, str(path), "exec"), module.__dict__)
+        exec(compile(contents, str(path), "exec", dont_inherit=True), module.__dict__)
     except BaseException:
         if sys.modules.get(module_name) is module:
             if previous is None:
@@ -486,7 +432,7 @@ def _load_source_file(origin: SourceFileOriginV1, identity: str) -> Any:
     return module
 
 
-def _load_shared_module(origin: SharedModuleOriginV1) -> Any:
+def _load_shared_module(origin: SharedModuleOrigin, primary: Any) -> Any:
     root = Path(origin.import_root)
     if not root.is_dir():
         raise ImportError(f"Shared import root does not exist: {root}.")
@@ -500,9 +446,9 @@ def _load_shared_module(origin: SharedModuleOriginV1) -> Any:
         raise ImportError(
             f"Shared module {origin.module!r} is absent from {origin.import_root!r}."
         )
-    if _file_hash(source_path) != origin.source_hash:
+    if primary.source_hash(source_path) != origin.source_hash:
         raise ImportError(f"Shared module {origin.module!r} source hash mismatch.")
-    module = _isolated_import(origin.module, origin.import_root, origin.class_name)
+    module = _selected_import(origin.module, origin.import_root, origin.class_name)
     module_file = getattr(module, "__file__", None)
     if not isinstance(module_file, str):
         raise ImportError(f"Shared module {origin.module!r} has no source file.")
@@ -514,36 +460,19 @@ def _load_shared_module(origin: SharedModuleOriginV1) -> Any:
     return module
 
 
-def _isolated_import(module_name: str, import_root: str, class_name: str) -> Any:
+def _selected_import(module_name: str, import_root: str, class_name: str) -> Any:
+    """Import without withdrawing or substituting a canonical namespace owner."""
     top_package = module_name.split(".", 1)[0]
-    previous = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == top_package or name.startswith(top_package + ".")
-    }
-    for name in previous:
-        sys.modules.pop(name, None)
-    try:
-        with _temporary_import_root(import_root):
-            module = importlib.import_module(module_name)
-            package_root = Path(import_root) / top_package
-            if not package_root.is_dir():
-                package_root = package_root.with_suffix(".py")
-            _require_class_root(
-                _require_processing_tool(module, class_name), package_root
-            )
-        return module
-    finally:
-        for name in [
-            candidate
-            for candidate in sys.modules
-            if candidate == top_package or candidate.startswith(top_package + ".")
-        ]:
-            sys.modules.pop(name, None)
-        sys.modules.update(previous)
+    with _temporary_import_root(import_root):
+        module = importlib.import_module(module_name)
+        package_root = Path(import_root) / top_package
+        if not package_root.is_dir():
+            package_root = package_root.with_suffix(".py")
+        _require_class_root(_require_processing_tool(module, class_name), package_root)
+    return module
 
 
-def _load_versioned_module(origin: VersionedModuleOriginV1) -> Any:
+def _load_versioned_module(origin: VersionedModuleOrigin, primary: Any) -> Any:
     root = Path(origin.store_root)
     if not root.is_dir():
         raise ImportError(f"Versioned store root does not exist: {root}.")
@@ -582,24 +511,25 @@ def _load_versioned_module(origin: VersionedModuleOriginV1) -> Any:
     }
     try:
         return _import_versioned(
-            origin, init_path, package_dir, target_source, scoped_root
+            origin, init_path, package_dir, target_source, scoped_root, primary
         )
     except BaseException:
         for name, module in list(sys.modules.items()):
             if (
                 name == scoped_root or name.startswith(scoped_root + ".")
-            ) and name not in before:
+            ) and name not in before and primary.owned_modules.get(name) is module:
                 if sys.modules.get(name) is module:
                     sys.modules.pop(name)
         raise
 
 
 def _import_versioned(
-    origin: VersionedModuleOriginV1,
+    origin: VersionedModuleOrigin,
     init_path: Path,
     package_dir: Path,
     target_source: Path,
     scoped_root: str,
+    primary: Any,
 ) -> Any:
     if scoped_root not in sys.modules:
         spec = importlib.util.spec_from_file_location(
@@ -611,8 +541,12 @@ def _import_versioned(
             raise ImportError(f"Cannot load versioned package from {init_path}.")
         package = importlib.util.module_from_spec(spec)
         package.__package__ = scoped_root
+        primary.own_module(package)
         sys.modules[scoped_root] = package
-        spec.loader.exec_module(package)
+        selected = next((name for name, path in primary.paths.items() if path == init_path.resolve(strict=True)), None)
+        if selected is None:
+            raise ImportError("Versioned initializer has no primary content member.")
+        exec(compile(primary.sources[selected], str(init_path), "exec", dont_inherit=True), vars(package))
     module = importlib.import_module(origin.scoped_module)
     module_file = getattr(module, "__file__", None)
     if not isinstance(module_file, str) or Path(module_file).resolve(
@@ -655,7 +589,7 @@ def _archive_tree_hash(package_root: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_archive_module(origin: ArchiveModuleOriginV1) -> Any:
+def _load_archive_module(origin: ArchiveModuleOrigin) -> Any:
     root = Path(origin.materialization_root)
     if not root.is_dir():
         raise ImportError(f"Archive materialization root does not exist: {root}.")
@@ -679,53 +613,51 @@ def _load_archive_module(origin: ArchiveModuleOriginV1) -> Any:
     )
     if actual_hash != origin.source_hash:
         raise ImportError(f"Archive source {origin.source_id!r} hash mismatch.")
-    return _isolated_import(
+    return _selected_import(
         origin.scoped_module, origin.materialization_root, origin.class_name
     )
 
 
 def _load_origin_class(
-    origin: WorkerToolOriginV1, identity: str
+    origin: WorkerToolOrigin, identity: str, primary: Any
 ) -> Type[ProcessingTool]:
     with _instance_lock:
         distribution: Optional[importlib.metadata.Distribution] = None
-        if isinstance(origin, InstalledModuleOriginV1):
+        if isinstance(origin, InstalledModuleOrigin):
             _verify_distribution(origin.distribution, origin.version)
             distribution = importlib.metadata.distribution(origin.distribution)
             top_package = origin.module.split(".", 1)[0]
-            if top_package not in _distribution_imports(
-                distribution
-            ) and not _editable_distribution_provides(distribution, origin.module):
+            if top_package not in _import_names(distribution):
                 raise ImportError(
                     f"Module {origin.module!r} is not provided by distribution "
                     f"{origin.distribution!r}."
                 )
             module = importlib.import_module(origin.module)
-        elif isinstance(origin, VersionedModuleOriginV1):
-            module = _load_versioned_module(origin)
-        elif isinstance(origin, SharedModuleOriginV1):
-            module = _load_shared_module(origin)
-        elif isinstance(origin, SourceFileOriginV1):
-            module = _load_source_file(origin, identity)
+        elif isinstance(origin, VersionedModuleOrigin):
+            module = _load_versioned_module(origin, primary)
+        elif isinstance(origin, SharedModuleOrigin):
+            module = _load_shared_module(origin, primary)
+        elif isinstance(origin, SourceFileOrigin):
+            module = _load_source_file(origin, identity, primary)
         else:
             module = _load_archive_module(origin)
         candidate = _require_processing_tool(module, origin.class_name)
-        if isinstance(origin, InstalledModuleOriginV1):
+        if isinstance(origin, InstalledModuleOrigin):
             assert distribution is not None
             defining = sys.modules.get(candidate.__module__)
             if (
-                not _distribution_owns_module(distribution, module)
+                not _owns(distribution, module.__name__, module, {}, {})
                 or defining is None
-                or not _distribution_owns_module(distribution, defining)
+                or not _owns(distribution, defining.__name__, defining, {}, {})
             ):
                 raise ImportError(
                     f"Selected module or tool defining module is outside distribution {origin.distribution!r}."
                 )
-        elif isinstance(origin, VersionedModuleOriginV1):
+        elif isinstance(origin, VersionedModuleOrigin):
             _require_class_root(
                 candidate, Path(origin.store_root) / origin.import_package
             )
-        elif isinstance(origin, SourceFileOriginV1):
+        elif isinstance(origin, SourceFileOrigin):
             defining = sys.modules.get(candidate.__module__)
             if defining is None or _module_source(defining) != Path(
                 origin.path
@@ -737,10 +669,10 @@ def _load_origin_class(
 
 
 def load_worker_tool(
-    origin: WorkerToolOriginV1, *, dependency_authority: str = "selected_installation",
+    origin: WorkerToolOrigin, *, dependency_authority: str = "selected_installation",
 ) -> ProcessingTool:
     """Load one instance with explicit selected-installation or worker authority."""
-    if isinstance(origin, VersionedModuleOriginV1):
+    if isinstance(origin, VersionedModuleOrigin):
         admission = admit_import_root(origin.store_root, import_package=origin.import_package,
                                       dependency_authority=dependency_authority)
         with selected_import_root(admission):
@@ -748,46 +680,96 @@ def load_worker_tool(
     return _load_worker_tool(origin)
 
 
-def _load_worker_tool(origin: WorkerToolOriginV1, *, admission: Any = None) -> ProcessingTool:
-    """Publish a cached instance only after successful admitted construction."""
+def _load_worker_tool(origin: WorkerToolOrigin, *, admission: Any = None) -> ProcessingTool:
+    with _selected_worker_tool(origin, admission=admission) as tool:
+        return tool
+
+
+@contextmanager
+def _selected_worker_tool(origin: WorkerToolOrigin, *, admission: Any = None) -> Iterator[ProcessingTool]:
+    """Reattest selected bytes and resident methods on every task admission."""
     validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
     identity = worker_tool_origin_identity(validated)
-    with _instance_lock:
-        instance = _instances.get(identity)
-        if instance is None:
-            prefix = (
-                f"_bioimageflow_worker_{identity}"
-                if isinstance(validated, SourceFileOriginV1)
-                else validated.scoped_module.split(".", 1)[0]
-                if isinstance(validated, VersionedModuleOriginV1)
-                else None
-            )
-            before = {
-                name: module
-                for name, module in sys.modules.items()
-                if prefix is not None
-                and (name == prefix or name.startswith(prefix + "."))
-            }
-            try:
-                instance = _load_origin_class(validated, identity)()
-                if admission is not None:
-                    _ = admission.observed_dependencies  # Validate before instance publication.
-            except BaseException:
-                if prefix is not None:
-                    for name in list(sys.modules):
-                        if name not in before and (
-                            name == prefix or name.startswith(prefix + ".")
-                        ):
-                            removed = sys.modules.pop(name)
-                            if _source_modules.get(name) is removed:
-                                _source_modules.pop(name)
-                    sys.modules.update(before)
-                raise
-            _instances[identity] = instance
-        return instance
+    primary = admit_primary_content(validated.primary)
+    _require_origin_coverage(validated, primary)
+    aliases = {}
+    if isinstance(validated, SourceFileOrigin):
+        selected = Path(validated.path).resolve(strict=True)
+        aliases = {name: f"_bioimageflow_worker_{identity}"
+                   for name, path in primary.paths.items() if path == selected}
+        _require_owned_source_namespace(identity)
+    try:
+        with primary_import_context(primary, aliases=aliases):
+            with _instance_lock:
+                instance = _instances.get(identity)
+                if instance is None:
+                    candidate = _load_origin_class(validated, identity, primary)
+                    primary.attest(candidate)
+                    instance = candidate()
+                    primary.attest(instance)
+                    if admission is not None:
+                        _ = admission.observed_dependencies
+                    _instances[identity] = instance
+                else:
+                    primary.attest(instance)
+            yield instance
+    except BaseException:
+        with _instance_lock:
+            cached = _instances.get(identity)
+            if cached is not None and type(cached).__module__ in primary.owned_modules:
+                _instances.pop(identity)
+            for name, module in primary.owned_modules.items():
+                if sys.modules.get(name) is not module and _source_modules.get(name) is module:
+                    _source_modules.pop(name)
+        raise
 
 
 def clear_worker_tool_instances() -> None:
     """Clear the origin-aware instance cache."""
     with _instance_lock:
         _instances.clear()
+
+
+def _require_owned_source_namespace(identity: str) -> None:
+    name = f"_bioimageflow_worker_{identity}"
+    if name in sys.modules and (sys.modules[name] is None or _source_modules.get(name) is not sys.modules[name]):
+        raise ImportError(f"Cached source module {name!r} was not admitted by this loader.")
+
+
+def _admit_origin_class(origin: WorkerToolOrigin) -> Type[ProcessingTool]:
+    """Admit a preflight class without constructing a tool instance."""
+    validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
+    identity = worker_tool_origin_identity(validated)
+    primary = admit_primary_content(validated.primary)
+    _require_origin_coverage(validated, primary)
+    aliases = {}
+    if isinstance(validated, SourceFileOrigin):
+        selected = Path(validated.path).resolve(strict=True)
+        aliases = {name: f"_bioimageflow_worker_{identity}"
+                   for name, path in primary.paths.items() if path == selected}
+        _require_owned_source_namespace(identity)
+    with primary_import_context(primary, aliases=aliases):
+        with _instance_lock:
+            candidate = _load_origin_class(validated, identity, primary)
+            primary.attest(candidate)
+            return candidate
+
+
+def _require_origin_coverage(origin: WorkerToolOrigin, primary: Any) -> None:
+    if isinstance(origin, SourceFileOrigin):
+        require_primary_coverage(primary, source_path=origin.path)
+    elif isinstance(origin, InstalledModuleOrigin):
+        _verify_distribution(origin.distribution, origin.version)
+        require_primary_coverage(primary, module=origin.module,
+                                 distribution=origin.distribution, version=origin.version)
+    else:
+        if isinstance(origin, VersionedModuleOrigin):
+            module = origin.scoped_module
+            root = Path(origin.store_root) / origin.import_package
+        else:
+            module = origin.module if isinstance(origin, SharedModuleOrigin) else origin.scoped_module
+            import_root = origin.import_root if isinstance(origin, SharedModuleOrigin) else origin.materialization_root
+            root = Path(import_root) / module.split(".")[0]
+            if not root.is_dir():
+                root = root.with_suffix(".py")
+        require_primary_coverage(primary, module=module, package_root=root)

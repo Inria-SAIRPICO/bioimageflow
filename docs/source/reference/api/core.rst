@@ -53,6 +53,33 @@ Different Python IOModel class names do not change semantic equality, while bool
 ``DECLARATION_CONTRACT_VERSION`` distinguishes attested cache records from records produced before this contract.
 These APIs do not attest arbitrary initializers, custom validators, later process-global mutation or installed dependency content.
 
+Selected primary content
+------------------------
+
+``WorkerToolOrigin`` uses the one current ``bioimageflow.worker_tool_origin.v2`` grammar with mandatory ``PrimaryContentProof``.
+The public variants are ``InstalledModuleOrigin``, ``VersionedModuleOrigin``, ``SharedModuleOrigin``, ``SourceFileOrigin`` and ``ArchiveModuleOrigin``; earlier aliases and wire fallbacks are absent.
+``PrimaryFileMember`` records an admitted module, normalized file locator and source digest.
+``PrimaryInstalledMember`` records the selected distribution/version and its contained member identity; actual local PEP 610 editable membership is admitted through its metadata-owned source layout, without inventing RECORD entries.
+``PrimaryCallback`` records the module and qualified owner of each represented constructor or scientific callback.
+``PrimaryBuiltinCallback`` explicitly represents supported immutable ``object.__new__`` and ``object.__init__`` owners.
+The four callback roles are ordered ``__new__``, ``__init__``, ``process_row`` and ``process_batch``; inherited row and overridden batch owners remain independent authorities.
+
+``capture_primary_content(tool_class, distribution=None, package_root=None)`` returns an admission retaining the proof and captured source bytes.
+Its ``source_hash(path_or_module)`` reads the held snapshot, ``scientific_facts()`` projects portable content identity independently of operational locators, and ``qualification`` records unresolved initializer or dependency facts.
+``attest(tool)`` compares represented resident owners and supported callable/literal facts against those bytes; ``validate_primary_content(tool, proof)`` admits the proof's current members and performs that comparison.
+``bioimageflow_core.primary_content.encode_primary_content`` and ``decode_primary_content`` enforce the strict proof grammar; decoding performs no source read or import.
+The controller admits primary content before cache lookup.
+The worker captures matched bytes before import, checks resident class and callback owners before construction, and checks the instance after construction and on every reuse before science.
+Fresh imports compile held bytes even when older timestamp-valid bytecode exists; interpreter-local compiled comparison is never a cross-Python bytecode wire token.
+``execute_processing_task`` retains one admission and its held-byte import finder through row or batch callbacks and result handling, including first-time represented helper imports.
+Finder scopes serialize within one process; separate WorkerPool processes remain parallel.
+``load_worker_tool`` covers admission, construction and reuse; its import scope ends when the instance is returned.
+
+A conflicting canonical Shared root refuses while preserving the prior namespace and proven instance.
+Distinct Source content namespaces and versioned or archive content-scoped namespaces retain their coexistence contract.
+These supported facts neither sandbox initializer/constructor side effects nor attest arbitrary class state, process-global state, unrepresented dependencies or native relocation.
+See :doc:`/specs` §§3.10, 5.2 and 6 for selection, scientific identity and refusal boundaries.
+
 Versioned import authority
 --------------------------
 

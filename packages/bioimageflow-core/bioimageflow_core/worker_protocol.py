@@ -17,7 +17,7 @@ from bioimageflow_core._processing_values import (
     encode_processing_value,
 )
 from bioimageflow_core.worker_origins import (
-    WorkerToolOriginV1,
+    WorkerToolOrigin,
     decode_worker_tool_origin,
     encode_worker_tool_origin,
 )
@@ -58,7 +58,7 @@ class ProcessingTask:
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
     row_consumption: Literal["mapped", "collective"]
-    tool: WorkerToolOriginV1
+    tool: WorkerToolOrigin
     declaration: Dict[str, Any]
     rows: Tuple[RowInvocation, ...]
     batch_context: Optional[Dict[str, Any]] = None

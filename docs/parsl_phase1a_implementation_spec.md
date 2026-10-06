@@ -349,13 +349,15 @@ Use the single current worker-safe task/result DTOs and the independently versio
 - `RowInvocation`,
 - `ProcessingTaskResult`,
 - `RowResult`,
-- `InstalledModuleOriginV1`,
-- `VersionedModuleOriginV1`,
-- `SharedModuleOriginV1`,
-- `SourceFileOriginV1`,
-- `ArchiveModuleOriginV1`,
-- `WorkerToolOriginV1`.
+- `InstalledModuleOrigin`,
+- `VersionedModuleOrigin`,
+- `SharedModuleOrigin`,
+- `SourceFileOrigin`,
+- `ArchiveModuleOrigin`,
+- `WorkerToolOrigin`.
 
+Every current origin carries mandatory `PrimaryContentProof` under `bioimageflow.worker_tool_origin.v2`; supported proof members and callback/builtin owners are documented in library specs Section 5.2 and the Core API reference.
+This shared grammar has no earlier-origin aliases or fallback.
 The task and result envelopes use `bioimageflow.processing_task.v2` and `bioimageflow.processing_result.v2`, with no historical DTO aliases or schema fallback.
 Both directions use the current Core typed-value grammar for primitives, explicit containers, Paths, local SharedArray references, and NumPy arrays/scalars; arbitrary picklable objects are not admitted.
 Invocation decoders must reject an unknown schema, kind, mode, missing key, extra key, duplicate position, invalid scalar type, and malformed path or hash before tool code runs.
@@ -385,11 +387,15 @@ If installed distribution metadata is unavailable, installed-module mode fails a
 Every filesystem value is normalized, absolute, confined to its declared shared root, and verified before processing submission.
 An orchestrator-only `sys.path` entry is not a worker deployment path without successful shared-path preflight.
 
-Canonical worker instance identity is the SHA-256 digest of canonical JSON for the complete origin, including the class name.
+Canonical worker instance identity is the SHA-256 digest of canonical JSON for the complete origin, including the class name and primary proof.
 Do not cache worker instances by only class name, module name, or source filename.
-This worker deployment identity is separate from logical cache tool identity, which continues to use the platform's tool/version/source-hash contract and excludes runtime materialization and import roots.
+This worker deployment identity is separate from logical cache tool identity, which consumes admitted portable primary-content facts and excludes operational runtime materialization and import roots.
 
 The core entry point imports inside the worker, creates or reuses the origin-specific tool instance, invokes `process_row()` or `process_batch()`, and returns plain dictionaries.
+Before import it captures matched primary bytes; it checks represented resident owners before construction and checks the actual instance after construction and on every reuse before the scientific method.
+Fresh imports compile held bytes, while interpreter-local resident comparison never requires cross-Python controller-bytecode equality.
+Conflicting canonical Shared roots refuse without namespace eviction; private versioned and archive content namespaces and distinct Source content namespaces retain coexistence.
+This is the shared Core contract, not distributed-runtime certification or arbitrary trusted-Python state isolation.
 It does not construct pandas objects or install packages.
 
 ### 10.3 Core exit tests

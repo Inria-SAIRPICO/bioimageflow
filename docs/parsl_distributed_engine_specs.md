@@ -636,7 +636,7 @@ class ProcessingTask:
     cache_attempt_id: Optional[str]
     task_retry: int
     mode: Literal["row_chunk", "process_batch"]
-    tool: "WorkerToolOriginV1"
+    tool: "WorkerToolOrigin"
     rows: tuple[RowInvocation, ...]
     batch_context: Optional[dict[str, Any]] = None
 
@@ -702,7 +702,7 @@ Arguments and outputs share the typed-value grammar specified in library specs S
 A literal dictionary resembling a descriptor remains a dictionary because it is encoded as a dictionary node.
 SharedArray decoding constructs only the validated name/shape/dtype reference and never attaches or allocates memory.
 Parsl still refuses these host-local references recursively in inputs and outputs; a supported local Core codec value is not automatically a supported remote Parsl value.
-Origin schemas remain independently versioned as `WorkerToolOriginV1`; task/result v2 does not change origin or row correlation contracts.
+Origins use the independently versioned `WorkerToolOrigin` grammar `bioimageflow.worker_tool_origin.v2` with mandatory primary proof; origin versioning remains separate from task/result correlation.
 
 These worker-side examples use `Optional[...]`, not PEP 604 unions, because `bioimageflow-core` supports Python 3.9.
 
@@ -965,23 +965,24 @@ The implementation MUST reject Wetlands-only per-environment fields when a Parsl
 
 ### 12.1 Origin variants
 
-`WorkerToolOriginV1` is a discriminated worker-safe identity.
+`WorkerToolOrigin` is a discriminated worker-safe identity using the single current `bioimageflow.worker_tool_origin.v2` grammar without earlier aliases or fallbacks.
 
 It is the following Python-3.9-compatible union in `bioimageflow-core`:
 
 ```python
 @dataclass(frozen=True)
-class InstalledModuleOriginV1:
-    schema: Literal["bioimageflow.worker_tool_origin.v1"]
+class InstalledModuleOrigin:
+    schema: Literal["bioimageflow.worker_tool_origin.v2"]
     kind: Literal["installed_module"]
     distribution: str
     version: str
     module: str
     class_name: str
+    primary: PrimaryContentProof
 
 @dataclass(frozen=True)
-class VersionedModuleOriginV1:
-    schema: Literal["bioimageflow.worker_tool_origin.v1"]
+class VersionedModuleOrigin:
+    schema: Literal["bioimageflow.worker_tool_origin.v2"]
     kind: Literal["versioned_module"]
     distribution: str
     import_package: str
@@ -990,27 +991,30 @@ class VersionedModuleOriginV1:
     scoped_module: str
     store_root: str
     class_name: str
+    primary: PrimaryContentProof
 
 @dataclass(frozen=True)
-class SharedModuleOriginV1:
-    schema: Literal["bioimageflow.worker_tool_origin.v1"]
+class SharedModuleOrigin:
+    schema: Literal["bioimageflow.worker_tool_origin.v2"]
     kind: Literal["shared_module"]
     module: str
     import_root: str
     source_hash: str
     class_name: str
+    primary: PrimaryContentProof
 
 @dataclass(frozen=True)
-class SourceFileOriginV1:
-    schema: Literal["bioimageflow.worker_tool_origin.v1"]
+class SourceFileOrigin:
+    schema: Literal["bioimageflow.worker_tool_origin.v2"]
     kind: Literal["source_file"]
     path: str
     source_hash: str
     class_name: str
+    primary: PrimaryContentProof
 
 @dataclass(frozen=True)
-class ArchiveModuleOriginV1:
-    schema: Literal["bioimageflow.worker_tool_origin.v1"]
+class ArchiveModuleOrigin:
+    schema: Literal["bioimageflow.worker_tool_origin.v2"]
     kind: Literal["archive_module"]
     source_id: str
     source_hash: str
@@ -1018,13 +1022,14 @@ class ArchiveModuleOriginV1:
     scoped_module: str
     materialization_root: str
     class_name: str
+    primary: PrimaryContentProof
 
-WorkerToolOriginV1 = Union[
-    InstalledModuleOriginV1,
-    VersionedModuleOriginV1,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    ArchiveModuleOriginV1,
+WorkerToolOrigin = Union[
+    InstalledModuleOrigin,
+    VersionedModuleOrigin,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    ArchiveModuleOrigin,
 ]
 ```
 
@@ -1034,8 +1039,13 @@ Distribution identity and import-package identity are independent and MUST NOT b
 `import_package` is the explicit package imported from the versioned store.
 Every filesystem string is absolute, normalized, preflight-verified, and confined to its declared shared root where applicable.
 
-Canonical worker instance identity is the SHA-256 digest of the complete origin, including `class_name`, encoded as canonical JSON.
-Logical cache tool identity continues to use the platform's tool/version/source-hash contract and does not acquire shared runtime paths.
+`PrimaryContentProof` uses `bioimageflow.primary_content.v1` and contains represented `PrimaryFileMember` or `PrimaryInstalledMember` digests/locators and ordered `PrimaryCallback` or `PrimaryBuiltinCallback` owners.
+Its four required owner roles are `__new__`, `__init__`, `process_row` and `process_batch`, including inherited owners and explicit supported immutable builtin owners.
+The proof captures selected defining/ancestor Python members separately from operation-owned held bytes and does not claim arbitrary Python or dependency closure.
+The current authoritative proof grammar and admission contract are specified in library specs Section 5.2 and the Core API reference.
+
+Canonical worker instance identity is the SHA-256 digest of the complete origin, including `class_name` and `primary`, encoded as canonical JSON.
+Logical cache tool identity consumes admitted portable primary-content facts and does not acquire operational import or runtime materialization paths.
 
 ### 12.2 Canonical worker loading
 
@@ -1046,6 +1056,11 @@ Installed-module mode MUST import from the worker's configured environment and v
 Missing or mismatched distribution metadata fails preflight; the deployment must use another origin variant when no distribution identity exists.
 
 An absolute orchestrator `sys.path` MUST NOT be sent as an installed-module import root unless preflight proves it is a shared deployment path.
+Selected represented bytes are captured and verified before import; fresh Python imports compile those held bytes instead of timestamp-valid older bytecode.
+The worker attests represented resident class/constructor/scientific owners before construction, then the actual instance after construction and on every reuse before science.
+Resident comparisons are interpreter-local; controller bytecode is not a cross-Python wire token.
+A conflicting canonical Shared namespace is preserved and the later selection is refused; versioned and archive content-scoped namespaces and distinct Source content namespaces retain their coexistence contract.
+These shared Core obligations do not establish distributed runtime certification or sandbox arbitrary initializer and process-state effects.
 
 ### 12.3 Archive custom sources
 

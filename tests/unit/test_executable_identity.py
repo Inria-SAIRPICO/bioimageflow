@@ -5,7 +5,7 @@ from types import ModuleType
 
 import pytest
 
-from bioimageflow.executable_identity import (
+from bioimageflow_core.executable_identity import (
     runtime_callable_identity,
     validate_source_callables,
 )

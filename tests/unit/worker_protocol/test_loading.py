@@ -10,17 +10,20 @@ import sys
 
 import pytest
 from bioimageflow_core import (
-    ArchiveModuleOriginV1,
-    InstalledModuleOriginV1,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    VersionedModuleOriginV1,
+    ArchiveModuleOrigin,
+    InstalledModuleOrigin,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    VersionedModuleOrigin,
 )
 from bioimageflow_core.worker_origins import (
     clear_worker_tool_instances,
     load_worker_tool,
     worker_tool_origin_identity,
 )
+from bioimageflow_core import ProcessingTool
+from bioimageflow_core.primary_content import capture_primary_content
+from tests.testkit.primary_content import source_proof
 
 
 TOOL_SOURCE = """
@@ -41,10 +44,15 @@ class SameNameTool(ProcessingTool):
 
 
 @pytest.fixture(autouse=True)
-def _clear_instances():
+def _clear_instances(tmp_path):
+    previous = dict(sys.modules)
     clear_worker_tool_instances()
     yield
     clear_worker_tool_instances()
+    for name, module in list(sys.modules.items()):
+        source = getattr(module, "__file__", None)
+        if name not in previous and isinstance(source, str) and Path(source).is_relative_to(tmp_path):
+            sys.modules.pop(name)
 
 
 def _write_source(path) -> str:
@@ -59,10 +67,11 @@ def test_source_file_hash_mismatch_fails(tmp_path) -> None:
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
         encoding="utf-8",
     )
-    origin = SourceFileOriginV1(
+    origin = SourceFileOrigin(
         path=str(source.resolve()),
         source_hash="0" * 64,
         class_name="SameNameTool",
+        primary=source_proof(source, "SameNameTool"),
     )
     with pytest.raises(ImportError, match="hash mismatch"):
         load_worker_tool(origin)
@@ -74,22 +83,24 @@ def test_complete_origin_separates_equal_class_names(tmp_path) -> None:
     source_b = tmp_path / "b.py"
     hash_a = _write_source(source_a)
     hash_b = _write_source(source_b)
-    first_origin = SourceFileOriginV1(
+    first_origin = SourceFileOrigin(
         path=str(source_a.resolve()),
         source_hash=hash_a,
         class_name="SameNameTool",
+        primary=source_proof(source_a, "SameNameTool"),
     )
-    second_origin = SourceFileOriginV1(
+    second_origin = SourceFileOrigin(
         path=str(source_b.resolve()),
         source_hash=hash_b,
         class_name="SameNameTool",
+        primary=source_proof(source_b, "SameNameTool"),
     )
     first = load_worker_tool(first_origin)
     assert load_worker_tool(first_origin) is first
     assert load_worker_tool(second_origin) is not first
 
 
-def test_equal_shared_module_names_from_different_roots_are_isolated(tmp_path) -> None:
+def test_shared_conflicting_root_refuses_without_replacing_admitted_owner(tmp_path) -> None:
     origins = []
     for directory in ("one", "two"):
         root = tmp_path / directory
@@ -97,19 +108,27 @@ def test_equal_shared_module_names_from_different_roots_are_isolated(tmp_path) -
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
         source = package / "worker.py"
-        source_hash = _write_source(source)
+        constructor = root / "constructed"
+        source.write_text(TOOL_SOURCE.replace("self.calls = 0", f"self.calls = 0; __import__('pathlib').Path({str(constructor)!r}).touch()"))
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
         origins.append(
-            SharedModuleOriginV1(
+            SharedModuleOrigin(
                 module="same_tools.worker",
                 import_root=str(root.resolve()),
                 source_hash=source_hash,
                 class_name="SameNameTool",
+                primary=source_proof(source, "SameNameTool", module="same_tools.worker", package_root=package),
             )
         )
     first = load_worker_tool(origins[0])
-    second = load_worker_tool(origins[1])
-    assert first is not second
-    assert "same_tools.worker" not in sys.modules
+    namespace = {name: module for name, module in sys.modules.items() if name == "same_tools" or name.startswith("same_tools.")}
+    assert (tmp_path / "one" / "constructed").exists()
+    with pytest.raises(ImportError, match="[Rr]esident.*[Pp]rimary|conflicts"):
+        load_worker_tool(origins[1])
+    assert not (tmp_path / "two" / "constructed").exists()
+    assert all(sys.modules[name] is module for name, module in namespace.items())
+    assert load_worker_tool(origins[0]) is first
+    assert first.calls == 0
 
 
 def test_shared_module_import_escape_fails(tmp_path, monkeypatch) -> None:
@@ -122,11 +141,12 @@ def test_shared_module_import_escape_fails(tmp_path, monkeypatch) -> None:
     declared_root = tmp_path / "declared"
     declared_root.mkdir()
     monkeypatch.syspath_prepend(str(actual_root))
-    origin = SharedModuleOriginV1(
+    origin = SharedModuleOrigin(
         module="escaped_tools.worker",
         import_root=str(declared_root.resolve()),
         source_hash=source_hash,
         class_name="SameNameTool",
+        primary=source_proof(source, "SameNameTool", module="escaped_tools.worker", package_root=package),
     )
     with pytest.raises(ImportError, match="absent from"):
         load_worker_tool(origin)
@@ -155,7 +175,7 @@ def test_two_versioned_origins_load_separate_instances(tmp_path) -> None:
         )
         scoped = f"versioned_tools__{version.replace('.', '_')}"
         origins.append(
-            VersionedModuleOriginV1(
+            VersionedModuleOrigin(
                 distribution="versioned-tools",
                 import_package="versioned_tools",
                 version=version,
@@ -163,6 +183,7 @@ def test_two_versioned_origins_load_separate_instances(tmp_path) -> None:
                 scoped_module=f"{scoped}.worker",
                 store_root=str(root.resolve()),
                 class_name="SameNameTool",
+                primary=source_proof(package / "worker.py", "SameNameTool", module=scoped + ".worker", package_root=package),
             )
         )
     assert load_worker_tool(origins[0]) is not load_worker_tool(origins[1])
@@ -173,11 +194,12 @@ def test_installed_distribution_version_mismatch_fails() -> None:
         actual = importlib.metadata.version("bioimageflow-core")
     except importlib.metadata.PackageNotFoundError:
         pytest.skip("bioimageflow-core metadata is unavailable")
-    origin = InstalledModuleOriginV1(
+    origin = InstalledModuleOrigin(
         distribution="bioimageflow-core",
         version=f"{actual}.mismatch",
         module="bioimageflow_core.worker",
         class_name="ProcessingTool",
+        primary=capture_primary_content(ProcessingTool).proof,
     )
     with pytest.raises(ImportError, match="version mismatch"):
         load_worker_tool(origin)
@@ -206,13 +228,14 @@ def test_two_archive_origins_load_separate_instances(tmp_path) -> None:
         (package / "__init__.py").write_text("", encoding="utf-8")
         (package / "worker.py").write_text(TOOL_SOURCE, encoding="utf-8")
         origins.append(
-            ArchiveModuleOriginV1(
+            ArchiveModuleOrigin(
                 source_id=source_id,
                 source_hash=_archive_hash(package),
                 canonical_module="tools.worker",
                 scoped_module=f"{package_name}.worker",
                 materialization_root=str(root.resolve()),
                 class_name="SameNameTool",
+                primary=source_proof(package / "worker.py", "SameNameTool", module=package_name + ".worker", package_root=package),
             )
         )
     assert load_worker_tool(origins[0]) is not load_worker_tool(origins[1])
@@ -223,6 +246,7 @@ def test_source_file_executes_the_bytes_that_were_hashed(tmp_path, monkeypatch) 
     admitted = TOOL_SOURCE + "\nSameNameTool.admitted_value = 1\n"
     source.write_text(admitted)
     source_hash = hashlib.sha256(admitted.encode()).hexdigest()
+    primary = source_proof(source, "SameNameTool")
     original_read = Path.read_bytes
 
     def mutate_after_read(path):
@@ -235,7 +259,7 @@ def test_source_file_executes_the_bytes_that_were_hashed(tmp_path, monkeypatch) 
 
     monkeypatch.setattr(Path, "read_bytes", mutate_after_read)
     tool = load_worker_tool(
-        SourceFileOriginV1(str(source), source_hash, "SameNameTool")
+        SourceFileOrigin(str(source), source_hash, "SameNameTool", primary)
     )
     assert tool.admitted_value == 1
 
@@ -257,8 +281,8 @@ def test_source_file_refuses_foreign_reexport_before_construction(
     spec.loader.exec_module(module)
     source = tmp_path / "selected.py"
     source.write_text("from origin_foreign_tool import SameNameTool\n")
-    origin = SourceFileOriginV1(
-        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool"
+    origin = SourceFileOrigin(
+        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool", source_proof(source, "SameNameTool")
     )
     with pytest.raises(ImportError, match="defining module"):
         load_worker_tool(origin)
@@ -283,7 +307,7 @@ def test_versioned_cached_root_must_match_selected_store(tmp_path, monkeypatch) 
     (package / "worker.py").write_text(TOOL_SOURCE)
     exec(compile(TOOL_SOURCE, child.__file__, "exec"), child.__dict__)
     monkeypatch.setitem(sys.modules, child.__name__, child)
-    origin = VersionedModuleOriginV1(
+    origin = VersionedModuleOrigin(
         "checked-tools",
         "checked_tools",
         "1.0",
@@ -291,6 +315,7 @@ def test_versioned_cached_root_must_match_selected_store(tmp_path, monkeypatch) 
         child.__name__,
         str(root),
         "SameNameTool",
+        source_proof(package / "worker.py", "SameNameTool", module=child.__name__, package_root=package),
     )
     with pytest.raises(ImportError, match="root|store"):
         load_worker_tool(origin)
@@ -309,7 +334,7 @@ def test_versioned_failed_initialization_can_retry(tmp_path, monkeypatch) -> Non
     )
     _write_distribution_metadata(root, "retry-tools", "1.0", "retry_tools")
     name = "retry_tools__1_0"
-    origin = VersionedModuleOriginV1(
+    origin = VersionedModuleOrigin(
         "retry-tools",
         "retry_tools",
         "1.0",
@@ -317,6 +342,7 @@ def test_versioned_failed_initialization_can_retry(tmp_path, monkeypatch) -> Non
         name,
         str(root),
         "SameNameTool",
+        source_proof(package / "__init__.py", "SameNameTool", module=name, package_root=package),
     )
     try:
         with pytest.raises(RuntimeError, match="first attempt"):
@@ -338,15 +364,16 @@ def test_standalone_module_origin_preserves_valid_tool(tmp_path, kind):
     source = tmp_path / "standalone.py"
     digest = _write_source(source)
     origin = (
-        SharedModuleOriginV1("standalone", str(tmp_path), digest, "SameNameTool")
+        SharedModuleOrigin("standalone", str(tmp_path), digest, "SameNameTool", source_proof(source, "SameNameTool", module="standalone"))
         if kind == "shared"
-        else ArchiveModuleOriginV1(
+        else ArchiveModuleOrigin(
             "standalone",
             digest,
             "standalone",
             "standalone",
             str(tmp_path),
             "SameNameTool",
+            source_proof(source, "SameNameTool", module="standalone"),
         )
     )
     tool = load_worker_tool(origin)
@@ -363,8 +390,8 @@ def test_source_namespace_preserves_preexisting_module_and_allows_clean_retry(
     source.write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).touch()\n" + TOOL_SOURCE
     )
-    origin = SourceFileOriginV1(
-        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool"
+    origin = SourceFileOrigin(
+        str(source), hashlib.sha256(source.read_bytes()).hexdigest(), "SameNameTool", source_proof(source, "SameNameTool")
     )
     name = "_bioimageflow_worker_" + worker_tool_origin_identity(origin)
     sentinel = ModuleType(name)
@@ -388,7 +415,7 @@ def test_source_namespace_preserves_preexisting_module_and_allows_clean_retry(
 
 def test_loader_owned_source_module_supports_instance_cache_reset(tmp_path):
     source = tmp_path / "owned.py"
-    origin = SourceFileOriginV1(str(source), _write_source(source), "SameNameTool")
+    origin = SourceFileOrigin(str(source), _write_source(source), "SameNameTool", source_proof(source, "SameNameTool"))
     first = load_worker_tool(origin)
     clear_worker_tool_instances()
     second = load_worker_tool(origin)

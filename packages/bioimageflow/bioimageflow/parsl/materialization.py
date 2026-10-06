@@ -12,9 +12,10 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 from typing import Any
+from bioimageflow_core.primary_content import relocate_primary_content
 
 from bioimageflow_core.worker_origins import (
-    ArchiveModuleOriginV1,
+    ArchiveModuleOrigin,
     decode_worker_tool_origin,
     encode_worker_tool_origin,
 )
@@ -44,7 +45,7 @@ class ParslMaterializationError(ValueError):
 class MaterializedArchiveSource:
     """A verified archive origin rewritten to its shared immutable root."""
 
-    origin: ArchiveModuleOriginV1
+    origin: ArchiveModuleOrigin
     directory: Path
     reused: bool
 
@@ -190,7 +191,7 @@ def _bundle_hash(
 
 
 def _validate_record(
-    origin: ArchiveModuleOriginV1,
+    origin: ArchiveModuleOrigin,
     record: Mapping[str, Any],
 ) -> tuple[str | None, tuple[tuple[PurePosixPath, bytes, str], ...]]:
     expected_fields = _BUNDLE_FIELDS if "files" in record else _SINGLE_FIELDS
@@ -270,7 +271,7 @@ def _validate_record(
 
 def _write_staging_tree(
     staging: Path,
-    origin: ArchiveModuleOriginV1,
+    origin: ArchiveModuleOrigin,
     source: str | None,
     files: tuple[tuple[PurePosixPath, bytes, str], ...],
 ) -> None:
@@ -289,7 +290,7 @@ def _write_staging_tree(
         destination.write_bytes(data)
 
 
-def _tree_hash(directory: Path, origin: ArchiveModuleOriginV1) -> str:
+def _tree_hash(directory: Path, origin: ArchiveModuleOrigin) -> str:
     entries = list(directory.rglob("*"))
     for path in entries:
         if path.is_symlink():
@@ -344,7 +345,7 @@ def _tree_hash(directory: Path, origin: ArchiveModuleOriginV1) -> str:
 
 def _validate_materialized(
     directory: Path,
-    origin: ArchiveModuleOriginV1,
+    origin: ArchiveModuleOrigin,
 ) -> None:
     if directory.is_symlink() or not directory.is_dir():
         raise ParslMaterializationError(
@@ -378,18 +379,18 @@ def _shared_root(value: str | Path) -> Path:
 
 
 def materialize_archive_source(
-    origin: ArchiveModuleOriginV1,
+    origin: ArchiveModuleOrigin,
     source_record: Mapping[str, Any],
     *,
     shared_runtime_root: str | Path,
 ) -> MaterializedArchiveSource:
     """Validate, atomically install, and rewrite one archive worker origin."""
-    if type(origin) is not ArchiveModuleOriginV1:
-        raise TypeError("origin must be an ArchiveModuleOriginV1.")
+    if type(origin) is not ArchiveModuleOrigin:
+        raise TypeError("origin must be an ArchiveModuleOrigin.")
     canonical_origin = decode_worker_tool_origin(
         encode_worker_tool_origin(origin)
     )
-    assert isinstance(canonical_origin, ArchiveModuleOriginV1)
+    assert isinstance(canonical_origin, ArchiveModuleOrigin)
     if type(source_record) is not dict:
         raise TypeError("source_record must be a plain dictionary.")
     source, files = _validate_record(canonical_origin, source_record)
@@ -411,6 +412,7 @@ def materialize_archive_source(
     shared_origin = replace(
         canonical_origin,
         materialization_root=str(destination),
+        primary=relocate_primary_content(canonical_origin.primary, canonical_origin.materialization_root, destination),
     )
     if destination.exists() or destination.is_symlink():
         _validate_materialized(destination, shared_origin)
@@ -453,12 +455,14 @@ def materialize_archive_tool_source(
     source_record: Mapping[str, Any],
     *,
     class_name: str,
+    primary_origin: ArchiveModuleOrigin,
     shared_runtime_root: str | Path,
 ) -> MaterializedArchiveSource:
     """Construct and materialize an archive origin directly from its record."""
     origin = archive_origin_from_source_record(
         source_record,
         class_name=class_name,
+        primary_origin=primary_origin,
         shared_runtime_root=shared_runtime_root,
     )
     return materialize_archive_source(
@@ -472,8 +476,9 @@ def archive_origin_from_source_record(
     source_record: Mapping[str, Any],
     *,
     class_name: str,
+    primary_origin: ArchiveModuleOrigin,
     shared_runtime_root: str | Path,
-) -> ArchiveModuleOriginV1:
+) -> ArchiveModuleOrigin:
     """Build the deterministic archive origin used during static routing."""
     if type(source_record) is not dict:
         raise TypeError("source_record must be a plain dictionary.")
@@ -494,18 +499,21 @@ def archive_origin_from_source_record(
     )
     runtime_root = _shared_root(shared_runtime_root)
     destination = runtime_root / "archive_sources" / source_hash
-    origin = ArchiveModuleOriginV1(
+    if (primary_origin.source_id, primary_origin.source_hash, primary_origin.class_name) != (source_id, source_hash, class_name):
+        raise ParslMaterializationError("Archive primary admission does not match its selected source record.")
+    origin = ArchiveModuleOrigin(
         source_id=source_id,
         source_hash=source_hash,
         canonical_module=canonical_module,
         scoped_module=scoped_module,
         materialization_root=str(destination),
         class_name=class_name,
+        primary=relocate_primary_content(primary_origin.primary, primary_origin.materialization_root, destination),
     )
     canonical_origin = decode_worker_tool_origin(
         encode_worker_tool_origin(origin)
     )
-    assert isinstance(canonical_origin, ArchiveModuleOriginV1)
+    assert isinstance(canonical_origin, ArchiveModuleOrigin)
     _validate_record(canonical_origin, source_record)
     return canonical_origin
 

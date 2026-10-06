@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sys
 import threading
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 from urllib.parse import unquote, urlparse
 
 from packaging.requirements import Requirement
@@ -62,7 +62,7 @@ def _module_paths(module: Any) -> tuple[Path, ...]:
 
 
 def _owns(distribution: Any, module_name: str, module: Any, cache: dict[int, Any],
-          layouts: dict[int, tuple[Path, str | None]]) -> bool:
+          layouts: dict[int, tuple[Path, Optional[str]]]) -> bool:
     paths = _module_paths(module)
     if not paths:
         return False

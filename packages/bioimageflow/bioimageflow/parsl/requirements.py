@@ -15,7 +15,7 @@ from bioimageflow.cache import compute_env_hash
 from bioimageflow.resources import parse_capacity
 from bioimageflow_core import EnvironmentSpec, ProcessingTool, ResourceSpec
 from bioimageflow_core.worker_origins import (
-    WorkerToolOriginV1,
+    WorkerToolOrigin,
     decode_worker_tool_origin,
     encode_worker_tool_origin,
 )
@@ -272,7 +272,7 @@ class WorkerRequirement:
     core_requirement: str
     anchored_dependency_paths: tuple[str, ...]
     resources: NormalizedResourceRequest
-    tool_origin: WorkerToolOriginV1
+    tool_origin: WorkerToolOrigin
 
     def __post_init__(self) -> None:
         if (
@@ -331,7 +331,7 @@ class WorkerRequirement:
 def build_worker_requirement(
     scoped_node_name: str,
     tool: ProcessingTool,
-    tool_origin: WorkerToolOriginV1,
+    tool_origin: WorkerToolOrigin,
     *,
     core_requirement: str,
     workflow_environment: Any | None = None,

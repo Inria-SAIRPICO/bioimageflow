@@ -7,6 +7,8 @@ sources = [
     "packages/bioimageflow-core/bioimageflow_core/worker_origins.py",
     "packages/bioimageflow-core/bioimageflow_core/worker_protocol.py",
     "packages/bioimageflow-core/bioimageflow_core/preflight.py",
+    "packages/bioimageflow-core/bioimageflow_core/primary_content.py",
+    "packages/bioimageflow-core/bioimageflow_core/executable_identity.py",
     "packages/bioimageflow/bioimageflow/worker_origins.py",
 ]
 edit_tests = [
@@ -14,6 +16,10 @@ edit_tests = [
     "tests/unit/test_core_python39_compat.py",
     "tests/unit/test_worker_safe_tool_imports.py",
     "tests/unit/tool_loader/test_dependencies.py",
+    "tests/unit/test_executable_identity.py",
+    "tests/unit/test_executable_metadata.py",
+    "tests/integration/runtime_cache/test_executable_source_identity.py",
+    "tests/integration/runtime_cache/test_selected_primary_identity.py",
 ]
 precommit_suites = ["unit", "integration"]
 

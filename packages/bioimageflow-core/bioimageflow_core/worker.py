@@ -13,7 +13,7 @@ from bioimageflow_core.declarations import compare_tool_declarations, declaratio
 from bioimageflow_core.import_context import admit_import_root, selected_import_root
 from bioimageflow_core.shared_memory import SharedMemoryContext, collect_input_scopes, get_shared_memory_context
 from bioimageflow_core.tool import IOModel, ProcessingTool
-from bioimageflow_core.worker_origins import VersionedModuleOriginV1, _load_worker_tool, load_worker_tool
+from bioimageflow_core.worker_origins import VersionedModuleOrigin, _selected_worker_tool
 from bioimageflow_core.worker_protocol import (
     ConsumedRow,
     OutputGroup,
@@ -168,7 +168,7 @@ def execute_processing_task(
 
 def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
     origin = invocation.tool
-    if isinstance(origin, VersionedModuleOriginV1):
+    if isinstance(origin, VersionedModuleOrigin):
         admission = admit_import_root(origin.store_root, import_package=origin.import_package,
                                       dependency_authority="managed_runtime")
         with selected_import_root(admission):
@@ -177,8 +177,11 @@ def _execute_bound(invocation: ProcessingTask, *, task: Any) -> Dict[str, Any]:
 
 
 def _execute_admitted(invocation: ProcessingTask, *, task: Any, admission: Any = None) -> Dict[str, Any]:
-    tool = (_load_worker_tool(invocation.tool, admission=admission) if admission is not None
-            else load_worker_tool(invocation.tool, dependency_authority="managed_runtime"))
+    with _selected_worker_tool(invocation.tool, admission=admission) as tool:
+        return _execute_tool(invocation, tool, task=task)
+
+
+def _execute_tool(invocation: ProcessingTask, tool: Any, *, task: Any) -> Dict[str, Any]:
     if tool.row_consumption.value != invocation.row_consumption:
         raise ValueError("Task row_consumption does not match the admitted tool declaration.")
     declaration = describe_tool_declaration(tool)

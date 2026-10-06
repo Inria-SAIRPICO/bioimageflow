@@ -23,18 +23,20 @@ from bioimageflow.parsl.types import (
     WorkerEnvironmentAttestation,
     WorkerSlotCapacity,
 )
-from bioimageflow_core.worker_origins import InstalledModuleOriginV1
+from bioimageflow_core.worker_origins import InstalledModuleOrigin
+from tests.testkit.primary_content import literal_proof
 
 
 CORE_REQUIREMENT = "bioimageflow-core>=0.1.7,<0.2"
 
 
-def _origin() -> InstalledModuleOriginV1:
-    return InstalledModuleOriginV1(
+def _origin() -> InstalledModuleOrigin:
+    return InstalledModuleOrigin(
         distribution="example-tools",
         version="1.0.0",
         module="example_tools.worker",
         class_name="ExampleTool",
+        primary=literal_proof("example_tools.worker", "ExampleTool"),
     )
 
 

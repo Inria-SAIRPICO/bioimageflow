@@ -12,13 +12,13 @@ import hashlib
 import inspect
 import sys
 from types import CodeType, FunctionType, MethodType
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 Canonicalizer = Callable[[Any], str]
 _MAX_FUNCTIONS = 128
 
 
-def _literal(value: Any, *, immutable: bool = False, active: set[int] | None = None) -> Any:
+def _literal(value: Any, *, immutable: bool = False, active: Optional[set[int]] = None) -> Any:
     """Close facts to tagged values before the supplied canonicalizer sees them."""
     if value is None:
         return {"type": "none"}

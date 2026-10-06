@@ -19,7 +19,7 @@ from bioimageflow_core import (
     validate_processing_result,
 )
 from bioimageflow_core.types import SharedArray
-from bioimageflow_core.worker_origins import WorkerToolOriginV1
+from bioimageflow_core.worker_origins import WorkerToolOrigin
 
 
 class ParslFuture(Protocol):
@@ -57,7 +57,7 @@ def iter_row_tasks(
     node_name: str,
     invocation_id: str,
     cache_attempt_id: str | None,
-    tool: WorkerToolOriginV1,
+    tool: WorkerToolOrigin,
     declaration: dict[str, Any],
     rows: Iterable[RowInvocation],
     row_chunk_size: int,
@@ -105,7 +105,7 @@ def make_batch_task(
     node_name: str,
     invocation_id: str,
     cache_attempt_id: str | None,
-    tool: WorkerToolOriginV1,
+    tool: WorkerToolOrigin,
     declaration: dict[str, Any],
     rows: Iterable[RowInvocation],
     batch_context: dict[str, Any],

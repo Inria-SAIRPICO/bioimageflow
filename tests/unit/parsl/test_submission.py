@@ -24,17 +24,13 @@ from bioimageflow_core import (
     IOModel,
     describe_io_model,
     declaration_digest,
-    SourceFileOriginV1,
     encode_processing_result,
 )
 from bioimageflow_core.types import SharedArray
+from tests.testkit.primary_content import literal_source_origin
 
 
-ORIGIN = SourceFileOriginV1(
-    path="/shared/tool.py",
-    source_hash="a" * 64,
-    class_name="Tool",
-)
+ORIGIN = literal_source_origin()
 class Declaration(IOModel):
     value: int
 

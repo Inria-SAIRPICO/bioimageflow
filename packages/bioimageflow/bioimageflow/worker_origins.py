@@ -11,18 +11,19 @@ import re
 from dataclasses import dataclass, field
 from contextlib import nullcontext
 from bioimageflow_core.import_context import ImportRootAdmission, admit_import_root, selected_import_root
+from bioimageflow_core.primary_content import PrimaryContentAdmission, capture_primary_content
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
 
 from bioimageflow_core import (
-    ArchiveModuleOriginV1,
-    InstalledModuleOriginV1,
+    ArchiveModuleOrigin,
+    InstalledModuleOrigin,
     ProcessingTool,
-    SharedModuleOriginV1,
-    SourceFileOriginV1,
-    VersionedModuleOriginV1,
-    WorkerToolOriginV1,
+    SharedModuleOrigin,
+    SourceFileOrigin,
+    VersionedModuleOrigin,
+    WorkerToolOrigin,
 )
 
 EXECUTION_CONTRACT_VERSION = "bioimageflow.execution.v1"
@@ -30,10 +31,6 @@ EXECUTION_CONTRACT_VERSION = "bioimageflow.execution.v1"
 
 def _canonical_distribution(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
-
-
-def _file_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _distribution_imports(distribution: importlib.metadata.Distribution) -> set[str]:
@@ -188,9 +185,20 @@ def resolve_worker_tool_origin(
     tool: ProcessingTool | type[ProcessingTool],
     *,
     installed_distribution: str | None = None,
-    _captured_source_hash: str | None = None,
-) -> WorkerToolOriginV1:
+) -> WorkerToolOrigin:
     """Construct one complete verified worker origin for a processing tool."""
+    origin, _ = _resolve_worker_tool_origin(
+        tool, installed_distribution=installed_distribution,
+    )
+    return origin
+
+
+def _resolve_worker_tool_origin(
+    tool: ProcessingTool | type[ProcessingTool],
+    *,
+    installed_distribution: str | None = None,
+) -> tuple[WorkerToolOrigin, PrimaryContentAdmission]:
+    """Share one held primary admission between identity and worker dispatch."""
     tool_class = tool if isinstance(tool, type) else type(tool)
     if not issubclass(tool_class, ProcessingTool):
         raise TypeError("Worker origins can only be built for ProcessingTool classes.")
@@ -215,7 +223,9 @@ def resolve_worker_tool_origin(
                 f"Versioned tool metadata expects {versioned_version!r}, but "
                 f"distribution metadata declares {installed_version!r}."
             )
-        return VersionedModuleOriginV1(
+        admission = capture_primary_content(tool_class, package_root=store_root / versioned_package)
+        admission.attest(tool)
+        return VersionedModuleOrigin(
             distribution=distribution,
             import_package=versioned_package,
             version=versioned_version,
@@ -223,7 +233,8 @@ def resolve_worker_tool_origin(
             scoped_module=tool_class.__module__,
             store_root=str(store_root),
             class_name=class_name,
-        )
+            primary=admission.proof,
+        ), admission
 
     source_id = getattr(tool_class, "_bif_custom_source_id", None)
     source_hash = getattr(tool_class, "_bif_custom_source_hash", None)
@@ -235,14 +246,20 @@ def resolve_worker_tool_origin(
         and isinstance(worker_root, str)
         and isinstance(worker_module, str)
     ):
-        return ArchiveModuleOriginV1(
+        selected_root = Path(worker_root).resolve(strict=True) / worker_module.split(".", 1)[0]
+        if not selected_root.is_dir():
+            selected_root = selected_root.with_suffix(".py")
+        admission = capture_primary_content(tool_class, package_root=selected_root)
+        admission.attest(tool)
+        return ArchiveModuleOrigin(
             source_id=source_id,
             source_hash=source_hash,
             canonical_module=canonical_module,
             scoped_module=worker_module,
             materialization_root=str(Path(worker_root).resolve(strict=True)),
             class_name=class_name,
-        )
+            primary=admission.proof,
+        ), admission
 
     declared_distribution = installed_distribution or getattr(
         tool_class, "_bif_worker_distribution", None
@@ -261,26 +278,40 @@ def resolve_worker_tool_origin(
             import_package,
             source_file,
         )
-        return InstalledModuleOriginV1(
+        admission = capture_primary_content(tool_class, distribution=declared_distribution)
+        admission.attest(tool)
+        return InstalledModuleOrigin(
             distribution=declared_distribution,
             version=version,
             module=canonical_module,
             class_name=class_name,
-        )
+            primary=admission.proof,
+        ), admission
 
     import_root = _package_import_root(source_file, tool_class.__module__)
     if import_root is not None:
-        return SharedModuleOriginV1(
+        selected_root = import_root / tool_class.__module__.split(".", 1)[0]
+        if not selected_root.is_dir():
+            selected_root = selected_root.with_suffix(".py")
+        admission = capture_primary_content(tool_class, package_root=selected_root)
+        admission.attest(tool)
+        source_hash = admission.source_hash(source_file)
+        return SharedModuleOrigin(
             module=tool_class.__module__,
             import_root=str(import_root),
-            source_hash=_captured_source_hash or _file_hash(source_file),
+            source_hash=source_hash,
             class_name=class_name,
-        )
-    return SourceFileOriginV1(
+            primary=admission.proof,
+        ), admission
+    admission = capture_primary_content(tool_class, package_root=source_file)
+    admission.attest(tool)
+    source_hash = admission.source_hash(source_file)
+    return SourceFileOrigin(
         path=str(source_file),
-        source_hash=_captured_source_hash or _file_hash(source_file),
+        source_hash=source_hash,
         class_name=class_name,
-    )
+        primary=admission.proof,
+    ), admission
 
 
 @dataclass(frozen=True)
@@ -289,7 +320,7 @@ class ExecutableCapture:
 
     scientific_key: Mapping[str, Any]
     callbacks: Mapping[str, Callable[..., Any]]
-    worker_origin: WorkerToolOriginV1 | None
+    worker_origin: WorkerToolOrigin | None
     qualification: tuple[str, ...]
     import_admission: ImportRootAdmission | None = None
 
@@ -320,12 +351,12 @@ def capture_tool_executable(
 ) -> ExecutableCapture:
     """Capture actual callbacks before lookup; never infer code from a version label.
 
-    Managed admission compares supported resident code/literals with one source
-    read. The existing worker loader must still verify that captured digest at
-    execution; a later disk change refuses instead of executing under this key.
+    Managed admission compares supported inherited primary callbacks and
+    constructors with held source reads before lookup. Worker dispatch carries
+    that proof and must verify the current primary members and resident instance.
     Opaque initializers and transitive imported dependencies remain qualified.
     """
-    from bioimageflow.executable_identity import runtime_callable_identity, validate_source_callables
+    from bioimageflow_core.executable_identity import runtime_callable_identity, validate_source_callables
     from bioimageflow_core.declarations import DECLARATION_CONTRACT_VERSION
 
     klass = type(tool)
@@ -361,28 +392,27 @@ def capture_tool_executable(
         key.update(import_admission.to_scientific_facts())
     if managed or isinstance(custom_hash, str):
         path = Path(getattr(klass, "_bif_admitted_source_file", None) or inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
-        source = path.read_bytes()
-        source_digest = hashlib.sha256(source).hexdigest()
-        # Inherited callbacks have a distinct source owner; this source read does
-        # not purport to validate their initializer or dependency closure.
-        local_callbacks = {name: callback for name, callback in callbacks.items()
-                           if Path(getattr(callback, "__func__", callback).__code__.co_filename).resolve() == path}
-        qualification = validate_source_callables(source, local_callbacks, canonicalize=canonicalize)
+        if managed:
+            origin, primary_admission = _resolve_worker_tool_origin(tool)
+            source_digest = primary_admission.source_hash(path)
+            qualification = primary_admission.qualification
+            key.update(primary_admission.scientific_facts())
+        else:
+            source = path.read_bytes()
+            source_digest = hashlib.sha256(source).hexdigest()
+            local_callbacks = {name: callback for name, callback in callbacks.items()
+                               if Path(getattr(callback, "__func__", callback).__code__.co_filename).resolve() == path}
+            qualification = validate_source_callables(source, local_callbacks, canonicalize=canonicalize)
         key.update(authority="captured_source", source_hash=custom_hash or source_digest)
         if isinstance(custom_hash, str) and getattr(klass, "_bif_admitted_source_file", None) and source_digest != custom_hash:
             raise ValueError("Admitted custom source bytes changed before executable capture")
         if managed:
-            origin = resolve_worker_tool_origin(tool, _captured_source_hash=source_digest)
-            if isinstance(origin, (SourceFileOriginV1, SharedModuleOriginV1)):
-                # Use the SAME captured bytes, not resolve's subsequent file read.
-                from dataclasses import replace
-                origin = replace(origin, source_hash=source_digest)
-            elif isinstance(origin, (InstalledModuleOriginV1, VersionedModuleOriginV1)):
+            if isinstance(origin, (InstalledModuleOrigin, VersionedModuleOrigin)):
                 evidence = runtime_callable_identity(callbacks, canonicalize=canonicalize)
                 key.update(authority="declared_installation", controller_digest=evidence["digest"],
                            distribution=origin.distribution, version=origin.version)
                 qualification = tuple(sorted(set(qualification) | set(evidence["unresolved"]) | {
-                    "installed worker/transitive byte closure unproved",
+                    "installed transitive dependency closure unproved",
                 }))
         qualification = tuple(sorted(set(qualification) | {"opaque initializer/transitive dependency closure unproved"}))
         if managed:
