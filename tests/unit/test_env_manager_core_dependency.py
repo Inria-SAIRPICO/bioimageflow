@@ -13,6 +13,7 @@ from bioimageflow.env_manager import (
     _bioimageflow_core_pin,
     _local_bioimageflow_core_project,
 )
+from bioimageflow.environment_recipe import to_wetlands_spec
 from bioimageflow_core import EnvironmentSpec
 from tests.testkit.env_manager_fakes import (
     _MutatingWetlandsEnvironment, _Operation, _generation_runtime_manager,
@@ -182,6 +183,7 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
             "conda": ["bioimageit::simglib=0.1.2"],
             "channels": ["conda-forge", "bioimageit"],
         },
+        allow_flexible_versions=True,
     )
 
     first = manager.get_or_create(env_spec)
@@ -198,6 +200,19 @@ def test_get_or_create_ignores_mutations_to_created_dependency_copy() -> None:
     assert translated.channels == ("conda-forge", "bioimageit")
     assert translated.conda == ("simglib=0.1.2",)
     assert len(manager._manager.provisioned_specs) == 1
+
+
+@pytest.mark.parametrize("channel", ["conda-forge/linux-64", "https://example.invalid/conda/linux-64"])
+def test_channel_prefix_recipe_preserves_text_and_current_translation(channel):
+    requirement = f"{channel}::numpy==2.5.3"
+    recipe = {"python": "3.12", "conda": [requirement], "channels": ["first", "conda-forge"]}
+    captured = EnvironmentSpec("prefixed", recipe)
+    translated = to_wetlands_spec(captured.dependencies)
+
+    assert captured.dependencies == recipe
+    assert translated.conda == ("numpy==2.5.3",)
+    assert translated.channels == ("first", "conda-forge", channel)
+    assert translated.python == "3.12.*"
 
 
 def test_wetlands_v2_translates_local_pypi_reference_to_typed_package() -> None:

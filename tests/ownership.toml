@@ -1,6 +1,22 @@
 version = 1
 
 [[areas]]
+name = "environment-recipe"
+sources = [
+    "packages/bioimageflow-core/bioimageflow_core/environment.py",
+    "packages/bioimageflow-core/bioimageflow_core/defaults.py",
+]
+edit_tests = [
+    "tests/unit/test_environment_spec.py",
+    "tests/unit/test_env_manager_core_dependency.py",
+    "tests/unit/test_env_manager_core_source.py",
+    "tests/unit/test_core_python39_compat.py",
+    "tests/integration/test_environment_management.py",
+    "tests/integration/runtime_cache/test_parameter_value_identity.py",
+]
+precommit_suites = ["unit", "integration"]
+
+[[areas]]
 name = "worker-protocol"
 sources = [
     "packages/bioimageflow-core/bioimageflow_core/worker.py",

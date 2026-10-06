@@ -19,6 +19,11 @@ Types
 Environment
 -----------
 
+``EnvironmentSpec(name, dependencies, allow_flexible_versions=False)`` captures an independently validated recipe in a frozen object.
+Each ``dependencies`` read returns a fresh ordinary nested dictionary/list projection; caller or returned-recipe edits do not mutate that captured authority.
+Pip validation parses complete PEP 508 requirements and preserves their text; Conda validation distinguishes exact version/build constraints from fuzzy versions and wildcards.
+See :doc:`/specs` §3.1 for the exact and flexible admission rules.
+
 .. automodule:: bioimageflow_core.environment
    :members:
    :undoc-members:
@@ -112,6 +117,7 @@ Definition values
 
 ``IOModel.capture_defaults()`` returns detached declared defaults with missing fields distinct from explicit None.
 ``bioimageflow_core.defaults.snapshot_value`` detaches supported semantic containers/numeric values without cloning scoped resource owners.
+An ``EnvironmentSpec`` snapshot reconstructs an equal independent specification from its captured name, recipe and flexibility flag.
 Constructor-supplied values retain caller identity; omitted mutable defaults do not share declaration storage.
 
 Tool Base Classes

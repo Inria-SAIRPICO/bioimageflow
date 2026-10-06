@@ -45,12 +45,12 @@ stardist_env = EnvironmentSpec(
 
 imageio_env = EnvironmentSpec(
     name="imageio",
-    dependencies={"conda": ["imageio=2.37.3"], "python": "3.12"},
+    dependencies={"conda": ["imageio==2.37.3"], "python": "3.12"},
 )
 
 numpy_env = EnvironmentSpec(
     name="numpy_only",
-    dependencies={"conda": ["numpy=2.4.2"], "python": "3.12"},
+    dependencies={"conda": ["numpy==2.4.2"], "python": "3.12"},
 )
 
 

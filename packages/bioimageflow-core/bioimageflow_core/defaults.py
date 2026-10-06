@@ -42,6 +42,14 @@ def snapshot_value(value: Any, _active: Optional[set[int]] = None) -> Any:
             }
         if isinstance(value, (list, tuple, set, frozenset)):
             return type(value)(snapshot_value(item, active) for item in value)
+        from .environment import EnvironmentSpec
+
+        if isinstance(value, EnvironmentSpec):
+            return EnvironmentSpec(
+                name=value.name,
+                dependencies=value.dependencies,
+                allow_flexible_versions=value.allow_flexible_versions,
+            )
         if (
             is_dataclass(value)
             and not isinstance(value, type)

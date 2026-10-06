@@ -364,21 +364,17 @@ Both inherit from `BaseTool`, which provides shared metadata attributes (`displa
 
 ### 3.1 EnvironmentSpec
 
-**Accepted target — S03:** Execution captures an independent validated effective recipe and per-environment configuration before callbacks or run-visible effects; later edits affect later calls only.
+**Accepted target — S03:** Execution captures an independent validated effective recipe and per-environment configuration before callbacks or run-visible effects; later replacement declarations or effective configuration changes affect later captures only.
 Read-only/frozen metadata must not expose mutable dependency authority to callers.
 
 *Module: `bioimageflow_core.environment`*
 
 Processing tools declare their environment requirements via an `EnvironmentSpec` object. This object is defined **once** and shared by reference across all tools that use the same environment.
 
-```python
-@dataclass(frozen=True)
-class EnvironmentSpec:
-    """Defines a reusable Wetlands environment specification."""
-    name: str          # Wetlands environment name (e.g., "cellpose")
-    dependencies: dict  # Wetlands format: {"conda": [...], "pip": [...], "python": "3.12"}
-    allow_flexible_versions: bool = False
-```
+The public constructor is `EnvironmentSpec(name, dependencies, allow_flexible_versions=False)`.
+The frozen object captures its validated recipe independently of the caller's dictionary and nested lists or local dependency dictionaries.
+Each `dependencies` read returns a fresh ordinary dictionary/list projection; editing either the original input or a returned projection cannot change the admitted recipe.
+`snapshot_value(spec)` reconstructs an equal independent `EnvironmentSpec`, preserving its name, captured dependencies and flexibility flag.
 
 **Defining an environment:**
 ```python
@@ -397,8 +393,12 @@ stardist_env = EnvironmentSpec(
 ```
 
 `EnvironmentSpec` validates package-index dependencies when it is constructed.
-By default, entries in `pip` and `conda` lists use exact pins; bare names such as `"numpy"` or `"tensorflow"` raise `ValueError`.
-Set `allow_flexible_versions=True` only when the environment intentionally accepts resolver flexibility; in that mode explicit constraints such as `">=2,<3"` or `"~=1.2"` are accepted, but bare names still raise.
+Pip entries use the complete PEP 508 requirement grammar, including extras, markers and direct URLs with or without spaces around `@`; their declared text is preserved.
+By default, an index requirement must contain a non-wildcard `==` or `===` constraint; additional valid conjuncts may coexist with that fixed constraint without a satisfiability solve.
+Conda entries retain channel prefixes, version and optional build text: `==version`, `=version=build` and `==version=build` are fixed only when their version and build contain no wildcard, while a single `=version` is a fuzzy constraint.
+Named channel/subdirectory and URL channel prefixes remain part of the captured declaration; Wetlands translation moves those prefixes into the ordered channel list under the source-pinning qualification below.
+Set `allow_flexible_versions=True` only when the environment intentionally accepts resolver flexibility; valid explicit ranges, exclusions and wildcards are then admitted, but bare names and malformed or empty constraints still raise `ValueError`.
+The supported Conda string grammar covers channel-qualified names, explicit version constraints and optional builds; it does not accept arbitrary MatchSpec bracket or hash forms.
 Direct references such as `"bioimageflow-core @ file:///..."` and Wetlands local dependency dicts are already anchored and do not need a package-index version specifier.
 
 For Wetlands execution, a missing `channels` key starts with channels named by `channel::package` Conda dependencies, in dependency order, followed by `conda-forge` as a fallback. With no prefixes, the channel list is `("conda-forge",)`. Repeated channel names are removed while preserving the first occurrence, which defines channel priority. When `channels` is present, its declared order takes priority; prefix channels not already listed are appended, and `conda-forge` is not added automatically. This permits an intentional explicit channel list without conda-forge. Wetlands requires at least one resulting channel.
@@ -1909,7 +1909,7 @@ class DicomLoader(ProcessingTool):
     """List DICOM files and extract metadata — requires pydicom, isolated from main process."""
     display_name = "DICOM Loader"
     row_consumption = RowConsumption.MAPPED
-    environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom=3.0.1"]})
+    environment = EnvironmentSpec(name="dicom", dependencies={"conda": ["pydicom==3.0.1"]})
 
     class Inputs(IOModel):
         directory: str
