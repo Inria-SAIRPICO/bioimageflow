@@ -30,9 +30,12 @@ def _contains_shared_array(value: Any) -> bool:
 def _output_values(
     output: IOModel | Mapping[str, Any],
     output_type: type[IOModel],
+    nominal_output_type: type[IOModel] | None = None,
 ) -> dict[str, Any]:
     fields = tuple(output_type._get_all_annotations())
-    if isinstance(output, output_type):
+    if isinstance(output, output_type) or (
+        nominal_output_type is not None and isinstance(output, nominal_output_type)
+    ):
         return {field: getattr(output, field) for field in fields}
     if type(output) is not dict:
         raise TypeError(
@@ -54,9 +57,10 @@ def validate_processing_output(
     output_type: type[IOModel],
     *,
     reject_shared_array: bool = False,
+    nominal_output_type: type[IOModel] | None = None,
 ) -> IOModel:
     """Validate one output and restore its declared field order and runtime values."""
-    values = _output_values(output, output_type)
+    values = _output_values(output, output_type, nominal_output_type)
     annotations = output_type._get_all_annotations()
     validated: dict[str, Any] = {}
     for field, annotation in annotations.items():
@@ -93,6 +97,7 @@ def normalize_processing_row_outputs(
     output_type: type[IOModel],
     *,
     reject_shared_array: bool = False,
+    nominal_output_type: type[IOModel] | None = None,
 ) -> list[IOModel]:
     """Normalize one process_row return to the canonical output list."""
     outputs = result if isinstance(result, list) else [result]
@@ -101,6 +106,7 @@ def normalize_processing_row_outputs(
             output,
             output_type,
             reject_shared_array=reject_shared_array,
+            nominal_output_type=nominal_output_type,
         )
         for output in outputs
     ]
@@ -113,6 +119,7 @@ def normalize_processing_batch_outputs(
     expected_rows: int,
     row_consumption: str = "mapped",
     reject_shared_array: bool = False,
+    nominal_output_type: type[IOModel] | None = None,
 ) -> list[list[IOModel]]:
     """Normalize a process_batch return and enforce exact input cardinality."""
     if not isinstance(result, list):
@@ -120,7 +127,10 @@ def normalize_processing_batch_outputs(
     if row_consumption == "collective":
         if any(isinstance(output, list) for output in result):
             raise TypeError("Collective process_batch returns one flat output list.")
-        return [[validate_processing_output(output, output_type, reject_shared_array=reject_shared_array) for output in result]]
+        return [[validate_processing_output(
+            output, output_type, reject_shared_array=reject_shared_array,
+            nominal_output_type=nominal_output_type,
+        ) for output in result]]
     if result and isinstance(result[0], list):
         if not all(isinstance(group, list) for group in result):
             raise TypeError(
@@ -144,6 +154,7 @@ def normalize_processing_batch_outputs(
                 output,
                 output_type,
                 reject_shared_array=reject_shared_array,
+                nominal_output_type=nominal_output_type,
             )
             for output in group
         ]

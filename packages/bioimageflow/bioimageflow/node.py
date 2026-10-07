@@ -24,6 +24,7 @@ from bioimageflow_core.viewer import (
 
 if TYPE_CHECKING:
     from bioimageflow.resources import NodeResourceOverrides
+    from bioimageflow.workflow.capture import CapturedOutputDeclaration
     from bioimageflow_core import ResourceSpec
 
 
@@ -176,6 +177,8 @@ def reset_active_workflow(token: contextvars.Token) -> None:
 class Node:
     """A node in the computation DAG. Wraps a tool and its configuration."""
 
+    _captured_output_declaration: "CapturedOutputDeclaration"
+
     def __init__(
         self,
         tool: BaseTool,
@@ -299,11 +302,14 @@ class Node:
         clone.tool = copy.copy(self.tool)
         if isinstance(self.tool, ProcessingTool):
             setattr(clone.tool, "environment", copy.deepcopy(self.tool.environment, memo))
-        from bioimageflow.workflow.capture import capture_model, capture_value
+        from bioimageflow.workflow.capture import capture_model, capture_output_declaration, capture_value
+        output_declaration = capture_output_declaration(
+            self.tool.Outputs, getattr(self, "_captured_output_declaration", None),
+        )
         setattr(clone.tool, "Inputs", capture_model(self.tool.Inputs))
-        setattr(clone.tool, "Outputs", capture_model(self.tool.Outputs))
+        setattr(clone.tool, "Outputs", output_declaration.frozen_model)
         for key, value in self.__dict__.items():
-            if key == "tool":
+            if key in {"tool", "_captured_output_declaration"}:
                 continue
             if key == "_constant_bindings":
                 captured = {name: capture_value(item) for name, item in value.items()}
@@ -314,6 +320,7 @@ class Node:
             else:
                 captured = copy.deepcopy(value, memo)
             setattr(clone, key, captured)
+        clone._captured_output_declaration = output_declaration
         clone._capture_defaults()
         return clone
 
