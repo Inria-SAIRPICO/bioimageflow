@@ -68,7 +68,7 @@ The following integration values and operations cover those lower-level contract
 - `prepare_remote_submission()` copies all explicit root-input and node-override `LocalUpload` values plus uploaded pre-launch bytes into an owned immutable bundle and returns a single-use `PreparedRemoteSubmission`. Submission verifies and consumes that bundle and never rereads the original local paths. Cluster-resident pre-launch files remain typed external sources until the cluster agent snapshots them into the launcher run.
 - `get_execution_capabilities()` reports Direct, Wetlands, Parsl modes, PSI/J, planning, validation, diagnostics, resource overrides, remote node path overrides, and immutable-upload support without importing optional Parsl or PSI/J runtimes.
 - `WorkflowRun.plan_retry()` and `RemoteWorkflowRun.plan_retry()` produce a strict JSON-safe `RunRetryPlan` for any retained terminal run. Ordinary retries reuse current cache selections; `RecomputeRequest` previews exact scoped selections and optional downstream cascade. The plan binds canonical storage, parent status revision, cache-selection revision, retained submission digest, and retained staged-material digest. `start_retry(plan)` is the idempotent restart-safe public confirmation boundary. Starting rejects active executions, durably journals invalidation of only current pointers, clones the retained invocation, copies run-owned input and bootstrap trees, reuses verified content-addressed uploads without rereading laptop paths, and records the complete plan. Remote mutation uses only the public cluster protocol, and uncertain submission is never automatically repeated.
-- `WorkflowRun.export_result(destination)`, `RemoteWorkflowRun.export_result(destination)`, and `WorkflowExecutionContext.export_result()` expose one verified, atomic, idempotent result-bundle contract. Owned assets are rehydrated beneath the destination and declared external paths remain external values. `WorkflowRun.load_result()` is a separate local-only storage-backed read operation.
+- `WorkflowRun.export_result(destination)`, `RemoteWorkflowRun.export_result(destination)`, and `WorkflowExecutionContext.export_result()` expose one verified, atomic, idempotent result-bundle contract. Owned assets are rehydrated beneath the destination and declared external paths remain external values. `WorkflowExecutionContext.export_result_bundle()` installs the identical verified bundle without hydrating a return. `WorkflowRun.load_result()` is a separate local-only storage-backed read operation.
 
 Every cross-process report has `to_dict()` and `from_dict()` methods and a versioned schema where applicable.
 Scoped node paths are used consistently by planning, progress, and failure diagnostics.
@@ -2295,7 +2295,10 @@ Historical result loading never consults `current.json`.
 An existing destination is idempotent only when its full expected bundle digest, run ID, storage binding, manifest, and entry digests match.
 All export failures derive from `WorkflowResultExportError`; destination conflicts raise `WorkflowResultDestinationError`, bundle verification raises `WorkflowResultIntegrityError`, actual SSH/SFTP failures raise `SSHTransportError`, and unavailable retained assets raise `WorkflowRunResultUnavailableError`.
 `WorkflowExecutionContext.export_result(value, destination=...)` creates the same bundle for a successful attached Direct, Wetlands, or Parsl run from engine-neutral provider outcomes.
+Attached root exports preserve published output names while resolving exact provider addresses without the synthetic execution-root prefix; genuine nested workflow names remain part of those addresses.
 Attached export snapshots the caller-supplied successful value at export time and must occur before caller mutation or transient-asset removal; a repeated export to the installed destination uses its retained expected digest.
+`WorkflowExecutionContext.export_result_bundle(value, destination=...)` returns the installed absolute `Path` without allocating hydrated arrays or result groups.
+It shares the materialized attached export's successful binding, exact provider routes, context identity lock, retained digest, full bundle verification, transactional installation and error contract; either API can subsequently verify and reuse the same installed destination.
 
 Laptop-to-cluster submission uses the system OpenSSH and SFTP clients plus the installed one-shot `bioimageflow-cluster-agent`.
 `SSHSubmissionTransport` carries only a host alias or `user@host`, normalized absolute cluster staging root, safe absolute remote executable, and finite timeout.
@@ -3231,7 +3234,13 @@ Explicit close/release refuses new controller allocation/open; existing views an
 A failed/uncertain pool close retains the pool and grants for retry; cleanup remains pending and does not advertise reclaimed storage.
 Windows deletion restrictions and mapped-handle/namespace errors remain pending with explicit errors until a later status/close retry succeeds.
 Ordinary loss of the final returned reference to a group releases only that group’s exact allocation leases.
-It never closes the whole owner or unrelated groups; retained descriptors and mapped views remain independent pins, and final-reader drain may finish a pending release.
+It never closes caller-provided owners or unrelated groups; retained descriptors and mapped views remain independent pins, and final-reader drain may finish a pending release.
+Public-return hydration additionally assigns disposal of a newly SDK-created root to captured local group metadata, without a global registry or reference/group ownership cycle.
+That root remains open until all its registered groups request disposal and pending scope admissions, foreign allocation leases, worker grants and unregistered allocation resources have settled; releasing one group keeps another same-root group's references open.
+Once that fence permits the exact root's public close, retained mapped views keep cleanup pending until they drain.
+Group `release()` and `status()`, or a retained SDK hydration scope's public `status()` and `close()`, retry captured pending cleanup, including namespace errors and interrupted cleanup callbacks.
+Foreign resources may require their owner to settle them and an explicit public retry; disposing a result is not permission to close them.
+Owned-root status accounts for its physical resources once, including pending namespace errors, rather than adding the same allocations to both lease and root totals.
 Weak context bookkeeping never retains discarded result handles or frames.
 Successful terminal finalization drops captured executable bindings and observer callbacks while preserving immutable outcome/status metadata and detached exact return routes/storage address for later export.
 Automatic failure also releases the captured execution binding and becomes logically failed even when terminal persistence fails; `WorkflowExecutionContext.cleanup_errors` exposes immutable detached diagnostic history, while `cleanup_pending` reports outstanding owned persistence actions.
@@ -3264,7 +3273,12 @@ Pending outputs remain until the controller accepts or rejects them, even if the
 After physical drain and controller disposition, unreturned or rejected task allocations are retired while accepted outputs remain.
 Failed tasks and failed cache/return hydration request cleanup only for their new groups; bound inputs, unrelated allocations and durable assets remain untouched.
 Cache records still persist numeric values as immutable `.npy` assets under `assets/shm/`; cache hydration creates a fresh owned group and retains references after Workflow exit.
-Public return loaders accept `shared_memory_context=` or create an SDK owner retained by the returned references; whole-group hydration failure retires only newly created backing.
+Public return loaders accept `shared_memory_context=` or create an SDK owner retained by the returned references and their captured disposal metadata; whole-group hydration failure retires only newly created backing.
+Ordinary caller-created or borrowed contexts retain their existing ownership contract and are never implicitly closed by a loaded group's disposal.
+Supplying an already SDK-owned hydration scope preserves its existing captured root disposal boundary and confers no new deletion authority.
+If child admission or hydration fails, that exact failure remains primary while cleanup independently attempts the admitted child and any newly created root.
+When cleanup remains pending or is interrupted and the exception permits metadata attachment, the primary exception's immutable `result_cleanup_scopes` tuple retains its exact public retry handles and `result_cleanup_errors` tuple reports detached diagnostics, including on Python 3.10.
+Retrying a retained scope's public `close()` or `status()` can complete SDK-owned root disposal; an independent standalone cleanup interruption is rethrown after the other captured cleanup callbacks have been attempted.
 References are host-local and supported by local Wetlands processing; Parsl refuses them recursively in task arguments and result containers.
 Physical resource release still requires the owning pool/controller fences; this contract is not a blanket fix for active-engine shutdown races or arbitrary process death.
 

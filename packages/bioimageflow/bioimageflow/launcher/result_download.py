@@ -10,6 +10,7 @@ import stat
 import subprocess
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
@@ -449,6 +450,32 @@ def export_local_result(
     *,
     expected_digest: str | None = None,
 ) -> Any:
+    """Install a verified bundle and materialize its public return."""
+    return _install_local_result_bundle(
+        run, destination, expected_digest=expected_digest,
+    ).load()
+
+
+@dataclass(frozen=True)
+class _InstalledResultBundle:
+    """One fully verified installation shared by archive and value consumers."""
+
+    destination: Path
+    manifest: Mapping[str, Any]
+    record_assets: Mapping[int, Path]
+
+    def load(self) -> Any:
+        return load_public_return_from_bundle(
+            self.destination, self.manifest["return_manifest"], self.record_assets,
+        )
+
+
+def _install_local_result_bundle(
+    run: Any,
+    destination: Path,
+    *,
+    expected_digest: str | None = None,
+) -> _InstalledResultBundle:
     """Build, verify, and atomically install one local result bundle."""
     from .result_bundle import _build_candidate, _remove_candidate
 
@@ -466,7 +493,7 @@ def export_local_result(
         )
     expected_digest = expected_digest or retained_digest
     if destination.exists() and expected_digest is not None:
-        return _load_existing_local_result(
+        return _verify_existing_local_result_bundle(
             run,
             destination,
             expected_digest=expected_digest,
@@ -498,7 +525,7 @@ def export_local_result(
             )
         _install_local_export_receipt(run, loaded["digest"])
         if destination.exists():
-            return _load_existing_local_result(
+            return _verify_existing_local_result_bundle(
                 run,
                 destination,
                 expected_digest=loaded["digest"],
@@ -509,9 +536,8 @@ def export_local_result(
             raise WorkflowResultDestinationError(
                 "Result destination appeared during export."
             )
-        return load_public_return_from_bundle(
-            destination,
-            loaded["return_manifest"],
+        return _InstalledResultBundle(
+            destination, loaded,
             {
                 index: destination / path.relative_to(candidate)
                 for index, path in assets.items()
@@ -528,7 +554,19 @@ def _load_existing_local_result(
     *,
     expected_digest: str,
 ) -> Any:
-    """Verify and load an already installed local bundle by expected identity."""
+    """Verify and materialize an installed bundle by expected identity."""
+    return _verify_existing_local_result_bundle(
+        run, destination, expected_digest=expected_digest,
+    ).load()
+
+
+def _verify_existing_local_result_bundle(
+    run: Any,
+    destination: Path,
+    *,
+    expected_digest: str,
+) -> _InstalledResultBundle:
+    """Verify an installed local bundle by its exact expected identity."""
     if destination.is_symlink() or not destination.is_dir():
         raise WorkflowResultDestinationError("Result destination already exists.")
     manifest = _load_manifest(destination / "manifest.json")
@@ -541,11 +579,7 @@ def _load_existing_local_result(
             "Result destination belongs to another bundle."
         )
     assets = _verify_tree(destination, manifest)
-    return load_public_return_from_bundle(
-        destination,
-        manifest["return_manifest"],
-        assets,
-    )
+    return _InstalledResultBundle(destination, manifest, assets)
 
 
 def _local_export_receipt_path(run: Any) -> Path:

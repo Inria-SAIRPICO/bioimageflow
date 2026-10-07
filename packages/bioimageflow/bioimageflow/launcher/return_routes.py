@@ -120,6 +120,11 @@ def _node_key(node: Node, scope: tuple[str, ...]) -> str:
     return "/".join((*scope, node._name))
 
 
+def _workflow_scope(node: WorkflowNode, scope: tuple[str, ...]) -> tuple[str, ...]:
+    """Match execution: synthetic root boundaries add no provider prefix."""
+    return scope if node._is_root_boundary else (*scope, node._name)
+
+
 def _outcome_route(
     node: Node,
     column: str,
@@ -184,7 +189,7 @@ def _workflow_routes(
     outcomes: Mapping[str, Any],
     memo: dict[tuple[int, tuple[str, ...]], _NodeRoutes],
 ) -> _NodeRoutes:
-    nested_scope = (*scope, node._name)
+    nested_scope = _workflow_scope(node, scope)
     routes: dict[str, tuple[ReturnProviderRoute, ...]] = {}
     declared: dict[str, tuple[bool, bool]] = {}
     for port in node.workflow._interface_outputs.values():
@@ -420,7 +425,7 @@ def _column_routes(
         return _column_routes(
             source,
             port.source_output,
-            scope=(*scope, node._name),
+            scope=_workflow_scope(node, scope),
             outcomes=outcomes,
             memo=memo,
         )
