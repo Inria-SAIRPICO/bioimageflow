@@ -351,18 +351,25 @@ def map_array(descriptor: dict[str, Any], ref: Any, *, writable: Any = None) -> 
     if readonly and writable is True:
         raise PermissionError("Accepted shared backing is read-only")
     path = Path(descriptor["root"]) / (ref.name + ".npy")
-    with _open(path, os.O_RDONLY if readonly or writable is False else os.O_RDWR, descriptor["root_identity"]) as handle:
-        if readonly:
-            _require_sealed_identity(record, os.fstat(handle.fileno()))
-        shape, actual_dtype, offset, fortran = _layout(handle, descriptor, ref, reserved_size)
-        # Header admission and mapping use this same captured descriptor.
-        mapping = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ if readonly or writable is False else mmap.ACCESS_WRITE)
+    mapping = None
     try:
+        with _open(path, os.O_RDONLY if readonly or writable is False else os.O_RDWR, descriptor["root_identity"]) as handle:
+            if readonly:
+                _require_sealed_identity(record, os.fstat(handle.fileno()))
+            shape, actual_dtype, offset, fortran = _layout(handle, descriptor, ref, reserved_size)
+            # Synchronize buffered read-ahead before Windows mmap resets the
+            # native cursor. Header admission and mapping retain the same FD.
+            handle.flush()
+            mapping = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ if readonly or writable is False else mmap.ACCESS_WRITE)
         array = np.ndarray(shape, dtype=actual_dtype, buffer=mapping, offset=offset,
                            order="F" if fortran else "C")
         return array, mapping
-    except BaseException:
-        mapping.close()
+    except BaseException as primary:
+        if mapping is not None:
+            try:
+                mapping.close()
+            except BaseException as cleanup_error:
+                raise primary from cleanup_error
         raise
 
 

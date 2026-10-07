@@ -3176,6 +3176,8 @@ A default byte budget captures available free space once; allocations across its
 `create_shared_output(data, name=None)` requires an active context, creates an allocation and yields its bound `SharedArray`; exiting the helper only unbinds lexical work and leaves backing intact.
 `open_shared_array(ref)` and the SharedArray branch of `load_image()` use the reference's bound owner or an explicitly active borrowed context.
 They validate the admitted directory identities, owner marker, bounded NPY header, dtype, exact shape and data size before mapping the same admitted file descriptor.
+The mapping handoff synchronizes buffered descriptor state before native mmap may reposition its cursor, without reopening the admitted path.
+If handoff or array construction fails after creating a mapping, cleanup closes only that new mapping and preserves the primary exception if cleanup also fails.
 Object-containing dtypes are rejected before allocation or mapping; Path/str image reader dispatch and numeric dtype/shape are preserved.
 Live arrays, sliced views and `numpy.asarray` views retain their mappings beyond context-manager exit.
 

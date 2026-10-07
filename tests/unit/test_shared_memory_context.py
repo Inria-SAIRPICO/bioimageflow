@@ -229,3 +229,113 @@ def test_existing_acquisition_target_is_not_adopted_or_removed(tmp_path, monkeyp
     target.rmdir()
     if owner:
         assert owner.close().state == "closed"
+
+
+@pytest.mark.parametrize("sealed", [False, True], ids=["mutable", "sealed-readonly"])
+def test_shared_mapping_survives_windows_native_cursor_reset(tmp_path, monkeypatch, sealed):
+    import os
+    from bioimageflow_core import SharedMemoryContext
+    from bioimageflow_core import _shared_storage as storage
+    from bioimageflow_core.shm import open_shared_array
+
+    owner = SharedMemoryContext(tmp_path)
+    source = np.arange(6, dtype="uint16").reshape(2, 3)
+    ref = owner.create(source)
+    selected = owner.publish(ref) if sealed else ref
+    real_mapping = storage.mmap.mmap
+    mappings = []
+    positions = []
+
+    def windows_mapping(fd, length, **kwargs):
+        # Apply CPython Windows mmap's native cursor reset around a real map.
+        # The file, descriptor, header reader and NumPy buffer remain real.
+        positions.append(os.lseek(fd, 0, os.SEEK_CUR))
+        os.lseek(fd, 0, os.SEEK_SET)
+        mapping = real_mapping(fd, length, **kwargs)
+        mappings.append(mapping)
+        return mapping
+
+    monkeypatch.setattr(storage.mmap, "mmap", windows_mapping)
+    array = reopened = None
+    try:
+        with open_shared_array(selected) as array:
+            np.testing.assert_array_equal(array, source)
+            assert array.dtype == source.dtype and array.shape == source.shape
+            assert array.flags.writeable is not sealed
+            if not sealed:
+                array[1, 2] = 91
+        array = None
+        gc.collect()
+        assert positions and all(mapping.closed for mapping in mappings)
+        with open_shared_array(selected) as reopened:
+            expected = source.copy()
+            if not sealed:
+                expected[1, 2] = 91
+            np.testing.assert_array_equal(reopened, expected)
+        reopened = None
+        gc.collect()
+        if sealed:
+            with pytest.raises(PermissionError, match="read-only"):
+                owner.open(selected, writable=True)
+    finally:
+        # Keep this fixture's mapped handles settled even if a value check fails.
+        array = reopened = None
+        gc.collect()
+        for mapping in mappings:
+            if not mapping.closed:
+                mapping.close()
+        status = owner.close()
+        assert status.state == "closed" and not status.errors
+        assert status.pending_files == status.pending_readers == status.pending_grants == status.pending_leases == 0
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True], ids=["closed", "retry-close"])
+def test_failed_mapping_context_preserves_primary_and_closes_constructed_map(tmp_path, monkeypatch, cleanup_fails):
+    from contextlib import contextmanager
+    from bioimageflow_core import SharedMemoryContext
+    from bioimageflow_core import _shared_storage as storage
+
+    owner = SharedMemoryContext(tmp_path)
+    ref = owner.create(np.arange(6, dtype="uint16").reshape(2, 3))
+    primary = OSError("captured file context failed after mapping")
+    cleanup_error = OSError("constructed mapping close failed once")
+    real_open, real_mapping = storage._open, storage.mmap.mmap
+    mappings = []
+    close_attempts = []
+
+    class CapturedMapping(real_mapping):
+        def __new__(cls, fd, length, **kwargs):
+            mapping = super().__new__(cls, fd, length, **kwargs)
+            mappings.append(mapping)
+            return mapping
+
+        def close(self):
+            close_attempts.append(self)
+            if cleanup_fails and len(close_attempts) == 1:
+                raise cleanup_error
+            return super().close()
+
+    @contextmanager
+    def fail_after_map(path, flags, expected_parent=None):
+        with real_open(path, flags, expected_parent) as handle:
+            yield handle
+            if path.name == ref.name + ".npy":
+                assert len(mappings) == 1
+                raise primary
+
+    monkeypatch.setattr(storage, "_open", fail_after_map)
+    monkeypatch.setattr(storage.mmap, "mmap", CapturedMapping)
+    try:
+        with pytest.raises(OSError) as captured:
+            owner.open(ref)
+        assert captured.value is primary
+        assert len(mappings) == 1 and close_attempts == [mappings[0]]
+        assert mappings[0].closed is not cleanup_fails
+        assert primary.__cause__ is (cleanup_error if cleanup_fails else None)
+    finally:
+        for mapping in mappings:
+            if not mapping.closed:
+                mapping.close()
+        status = owner.close()
+        assert status.state == "closed" and not status.errors
+        assert status.pending_files == status.pending_readers == status.pending_grants == status.pending_leases == 0
