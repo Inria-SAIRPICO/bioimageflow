@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      core_floor_only:
+        description: Run only the installed Core OS and Python floor capabilities
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +32,7 @@ env:
 
 jobs:
   quality:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Quality
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -54,6 +60,7 @@ jobs:
         run: uv run pyright
 
   unit-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Unit tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -78,6 +85,7 @@ jobs:
         run: uv run pytest tests/unit $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   integration-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Direct integration tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -102,6 +110,7 @@ jobs:
         run: uv run pytest tests/integration $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   compatibility-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Compatibility smoke (Python 3.11)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -122,6 +131,7 @@ jobs:
         run: uv run pytest tests $LOCAL_LIBRARY_PYTEST_ARGS -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   core-python314-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Core IOModel (Python 3.14)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -194,7 +204,7 @@ jobs:
 
   local-worker-capability:
     name: Local WorkerPool capability (editable Core, Python 3.10)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.core_floor_only
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -220,7 +230,7 @@ jobs:
           packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py
 
   parsl-fast-tests:
-    if: github.event_name != 'workflow_dispatch' || !inputs.local_library_only
+    if: github.event_name != 'workflow_dispatch' || (!inputs.local_library_only && !inputs.core_floor_only)
     name: Parsl fast runtime (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -245,7 +255,7 @@ jobs:
         run: uv run pytest tests -m "parsl and not slow"
 
   parsl-process-tests:
-    if: github.event_name != 'workflow_dispatch' || !inputs.local_library_only
+    if: github.event_name != 'workflow_dispatch' || (!inputs.local_library_only && !inputs.core_floor_only)
     name: Parsl process isolation (Python 3.11)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -266,6 +276,7 @@ jobs:
         run: uv run pytest tests -m "parsl and slow"
 
   deterministic-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Deterministic acceptance and package tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -288,6 +299,7 @@ jobs:
         run: uv run pytest $LOCAL_LIBRARY_PYTEST_ARGS -m "package_tools and not complete"
 
   packages:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Build and validate packages
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -323,6 +335,7 @@ jobs:
           retention-days: 7
 
   docs:
+    if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
     name: Documentation
     runs-on: ubuntu-latest
     timeout-minutes: 30

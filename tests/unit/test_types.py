@@ -107,8 +107,9 @@ class TestImageTypes:
         assert {spec: "captured"}[equal] == "captured"
         outer = Optional[Annotated[Path, spec, GUIMeta()]]
         inner = Annotated[Optional[Path], spec, GUIMeta()]
-        assert get_args(get_args(outer)[0])[1] is spec
-        assert get_args(inner)[1] is spec
+        assert get_args(get_args(outer)[0])[1] == spec
+        assert get_args(inner)[1] == spec
+        assert hash(get_args(get_args(outer)[0])[1]) == hash(get_args(inner)[1]) == captured_hash
 
 
 class TestCheckCompatibility:

@@ -276,7 +276,8 @@ def core_contract_checks() -> list:
         values.clear()
     assert image_spec == equal_spec and hash(image_spec) == hash(equal_spec) == captured_hash
     class AlternateInputs(core.IOModel):
-        path: Annotated[Optional[Path], core.ImageSpec(layouts={core.Layout.PLANAR}), core.GUIMeta("Pixels")] = None
+        MaybePath = Annotated[Optional[Path], core.ImageSpec(layouts={core.Layout.PLANAR}), core.GUIMeta("Pixels")]
+        path: MaybePath = None
     assert core.describe_io_model(AlternateInputs)["fields"]["path"] == declaration["fields"]["path"]
     defaults = Inputs.capture_defaults()
     assert defaults == {"count": 2, "path": None, "values": [1, 2]}
