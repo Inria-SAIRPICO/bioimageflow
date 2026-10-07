@@ -540,11 +540,17 @@ class FilterRows(DataFrameTool):
         max: float | None = None
 
     def transform(self, df: Any, arguments: Any) -> Any:
+        if arguments.min is None and arguments.max is None:
+            return df
+        import pandas as pd
+
+        values = pd.to_numeric(df[arguments.column_name], errors="raise")
+        keep = pd.Series(True, index=df.index)
         if arguments.min is not None:
-            df = df[df[arguments.column_name] >= arguments.min]
+            keep &= values >= arguments.min
         if arguments.max is not None:
-            df = df[df[arguments.column_name] <= arguments.max]
-        return df
+            keep &= values <= arguments.max
+        return df.loc[keep]
 
 
 class AddColumn(DataFrameTool):

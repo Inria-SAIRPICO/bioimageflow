@@ -488,13 +488,18 @@ def test_sairpico_command_wrappers_stage_outputs_and_pass_expected_arguments(
     expected_command: list[str],
     output_text: str,
 ) -> None:
+    import subprocess
+
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+    def fake_run(
+        command: list[str], run_kwargs: dict[str, object]
+    ) -> subprocess.CompletedProcess[bytes]:
         assert run_kwargs["check"] is True
         calls.append(command)
         output_path = Path(command[command.index("-o") + 1])
         output_path.write_text(output_text)
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
     output_image = tmp_path / "output.tif"
