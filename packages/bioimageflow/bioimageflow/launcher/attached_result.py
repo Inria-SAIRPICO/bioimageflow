@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from .result_download import (
-    _load_existing_local_result,
-    _load_manifest,
+    _InstalledResultBundle,
+    _install_local_result_bundle,
     _validate_destination_parent,
-    export_local_result,
+    _verify_existing_local_result_bundle,
 )
 from .returns import persist_public_return
 
@@ -35,7 +35,20 @@ def export_attached_result(
             context,
             value,
             destination=destination,
-        )
+        ).load()
+
+
+def export_attached_result_bundle(
+    context: Any,
+    value: Any,
+    *,
+    destination: str | Path,
+) -> Path:
+    """Install the identical verified attached bundle without hydrating values."""
+    with context._lock:
+        return _export_attached_result_locked(
+            context, value, destination=destination,
+        ).destination
 
 
 def _export_attached_result_locked(
@@ -43,7 +56,7 @@ def _export_attached_result_locked(
     value: Any,
     *,
     destination: str | Path,
-) -> Any:
+) -> _InstalledResultBundle:
     """Persist and export the exact return of one successful attached run."""
     if context.terminal_status != "succeeded" or context.run_id is None:
         raise RuntimeError("Only a successful attached execution can be exported.")
@@ -62,7 +75,7 @@ def _export_attached_result_locked(
         Path(),
     )
     if destination_path.exists() and expected_digest is not None:
-        return _load_existing_local_result(
+        return _verify_existing_local_result_bundle(
             attached_run,
             destination_path,
             expected_digest=expected_digest,
@@ -83,13 +96,13 @@ def _export_attached_result_locked(
             provider_routes=routes,
         )
         attached_run.control_dir = temporary
-        result = export_local_result(
+        result = _install_local_result_bundle(
             attached_run,
             destination_path,
             expected_digest=expected_digest,
         )
         context._remember_result_export_digest(
-            _load_manifest(destination_path / "manifest.json")["digest"]
+            result.manifest["digest"]
         )
         return result
     finally:

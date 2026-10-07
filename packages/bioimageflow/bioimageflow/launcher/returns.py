@@ -549,11 +549,14 @@ def _rehydrate_public_return(
     owned = shared_memory_context is None
     owner = shared_memory_context
     if owner is None:
+        from bioimageflow.result_groups import _ReturnMemoryContext
+
         root = (storage.storage_path / ".bioimageflow" / "shared_arrays" if storage is not None
                 else Path(tempfile.gettempdir()) / "bioimageflow-return-shared")
-        owner = SharedMemoryContext(root)
-    scope = owner.task_scope("return_" + uuid.uuid4().hex)
+        owner = _ReturnMemoryContext(root)
+    scope: SharedMemoryContext | None = None
     try:
+        scope = owner.task_scope("return_" + uuid.uuid4().hex)
         with scope.activate():
             result = _rehydrate_public_return_bound(
                 asset_root, manifest, storage=storage, record_assets=record_assets,
@@ -574,10 +577,33 @@ def _rehydrate_public_return(
         result, _group = bind_result_group(result, node_name="return", group_id=scope.scope_id)
         scope.discard_unreturned()
         return result
-    except BaseException:
-        scope.close()
-        if owned:
-            owner.close()
+    except BaseException as primary:
+        from bioimageflow.result_groups import _cleanup_error
+
+        pending: list[SharedMemoryContext] = []
+        errors: list[str] = []
+        cleanup_scopes = (() if scope is None else (scope,)) + ((owner,) if owned else ())
+        for cleanup_scope in cleanup_scopes:
+            try:
+                status = cleanup_scope.close()
+                if status.state != "closed":
+                    pending.append(cleanup_scope)
+                    errors.extend(status.errors)
+            except BaseException as cleanup:
+                pending.append(cleanup_scope)
+                errors.append(_cleanup_error(cleanup))
+        if pending:
+            try:
+                setattr(primary, "result_cleanup_scopes", tuple(pending))
+                setattr(primary, "result_cleanup_errors", tuple(dict.fromkeys(errors)))
+            except BaseException:
+                pass
+            try:
+                note = getattr(primary, "add_note", None)
+                if callable(note):
+                    note("Public-return hydration cleanup remains pending: " + "; ".join(errors))
+            except BaseException:
+                pass
         raise
 
 

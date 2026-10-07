@@ -215,6 +215,12 @@ class WorkflowExecutionContext:
 
         return export_attached_result(self, value, destination=destination)
 
+    def export_result_bundle(self, value: object, *, destination: str | Path) -> Path:
+        """Install the same verified bundle without allocating a hydrated return."""
+        from bioimageflow.launcher.attached_result import export_attached_result_bundle
+
+        return export_attached_result_bundle(self, value, destination=destination)
+
     def _remember_result_export_digest(self, digest: str) -> None:
         with self._lock:
             if self._result_export_digest not in {None, digest}:
