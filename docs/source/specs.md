@@ -42,7 +42,7 @@ BioImageFlow relies on **Wetlands**, an external library for Conda environment i
 - By default they remain alive for one workflow execution, while an explicit engine ownership policy can retain them for an engine session or delegate their lifetime to an external manager.
 - Processing calls and results use the explicit current Core typed-value protocol over the public Wetlands worker transport; picklability alone does not make a value supported.
 - Exceptions raised in the worker are automatically re-raised in the main process with their original stack trace.
-- BioImageFlow requires Wetlands `>=2.6.0,<3` and uses only its public top-level API.
+- BioImageFlow requires Wetlands `>=2.6.1,<3` and uses only its public top-level API.
 - BioImageFlow translates its public `EnvironmentSpec` into the immutable Wetlands 2 `EnvironmentSpec`, provisions with `EnvironmentManager.provision(...).wait_for()`, and starts a `WorkerPool` with `ManagedEnvironment.start()`.
 - Processing calls use `WorkerPool.submit_import("bioimageflow_core.worker:execute_processing_task", ...)`.
 - `max_workers` selects the Wetlands 2 pool size. Node-effective `max_concurrent` bounds the number of row tasks BioImageFlow keeps active for that node.
@@ -422,7 +422,9 @@ The default authoritative dependency is `bioimageflow-core==<installed version>`
 `WetlandsEnvManager.inspect_environment()` reports whether the augmented requested recipe is missing, current, or stale without provisioning it.
 `recreate(...)` and the `get_or_create(..., replace_existing=True)` entry point explicitly rebuild one Wetlands-managed processing environment, including the current recipe.
 Automatic callers inspect first and grant that authorization only for a stale owned recipe; an explicit lifecycle action may force a rebuild.
-Forced recreation uses the public `Operation.wait_for_completion()` API introduced in Wetlands 2.5; the current supported library cohort requires installed Wetlands >=2.6.0,<3; unsupported runtimes are refused before preparation callbacks or destructive effects, while False preserves matching warm-pool reuse.
+Forced recreation uses the public `Operation.wait_for_completion()` API introduced in Wetlands 2.5; its runtime capability guard requires that callable API and Wetlands >=2.5.0,<3 before preparation callbacks or destructive effects.
+The current supported library dependency cohort requires installed Wetlands >=2.6.1,<3; the older API-introduction guard does not widen that declared dependency range.
+False preserves matching warm-pool reuse.
 Before effects, the manager captures the selected name, independent validated recipe/Core dependency and valid positive worker count/finite timeout.
 Under its existing wrapper lock it synchronously and strictly closes only the selected cached pool, drains that pool’s exact shared-array grants while leaving controller output disposition independent, retires its pool caches, removes the selected managed target through the same public Wetlands manager, provisions with `replace_existing=False`, starts workers and publishes caches only after success.
 A close failure propagates with the selected cleanup owner retained for explicit retry; retained bookkeeping does not certify that a partially closed pool is healthy.
@@ -2659,6 +2661,13 @@ Before managed Processing cache lookup, the engine admits the selected ready run
 The public `RuntimeContentReceipt` owns normalized interpreter, installed-content and resolved-artifact facts; its generation, recipe and lockfile identities fence the selected ready owner without substituting for scientific content.
 Ready inspection and planning do not provision, start scientific workers or spawn a content probe; actual execution may prepare a missing or stale owned runtime before deriving the key, while scientific worker startup remains unnecessary for a reusable hit.
 Later managed cache decisions and dispatch validate the admitted receipt's current-generation fence without rescanning installed content, rather than silently switching to another runtime after cache admission.
+The public `WetlandsEnvManager.admit_runtime(spec, provision=..., admissions=..., replace_stale=False, on_preparation=..., on_provision_event=..., on_removal_event=...)` provides that worker-free preparation boundary to application adapters.
+`replace_stale=True` requires `provision=True` and authorizes only the selected managed stale recipe before its first admission, never a forced matching rebuild or replacement of a held receipt; the caller owns the authorization policy.
+The target and augmented recipe are captured before observers or lifecycle effects; preparation reports creating, updating or ready-content reuse, while provisioning and removal have separate public operation observers.
+Successful physical pool close drains only its selected grants before removal; failed close retains the pool and grants for retry and prevents removal, provisioning and startup.
+Preparation failures precede destructive effects, and removal/provisioning interruption uses the same listener detachment, cancellation and independent public-completion ownership as explicit recreation while preserving the primary interruption.
+Memoized receipts are fenced again without repeating content capture or preparation, and failed preparation stores no new receipt; a committed removal has no rollback.
+`provision=False` performs no writes or worker startup, and pool handoff rejects simultaneous receipt use and requested replacement.
 This bounded receipt describes owner-managed ready content, independently of the selected primary-content proof; it does not describe arbitrary external filesystem tampering or universal native relocation.
 Editable source roots require fresh operation-owned live-source admission; a changed admitted footprint is refused until explicit owned retirement and reprovisioning, without hot reloading or claiming arbitrary Python state sealing.
 
@@ -3639,7 +3648,7 @@ The normative host-facing grammar, identifiers, status rules, and golden fixture
 
 ## Appendix A: Wetlands API
 
-BioImageFlow requires Wetlands `>=2.6.0,<3`.
+BioImageFlow requires Wetlands `>=2.6.1,<3`.
 Wetlands separates manager construction, observable provisioning, managed environments, worker pools, and execution tasks.
 BioImageFlow uses its public top-level imports only.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -522,10 +523,17 @@ def publish_release_set(
     plan: ReleasePlan,
     artifact_root: Path,
     *,
+    expected_core_sha256: str = "",
     runner: CommandRunner | None = None,
 ) -> list[str]:
     run = subprocess.run if runner is None else runner
     by_name = {item.package.name: item for item in plan.items}
+    core_name = next((name for name in by_name if canonicalize_name(name) == "bioimageflow-core"), None)
+    if core_name is not None and re.fullmatch(r"[0-9a-f]{64}", expected_core_sha256) is None:
+        raise ReleaseError(
+            "A Core release requires the reviewed canonical wheel SHA256 "
+            "as 64 lowercase hexadecimal characters"
+        )
     admitted_artifacts: dict[str, list[Path]] = {}
     for package_name in plan.publish_order:
         item = by_name[package_name]
@@ -533,6 +541,13 @@ def publish_release_set(
         admitted_artifacts[package_name] = validate_release_artifacts(
             artifact_dir, item.package, item.version,
         )
+    if core_name is not None:
+        core_wheel = next(path for path in admitted_artifacts[core_name] if path.suffix == ".whl")
+        if hashlib.sha256(core_wheel.read_bytes()).hexdigest() != expected_core_sha256:
+            raise ReleaseError(
+                "Staged Core wheel differs from the reviewed canonical floor-tested SHA256; "
+                "no package upload was started"
+            )
     published: list[str] = []
     for package_name in plan.publish_order:
         artifacts = admitted_artifacts[package_name]
@@ -595,6 +610,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         command_parser.add_argument("--check-pypi", action="store_true")
         if command == "publish":
             command_parser.add_argument("--artifacts-dir", type=Path, required=True)
+            command_parser.add_argument(
+                "--expected-core-sha256", default="",
+                help="reviewed floor-tested wheel SHA256, required when Core is selected",
+            )
         if command == "verify":
             command_parser.add_argument("--attempts", type=int, default=12)
             command_parser.add_argument("--interval", type=float, default=5.0)
@@ -624,7 +643,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "plan":
             print(json.dumps(plan.payload(), separators=(",", ":")))
         elif args.command == "publish":
-            published = publish_release_set(plan, args.artifacts_dir)
+            published = publish_release_set(
+                plan, args.artifacts_dir, expected_core_sha256=args.expected_core_sha256,
+            )
             print(f"Published {len(published)} package(s): {', '.join(published)}")
         else:
             verify_release_set(plan, attempts=args.attempts, interval=args.interval)
