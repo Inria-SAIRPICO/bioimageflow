@@ -134,19 +134,29 @@ def test_output_image_override_uses_output_template_not_input_binding(
 
 
 def test_importing_package_does_not_import_subprocess() -> None:
-    modules_to_clear = [
-        name
-        for name in sys.modules
+    original_modules = {
+        name: module
+        for name, module in sys.modules.items()
         if name == "bioimageflow_sairpico_tools"
         or name.startswith("bioimageflow_sairpico_tools.")
-    ]
-    for name in modules_to_clear:
-        sys.modules.pop(name, None)
-    sys.modules.pop("subprocess", None)
-
-    __import__("bioimageflow_sairpico_tools")
-
-    assert "subprocess" not in sys.modules
+    }
+    original_subprocess = sys.modules.get("subprocess")
+    try:
+        for name in original_modules:
+            sys.modules.pop(name)
+        sys.modules.pop("subprocess", None)
+        __import__("bioimageflow_sairpico_tools")
+        assert "subprocess" not in sys.modules
+    finally:
+        for name in list(sys.modules):
+            if name == "bioimageflow_sairpico_tools" or name.startswith(
+                "bioimageflow_sairpico_tools."
+            ):
+                sys.modules.pop(name)
+        sys.modules.update(original_modules)
+        sys.modules.pop("subprocess", None)
+        if original_subprocess is not None:
+            sys.modules["subprocess"] = original_subprocess
 
 
 @pytest.mark.parametrize(
@@ -160,6 +170,10 @@ def test_importing_package_does_not_import_subprocess() -> None:
 def test_runtime_module_imports_do_not_mutate_sys_path(module_name: str) -> None:
     package_root = str(SAIRPICO_PACKAGE.parent)
     original_path = list(sys.path)
+    original_module = sys.modules[module_name]
+    parent_name, leaf_name = module_name.rsplit(".", 1)
+    parent = sys.modules[parent_name]
+    original_attribute = getattr(parent, leaf_name)
     try:
         sys.path[:] = [entry for entry in sys.path if entry != package_root]
         before = list(sys.path)
@@ -170,6 +184,8 @@ def test_runtime_module_imports_do_not_mutate_sys_path(module_name: str) -> None
         assert sys.path == before
     finally:
         sys.path[:] = original_path
+        sys.modules[module_name] = original_module
+        setattr(parent, leaf_name, original_attribute)
 
 
 @pytest.mark.parametrize(
