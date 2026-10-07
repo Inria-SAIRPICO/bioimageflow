@@ -1,4 +1,4 @@
-"""Source-disabled Core artifact capability checks, not a full backend/tool suite.
+"""Source-disabled Core contracts and array capabilities, not a full tool suite.
 
 Run from outside the checkout using an isolated interpreter with the built Core
 wheel installed normally. Each child uses the same interpreter and public Core
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -138,9 +139,33 @@ def run_child(command: list, log: Path, retirement: dict) -> None:
     assert process.returncode == 0, (process.returncode, stdout, stderr)
 
 
-def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, fail: bool):
+def source_tool_origin(source: Path):
+    """Capture one current proof for the freshly generated trusted fixture."""
+    from bioimageflow_core import SourceFileOrigin
+    from bioimageflow_core.primary_content import capture_primary_content
+
+    name = "_core_array_capability_tool"
+    assert name not in sys.modules, "Fixture module already has a resident owner"
+    spec = importlib.util.spec_from_file_location(name, source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+        admission = capture_primary_content(module.ArrayLifetimeTool)
+        return SourceFileOrigin(
+            path=str(source), source_hash=admission.source_hash(source),
+            class_name="ArrayLifetimeTool", primary=admission.proof,
+        )
+    except BaseException:
+        if sys.modules.get(name) is module:
+            del sys.modules[name]
+        raise
+
+
+def transport_case(args: argparse.Namespace, owner, input_ref, origin, *, fail: bool):
     from bioimageflow_core import (
-        ProcessingTask, RowInvocation, SourceFileOriginV1, collect_input_scopes,
+        ProcessingTask, RowInvocation, collect_input_scopes,
         decode_processing_result, encode_processing_task, validate_processing_result,
         describe_tool_declaration,
     )
@@ -148,6 +173,7 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
     from bioimageflow_core.worker_origins import load_worker_tool
 
     label = "failure" if fail else "success"
+    declaration = describe_tool_declaration(load_worker_tool(origin))
     input_ref = owner.publish(input_ref)
     task_scope = owner.task_scope(label)
     grant = task_scope.acquire_worker_grant(inputs=(input_ref,))
@@ -155,11 +181,8 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
         task_id="task_0000000000000001", node_name="array-lifetime",
         invocation_id="inv_00000000000000000000000000000001",
         cache_attempt_id=None, task_retry=0, mode="row_chunk", row_consumption="mapped",
-        tool=SourceFileOriginV1(path=str(source), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
-                              class_name="ArrayLifetimeTool"),
-        declaration=describe_tool_declaration(load_worker_tool(SourceFileOriginV1(
-            path=str(source), source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
-            class_name="ArrayLifetimeTool"))),
+        tool=origin,
+        declaration=declaration,
         rows=(RowInvocation(position=0, row_index="sample",
                             arguments={"reference": input_ref, "fail": fail}, context=None),),
         shared_memory_context={"output": task_scope.descriptor(), "inputs": list(collect_input_scopes((input_ref,)))},
@@ -207,6 +230,87 @@ def transport_case(args: argparse.Namespace, owner, input_ref, source: Path, *, 
                     "physical_exit_before_grant_drain": True, "expected_failure": fail}
 
 
+def core_contract_checks() -> list:
+    """Exercise installed worker-floor APIs without importing the controller."""
+    import importlib
+    import pkgutil
+    from typing import Annotated, List, Optional
+
+    import bioimageflow_core as core
+    from bioimageflow_core.defaults import snapshot_value
+    from bioimageflow_core.worker_origins import load_worker_tool
+
+    modules = sorted(item.name for item in pkgutil.walk_packages(core.__path__, core.__name__ + "."))
+    for name in modules:
+        importlib.import_module(name)
+    assert "bioimageflow" not in sys.modules
+    assert "pandas" not in sys.modules and "pydantic" not in sys.modules
+    assert Path(core.__file__).with_name("py.typed").is_file()
+
+    class ParentInputs(core.IOModel):
+        CountType = Annotated[int, core.GUIMeta("Count", min=0)]
+        MaybePath = Optional[Path]
+        count: CountType = 2
+        missing: int
+        path: MaybePath = None
+
+    class Inputs(ParentInputs):
+        ValuesType = List[int]
+        values: ValuesType = [1, 2]
+
+    declaration = core.describe_io_model(Inputs)
+    assert declaration["field_names"] == ["count", "missing", "path", "values"]
+    assert declaration["fields"]["count"]["constraints"] == {"min": 0}
+    assert declaration["fields"]["missing"]["required"]
+    assert declaration["fields"]["path"]["nullable"]
+    defaults = Inputs.capture_defaults()
+    assert defaults == {"count": 2, "path": None, "values": [1, 2]}
+    defaults["values"].append(9)
+    assert Inputs.capture_defaults()["values"] == [1, 2]
+    cases = [{"family": "installed-core-import-annotations-defaults", "result": "PASS", "modules": modules}]
+
+    recipe = {"python": "3.9", "pip": ["sample==1.0"], "channels": ["conda-forge"],
+              "local": [{"name": "sample", "path": Path("held-project"), "editable": True,
+                         "extras": ["base"]}]}
+    spec = core.EnvironmentSpec("floor-recipe", recipe)
+    captured = snapshot_value(spec)
+    assert captured is not spec and captured == spec
+    recipe["local"][0]["extras"].append("original-edit")
+    projected = captured.dependencies
+    projected["local"][0]["extras"].append("projection-edit")
+    projected["channels"].append("projection-edit")
+    assert captured == spec
+    assert spec.dependencies["local"][0]["extras"] == ["base"]
+    assert captured.dependencies["channels"] == ["conda-forge"]
+    cases.append({"family": "installed-core-detached-recipe-snapshot", "result": "PASS"})
+
+    viewer = core.ViewerSpec(core.NapariRequirement(required_packages=[core.PackageRequirement("Example_Reader")]))
+    wire = viewer.to_dict()
+    assert core.ViewerSpec.from_dict(wire) == viewer
+    assert viewer.napari is not None
+    assert viewer.napari.required_packages[0].normalized_name == "example-reader"
+    wire["napari"]["required_packages"] = ["Example_Reader"]
+    refused(lambda: core.ViewerSpec.from_dict(wire), (TypeError, ValueError))
+    cases.append({"family": "installed-core-strict-viewer-wire", "result": "PASS"})
+
+    proof = core.capture_primary_content(core.ProcessingTool, distribution="bioimageflow-core").proof
+    origin = core.InstalledModuleOrigin(
+        distribution="bioimageflow-core", version=version("bioimageflow-core"),
+        module=core.ProcessingTool.__module__, class_name=core.ProcessingTool.__name__, primary=proof,
+    )
+    payload = core.encode_worker_tool_origin(origin)
+    assert payload["schema"] == "bioimageflow.worker_tool_origin.v2"
+    assert core.decode_worker_tool_origin(payload) == origin
+    assert tuple(callback.role for callback in proof.callbacks) == ("__new__", "__init__", "process_row", "process_batch")
+    instance = load_worker_tool(origin)
+    assert type(instance) is core.ProcessingTool and load_worker_tool(origin) is instance
+    payload["primary"]["callbacks"] = []
+    refused(lambda: core.decode_worker_tool_origin(payload), ValueError)
+    cases.append({"family": "installed-core-current-primary-admission", "result": "PASS",
+                  "schema": origin.schema, "members": len(proof.members)})
+    return cases
+
+
 def capability_checks(args: argparse.Namespace) -> list:
     import numpy as np
     from bioimageflow_core import SharedArray, SharedMemoryContext
@@ -223,7 +327,8 @@ def capability_checks(args: argparse.Namespace) -> list:
             pass
         source = args.root / "array_tool.py"
         source.write_text(TOOL_SOURCE, encoding="utf-8")
-        output, child_receipt = transport_case(args, owner, ref, source, fail=False)
+        origin = source_tool_origin(source)
+        output, child_receipt = transport_case(args, owner, ref, origin, fail=False)
         assert isinstance(output, SharedArray)
         with open_shared_array(ref) as array:
             np.testing.assert_array_equal(array, [[0, 1, 2], [3, 4, 5]])
@@ -238,7 +343,7 @@ def capability_checks(args: argparse.Namespace) -> list:
         # and the controller's input remain readable.
         with owner.activate(), create_shared_output(np.arange(6, dtype="uint16").reshape(2, 3)) as failure_ref:
             pass
-        _, failure_receipt = transport_case(args, owner, failure_ref, source, fail=True)
+        _, failure_receipt = transport_case(args, owner, failure_ref, origin, fail=True)
         with budget.activate():
             refused(lambda: budget.create(np.array([object()], dtype=object)), ValueError, "Python objects")
             refused(lambda: budget.create(np.zeros(100, dtype=np.float64)), ValueError, "budget")
@@ -311,14 +416,15 @@ def main() -> int:
     args.cleanup = []
     args.grant_errors = []
     started = time.monotonic()
-    record = {"result": "FAIL", "scope": "Core artifact public-API child-process capabilities; not all tools/backends",
+    record = {"result": "FAIL", "scope": "Core artifact public contracts and child-process capabilities; not all tools/backends",
               "skipped": [], "cases": []}
     try:
         if args.expected_python:
             assert platform.python_version().startswith(args.expected_python + "."), platform.python_version()
         args.host_identity = artifact_identity(args.wheel, args.source_root, args.expected_version)
         record["artifact"] = args.host_identity
-        record["cases"] = capability_checks(args)
+        record["cases"] = core_contract_checks()
+        record["cases"].extend(capability_checks(args))
         assert all(status["state"] == "closed" for status in args.cleanup), args.cleanup
         record["result"] = "PASS"
     except BaseException:
@@ -330,7 +436,7 @@ def main() -> int:
         record["duration_seconds"] = time.monotonic() - started
         args.receipt.parent.mkdir(parents=True, exist_ok=True)
         args.receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    print("Four Core artifact lifetime families PASS; 0 skipped.")
+    print("Eight Core artifact contract/lifetime families PASS; 0 skipped.")
     return 0
 
 

@@ -15,6 +15,8 @@ from tests.support.ci_selectors import (
     FAST_TEST_COMMAND,
     PARSL_FAST_TEST_COMMAND,
     UNIT_TEST_COMMAND,
+    DOCS_BUILD_COMMAND,
+    CI_QUALITY_CONFIG_COMMAND,
 )
 
 
@@ -140,6 +142,58 @@ def test_edit_stage_selects_focused_engine_tests() -> None:
     assert len(commands) == 1
     assert "tests/integration/test_engine_injection.py" in commands[0]
     assert commands[0] != FAST_TEST_COMMAND
+
+
+def test_declared_source_owners_precede_docs_and_example_fallbacks():
+    cases = {
+        "docs/source/workflows/images/generate_workflow_previews.py": "tests/unit/test_workflow_preview_binding.py",
+        "example_workflows/fish_analysis/tools/download_images.py": "tests/unit/test_example_download_tools.py",
+    }
+    for path, test in cases.items():
+        commands = commands_for_paths([path], stage="edit", root=ROOT)
+        assert len(commands) == 1 and test in commands[0]
+        assert FAST_TEST_COMMAND not in commands and DOCS_BUILD_COMMAND not in commands
+
+
+def test_existing_collected_test_edits_select_only_the_actual_file():
+    for path in [
+        "tests/unit/test_development_workflow.py",
+        "packages/bioimageflow-spot-tools/tests/test_atlas_workdir.py",
+    ]:
+        assert commands_for_paths([path], stage="edit", root=ROOT) == [
+            f"uv run pytest {path}"
+        ]
+
+
+def test_shared_support_and_configuration_keep_broad_guards():
+    broad = [FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND]
+    for path in ["tests/support/ci_selectors.py", "tests/testkit/primary_content.py"]:
+        assert commands_for_paths([path], stage="edit", root=ROOT) == broad
+    assert commands_for_paths(["conftest.py"], stage="edit", root=ROOT) == [
+        CI_QUALITY_CONFIG_COMMAND,
+        DOCS_BUILD_COMMAND,
+    ]
+    package = "packages/bioimageflow-segmentation-tools/tests/conftest.py"
+    commands = commands_for_paths([package], stage="edit", root=ROOT)
+    assert len(commands) == 2
+    assert (
+        'packages/bioimageflow-segmentation-tools/tests -m "not complete"'
+        in commands[0]
+    )
+    assert commands[0] != f"uv run pytest {package}"
+
+
+def test_prose_readme_and_docs_edits_select_only_strict_docs():
+    for path in [
+        "README.md",
+        "packages/bioimageflow-io-tools/README.md",
+        "example_workflows/parameter_space_exploration/README.md",
+        "docs/source/specs.md",
+        "docs/source/reference/api/core.rst",
+    ]:
+        assert commands_for_paths([path], stage="edit", root=ROOT) == [
+            DOCS_BUILD_COMMAND
+        ]
 
 
 def test_precommit_stage_selects_independent_suites() -> None:

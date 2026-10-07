@@ -169,9 +169,10 @@ git push origin main
 ```
 
 Wait for the normal **CI** workflow to succeed on the exact release commit.
-The coordinated release workflow refuses to publish a commit without a successful `ci.yml` run for that SHA.
+The coordinated release workflow refuses to publish a commit without a successful push or pull-request `ci.yml` run for that SHA.
+Manual capability runs, including the local-library mode, cannot satisfy this publication gate.
 
-The Core 0.5 scoped array surface additionally requires source-disabled numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
+The Core 0.5 scoped array surface additionally requires source-disabled public annotation/default, recipe, viewer, selected-primary and numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
 Run an additional resource-dependent suite only when the release changes that runtime surface:
 
 | Release surface | Additional suite in **Complete validation** |

@@ -172,12 +172,6 @@ def _commands_for_path(
     ):
         return (CI_QUALITY_CONFIG_COMMAND, DOCS_BUILD_COMMAND)
 
-    if _is_docs_path(parts):
-        return (CI_QUALITY_CONFIG_COMMAND, DOCS_BUILD_COMMAND)
-
-    if _is_example_workflow_path(parts):
-        return (ACCEPTANCE_TEST_COMMAND, PACKAGE_TOOLS_TEST_COMMAND)
-
     areas = matching_areas(path, ownership)
     if areas:
         if stage == "precommit":
@@ -193,6 +187,17 @@ def _commands_for_path(
             )
         return tuple(f"uv run pytest {' '.join(area['edit_tests'])}" for area in areas)
 
+    if stage == "edit" and _is_collected_test_path(path) and (root / path_text).is_file():
+        return (f"uv run pytest {path_text}",)
+
+    if _is_docs_path(parts):
+        if path.suffix in {".md", ".rst"}:
+            return (DOCS_BUILD_COMMAND,)
+        return (CI_QUALITY_CONFIG_COMMAND, DOCS_BUILD_COMMAND)
+
+    if _is_example_workflow_path(parts):
+        return (ACCEPTANCE_TEST_COMMAND, PACKAGE_TOOLS_TEST_COMMAND)
+
     if _is_package_path(parts):
         package_name = parts[1]
         if _is_core_package(parts):
@@ -203,8 +208,8 @@ def _commands_for_path(
         )
 
     if _is_test_path(parts):
-        if stage == "edit" and path.suffix == ".py" and (root / path_text).is_file():
-            return (f"uv run pytest {path_text}", FAST_TEST_COMMAND)
+        if path.suffix == ".py" and not path.name.startswith("test_"):
+            return (FAST_TEST_COMMAND, PARSL_FAST_TEST_COMMAND)
         if len(parts) > 1 and parts[1] == "unit":
             return (UNIT_TEST_COMMAND,)
         if len(parts) > 1 and parts[1] == "integration":
@@ -215,7 +220,21 @@ def _commands_for_path(
 
 
 def _is_docs_path(parts: Sequence[str]) -> bool:
-    return bool(parts) and parts[0] in {"docs", "README.md"}
+    if not parts:
+        return False
+    if parts[0] in {"docs", "README.md"}:
+        return True
+    if len(parts) >= 3 and parts[0] == "packages":
+        return parts[2] == "docs" or (len(parts) == 3 and parts[2] == "README.md")
+    return parts[0] == "example_workflows" and parts[-1] == "README.md"
+
+
+def _is_collected_test_path(path: PurePosixPath) -> bool:
+    parts = path.parts
+    test_directory = _is_test_path(parts) or (
+        len(parts) >= 4 and parts[0] == "packages" and parts[2] == "tests"
+    )
+    return test_directory and path.suffix == ".py" and path.name.startswith("test_")
 
 
 def _is_example_workflow_path(parts: Sequence[str]) -> bool:

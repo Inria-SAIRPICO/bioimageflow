@@ -73,7 +73,7 @@ def _run_subprocess(
                 raise FileNotFoundError(f"Executable is absent from supplied PATH: {executable}")
             resolved_command[0] = selected
         elif selected is None:
-            environment_executable = Path(sys.executable).resolve().parent / executable
+            environment_executable = Path(sys.executable).absolute().parent / executable
             if environment_executable.is_file():
                 resolved_command[0] = str(environment_executable)
     return subprocess.run(resolved_command, **run_kwargs)

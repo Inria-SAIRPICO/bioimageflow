@@ -15,6 +15,7 @@ External commands
 ``run_external_command_with_staged_output`` publishes one successful regular staged file only to an absent final path, using exclusive installation.
 Existing and late owners are preserved; nonzero ``check=False`` results retain diagnostics and publish nothing.
 An explicitly supplied environment's PATH is authoritative, including paths relative to the requested child directory.
+The default missing-command fallback uses the lexical interpreter directory, including a symlinked environment's neighboring executable.
 Pending owned cleanup and any committed output are reported without masking a primary failure; exceptions that accept attributes retain an explicit cleanup retry owner.
 The contract covers the synchronous child and does not supervise arbitrary descendants.
 

@@ -19,6 +19,7 @@ edit_tests = [
     "tests/unit/test_viewer_requirements.py",
     "tests/unit/test_tool_package_doc_metadata.py",
     "tests/unit/test_release_tooling.py",
+    "tests/unit/test_local_capability_ci.py",
     "tests/unit/test_release_tagging.py",
     "tests/unit/test_development_workflow.py",
     "tests/unit/test_core_python39_compat.py",

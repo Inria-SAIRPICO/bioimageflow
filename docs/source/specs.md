@@ -3132,6 +3132,7 @@ External command wrappers must avoid process-CWD pollution. If a row-level binar
 An existing or late-created final owner, including a broken symlink, is preserved; staged symlinks are refused and predictable temporary names do not carry ownership authority.
 A nonzero `CompletedProcess` under `check=False` returns its diagnostics without publishing partial output.
 An explicitly supplied environment's PATH selects the executable, including relative entries resolved against the requested child directory; a neighboring interpreter executable cannot override it.
+Without an explicit environment and when PATH cannot resolve the command, the fallback uses the lexical directory beside `sys.executable`, preserving a symlinked environment interpreter rather than following it to a base installation.
 Cleanup removes only captured owned paths and preserves the primary failure; pending cleanup paths and any already-published output are reported, with an attached retry owner when the exception permits it.
 These guarantees cover the synchronous child and cooperating publication path, not arbitrary descendant processes or hostile external filesystem mutation.
 

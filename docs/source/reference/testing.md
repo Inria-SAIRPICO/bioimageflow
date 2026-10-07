@@ -53,6 +53,15 @@ uv run pytest packages/bioimageflow-io-tools/tests
 uv run pytest -m "package_tools and not complete"
 ```
 
+## Manual Local Library Capability
+
+A manual **CI** dispatch may set `local_library_only=true` (default false) for the bounded prepublication library milestone.
+This mode excludes the declared distributed, cluster and launcher test folders, including unmarked tests, and skips the two Parsl runtime jobs; ordinary push/pull-request CI retains its full configured gates.
+Quality, normal package/Core artifacts and documentation remain required.
+The separate manually dispatched local WorkerPool job executes four explicit owner files with editable/source Core; it does not certify source-disabled installed library dispatch.
+The normal installed Core matrix separately checks public contracts and child/view/owner lifetime on Python 3.9 and 3.12 on Linux and Windows.
+Configured matrix coverage is distinct from successful run evidence, and manual capability CI never unlocks release publication.
+
 ## Parsl Runtime Tests
 
 The `parsl` marker is reserved for tests that execute the real optional Parsl runtime.
@@ -201,7 +210,9 @@ git diff --name-only | uv run python scripts/affected_tests.py --stdin
 
 For suite-level validation before committing, add `--stage precommit`.
 For the complete deterministic fast merge gate, add `--stage merge`.
-The ownership map is stored in `tests/ownership.toml`, unknown paths fail open to the full fast suite, and the helper never replaces CI gates.
+The ownership map is stored in `tests/ownership.toml`; declared source owners take precedence over generic docs and example routing.
+At edit stage an existing collected `test_*.py` selects that file, prose documentation selects strict Sphinx, and shared support or configuration retains its broader guards.
+Unknown paths and merge-stage checks fail open to the broader suites, and the helper never replaces CI gates.
 See :doc:`platform_development` for source ownership, module-size limits, dependency boundaries, and the backend seam.
 
 Before broad finalization, run:

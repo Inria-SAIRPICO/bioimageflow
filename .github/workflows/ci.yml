@@ -6,6 +6,12 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      local_library_only:
+        description: Run local library capabilities without distributed runtime tests
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +23,7 @@ permissions:
 env:
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_LINK_MODE: copy
+  LOCAL_LIBRARY_PYTEST_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.local_library_only && '--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher' || '' }}
 
 jobs:
   quality:
@@ -68,7 +75,7 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run unit tests
-        run: uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+        run: uv run pytest tests/unit $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   integration-tests:
     name: Direct integration tests (Python ${{ matrix.python }})
@@ -92,7 +99,7 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run direct integration tests
-        run: uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+        run: uv run pytest tests/integration $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   compatibility-tests:
     name: Compatibility smoke (Python 3.11)
@@ -112,7 +119,7 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run compatibility smoke tests
-        run: uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+        run: uv run pytest tests $LOCAL_LIBRARY_PYTEST_ARGS -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
   core-python314-tests:
     name: Core IOModel (Python 3.14)
@@ -133,7 +140,7 @@ jobs:
           PYTHONPATH: packages/bioimageflow-core
 
   core-array-lifetime:
-    name: Core array lifetime (${{ matrix.os }}, Python ${{ matrix.python }})
+    name: Core artifact contracts and array lifetime (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -164,7 +171,7 @@ jobs:
           uv pip install --python "$runtime_python" --no-sources dist/core-array-lifetime/*.whl "numpy==1.26.4"
           uv pip check --python "$runtime_python"
           echo "CORE_ARRAY_PYTHON=$runtime_python" >> "$GITHUB_ENV"
-      - name: Check source-disabled public child/view/owner lifetimes
+      - name: Check source-disabled Core contracts and child/view/owner lifetimes
         run: |
           cp scripts/check_core_array_lifetime.py "$RUNNER_TEMP/check_core_array_lifetime.py"
           wheel_path="$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.0-py3-none-any.whl"
@@ -185,7 +192,35 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  local-worker-capability:
+    name: Local WorkerPool capability (editable Core, Python 3.10)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      UV_PYTHON: "3.10"
+      BIOIMAGEFLOW_CORE_SOURCE: ${{ github.workspace }}/packages/bioimageflow-core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.10.9"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install workspace
+        run: uv sync --locked --all-packages --group dev
+      - name: Run finite real local WorkerPool owners
+        run: >-
+          uv run pytest --run-complete -rsx
+          tests/integration/test_wetlands_smoke.py
+          tests/integration/test_wetlands_task_api.py
+          tests/integration/test_wetlands_cancellation.py
+          packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py
+
   parsl-fast-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.local_library_only
     name: Parsl fast runtime (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -210,6 +245,7 @@ jobs:
         run: uv run pytest tests -m "parsl and not slow"
 
   parsl-process-tests:
+    if: github.event_name != 'workflow_dispatch' || !inputs.local_library_only
     name: Parsl process isolation (Python 3.11)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -247,9 +283,9 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run acceptance tests
-        run: uv run pytest -m "acceptance and not complete"
+        run: uv run pytest $LOCAL_LIBRARY_PYTEST_ARGS -m "acceptance and not complete"
       - name: Run package-tool tests
-        run: uv run pytest -m "package_tools and not complete"
+        run: uv run pytest $LOCAL_LIBRARY_PYTEST_ARGS -m "package_tools and not complete"
 
   packages:
     name: Build and validate packages

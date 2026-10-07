@@ -69,7 +69,7 @@ jobs:
           echo "matrix=$(jq -c '{include: .items}' <<< "$plan")" >> "$GITHUB_OUTPUT"
           echo "sha=$(jq -r '.sha' <<< "$plan")" >> "$GITHUB_OUTPUT"
           echo "RELEASE_SHA=$(jq -r '.sha' <<< "$plan")" >> "$GITHUB_ENV"
-      - name: Require successful CI for the exact release commit
+      - name: Require successful push or pull-request CI for the exact release commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -77,10 +77,10 @@ jobs:
             gh api --method GET \
               "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
               -f head_sha="$RELEASE_SHA" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+              --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "pull_request"))] | length'
           )"
           if [[ "$successful_runs" -lt 1 ]]; then
-            printf 'No successful CI workflow found for release commit %s\n' "$RELEASE_SHA" >&2
+            printf 'No successful push or pull-request CI workflow found for release commit %s\n' "$RELEASE_SHA" >&2
             exit 1
           fi
 

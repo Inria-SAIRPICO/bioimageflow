@@ -333,7 +333,7 @@ def test_github_release_workflow_coordinates_validated_package_sets() -> None:
     assert "scripts/release_set.py plan --check-pypi" in prepare_script
     assert "actions/workflows/ci.yml/runs" in prepare_script
     assert 'head_sha="$RELEASE_SHA"' in prepare_script
-    assert "select(.conclusion == \"success\")" in prepare_script
+    assert "select(.conclusion == \"success\" and" in prepare_script
     assert build["needs"] == "prepare"
     assert publish["needs"] == ["prepare", "build"]
     assert publish["environment"]["name"] == "pypi"
@@ -427,6 +427,7 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "unit-tests",
         "core-python314-tests",
         "core-array-lifetime",
+        "local-worker-capability",
         "integration-tests",
         "compatibility-tests",
         "parsl-fast-tests",

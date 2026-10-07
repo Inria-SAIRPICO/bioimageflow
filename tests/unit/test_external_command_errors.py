@@ -39,6 +39,36 @@ def test_subprocess_resolves_cli_next_to_environment_python(
     assert calls == [[str(executable), "--version"]]
 
 
+def test_default_cli_fallback_keeps_symlinked_interpreter_directory(
+    monkeypatch, tmp_path
+):
+    base = tmp_path / "base" / "bin"
+    lexical = tmp_path / "venv" / "bin"
+    base.mkdir(parents=True)
+    lexical.mkdir(parents=True)
+    (base / "python").write_text("interpreter stub")
+    (lexical / "python").symlink_to(base / "python")
+    (base / "environment-tool").write_text("1")
+    (lexical / "environment-tool").write_text("9")
+    missing_path = tmp_path / "empty-path"
+    missing_path.mkdir()
+    monkeypatch.setenv("PATH", str(missing_path))
+    monkeypatch.setattr(external.sys, "executable", str(lexical / "python"))
+    observed = []
+
+    def run(command, **_kwargs):
+        observed.append(command)
+        return subprocess.CompletedProcess(
+            command, 0, stdout=Path(command[0]).read_text()
+        )
+
+    monkeypatch.setattr(external.subprocess, "run", run)
+    result = run_external_command(["environment-tool", "--version"])
+    assert (lexical / "python").resolve() == base / "python"
+    assert observed == [[str(lexical / "environment-tool"), "--version"]]
+    assert result.stdout == "9"
+
+
 def test_run_external_command_reports_signal_failures(monkeypatch) -> None:
     def fake_run(command, run_kwargs):
         raise subprocess.CalledProcessError(
