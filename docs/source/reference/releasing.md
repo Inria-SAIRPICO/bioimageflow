@@ -30,7 +30,7 @@ Choose the version bump from the selected package's public behavior:
 - Major: breaking changes after the package reaches `1.0.0`.
 
 First-party dependency ranges identify the single supported current release cohort.
-Core is `>=0.5.0,<0.6`, the orchestrator is `>=0.9.0,<1`, and its Wetlands completion dependency is `>=2.6.0,<3`.
+Core is `>=0.5.0,<0.6`, the orchestrator is `>=0.9.0,<1`, and its Wetlands dependency is `>=2.6.1,<3`.
 All nine first-party tool packages use that Core range; common, measurement, spot and tracking also use the current orchestrator range.
 These ranges must resolve and pass current scientific and tool-authoring controls before publication.
 There is no obligation to preserve old DTOs, wire schemas, aliases or dependency floors solely for backward compatibility.

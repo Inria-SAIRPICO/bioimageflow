@@ -158,9 +158,11 @@ captured recipe with replacement disabled, starts workers and returns the new po
 including when the recipe already matches; False preserves matching warm reuse.
 
 Forced recreation uses the callable public ``Operation.wait_for_completion()``
-API introduced in Wetlands 2.5; the current library cohort requires installed
-Wetlands >=2.6.0,<3. Unsupported runtimes are refused before
-preparation or destructive work. False preserves matching warm reuse.
+API introduced in Wetlands 2.5; its runtime capability guard requires that API and
+Wetlands >=2.5.0,<3 before preparation or destructive work.
+The current supported dependency cohort requires installed Wetlands >=2.6.1,<3;
+the API-introduction guard does not widen that declared dependency range.
+False preserves matching warm reuse.
 
 The recipe, Core dependency, target name and startup arguments are captured and
 validated before preparation callbacks or destructive work.
