@@ -30,6 +30,7 @@ def test_local_capability_mode_is_opt_in_and_excludes_unmarked_distributed_trees
         "tests/unit/launcher",
         "tests/integration/parsl",
         "tests/integration/launcher",
+        "tests/unit/test_distributed_contract.py",
     ]:
         assert f"--ignore={tree}" in selection
     jobs = ci["jobs"]

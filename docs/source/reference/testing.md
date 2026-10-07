@@ -56,7 +56,7 @@ uv run pytest -m "package_tools and not complete"
 ## Manual Local Library Capability
 
 A manual **CI** dispatch may set `local_library_only=true` (default false) for the bounded prepublication library milestone.
-This mode excludes the declared distributed, cluster and launcher test folders, including unmarked tests, and skips the two Parsl runtime jobs; ordinary push/pull-request CI retains its full configured gates.
+This mode excludes the declared distributed, cluster and launcher test folders plus the top-level distributed planner contract file, including unmarked tests, and skips the two Parsl runtime jobs; ordinary push/pull-request CI retains its full configured gates.
 Quality, normal package/Core artifacts and documentation remain required.
 The separate manually dispatched local WorkerPool job executes four explicit owner files with editable/source Core; it does not certify source-disabled installed library dispatch.
 The normal installed Core matrix separately checks public contracts and child/view/owner lifetime on Python 3.9 and 3.12 on Linux and Windows.

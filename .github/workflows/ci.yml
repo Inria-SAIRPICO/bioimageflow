@@ -23,7 +23,7 @@ permissions:
 env:
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_LINK_MODE: copy
-  LOCAL_LIBRARY_PYTEST_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.local_library_only && '--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher' || '' }}
+  LOCAL_LIBRARY_PYTEST_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.local_library_only && '--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher --ignore=tests/unit/test_distributed_contract.py' || '' }}
 
 jobs:
   quality:

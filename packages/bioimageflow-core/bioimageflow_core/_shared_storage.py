@@ -11,7 +11,17 @@ import stat
 import struct
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, BinaryIO, Iterator, Protocol
+
+if TYPE_CHECKING:
+    import numpy as np
+
+
+class _NPYHeaderReader(Protocol):
+    """Public NumPy reader signature omitted by its 2.2.6 typing stub."""
+
+    def __call__(self, fp: BinaryIO, *, max_header_size: int) -> tuple[tuple[int, ...], bool, "np.dtype[Any]"]: ...
+
 
 TOKEN = re.compile(r"[a-zA-Z0-9_-]{1,96}\Z")
 
@@ -310,7 +320,8 @@ def _layout(handle: Any, descriptor: dict[str, Any], ref: Any, reserved_size: An
         raise ValueError("Shared array header exceeds admitted header budget")
     handle.seek(0)
     np.lib.format.read_magic(handle)
-    shape, fortran, actual_dtype = np.lib.format.read_array_header_2_0(
+    read_header: _NPYHeaderReader = getattr(np.lib.format, "read_array_header_2_0")
+    shape, fortran, actual_dtype = read_header(
         handle, max_header_size=descriptor["max_header_bytes"]
     )
     dtype(actual_dtype)

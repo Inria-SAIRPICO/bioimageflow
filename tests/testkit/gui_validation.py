@@ -52,7 +52,7 @@ def _graph(
     edges: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "gui-test",
         "display_name": "GUI Test",
         "interface": {"inputs": [], "outputs": []},
