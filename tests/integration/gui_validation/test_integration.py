@@ -159,17 +159,64 @@ class TestIntegration:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        import importlib.util
+        import sys
+
         import bioimageflow.env_manager as em
 
+        from bioimageflow.engine.common import NodePlanStatus
+
+        owned = tmp_path / "absent-planning-roots"
+        runtime_root = owned / "wetlands"
+        effects = []
+
         def _boom(*args: Any, **kwargs: Any) -> None:
-            raise RuntimeError("plan() launched Wetlands")
+            effects.append("runtime effect")
+            raise RuntimeError("plan() performed a runtime effect")
 
-        monkeypatch.setattr(em.WetlandsEnvManager, "__init__", _boom)
+        monkeypatch.setattr(em, "_shared_manager", None)
+        monkeypatch.setattr(em, "_wetlands_config", {"root": runtime_root})
+        monkeypatch.setattr(em.EnvironmentManager, "prepare", _boom)
+        monkeypatch.setattr(em.EnvironmentManager, "provision", _boom)
+        monkeypatch.setattr(em.ManagedEnvironment, "start", _boom)
+        monkeypatch.setattr(em.ManagedEnvironment, "runtime_content_receipt", _boom)
+        monkeypatch.setattr(em.WorkerPool, "__init__", _boom)
 
-        wf = Workflow(storage_path=tmp_path, engine="wetlands")
+        # A normal selected source module keeps pytest assertion rewriting outside
+        # the managed tool's admitted primary package.
+        source = tmp_path / "planning_effect_tool.py"
+        source.write_text(
+            "from pathlib import Path\n"
+            "from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption\n"
+            "class PlanningTool(ProcessingTool):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
+            "    environment = EnvironmentSpec('planning-only', {'python': '>=3.9'})\n"
+            "    class Inputs(IOModel): input_image: Path\n"
+            "    class Outputs(IOModel): value: int\n"
+            "    def process_row(self, arguments):\n"
+            "        raise RuntimeError('planning executed science')\n"
+        )
+        spec = importlib.util.spec_from_file_location("planning_effect_tool", source)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, spec.name, module)
+        spec.loader.exec_module(module)
+
+        storage_root = tmp_path / "results"
+        wf = Workflow(storage_path=storage_root, engine="wetlands")
         with wf:
             load = FileLoader()(path=str(tmp_path))
-            StubSegmenter()(input_image=load["path"])
-        # plan() must succeed without hitting Wetlands
-        plan = wf.plan()
-        assert plan
+            module.PlanningTool()(input_image=load["path"])
+        # Bind the caller's controller owner before measuring planning effects.
+        owner = wf.shared_memory_context
+        storage_before = sorted(path.relative_to(storage_root) for path in storage_root.rglob("*"))
+        try:
+            plan = wf.plan()
+            assert plan["PlanningTool_1"].status is NodePlanStatus.PENDING_RUNTIME
+            assert effects == []
+            assert not owned.exists()
+            assert sorted(path.relative_to(storage_root) for path in storage_root.rglob("*")) == storage_before
+        finally:
+            if em._shared_manager is not None:
+                em._shared_manager.close()
+            owner.close()

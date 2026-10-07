@@ -277,7 +277,7 @@ class _LoadingMixin:
         Parameters
         ----------
         data
-            A schema-version-1 or schema-version-2 recursive graph,
+            A current schema-version-2 recursive graph,
             or a portable archive envelope produced by :meth:`export`.
         validate_only
             Drives the **return type**. When ``True``, returns a

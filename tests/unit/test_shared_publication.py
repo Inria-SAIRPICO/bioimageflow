@@ -257,13 +257,17 @@ def test_receipt_cleanup_preserves_primary_and_failed_pin_retry(tmp_path, monkey
         return cancellation(lease)
 
     monkeypatch.setattr(SharedArrayLease, "cancel_retention", fail_once)
+    receipt = RecordSharedAssets()
     try:
         with pytest.raises(RuntimeError) as observed:
-            with RecordSharedAssets() as receipt:
+            with receipt:
                 for name, reference in references.items():
                     receipt.capture(reference, {"path": f"assets/shm/{name}.npy"})
                 raise primary
-        assert observed.value is primary and "cleanup remains pending" in primary.__notes__[0]
+        assert observed.value is primary
+        assert getattr(primary, "_record_shared_assets_cleanup") is receipt
+        if callable(getattr(primary, "add_note", None)):
+            assert "cleanup remains pending" in getattr(primary, "__notes__")[0]
         assert len(attempts) == 2 and owner.status().pending_leases == 3
         getattr(primary, "_record_shared_assets_cleanup").close()
         assert len(attempts) == 3 and owner.status().pending_leases == 2
@@ -273,5 +277,6 @@ def test_receipt_cleanup_preserves_primary_and_failed_pin_retry(tmp_path, monkey
                 assert view.tolist() == [4 if name == "a" else 9]
             del view
     finally:
+        receipt.close()
         source_group.release()
         assert owner.close().state == "closed"
