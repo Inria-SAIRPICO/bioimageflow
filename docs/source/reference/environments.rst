@@ -34,6 +34,14 @@ Managed Processing also admits the actual ready runtime content before scientifi
 The provider receipt records normalized interpreter, resolved-artifact and installed-distribution content facts; its semantic digest excludes the environment prefix and generation UUID.
 One receipt is shared per augmented recipe in each compute, planning or stepped operation.
 Computation can provision a missing runtime, or strictly drain and recreate an owned runtime whose receipt is unavailable or whose editable sources changed, before looking up its cache record.
+Application adapters can use ``WetlandsEnvManager.admit_runtime(spec, provision=..., admissions=...)`` directly without starting workers.
+Its optional ``replace_stale=True`` requires ``provision=True`` and authorizes replacement of only the selected managed stale recipe before its first admission; it does not force a matching rebuild.
+``on_preparation`` observes creating, updating or ready-content reuse, while ``on_removal_event`` and ``on_provision_event`` receive separate public operation events.
+The target and augmented recipe are captured before callbacks or effects, and failed selected pool close retains its owner and grants for retry before any removal or provisioning.
+Preparation callbacks remain observational; reentrant lifecycle mutation is unsupported.
+Removal and provisioning reuse explicit recreation's interruption/completion ownership; preparation failure leaves no new memoized receipt, and committed removal has no rollback.
+An operation-owned ``admissions`` dictionary shares one content capture and revalidates its held receipt without repeated preparation or replacement.
+``provision=False`` stays read-only, and ``get_or_create(..., runtime_receipt=..., replace_existing=True)`` refuses before effects.
 A ready cache hit starts no scientific worker pool, including after an identical-content rebuild with a different generation UUID.
 Planning reads only and reports ``PENDING_RUNTIME`` with no final result key when the requested runtime has no valid ready receipt; ``Workflow.plan(engine=...)`` can inspect a caller-supplied engine without changing its lifetime.
 Dispatch separately verifies the admitted recipe, generation and lock binding before starting or reusing a pool; failed physical close retains the original pool and its grants for retry.

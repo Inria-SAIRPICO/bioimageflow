@@ -307,13 +307,43 @@ class WetlandsEnvManager:
     def admit_runtime(
         self, env_spec: BioImageFlowEnvironmentSpec, *, provision: bool,
         admissions: dict[tuple[str, str], RuntimeContentReceipt | None] | None = None,
+        replace_stale: bool = False,
+        on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
+        on_provision_event: Callable[[OperationEvent], None] | None = None,
+        on_removal_event: Callable[[OperationEvent], None] | None = None,
     ) -> RuntimeContentReceipt | None:
-        """Admit actual ready content once per owned operation, without workers."""
+        """Admit ready content with observed, worker-free preparation.
+
+        ``replace_stale`` authorizes replacement of this selected managed stale
+        recipe before its first admission. It never forces a matching rebuild or
+        replaces a memoized receipt. Planning (``provision=False``) is read-only.
+        Observers and interruption ownership match explicit recreation; callers
+        must independently fence the returned receipt at subsequent use.
+        """
+        if not isinstance(provision, bool) or not isinstance(replace_stale, bool):
+            raise TypeError("provision and replace_stale must be bools")
+        if replace_stale and not provision:
+            raise ValueError("replace_stale requires provision=True")
+        if admissions is not None and not isinstance(admissions, dict):
+            raise TypeError("admissions must be an operation-owned dict or None")
+        for observer in (on_preparation, on_provision_event, on_removal_event):
+            if observer is not None and not callable(observer):
+                raise TypeError("Runtime preparation observers must be callable or None")
+        name = env_spec.name
+        recipe = self._to_wetlands_spec(env_spec)
+
+        def preparation(action: Literal["creating", "updating", "reusing"], existing: str | None) -> None:
+            if on_preparation is not None:
+                on_preparation(EnvironmentPreparation(name, action, recipe.recipe_hash, existing))
+
         with self._lock:
             return RuntimeAdmission(self._manager).admit(
-                env_spec.name, self._to_wetlands_spec(env_spec), provision=provision,
-                admissions=admissions, owned_environment=self._environments.get(env_spec.name),
+                name, recipe, provision=provision,
+                admissions=admissions, owned_environment=self._environments.get(name),
                 retire_pool=self._retire_runtime_pool,
+                replace_stale=replace_stale, on_preparation=preparation,
+                wait_for_operation=self._wait_for_recreation_operation,
+                on_provision_event=on_provision_event, on_removal_event=on_removal_event,
             )
 
     def _retire_runtime_pool(self, name: str) -> ManagedEnvironment | None:
@@ -520,6 +550,8 @@ class WetlandsEnvManager:
         warm-pool reuse. Force failures propagate and never authorize mutation of
         an unmanaged target.
         """
+        if runtime_receipt is not None and replace_existing:
+            raise ValueError("An admitted runtime cannot be replaced during pool handoff")
         if replace_existing:
             return self.recreate(
                 env_spec, max_workers, worker_timeout,

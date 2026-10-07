@@ -2659,6 +2659,13 @@ Before managed Processing cache lookup, the engine admits the selected ready run
 The public `RuntimeContentReceipt` owns normalized interpreter, installed-content and resolved-artifact facts; its generation, recipe and lockfile identities fence the selected ready owner without substituting for scientific content.
 Ready inspection and planning do not provision, start scientific workers or spawn a content probe; actual execution may prepare a missing or stale owned runtime before deriving the key, while scientific worker startup remains unnecessary for a reusable hit.
 Later managed cache decisions and dispatch validate the admitted receipt's current-generation fence without rescanning installed content, rather than silently switching to another runtime after cache admission.
+The public `WetlandsEnvManager.admit_runtime(spec, provision=..., admissions=..., replace_stale=False, on_preparation=..., on_provision_event=..., on_removal_event=...)` provides that worker-free preparation boundary to application adapters.
+`replace_stale=True` requires `provision=True` and authorizes only the selected managed stale recipe before its first admission, never a forced matching rebuild or replacement of a held receipt; the caller owns the authorization policy.
+The target and augmented recipe are captured before observers or lifecycle effects; preparation reports creating, updating or ready-content reuse, while provisioning and removal have separate public operation observers.
+Successful physical pool close drains only its selected grants before removal; failed close retains the pool and grants for retry and prevents removal, provisioning and startup.
+Preparation failures precede destructive effects, and removal/provisioning interruption uses the same listener detachment, cancellation and independent public-completion ownership as explicit recreation while preserving the primary interruption.
+Memoized receipts are fenced again without repeating content capture or preparation, and failed preparation stores no new receipt; a committed removal has no rollback.
+`provision=False` performs no writes or worker startup, and pool handoff rejects simultaneous receipt use and requested replacement.
 This bounded receipt describes owner-managed ready content, independently of the selected primary-content proof; it does not describe arbitrary external filesystem tampering or universal native relocation.
 Editable source roots require fresh operation-owned live-source admission; a changed admitted footprint is refused until explicit owned retirement and reprovisioning, without hot reloading or claiming arbitrary Python state sealing.
 
