@@ -2,7 +2,7 @@
 
 import warnings
 from pathlib import Path
-from typing import Annotated, get_args
+from typing import Annotated, Optional, get_args
 
 import pytest
 
@@ -87,12 +87,28 @@ class TestImageTypes:
 
     def test_image_spec_normalizes_constraints_to_frozensets(self):
         semantics = {Semantic.INTENSITY}
-        spec = ImageSpec(semantics=semantics)
-
+        layouts = {Layout.PLANAR}
+        formats = {"tiff"}
+        dtypes = {"uint16"}
+        spec = ImageSpec(semantics=semantics, layouts=layouts, formats=formats, dtypes=dtypes)
+        equal = ImageSpec(semantics={Semantic.INTENSITY}, layouts={Layout.PLANAR},
+                          formats={"tiff"}, dtypes={"uint16"})
+        captured_hash = hash(spec)
         semantics.add(Semantic.LABEL)
-
+        layouts.add(Layout.VOLUMETRIC)
+        formats.add("png")
+        dtypes.add("float32")
         assert isinstance(spec.semantics, frozenset)
         assert spec.semantics == {Semantic.INTENSITY}
+        assert spec.layouts == frozenset({Layout.PLANAR})
+        assert spec.formats == frozenset({"tiff"})
+        assert spec.dtypes == frozenset({"uint16"})
+        assert spec == equal and hash(spec) == hash(equal) == captured_hash
+        assert {spec: "captured"}[equal] == "captured"
+        outer = Optional[Annotated[Path, spec, GUIMeta()]]
+        inner = Annotated[Optional[Path], spec, GUIMeta()]
+        assert get_args(get_args(outer)[0])[1] is spec
+        assert get_args(inner)[1] is spec
 
 
 class TestCheckCompatibility:

@@ -249,7 +249,8 @@ def core_contract_checks() -> list:
 
     class ParentInputs(core.IOModel):
         CountType = Annotated[int, core.GUIMeta("Count", min=0)]
-        MaybePath = Optional[Path]
+        ImagePath = Annotated[Path, core.ImageSpec(layouts={core.Layout.PLANAR}), core.GUIMeta("Pixels")]
+        MaybePath = Optional[ImagePath]
         count: CountType = 2
         missing: int
         path: MaybePath = None
@@ -263,6 +264,20 @@ def core_contract_checks() -> list:
     assert declaration["fields"]["count"]["constraints"] == {"min": 0}
     assert declaration["fields"]["missing"]["required"]
     assert declaration["fields"]["path"]["nullable"]
+    assert declaration["fields"]["path"]["image_spec"]["layouts"] == ["YX"]
+    gui_meta = core.extract_gui_meta(ParentInputs.MaybePath)
+    assert gui_meta is not None and gui_meta.display_name == "Pixels"
+    constraints = {"semantics": {core.Semantic.INTENSITY}, "layouts": {core.Layout.PLANAR},
+                   "formats": {"tiff"}, "dtypes": {"uint16"}}
+    image_spec = core.ImageSpec(**constraints)
+    equal_spec = core.ImageSpec(**{key: frozenset(value) for key, value in constraints.items()})
+    captured_hash = hash(image_spec)
+    for values in constraints.values():
+        values.clear()
+    assert image_spec == equal_spec and hash(image_spec) == hash(equal_spec) == captured_hash
+    class AlternateInputs(core.IOModel):
+        path: Annotated[Optional[Path], core.ImageSpec(layouts={core.Layout.PLANAR}), core.GUIMeta("Pixels")] = None
+    assert core.describe_io_model(AlternateInputs)["fields"]["path"] == declaration["fields"]["path"]
     defaults = Inputs.capture_defaults()
     assert defaults == {"count": 2, "path": None, "values": [1, 2]}
     defaults["values"].append(9)

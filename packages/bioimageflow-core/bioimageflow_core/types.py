@@ -5,7 +5,6 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     Optional,
@@ -64,9 +63,6 @@ class Layout(str, Enum):
 @dataclass(frozen=True)
 class ImageSpec:
     """Defines type constraints. Empty sets mean 'any' (wildcard)."""
-
-    if not TYPE_CHECKING:
-        __hash__ = None
 
     semantics: AbstractSet[Semantic] = field(default_factory=frozenset)
     layouts: AbstractSet[Layout] = field(default_factory=frozenset)

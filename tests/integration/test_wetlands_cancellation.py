@@ -14,7 +14,7 @@ from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.env_manager import _reset_shared_manager
 from tests.testkit.integration_tools import FileLoader
 
-from .wetlands_test_tools import CancellableBatchTool, CancellableRowTool
+from tests.testkit.wetlands_tools import CancellableBatchTool, CancellableRowTool
 
 pytestmark = [pytest.mark.complete, pytest.mark.wetlands]
 

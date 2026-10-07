@@ -20,7 +20,7 @@ from bioimageflow import Workflow, configure_logging
 from bioimageflow.env_manager import _reset_shared_manager
 
 from tests.testkit.integration_tools import FileLoader
-from .wetlands_test_tools import SimpleRowTool, WorkerStreamTool
+from tests.testkit.wetlands_tools import SimpleRowTool, WorkerStreamTool
 
 pytestmark = pytest.mark.wetlands
 

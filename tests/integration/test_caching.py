@@ -293,10 +293,10 @@ class TestDependencyNormalization:
     def test_ordered_dependencies_preserve_their_declared_order(self):
         """Recipe sequences retain declared solver precedence."""
         env1 = EnvironmentSpec(
-            name="test", dependencies={"conda": ["numpy=2.4.2", "cellpose==3.0"]}
+            name="test", dependencies={"conda": ["numpy==2.4.2", "cellpose==3.0"]}
         )
         env2 = EnvironmentSpec(
-            name="test", dependencies={"conda": ["cellpose==3.0", "numpy=2.4.2"]}
+            name="test", dependencies={"conda": ["cellpose==3.0", "numpy==2.4.2"]}
         )
         from bioimageflow.cache import compute_env_hash
 

@@ -24,7 +24,7 @@ from bioimageflow import (
 from bioimageflow.engine import DefaultEngine, SequentialEngine
 
 from tests.testkit.integration_tools import FileLoader
-from .wetlands_test_tools import (
+from tests.testkit.wetlands_tools import (
     BatchTool,
     ErrorRowTool,
     GpuTool,
