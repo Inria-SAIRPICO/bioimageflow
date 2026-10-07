@@ -648,12 +648,17 @@ def test_cimg_denoising_command_builds_optional_flags(
     tmp_path: Path,
     algorithm: str | None,
 ) -> None:
+    import subprocess
+
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], run_kwargs: dict[str, object]) -> None:
+    def fake_run(
+        command: list[str], run_kwargs: dict[str, object]
+    ) -> subprocess.CompletedProcess[bytes]:
         assert run_kwargs["check"] is True
         calls.append(command)
         Path(command[command.index("-o") + 1]).write_text("cimg")
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("bioimageflow_core.external._run_subprocess", fake_run)
 
