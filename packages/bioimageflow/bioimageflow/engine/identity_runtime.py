@@ -225,15 +225,13 @@ class _IdentityRuntimeMixin:
     ) -> dict[str, Any]:
         """Return normalized static processing-node signature material."""
         signature_constants = dict(node._constant_bindings)
+        # Execution captures omitted defaults into constants. Read-only planning
+        # must give the same effective values the same identity, while a column
+        # binding remains authoritative over a declared default.
+        for field in input_annotations:
+            if field not in node._column_bindings and field not in signature_constants and hasattr(node.tool.Inputs, field):
+                signature_constants[field] = getattr(node.tool.Inputs, field)
         self._normalize_path_arguments(signature_constants, input_annotations)
-        signature_defaults = {
-            field: getattr(node.tool.Inputs, field)
-            for field in input_annotations
-            if field not in node._column_bindings
-            and field not in node._constant_bindings
-            and hasattr(node.tool.Inputs, field)
-        }
-        self._normalize_path_arguments(signature_defaults, input_annotations)
         assert node.tool.Outputs is not None
         return {
             "bindings": {
@@ -244,7 +242,7 @@ class _IdentityRuntimeMixin:
                 for field, reference in node._column_bindings.items()
             },
             "constants": signature_constants,
-            "defaults": signature_defaults,
+            "defaults": {},
             "output_templates": get_output_templates(
                 node.tool.Outputs,
                 node.tool.Inputs,

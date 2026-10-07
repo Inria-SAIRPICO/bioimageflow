@@ -26,7 +26,7 @@ def _bad_data(*, valid_count: int = 0) -> dict:
             "constants": {"path": {"__type__": "str", "value": "/tmp/x"}},
         })
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "inspection",
         "display_name": "Inspection",
         "interface": {"inputs": [], "outputs": []},
@@ -62,7 +62,7 @@ class TestFailedNodes:
             }],
             "edges": [],
             "config": {},
-            "schema_version": 1,
+            "schema_version": 2,
             "name": "inspection",
             "display_name": "Inspection",
             "interface": {"inputs": [], "outputs": []},

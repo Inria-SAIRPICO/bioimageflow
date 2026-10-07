@@ -73,8 +73,69 @@ class DictionaryKeyKind(DataFrameTool):
         return pd.DataFrame({"observed_kind": [type(key).__name__], "value": [4]}, index=dataframe.index)
 
 
+class BoundDefaultValues(ProcessingTool):
+    environment = GENERAL_ENV
+    row_consumption = RowConsumption.MAPPED
+    executions = 0
+
+    class Inputs(IOModel):
+        value: int = 999
+        payload: list[int] | tuple[int, ...] = [4]
+
+    class Outputs(IOModel):
+        value: int
+
+    def process_row(self, arguments):
+        type(self).executions += 1
+        return self.Outputs(value=arguments.value + arguments.payload[0])
+
+
 def _outcome(context):
     return next(item for item in context.execution_outcomes if item.node_key == "subject")
+
+
+def test_bound_defaults_compute_plan_and_equal_explicit_values_share_selection(tmp_path):
+    from bioimageflow import NodePlanStatus
+
+    BoundDefaultValues.executions = 0
+    owners = []
+    outcomes = []
+    try:
+        for parameters, expected in [({}, 8), ({"payload": [4]}, 8),
+                                     ({"payload": [9]}, 13), ({"payload": (4,)}, 8)]:
+            with Workflow(engine="direct", storage_path=tmp_path / "results") as workflow:
+                seed = SeedValue()(name="seed")
+                subject = BoundDefaultValues()(value=seed["value"], name="subject", **parameters)
+            owners.append(workflow.shared_memory_context)
+            context = WorkflowExecutionContext()
+            assert workflow.compute(subject, run_context=context)["value"].tolist() == [expected]
+            outcome = _outcome(context)
+            plan = workflow.plan()["subject"]
+            assert plan.status is NodePlanStatus.CACHED
+            assert (plan.final_result_key, plan.selected_record_id) == (outcome.result_key, outcome.record_id)
+            outcomes.append(outcome)
+        assert BoundDefaultValues.executions == 3
+        assert (outcomes[0].result_key, outcomes[0].record_id) == (outcomes[1].result_key, outcomes[1].record_id)
+        assert len({item.result_key for item in (outcomes[0], outcomes[2], outcomes[3])}) == 3
+
+        BoundDefaultValues.Inputs.payload = [9]
+        with Workflow(engine="direct", storage_path=tmp_path / "results") as changed:
+            seed = SeedValue()(name="seed")
+            subject = BoundDefaultValues()(value=seed["value"], name="subject")
+        owners.append(changed.shared_memory_context)
+        context = WorkflowExecutionContext()
+        assert changed.compute(subject, run_context=context)["value"].tolist() == [13]
+        outcome = _outcome(context)
+        assert outcome.result_key != outcomes[0].result_key
+        assert (outcome.result_key, outcome.record_id) == (outcomes[2].result_key, outcomes[2].record_id)
+        plan = changed.plan()["subject"]
+        assert plan.status is NodePlanStatus.CACHED
+        assert (plan.final_result_key, plan.selected_record_id) == (outcome.result_key, outcome.record_id)
+        assert BoundDefaultValues.executions == 3
+    finally:
+        BoundDefaultValues.Inputs.payload = [4]
+        for owner in owners:
+            owner.close()
 
 
 @pytest.mark.parametrize("family", ["source-processing", "bound-processing", "dataframe"])

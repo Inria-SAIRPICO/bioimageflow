@@ -35,6 +35,7 @@ from bioimageflow_core import (
 
 
 from tests.testkit.worker_timeout import (
+    admitted_dispatch_tool as admitted_dispatch_tool,
     _FailingEnvManager,
     _StubTool,
     _execution_contexts,
@@ -52,11 +53,11 @@ class TestWorkerTaskErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
         return engine, stub
 
-    def test_row_path_wraps_failed_task_with_node_context(self, tmp_path):
+    def test_row_path_wraps_failed_task_with_node_context(self, tmp_path, admitted_dispatch_tool):
         original = RuntimeError("native command crashed")
         engine, _stub = self._make_engine_with_failure(original)
-        tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
+        tool = admitted_dispatch_tool(engine, wf, "denoise_node")
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)
@@ -85,18 +86,12 @@ class TestWorkerTaskErrorRaised:
         assert exc_info.value.tool_class == "_StubTool"
         assert exc_info.value.environment_name == "stub_wt_env"
 
-    def test_batch_path_wraps_failed_task_with_batch_context(self, tmp_path):
+    def test_batch_path_wraps_failed_task_with_batch_context(self, tmp_path, admitted_dispatch_tool):
         original = ValueError("batch worker failed")
         engine, _stub = self._make_engine_with_failure(original)
 
-        class _BatchTool(_StubTool):
-            row_consumption = RowConsumption.MAPPED
-
-            def process_batch(self, arguments_list, *, context: object | None = None):
-                return []
-
-        tool = _BatchTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
+        tool = admitted_dispatch_tool(engine, wf, "batch_node", batch=True)
 
         with pytest.raises(WorkerTaskError) as exc_info:
             row_contexts, batch_context = _execution_contexts(1)

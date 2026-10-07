@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 
 from bioimageflow import Workflow
+from tests.testkit.tool_loader import record_distribution
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ def tool_store(tmp_path):
             f"{loader_extra}\n"
             "        return df\n"
         )
+        record_distribution(pkg_dir.parent, "dummy_tools", version)
 
     return store
 

@@ -6,6 +6,9 @@ from __future__ import annotations
 # ruff: noqa: F401
 
 import pickle
+import importlib.util
+import sys
+import uuid
 
 from dataclasses import replace
 
@@ -63,6 +66,52 @@ def _execution_contexts(count: int) -> tuple[list[ExecutionContext], ExecutionCo
         batch_dir=work_dir / "batch",
     )
     return row_contexts, batch_context
+
+
+@pytest.fixture
+def admitted_dispatch_tool(tmp_path):
+    """Bind fake dispatch to ordinary tool source and a real compiled node."""
+    bindings = []
+
+    def bind(engine, workflow, node_name, *, batch=False):
+        name = "timeout_tool_" + uuid.uuid4().hex
+        source = tmp_path / (name + ".py")
+        source.write_text(
+            "from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption\n"
+            "class _StubTool(ProcessingTool):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
+            "    environment = EnvironmentSpec('stub_wt_env', {})\n"
+            "    class Inputs(IOModel): a: int\n"
+            "    class Outputs(IOModel): value: float = 0.0\n"
+            "    def process_row(self, arguments, *, context=None): return self.Outputs()\n"
+            "class _BatchTool(_StubTool):\n"
+            "    row_consumption = RowConsumption.MAPPED\n"
+            "    def process_batch(self, arguments_list, *, context=None): return []\n"
+        )
+        spec = importlib.util.spec_from_file_location(name, source)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        owner = workflow.shared_memory_context
+        bindings.append((engine, owner, name, module))
+        spec.loader.exec_module(module)
+        with workflow:
+            node = (module._BatchTool if batch else module._StubTool)()(a=1, name=node_name)
+        reachable, dependencies, _ = engine._compile_execution_graph([node])
+        engine._compiled_ordinals = {
+            current: ordinal for ordinal, current in enumerate(engine._topological_sort(reachable, dependencies))
+        }
+        engine._capture_executable(node)
+        return node.tool
+
+    yield bind
+    for engine, owner, name, module in reversed(bindings):
+        for grant in engine._env_manager.shared_memory_grants:
+            grant.drained()
+        assert owner.close().state == "closed"
+        engine.close()
+        if sys.modules.get(name) is module:
+            sys.modules.pop(name)
 
 
 class _StubTool(ProcessingTool):
@@ -140,6 +189,7 @@ class _StubEnvManager:
         worker_timeout=None,
         *,
         shared_memory_grant=None,
+        runtime_receipt=None,
     ):
         self.last_worker_timeout = worker_timeout
         if shared_memory_grant is not None:
@@ -170,8 +220,10 @@ class _FailingEnvManager:
     def __init__(self, exception: BaseException) -> None:
         self.exception = exception
         self.tasks: list[_FailedTask] = []
+        self.shared_memory_grants: list[Any] = []
 
     def submit_processing_task(self, *args, **kwargs):
+        self.shared_memory_grants.append(kwargs["shared_memory_grant"])
         task = _FailedTask(self.exception)
         self.tasks.append(task)
         return task

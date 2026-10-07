@@ -12,10 +12,11 @@ Covers:
 
 import pandas as pd
 import pytest
+from pathlib import Path
 
 from bioimageflow import DataFrameTool, Workflow
 from bioimageflow_common_tools import Collect
-from bioimageflow_core import Arguments, IOModel
+from bioimageflow_core import Arguments, EnvironmentSpec, IOModel, ProcessingTool, RowConsumption
 
 from tests.testkit.integration_tools import FileLoader, StubSegmenter, StubTiler
 
@@ -98,19 +99,50 @@ class TestExplosionAlignment:
         load = FileLoader()
         tile = StubTiler()
 
+        class PairedTiles(ProcessingTool):
+            row_consumption = RowConsumption.MAPPED
+            environment = EnvironmentSpec("paired-tiles", {})
+
+            class Inputs(IOModel):
+                original: Path
+                tile: Path
+
+            class Outputs(IOModel):
+                path: str
+                tile: str
+                part: int
+
+            def process_row(self, arguments):
+                return self.Outputs(
+                    path=str(arguments.original), tile=str(arguments.tile),
+                    part=int(Path(arguments.tile).read_text().removeprefix("TILE_")),
+                )
+
         with Workflow(engine="direct", storage_path=tmp_workspace / "results") as wf:
             raw = load(path=str(tmp_workspace / "data"))
             tiles = tile(input_image=raw["path"], tile_count=2)
-            # The key test: Collect(raw, tiles) aligns raw's coarser index
-            # to tiles' finer exploded index via parent-index expansion
-            collect = Collect()
-            all_data = collect(raw, tiles)
+            all_data = PairedTiles()(original=raw["path"], tile=tiles["tile"])
             df = wf.compute(all_data)
 
             # 3 images × 2 tiles = 6 rows, with raw columns expanded
             assert len(df) == 6
             assert "path" in df.columns
             assert "tile" in df.columns
+            raw_frame = wf.compute(raw)
+            tile_frame = wf.compute(tiles)
+            assert df.index.tolist() == tile_frame.index.tolist()
+            assert list(df["part"]) == [0, 1] * 3
+            for index in tile_frame.index:
+                parent = str(index).rsplit("::", 1)[0]
+                assert df.at[index, "path"] == str(raw_frame.at[parent, "path"])
+                assert df.at[index, "tile"] == str(tile_frame.at[index, "tile"])
+
+            # DataFrame operands retain their actual disjoint coarse/fine indices.
+            literal = wf.compute(Collect()(raw, tiles))
+            expected_join = raw_frame.join(tile_frame, how="inner")
+            assert literal.index.tolist() == expected_join.index.tolist()
+            assert literal.columns.tolist() == expected_join.columns.tolist()
+            assert literal.empty
 
 
 class TestNestedExplosion:

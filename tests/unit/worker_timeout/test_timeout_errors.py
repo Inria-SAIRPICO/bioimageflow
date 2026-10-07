@@ -35,6 +35,7 @@ from bioimageflow_core import (
 
 
 from tests.testkit.worker_timeout import (
+    admitted_dispatch_tool as admitted_dispatch_tool,
     _StubEnvManager,
     _StubTool,
     _execution_contexts,
@@ -49,10 +50,10 @@ class TestWorkerTimeoutErrorRaised:
         engine._env_manager = stub  # type: ignore[assignment]
         return engine, stub
 
-    def test_row_path_raises_worker_timeout_error(self, tmp_path):
+    def test_row_path_raises_worker_timeout_error(self, tmp_path, admitted_dispatch_tool):
         engine, stub = self._make_engine_with_stub()
-        tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
+        tool = admitted_dispatch_tool(engine, wf, "my_node")
         wf.get_environment(tool).worker_timeout = 10.0
         # Engine will call _resolve_worker_config → (1, None, 10.0)
         # Then map_processing_tasks → hanging tasks → WorkerTimeoutError
@@ -76,17 +77,11 @@ class TestWorkerTimeoutErrorRaised:
         # worker_timeout should have been passed through
         assert stub.last_worker_timeout == 10.0
 
-    def test_batch_path_raises_worker_timeout_error(self, tmp_path):
+    def test_batch_path_raises_worker_timeout_error(self, tmp_path, admitted_dispatch_tool):
         engine, stub = self._make_engine_with_stub()
 
-        class _BatchTool(_StubTool):
-            row_consumption = RowConsumption.MAPPED
-
-            def process_batch(self, arguments_list, *, context: object | None = None):
-                return []
-
-        tool = _BatchTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
+        tool = admitted_dispatch_tool(engine, wf, "my_batch_node", batch=True)
         wf.get_environment(tool).worker_timeout = 5.0
 
         with pytest.raises(WorkerTimeoutError, match="Batch"):
@@ -106,7 +101,7 @@ class TestWorkerTimeoutErrorRaised:
         assert stub.hanging_tasks[0].cancel_called
         assert stub.last_worker_timeout == 5.0
 
-    def test_no_timeout_when_worker_timeout_none(self, tmp_path):
+    def test_no_timeout_when_worker_timeout_none(self, tmp_path, admitted_dispatch_tool):
         """When worker_timeout is None, engine passes timeout=None.
 
         _HangingTask.wait_for still raises TimeoutError for any timeout,
@@ -135,6 +130,7 @@ class TestWorkerTimeoutErrorRaised:
             def __init__(self):
                 self.last_worker_timeout = "sentinel"
                 self.tasks: list[_PassThroughTask] = []
+                self.shared_memory_grants = []
 
             def submit_processing_task(
                 self, env_spec, payload, *, worker_timeout=None, **kwargs
@@ -142,6 +138,7 @@ class TestWorkerTimeoutErrorRaised:
                 from bioimageflow_core.worker import execute_processing_task
 
                 self.last_worker_timeout = worker_timeout
+                self.shared_memory_grants.append(kwargs["shared_memory_grant"])
                 t = _PassThroughTask()
                 t.result = execute_processing_task(payload)
                 self.tasks.append(t)
@@ -166,8 +163,8 @@ class TestWorkerTimeoutErrorRaised:
         stub = _Env()
         engine._env_manager = stub  # type: ignore[assignment]
 
-        tool = _StubTool()
         wf = Workflow(storage_path=tmp_path, engine="direct")
+        tool = admitted_dispatch_tool(engine, wf, "n")
         # No worker_timeout configured → None flows through
 
         row_contexts, batch_context = _execution_contexts(1)
