@@ -18,6 +18,7 @@ array.
 Each worker-side `StarDistSegmenter` instance lazily caches one model by `model_name`.
 Repeated rows and retained-engine executions with the same model reuse its weights even when channel, prediction-threshold, or normalization settings change.
 Changing `model_name` replaces the cached model, and `clear_model_cache()` releases the current-process reference explicitly.
+Invalid probability and NMS thresholds are refused before model acquisition, including on the first call.
 Applications can invalidate the remote worker cache by stopping the `segmentation-stardist` environment.
 
 ## Dependencies and Core Libraries

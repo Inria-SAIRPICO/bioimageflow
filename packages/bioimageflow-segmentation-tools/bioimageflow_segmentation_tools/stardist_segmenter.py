@@ -216,15 +216,6 @@ class StarDistSegmenter(ProcessingTool):
                 "normalize_low and normalize_high must satisfy "
                 "0 <= normalize_low < normalize_high <= 100."
             )
-        normalized = normalize(
-            image,
-            normalize_low,
-            normalize_high,
-            axis=(0, 1),
-        )
-
-        print(f"Performing StarDist segmentation (model={model_name})...")
-        model = self._get_model(model_name)
         predict_kwargs: dict[str, float] = {}
         if arguments.prob_thresh is not None:
             prob_thresh = finite_float(arguments.prob_thresh, name="prob_thresh")
@@ -236,6 +227,15 @@ class StarDistSegmenter(ProcessingTool):
             if not 0.0 <= nms_thresh <= 1.0:
                 raise ValueError("nms_thresh must be between 0 and 1.")
             predict_kwargs["nms_thresh"] = nms_thresh
+        normalized = normalize(
+            image,
+            normalize_low,
+            normalize_high,
+            axis=(0, 1),
+        )
+
+        print(f"Performing StarDist segmentation (model={model_name})...")
+        model = self._get_model(model_name)
         labels, _ = model.predict_instances(normalized, **predict_kwargs)
         labels = validate_labels(
             labels,

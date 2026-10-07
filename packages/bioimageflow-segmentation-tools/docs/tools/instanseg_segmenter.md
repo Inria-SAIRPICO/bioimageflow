@@ -4,8 +4,11 @@
 
 Use `model_name` for an official model or `model_path` for a local model bundle; a local path takes precedence.
 Named models use InstanSeg's download cache on first execution, while the provenance JSON records the resolved selection and input digest.
+The instance cache retains the acquired model together with its source/device/content stamp; changed local model bytes replace it, while unchanged content reuses it.
+Named-model provenance retains the resolved stamp belonging to the cached model; an unavailable digest is reported as unknown.
 
 The tool accepts YX, CYX, or explicitly declared YXC arrays, optional channel IDs and pixel size, `small`, `medium`, or automatic processing, and CPU/CUDA/MPS device selection.
 It returns one uint32 YX mask for `target="nuclei"` or `target="cells"` and rejects cell requests for nucleus-only models.
+Wrapper dimensions are removed without squeezing singleton spatial axes such as 1×N or N×1.
 
 Whole-slide inference is intentionally outside the first contract.

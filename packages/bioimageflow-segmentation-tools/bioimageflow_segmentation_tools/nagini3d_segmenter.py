@@ -231,12 +231,9 @@ class Nagini3DSegment(ProcessingTool):
                 f"got {probability.shape} and {image.shape}."
             )
         count = object_count(mask)
-        centers = np.asarray(surface_data["centers"])
-        parameters = np.asarray(surface_data["params"])
-        if len(centers) != count or len(parameters) != count:
-            raise ValueError(
-                "NAGINI-3D surface count must match the number of mask objects."
-            )
+        surface_data = _validate_surfaces(surface_data, mask, m1, m2)
+        centers = surface_data["centers"]
+        parameters = surface_data["params"]
         if count:
             sampler = SnakeSmoothSampler(P=301, M1=m1, M2=m2, device=device_name)
             curvature_positions, curvature_values = sampler.get_curvature_and_position(
@@ -247,6 +244,9 @@ class Nagini3DSegment(ProcessingTool):
         else:
             curvature_positions = np.empty((0, 3), dtype=np.float32)
             curvature_values = np.empty((0,), dtype=np.float32)
+        curvature_positions, curvature_values = _validate_curvature(
+            curvature_positions, curvature_values, count
+        )
 
         mask_path = Path(arguments.mask)
         probability_path = Path(arguments.probability)
@@ -300,6 +300,72 @@ class Nagini3DSegment(ProcessingTool):
             object_count=count,
             model_provenance=provenance_path,
         )
+
+
+def _numeric_array(value: Any, name: str, *, finite: bool = True) -> Any:
+    import numpy as np
+
+    array = np.asarray(value)
+    if not (
+        np.issubdtype(array.dtype, np.integer)
+        or np.issubdtype(array.dtype, np.floating)
+    ):
+        raise ValueError(f"NAGINI-3D {name} must contain real numeric values.")
+    if finite and not np.isfinite(array).all():
+        raise ValueError(f"NAGINI-3D {name} must contain finite values.")
+    return array
+
+
+def _validate_surfaces(data: Any, mask: Any, m1: int, m2: int) -> dict[str, Any]:
+    import numpy as np
+
+    names = ("points", "facets", "values", "centers", "params")
+    if not isinstance(data, dict) or any(name not in data for name in names):
+        raise ValueError("NAGINI-3D surfaces must contain points, facets, values, centers and params.")
+    arrays = {name: _numeric_array(data[name], name) for name in names}
+    count = object_count(mask)
+    labels = np.unique(mask)
+    if not np.array_equal(labels[labels > 0], np.arange(1, count + 1)):
+        raise ValueError("NAGINI-3D surface rows require mask object labels 1 through N.")
+    centers, parameters = arrays["centers"], arrays["params"]
+    if centers.shape != (count, 3):
+        raise ValueError("NAGINI-3D centers must have shape (objects, 3).")
+    if parameters.shape != (count, m1 * (m2 - 1) + 6, 3):
+        raise ValueError("NAGINI-3D params must have shape (objects, M1*(M2-1)+6, 3).")
+    points, facets, values = arrays["points"], arrays["facets"], arrays["values"]
+    if points.ndim != 3 or points.shape[0] != count or points.shape[2] != 3:
+        raise ValueError("NAGINI-3D points must have shape (objects, samples, 3).")
+    samples = points.shape[1]
+    if samples < 1 or values.shape != (samples,):
+        raise ValueError("NAGINI-3D shared values must have one entry per surface sample.")
+    if facets.ndim != 2 or facets.shape[1] != 3 or not np.issubdtype(facets.dtype, np.integer):
+        raise ValueError("NAGINI-3D shared facets must have integer shape (facets, 3).")
+    if np.any(facets < 0) or np.any(facets >= samples):
+        raise ValueError("NAGINI-3D facet indices must refer to the shared surface samples.")
+    return arrays
+
+
+def _validate_curvature(positions: Any, values: Any, count: int) -> tuple[Any, Any]:
+    import numpy as np
+
+    positions = _numeric_array(positions, "curvature positions")
+    # Degenerate parametric geometry can have undefined curvature.
+    values = _numeric_array(values, "curvature values", finite=False)
+    if np.isinf(values).any():
+        raise ValueError("NAGINI-3D curvature values must be finite or NaN.")
+    if count == 0:
+        valid = positions.shape == (0, 3) and values.shape == (0,)
+    else:
+        valid = (
+            positions.ndim == 3
+            and positions.shape[0] == count
+            and positions.shape[2] == 3
+            and positions.shape[1] > 0
+            and values.shape == positions.shape[:2]
+        )
+    if not valid:
+        raise ValueError("NAGINI-3D curvature positions and values must match the ordered surface rows.")
+    return positions, values
 
 
 def _threshold(override: Any, default: Any, name: str) -> float:

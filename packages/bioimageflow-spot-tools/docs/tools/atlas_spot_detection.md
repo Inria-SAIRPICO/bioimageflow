@@ -10,9 +10,13 @@ Inputs are `input_image`, optional `gaussian_std`, optional `p_value`, optional 
 Output is `output_image`, a binary TIFF detection mask.
 Inside a workflow, the tool uses the row directory from its `ExecutionContext` to isolate implicit Atlas CLI files.
 Direct `process_row` calls without a context receive an isolated temporary work and row directory automatically.
+That owned scope includes preparation failures; cleanup preserves the primary failure and reports pending paths with a retained retry owner when the exception permits it.
+Caller-owned workflow directories are not retired by this temporary cleanup.
 
 Core dependencies are BioImageFlow core APIs and the external `bioimageit::atlas` conda package.
 The wrapper also uses a packaged `blobs.txt` Atlas reference, with a generated shared fallback in the workflow work directory when packaged reference data is unavailable.
+Fallback generation delegates exclusive publication to the Core staged-file helper under the shared lock; it preserves foreign temporary files and late reference owners.
+Lock cleanup retains the primary error and reports the actual pending lock and any already-published reference, with a retry owner only while the lock remains unresolved.
 
 ```python
 from bioimageflow_spot_tools import AtlasSpotDetection

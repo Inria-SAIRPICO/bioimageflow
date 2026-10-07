@@ -3139,6 +3139,13 @@ Scientific image adapters preserve reader facts rather than infer color from a w
 Explicit scalar TIFF axes determine scalar photometric output; actual TIFF sample axes and compatible ImageIO color-mode/sample evidence remain usable, while matching partial axes retain their known dimensions.
 `ReadImageMetadata.pixel_sizes` preserves the original OME numerical values and `pixel_size_units` separately reports X/Y/Z units without conversion: an explicit unit is preserved, a present size without a unit uses the OME default µm, and absent calibration reports `None` for both projections.
 Phasor calibration uses the selected harmonic with the fundamental frequency; apparent lifetime conversion uses their product and reports nanosecond float32 values, retaining the fundamental frequency metadata and representing undefined results as NaN.
+InstanSeg removes only selected-target wrapper dimensions, preserving singleton spatial axes, and its instance cache pairs the acquired model with its resolved source/device/content stamp; changed local model bytes replace the cached model, and emitted provenance describes the model used rather than a later unrelated selection.
+Unavailable named-model content digests remain explicitly unknown rather than implying verified model bytes.
+StarDist refuses invalid probability/NMS thresholds before acquiring a pretrained model.
+Nagini surface publication admits the pinned numeric geometry conventions before writing output assets: object-indexed points/centers/control parameters, shared point values and facet indices, and aligned per-object curvature arrays; empty curvature retains its documented zero-object shapes and meaningful NaN curvature values remain permitted.
+LapTrack validates the exact unique returned position set and unchanged object identity against facts captured before the tracker call, including when a tracker mutates its input frame; valid reordered results retain the original input order.
+Direct Atlas calls own their preparation work/row directory through failure as well as execution; preparation cleanup preserves the primary failure, reports pending ownership and retains a retry handle when the exception permits it, without closing caller-owned execution directories.
+Atlas reference generation uses the same staged-file publication authority under a captured lock; foreign temporary files and late reference owners are preserved, while lock-cleanup errors distinguish a retained lock from one already removed and report any reference already published.
 
 The exhaustive storage contract is specified in [Output and Cache Storage Specification](reference/output_cache_storage.md).
 

@@ -1,7 +1,10 @@
 """AtlasSpotDetection — adaptive spot detection via external CLI."""
 
+import logging
+import stat
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -19,7 +22,6 @@ from bioimageflow_core import (
     RowConsumption,
     Semantic,
     Template,
-    run_external_command,
     run_external_command_with_staged_output,
 )
 
@@ -32,6 +34,99 @@ atlas_env = EnvironmentSpec(
     },
     allow_flexible_versions=True,
 )
+
+
+def _cleanup_temporary_directory(
+    temporary: tempfile.TemporaryDirectory[str], primary: BaseException | None,
+) -> None:
+    try:
+        temporary.cleanup()
+    except BaseException as failure:
+        target = failure if primary is None else primary
+        message = f"Atlas temporary cleanup failed: {failure}."
+        try:
+            pending = Path(temporary.name).exists()
+            if pending:
+                message += f" Cleanup remains pending at {temporary.name}."
+                try:
+                    setattr(target, "_atlas_cleanup_owner", temporary)
+                except Exception:
+                    pass
+            try:
+                setattr(target, "atlas_cleanup", {"pending_path": temporary.name if pending else None})
+            except Exception:
+                pass
+            add_note = getattr(target, "add_note", None)
+            if add_note is not None:
+                add_note(message)
+        except Exception:
+            pass
+        try:
+            logging.getLogger(__name__).warning(message)
+        except Exception:
+            pass
+        if primary is None:
+            raise
+
+
+@dataclass(frozen=True)
+class _ReferenceLock:
+    path: Path
+    identity: tuple[int, int, int]
+
+    def close(self) -> None:
+        try:
+            value = self.path.lstat()
+        except FileNotFoundError:
+            return
+        if (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode)) != self.identity:
+            raise RuntimeError(f"Atlas reference lock identity changed: {self.path}")
+        self.path.rmdir()
+
+
+def _release_reference_lock(
+    lock: _ReferenceLock, primary: BaseException | None, published: Path | None,
+) -> None:
+    try:
+        lock.close()
+    except BaseException as failure:
+        target = failure if primary is None else primary
+        try:
+            lock.path.lstat()
+            pending = True
+        except FileNotFoundError:
+            pending = False
+        except OSError:
+            pending = True
+        message = f"Atlas reference lock cleanup failed at {lock.path}: {failure}."
+        if pending:
+            message += f" Cleanup remains unresolved for captured identity {lock.identity}."
+        if published is not None:
+            message += f" Reference was published at {published}; no rollback was attempted."
+        if pending:
+            try:
+                setattr(target, "_atlas_reference_cleanup_owner", lock)
+            except Exception:
+                pass
+        try:
+            setattr(target, "atlas_reference_cleanup", {
+                "pending_lock": str(lock.path) if pending else None, "identity": lock.identity,
+                "published_reference": None if published is None else str(published),
+            })
+        except Exception:
+            pass
+        try:
+            add_note = getattr(target, "add_note", None)
+            if add_note is not None:
+                add_note(message)
+        except Exception:
+            pass
+        try:
+            logging.getLogger(__name__).warning(message)
+        except Exception:
+            pass
+        if primary is None:
+            raise
 
 
 def _ensure_generated_blobs_file(work_dir: Path) -> Path:
@@ -47,6 +142,8 @@ def _ensure_generated_blobs_file(work_dir: Path) -> Path:
     while True:
         try:
             lock_dir.mkdir()
+            value = lock_dir.lstat()
+            lock = _ReferenceLock(lock_dir, (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode)))
             break
         except FileExistsError:
             if not lock_dir.exists() and blobs_file.exists():
@@ -57,18 +154,22 @@ def _ensure_generated_blobs_file(work_dir: Path) -> Path:
                 )
             time.sleep(0.05)
 
+    primary: BaseException | None = None
+    published: Path | None = None
     try:
         if not blobs_file.exists():
-            tmp_file = atlas_work_dir / "blobs.txt.tmp"
-            tmp_file.unlink(missing_ok=True)
-            run_external_command(
-                ["blobsref", "-o", str(tmp_file)],
+            run_external_command_with_staged_output(
+                ["blobsref", "-o", str(blobs_file)],
+                output_path=blobs_file,
                 cwd=atlas_work_dir,
                 context="Atlas reference generation",
             )
-            tmp_file.replace(blobs_file)
+            published = blobs_file
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        lock_dir.rmdir()
+        _release_reference_lock(lock, primary, published)
 
     return blobs_file.resolve()
 
@@ -201,16 +302,17 @@ class AtlasSpotDetection(ProcessingTool):
                     "AtlasSpotDetection.process_row requires context.row_dir."
                 )
             row_dir = context.row_dir
-        work_dir.mkdir(parents=True, exist_ok=True)
-        row_dir.mkdir(parents=True, exist_ok=True)
-
-        # Prefer the packaged Atlas reference. If a development checkout is
-        # missing it, generate a node-shared fallback reference under work.
-        blobs_file = Path(__file__).parent.resolve() / "data" / "blobs.txt"
-        if not blobs_file.exists():
-            blobs_file = _ensure_generated_blobs_file(work_dir)
-
+        primary: BaseException | None = None
         try:
+            work_dir.mkdir(parents=True, exist_ok=True)
+            row_dir.mkdir(parents=True, exist_ok=True)
+
+            # Prefer the packaged reference; a missing development copy uses
+            # a node-shared fallback under work.
+            blobs_file = Path(__file__).parent.resolve() / "data" / "blobs.txt"
+            if not blobs_file.exists():
+                blobs_file = _ensure_generated_blobs_file(work_dir)
+
             print(f"Running Atlas spot detection on {input_path.name}...")
 
             command = [
@@ -240,6 +342,9 @@ class AtlasSpotDetection(ProcessingTool):
             print(f"Atlas: detection complete -> {output_path.name}")
 
             return self.Outputs(output_image=output_path)
+        except BaseException as error:
+            primary = error
+            raise
         finally:
             if temp_dir is not None:
-                temp_dir.cleanup()
+                _cleanup_temporary_directory(temp_dir, primary)

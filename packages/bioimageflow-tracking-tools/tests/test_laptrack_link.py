@@ -108,3 +108,74 @@ def test_laptrack_rejects_duplicate_object_identity() -> None:
     )
     with pytest.raises(ValueError, match="unique"):
         LapTrackLink().process_batch([row, row])
+
+
+@pytest.mark.parametrize(
+    "returned",
+    [
+        "reordered",
+        "duplicate",
+        "changed_label",
+        "in_place_label",
+        "fractional_position",
+    ],
+)
+def test_laptrack_requires_exact_returned_association(monkeypatch, returned):
+    class FakeLapTrack:
+        def __init__(self, **_kwargs):
+            pass
+
+        def predict_dataframe(self, frame, **_kwargs):
+            tracked = frame if returned == "in_place_label" else frame.copy()
+            tracked["track_id"] = [10, 20]
+            tracked["tree_id"] = [10, 20]
+            if returned == "duplicate":
+                tracked = pd.concat([tracked, tracked.iloc[[0]]], ignore_index=True)
+            elif returned in {"changed_label", "in_place_label"}:
+                tracked.loc[0, "label"] = 99
+            elif returned == "fractional_position":
+                tracked["input_position"] = [0.5, 1.0]
+            else:
+                tracked = tracked.iloc[::-1]
+            return tracked, pd.DataFrame(), pd.DataFrame()
+
+    module = types.ModuleType("laptrack")
+    module.LapTrack = FakeLapTrack
+    monkeypatch.setitem(sys.modules, "laptrack", module)
+    rows = [
+        Arguments(
+            source_label_image=Path("labels.tif"),
+            frame=index,
+            label=index + 1,
+            y=2.5 + index,
+            x=5.5 + index,
+            area=7.5 + index,
+            max_link_distance=10,
+            gap_closing_distance=None,
+            gap_closing_max_frames=2,
+            division_distance=None,
+        )
+        for index in range(2)
+    ]
+    if returned != "reordered":
+        with pytest.raises(
+            RuntimeError, match="identity|position|exactly|changed input object"
+        ):
+            LapTrackLink().process_batch(rows)
+        return
+    outputs = LapTrackLink().process_batch(rows)
+    assert [output.track_id for output in outputs] == [1, 2]
+    assert [
+        (
+            output.source_label_image,
+            output.frame,
+            output.label,
+            output.y,
+            output.x,
+            output.area,
+        )
+        for output in outputs
+    ] == [
+        (Path("labels.tif"), 0, 1, 2.5, 5.5, 7.5),
+        (Path("labels.tif"), 1, 2, 3.5, 6.5, 8.5),
+    ]

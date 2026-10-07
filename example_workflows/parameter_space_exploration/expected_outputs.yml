@@ -17,7 +17,7 @@ outputs:
     - size
     - output_image
   required_nodes:
-    - input_images
+    - download_cil_image
     - sensitivity_values
     - size_values
     - parameter_grid

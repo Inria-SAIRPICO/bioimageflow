@@ -1,5 +1,6 @@
 """Production InstanSeg inference adapter."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -37,6 +38,14 @@ instanseg_env = EnvironmentSpec(
 )
 
 
+@dataclass(frozen=True)
+class _CachedModel:
+    source: str
+    device: str | None
+    metadata: tuple[str | None, str | None, str | None]
+    model: Any
+
+
 class InstanSegSegment(ProcessingTool):
     """Segment nuclei or cells with an InstanSeg model."""
 
@@ -52,28 +61,40 @@ class InstanSegSegment(ProcessingTool):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model_cache_key: tuple[str, str | None] | None = None
-        self._cached_model: Any | None = None
+        self._cached_model: _CachedModel | None = None
 
     def clear_model_cache(self) -> None:
         """Release the cached model held by this tool instance."""
-        self._model_cache_key = None
         self._cached_model = None
 
-    def _get_model(self, model_source: str, device: str | None) -> Any:
-        key = (model_source, device)
-        if self._cached_model is None or self._model_cache_key != key:
+    def _get_model(
+        self,
+        model_source: str,
+        device: str | None,
+        metadata: tuple[str | None, str | None, str | None],
+        *,
+        named: bool,
+    ) -> _CachedModel:
+        cached = self._cached_model
+        if cached is None or (cached.source, cached.device, cached.metadata) != (
+            model_source, device, metadata
+        ):
             from instanseg import InstanSeg  # type: ignore
 
             self.clear_model_cache()
-            self._cached_model = InstanSeg(
+            cached = None
+            model = InstanSeg(
                 model_type=model_source,
                 device=device,
                 image_reader="skimage.io",
                 verbosity=0,
             )
-            self._model_cache_key = key
-        return self._cached_model
+            if named and metadata[2] is None:
+                # Acquisition can establish a previously absent local weight file.
+                metadata = _named_model_metadata(model_source)
+            cached = _CachedModel(model_source, device, metadata, model)
+            self._cached_model = cached
+        return cached
 
     class Inputs(IOModel):
         input_image: Annotated[
@@ -237,9 +258,14 @@ class InstanSegSegment(ProcessingTool):
             model_url = None
             model_digest = None
 
-        model = self._get_model(model_source, device)
         if model_kind == "named":
             model_version, model_url, model_digest = _named_model_metadata(model_source)
+        cached = self._get_model(
+            model_source, device, (model_version, model_url, model_digest),
+            named=model_kind == "named",
+        )
+        model = cached.model
+        model_version, model_url, model_digest = cached.metadata
         cells_and_nuclei = bool(getattr(model.instanseg, "cells_and_nuclei", False))
         if target == "cells" and not cells_and_nuclei:
             raise ValueError(
@@ -302,7 +328,8 @@ def _instanseg_labels(prediction: Any) -> Any:
     if hasattr(prediction, "detach"):
         prediction = prediction.detach().cpu().numpy()
     labels = np.asarray(prediction)
-    labels = np.squeeze(labels)
+    if labels.ndim > 2 and all(size == 1 for size in labels.shape[:-2]):
+        labels = labels.reshape(labels.shape[-2:])
     if labels.ndim != 2:
         raise ValueError(
             "InstanSeg selected-target prediction must contain one 2D label image; "

@@ -9,4 +9,5 @@ Adjacent linking is required, while gap closing and divisions are independently 
 Merges are always disabled.
 
 Outputs preserve canonical object fields and add positive `track_id`, positive `lineage_id`, nullable `parent_track_id`, zero-based `generation`, `track_count`, and `division_count`.
+Returned positions must be unique and exactly match the admitted source group, and source/frame/label/centroid/area facts must match the identity captured before the tracker call; duplicate, fractional or relabeled results are refused, while valid reordering is restored to input order.
 Identifiers are normalized independently per source stack and remain compatible with `TracksToLabels`, where zero is background.

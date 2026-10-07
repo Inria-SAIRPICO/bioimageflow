@@ -199,6 +199,7 @@ class LapTrackLink(ProcessingTool):
                 ),
                 merging_cutoff=False,
             )
+            expected_objects = {position: rows[position] for position in positions}
             tracked, splits, merges = tracker.predict_dataframe(
                 group,
                 coordinate_cols=["y", "x"],
@@ -208,8 +209,7 @@ class LapTrackLink(ProcessingTool):
             if len(merges):
                 raise RuntimeError("LapTrack returned merges although merging is disabled.")
             tracked = tracked.reset_index(drop=True)
-            if "input_position" not in tracked:
-                raise RuntimeError("LapTrack did not preserve the object identity column.")
+            _admit_returned_objects(tracked, expected_objects, pd=pd)
             upstream_track_ids = sorted(int(value) for value in tracked["track_id"].unique())
             track_id_map = {
                 upstream: normalized
@@ -274,6 +274,28 @@ class LapTrackLink(ProcessingTool):
         if set(output_by_position) != set(range(len(arguments_list))):
             raise RuntimeError("LapTrack did not return exactly one row per input object.")
         return [output_by_position[position] for position in range(len(arguments_list))]
+
+
+def _admit_returned_objects(tracked: Any, expected: dict[int, dict[str, Any]], *, pd: Any) -> None:
+    columns = ("input_position", "source_label_image", "frame", "label", "y", "x", "area")
+    if any(column not in tracked for column in columns):
+        raise RuntimeError("LapTrack did not preserve the object identity columns.")
+    returned = tracked.to_dict("records")
+    positions: list[int] = []
+    for row in returned:
+        try:
+            positions.append(_integral(row["input_position"], "input_position", minimum=0))
+        except ValueError as error:
+            raise RuntimeError("LapTrack returned an invalid input position.") from error
+    if len(positions) != len(expected) or len(set(positions)) != len(positions) or set(positions) != set(expected):
+        raise RuntimeError("LapTrack did not return exactly one row per input object.")
+    for position, row in zip(positions, returned):
+        original = expected[position]
+        for column in columns[1:]:
+            value = row[column]
+            unchanged = pd.isna(value) if pd.isna(original[column]) else value == original[column]
+            if pd.isna(unchanged) or not unchanged:
+                raise RuntimeError(f"LapTrack changed input object {position} column {column!r}.")
 
 
 def _finite(value: Any, name: str) -> float:

@@ -134,9 +134,22 @@ def test_instanseg_rejects_cells_for_nucleus_only_model(
         )
 
 
+@pytest.mark.parametrize(
+    "surface_case",
+    [
+        "valid",
+        "empty",
+        "centers",
+        "facets",
+        "params",
+        "curvature",
+        "infinite_curvature",
+    ],
+)
 def test_nagini_writes_labels_probability_surfaces_and_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    surface_case: str,
 ) -> None:
     class FakeCuda:
         @staticmethod
@@ -157,16 +170,25 @@ def test_nagini_writes_labels_probability_surfaces_and_provenance(
 
         def inference(self, image: np.ndarray, **_: object):
             mask = np.zeros(image.shape, dtype=np.int32)
-            mask[1:3, 1:3, 1:3] = 1
+            count = 0 if surface_case == "empty" else 1
+            if count:
+                mask[1:3, 1:3, 1:3] = 1
             return (
                 mask,
                 np.full(image.shape, 0.75, dtype=np.float32),
                 {
-                    "points": np.ones((1, 4, 3), dtype=np.float32),
-                    "facets": np.array([[0, 1, 2]], dtype=np.int32),
-                    "values": np.ones((1, 4), dtype=np.float32),
-                    "centers": np.array([[2.0, 2.0, 2.0]], dtype=np.float32),
-                    "params": np.ones((1, 4), dtype=np.float32),
+                    "points": np.ones((count, 4, 3), dtype=np.float32),
+                    "facets": np.array(
+                        [[0, 1, 4 if surface_case == "facets" else 2]], dtype=np.int32
+                    ),
+                    "values": np.ones((4,), dtype=np.float32),
+                    "centers": np.full(
+                        (count, 3), "bad" if surface_case == "centers" else 2.0
+                    ),
+                    "params": np.ones(
+                        (count, 4) if surface_case == "params" else (count, 8, 3),
+                        dtype=np.float32,
+                    ),
                 },
             )
 
@@ -175,7 +197,13 @@ def test_nagini_writes_labels_probability_surfaces_and_provenance(
             pass
 
         def get_curvature_and_position(self, parameters: np.ndarray):
-            return np.ones((len(parameters), 3)), np.ones((len(parameters),))
+            positions = np.ones((len(parameters), 4, 3))
+            values = np.full((len(parameters), 4), np.nan)
+            if surface_case == "curvature":
+                values = values[:, :3]
+            elif surface_case == "infinite_curvature":
+                values[0, 0] = np.inf
+            return positions, values
 
     nagini = types.ModuleType("nagini3D")
     models = types.ModuleType("nagini3D.models")
@@ -215,30 +243,37 @@ def test_nagini_writes_labels_probability_surfaces_and_provenance(
     surfaces_path = tmp_path / "surfaces.npz"
     provenance_path = tmp_path / "provenance.json"
 
-    result = Nagini3DSegment().process_row(
-        Arguments(
-            input_volume=volume_path,
-            model_bundle=bundle,
-            weights_filename="best.pkl",
-            probability_threshold=None,
-            nms_threshold=None,
-            tiles_z=1,
-            tiles_y=1,
-            tiles_x=1,
-            anisotropy_z=1.0,
-            anisotropy_y=1.0,
-            anisotropy_x=1.0,
-            optimize_snakes=True,
-            otsu_for_snakes=True,
-            device="cpu",
-            mask=mask_path,
-            probability=probability_path,
-            surfaces=surfaces_path,
-            model_provenance=provenance_path,
-        )
+    arguments = Arguments(
+        input_volume=volume_path,
+        model_bundle=bundle,
+        weights_filename="best.pkl",
+        probability_threshold=None,
+        nms_threshold=None,
+        tiles_z=1,
+        tiles_y=1,
+        tiles_x=1,
+        anisotropy_z=1.0,
+        anisotropy_y=1.0,
+        anisotropy_x=1.0,
+        optimize_snakes=True,
+        otsu_for_snakes=True,
+        device="cpu",
+        mask=mask_path,
+        probability=probability_path,
+        surfaces=surfaces_path,
+        model_provenance=provenance_path,
     )
+    if surface_case not in {"valid", "empty"}:
+        with pytest.raises(ValueError):
+            Nagini3DSegment().process_row(arguments)
+        assert not any(
+            path.exists()
+            for path in (mask_path, probability_path, surfaces_path, provenance_path)
+        )
+        return
+    result = Nagini3DSegment().process_row(arguments)
 
-    assert result.object_count == 1
+    assert result.object_count == (0 if surface_case == "empty" else 1)
     assert iio.imread(mask_path).dtype == np.uint32
     assert iio.imread(probability_path).dtype == np.float32
     with np.load(surfaces_path) as surfaces:
@@ -251,4 +286,15 @@ def test_nagini_writes_labels_probability_surfaces_and_provenance(
             "curvature_positions",
             "curvature_values",
         }
+        assert surfaces["points"].shape == (result.object_count, 4, 3)
+        assert surfaces["values"].shape == (4,)
+        assert surfaces["params"].shape == (result.object_count, 8, 3)
+        np.testing.assert_array_equal(surfaces["facets"], [[0, 1, 2]])
+        np.testing.assert_allclose(iio.imread(probability_path), 0.75)
+        if surface_case == "valid":
+            assert surfaces["curvature_positions"].shape == (1, 4, 3)
+            assert np.isnan(surfaces["curvature_values"]).all()
+        else:
+            assert surfaces["curvature_positions"].shape == (0, 3)
+            assert surfaces["curvature_values"].shape == (0,)
     assert '"model_bundle_sha256"' in provenance_path.read_text()
