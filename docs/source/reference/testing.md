@@ -28,19 +28,26 @@ Fast tests should:
 Portable viewer grammar, metadata projections, package TOML parsing, upload preflight and import-direction checks use finite ordinary fixtures in the fast tier.
 The Core source type-marker check is separate from the packaging tier's actual wheel/source-distribution closure; source presence alone does not certify built artifacts.
 
-CI runs the backend-neutral fast selector with deterministic non-fast, real Parsl, and complete/resource tiers excluded:
+The ordinary **CI** workflow (`ci.yml`) runs the backend-neutral fast selector with deterministic non-fast and complete/resource tiers excluded, and applies these fixed distributed-path exclusions to local unit, integration, compatibility, acceptance and package-tool selections:
 
 ```bash
-uv run pytest tests -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+export LOCAL_LIBRARY_PYTEST_ARGS="--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher --ignore=tests/unit/test_distributed_contract.py"
+```
+
+These exclusions also cover unmarked distributed tests; shared DTO, serialization and static import guards outside those paths remain local coverage.
+Using that selection, run the local fast tests with:
+
+```bash
+uv run pytest tests $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 ```
 
 GitHub Actions runs `tests/unit` and `tests/integration` as independent jobs on Python 3.10 and 3.12 so failures arrive sooner and can be rerun by concern.
 Python 3.11 runs the backend-neutral `compat` smoke selector on every pipeline.
 
-Run the Python-version compatibility smoke selector with:
+Using the same fixed exclusions above, run the Python-version compatibility smoke selector with:
 
 ```bash
-uv run pytest tests -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests $LOCAL_LIBRARY_PYTEST_ARGS -m "compat and not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 ```
 
 Shared-array controls use controller-owned temporary NPY/mmap files on supported Python/OS runtimes and remain included in the required fast matrix.
@@ -53,28 +60,33 @@ uv run pytest packages/bioimageflow-io-tools/tests
 uv run pytest -m "package_tools and not complete"
 ```
 
-## Manual Local Library Capability
+## Local and Distributed CI
 
-A manual **CI** dispatch may set `local_library_only=true` (default false) for the bounded prepublication library milestone.
-This mode excludes the declared distributed, cluster and launcher test folders plus the top-level distributed planner contract file, including unmarked tests, and skips the two Parsl runtime jobs; ordinary push/pull-request CI retains its full configured gates.
-Quality, normal package/Core artifacts and documentation remain required.
+Local and distributed coverage have separate visible workflows on main pushes, pull requests and manual dispatches.
+The ordinary **CI** workflow always uses the fixed local exclusions above; **Distributed CI** (`distributed.yml`) retains the complementary unmarked distributed unit/integration selections and the existing real Parsl runtime jobs.
+Both workflows report their actual failures, with independent concurrency and no suppressed errors or branch-specific exceptions.
+The split preserves selected coverage; it does not repair or certify distributed features, and earlier failed combined CI results remain failed.
+Quality, normal package/Core artifacts and documentation remain required local gates.
+Only successful ordinary push/pull-request `ci.yml` at the exact release SHA qualifies publication; a distributed or manual capability run does not replace that authority.
 The separate manually dispatched local WorkerPool job executes four explicit owner files with editable/source Core; it does not certify source-disabled installed library dispatch.
 The normal installed Core matrix separately checks public contracts and child/view/owner lifetime on Python 3.9 and 3.12 on Linux and Windows.
 Configured matrix coverage is distinct from successful run evidence, and manual capability CI never unlocks release publication.
 
-## Parsl Runtime Tests
+## Distributed and Parsl Tests
 
 The `parsl` marker is reserved for tests that execute the real optional Parsl runtime.
-Fake DFK and future tests remain ordinary unit tests so the core execution contracts do not depend on starting Parsl.
+Fake DFK and future tests remain ordinary unit tests, but distributed-owned unmarked tests run in the separate **Distributed CI** workflow rather than becoming local coverage merely because no real executor starts.
+Its complementary fast unit jobs use `tests/unit/parsl`, `tests/unit/cluster`, `tests/unit/launcher` and `tests/unit/test_distributed_contract.py`; fast integration jobs use `tests/integration/parsl` and `tests/integration/launcher`.
+Both complementary jobs retain Python 3.10 and 3.12 and the same fast marker selector above, without local ignore arguments; the marked runtime selectors below are disjoint from them.
 
-Fast real-runtime tests use local thread executors and run on Python 3.10 and 3.12 in a dedicated CI matrix:
+Fast real-runtime tests use local thread executors and run on Python 3.10 and 3.12 in the separate distributed matrix:
 
 ```bash
 uv run pytest tests -m "parsl and not slow"
 ```
 
-Only process-isolated executor cases also carry `slow`.
-They run as a required Python 3.11 CI job and need no external scheduler:
+The `slow` Parsl tier includes process-isolated executor cases and explicitly configured cluster smoke.
+The distributed workflow’s Python 3.11 job retains that selector; local process isolation needs no external scheduler, while cluster smoke skips unless `BIOIMAGEFLOW_PSIJ_SMOKE_CONFIG` supplies its maintainer-owned site configuration:
 
 ```bash
 uv run pytest tests -m "parsl and slow"
@@ -221,19 +233,17 @@ At edit stage an existing collected `test_*.py` selects that file, prose documen
 Unknown paths and merge-stage checks fail open to the broader suites, and the helper never replaces CI gates.
 See :doc:`platform_development` for source ownership, module-size limits, dependency boundaries, and the backend seam.
 
-Before broad finalization, run:
+Before broad local finalization, use the fixed `LOCAL_LIBRARY_PYTEST_ARGS` selection above and run:
 
 ```bash
 uv run ruff check .
 uv run pyright
 uv run python scripts/check_file_sizes.py
 uv run python scripts/check_import_boundaries.py
-uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
-uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
-uv run pytest tests -m "parsl and not slow"
-uv run pytest tests -m "parsl and slow"
-uv run pytest -m "acceptance and not complete"
-uv run pytest -m "package_tools and not complete"
+uv run pytest tests/unit $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests/integration $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest $LOCAL_LIBRARY_PYTEST_ARGS -m "acceptance and not complete"
+uv run pytest $LOCAL_LIBRARY_PYTEST_ARGS -m "package_tools and not complete"
 uv run pytest tests/unit/test_package_artifacts.py
 uv build --all-packages --no-sources --out-dir dist/packages
 BIOIMAGEFLOW_PACKAGE_ARTIFACTS_DIR=dist/packages uv run pytest tests/unit/test_package_artifacts.py

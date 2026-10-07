@@ -292,6 +292,8 @@ The `replace` option is invalid when no explicit destination is supplied.
 ## Development
 
 The full test workflow is documented in `docs/source/reference/testing.md`.
+Ordinary `ci.yml` validates the local library with fixed distributed-path exclusions; `distributed.yml` retains complementary unmarked distributed tests and the real Parsl tiers with visible independent results.
+Only successful ordinary push/pull-request local CI at the exact release SHA qualifies publication; the split does not repair or certify excluded distributed features.
 
 ```bash
 # Run quality checks
@@ -303,11 +305,12 @@ uv run python scripts/check_import_boundaries.py
 # Print focused tests for the current edit
 git diff --name-only | uv run python scripts/affected_tests.py --stdin
 
-# Run the independent fast suites used by CI
-uv run pytest tests/unit -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
-uv run pytest tests/integration -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+# Run the independent local fast suites used by ordinary CI
+export LOCAL_LIBRARY_PYTEST_ARGS="--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher --ignore=tests/unit/test_distributed_contract.py"
+uv run pytest tests/unit $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
+uv run pytest tests/integration $LOCAL_LIBRARY_PYTEST_ARGS -m "not slow and not acceptance and not packaging and not package_tools and not complete and not wetlands and not public_data and not external_binary and not sairpico_binary and not model_runtime and not parsl"
 
-# Run the real Parsl tiers
+# Run real Parsl tiers separately (see the reference for the unmarked complement)
 uv run pytest tests -m "parsl and not slow"
 uv run pytest tests -m "parsl and slow"
 
@@ -354,6 +357,7 @@ uv run python scripts/package_status.py
 Package-specific releases use annotated tags such as `bioimageflow-core-v0.5.0` and an explicitly dispatched coordinated GitHub Actions publication workflow after exact-head CI and selected runtime validation.
 `scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
 Release-set publication validates all selected artifact pairs before the first upload and then follows dependency order.
+Sets containing Core also require the reviewed canonical floor-tested wheel SHA256; a missing or different digest stops every upload.
 The declared current candidate cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.6.0,<3`; first-party tools declare those bounds.
 Selected local artifact proofs do not certify all supported OS/interpreter/scientific recipes or establish current candidate availability on PyPI; the deep S/T/C library milestone precedes publication.
 See the [release operator guide](docs/source/reference/releasing.md) for setup, actual deployment controls and release steps.

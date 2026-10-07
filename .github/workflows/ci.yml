@@ -7,11 +7,6 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      local_library_only:
-        description: Run local library capabilities without distributed runtime tests
-        type: boolean
-        required: false
-        default: false
       core_floor_only:
         description: Run only the installed Core OS and Python floor capabilities
         type: boolean
@@ -38,7 +33,7 @@ permissions:
 env:
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_LINK_MODE: copy
-  LOCAL_LIBRARY_PYTEST_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.local_library_only && '--ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher --ignore=tests/unit/test_distributed_contract.py' || '' }}
+  LOCAL_LIBRARY_PYTEST_ARGS: --ignore=tests/unit/parsl --ignore=tests/unit/cluster --ignore=tests/unit/launcher --ignore=tests/integration/parsl --ignore=tests/integration/launcher --ignore=tests/unit/test_distributed_contract.py
 
 jobs:
   quality:
@@ -284,52 +279,6 @@ jobs:
           tests/integration/test_wetlands_task_api.py
           tests/integration/test_wetlands_cancellation.py
           packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py
-
-  parsl-fast-tests:
-    if: github.event_name != 'workflow_dispatch' || (!inputs.local_library_only && !inputs.core_floor_only)
-    name: Parsl fast runtime (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.10", "3.12"]
-    env:
-      UV_PYTHON: ${{ matrix.python }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.10.9"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install workspace
-        run: uv sync --locked --all-packages --group dev
-      - name: Run fast Parsl runtime tests
-        run: uv run pytest tests -m "parsl and not slow"
-
-  parsl-process-tests:
-    if: github.event_name != 'workflow_dispatch' || (!inputs.local_library_only && !inputs.core_floor_only)
-    name: Parsl process isolation (Python 3.11)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      UV_PYTHON: "3.11"
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.10.9"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install workspace
-        run: uv sync --locked --all-packages --group dev
-      - name: Run process-isolated Parsl tests
-        run: uv run pytest tests -m "parsl and slow"
 
   deterministic-tests:
     if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only

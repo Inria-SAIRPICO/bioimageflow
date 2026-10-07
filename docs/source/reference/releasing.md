@@ -20,7 +20,8 @@ The GitHub release workflow rejects a lightweight tag, a dirty checkout, a misma
 
 Each distribution owns its version.
 A change in one tool package does not require releases of unrelated packages.
-Normal exact-head CI and any selected affected runtime suite must pass before publication.
+Ordinary exact-head local CI and any selected affected runtime suite must pass before publication.
+Distributed coverage remains visible in its separate workflow; the local/distributed CI partition does not certify or repair excluded distributed features.
 
 Choose the version bump from the selected package's public behavior:
 
@@ -155,7 +156,9 @@ Update affected first-party dependency ranges in the same change, then regenerat
 
 During development, run only tests focused on the changed code and package metadata.
 Before review, run Ruff, Pyright, and the relevant focused tests locally.
-The normal **CI** workflow is the authoritative shared validation and already runs the supported Python matrix, deterministic acceptance and package-tool tests, builds every distribution without workspace sources, and builds the documentation.
+The ordinary local **CI** workflow (`ci.yml`) is the release-qualifying validation and runs the supported local Python matrix, deterministic acceptance and package-tool tests with fixed distributed-path exclusions, builds every distribution without workspace sources, and builds the documentation.
+The separate **Distributed CI** workflow (`distributed.yml`) retains marked Parsl and complementary unmarked distributed tests, reports failures independently, and is not a substitute for local release authority.
+Earlier failed combined CI runs remain failed; only a new successful ordinary exact-SHA local run can qualify the release after this partition.
 Do not rerun that complete set in a separate release-validation job.
 
 Commit the versions, dependency ranges, code, and lockfile as one release commit and merge or push it through the normal review process:
@@ -169,8 +172,9 @@ git push origin main
 ```
 
 Wait for the normal **CI** workflow to succeed on the exact release commit.
-The coordinated release workflow refuses to publish a commit without a successful push or pull-request `ci.yml` run for that SHA.
-Manual capability runs, including the local-library mode, cannot satisfy this publication gate.
+The coordinated release workflow refuses to publish a commit without a successful ordinary push or pull-request local `ci.yml` run for that SHA.
+It does not admit a manual capability run or the separate distributed workflow as release-qualifying evidence.
+Manual capability runs, including floor-only dispatches, cannot satisfy this publication gate.
 
 The Core 0.5 scoped array surface additionally requires source-disabled public annotation/default, recipe, viewer, selected-primary and numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
 To verify the same canonical wheel on every floor, dispatch `ci.yml` with `core_floor_only=true`, `candidate_run_id` naming a successful ordinary push/pull-request CI run at the exact current commit, and `candidate_core_sha256` naming its held Core wheel hash.
@@ -234,6 +238,8 @@ Pushing tags does not publish anything.
 
 Open **Actions > Publish coordinated package release** and run the workflow from `main`.
 Enter every tag in the `release_tags` input, separated by spaces.
+When publishing a set that includes Core, supply `expected_core_sha256` with the held SHA256 of the exact canonical wheel accepted by the required floor runs.
+The digest is mandatory for Core publication selections and is not a substitute for those actual capability results; validate mode does not run this publisher gate.
 Normally select `publish`: dispatching this workflow starts publication unless the GitHub `pypi` environment has required reviewers configured.
 Use `validate` only for an optional dry run; a later publish run must rebuild its artifacts, so running both modes routinely wastes time.
 
@@ -241,12 +247,14 @@ The workflow performs only release-specific work:
 
 1. It resolves the tags to one commit and validates all versions, selected dependency ranges, and current PyPI versions.
 2. It requires a successful normal CI workflow for the exact tagged commit instead of rerunning the workspace tests.
-3. It builds and validates only the selected distributions, in parallel.
+3. It builds and validates only the selected distributions, in parallel; in publish mode, it refuses a selected Core wheel whose SHA256 differs from the held expected value.
 4. Subject to the actual configured `pypi` environment controls, it publishes dependencies before their selected dependants with short-lived trusted-publishing credentials.
 5. It waits until every requested version is visible on PyPI.
 
 If publication stops partway through, rerun the same workflow with the same release set.
 The release-set publisher admits every selected wheel/source-distribution pair before its first upload; an invalid later pair causes no earlier package upload.
+Missing, malformed, or mismatched expected Core hashes also stop the whole selected set before any upload; reproducibility is checked rather than assumed.
+For a direct operator invocation, pass the same held value through `scripts/release_set.py publish --expected-core-sha256`; sets without Core do not require it.
 The publisher checks PyPI before uploading, so already published identical files are skipped and remaining packages continue in dependency order.
 Never move or reuse a release tag, and never attempt to replace an existing PyPI file.
 

@@ -7,6 +7,11 @@ on:
         description: Space-separated annotated package tags at one validated commit
         required: true
         type: string
+      expected_core_sha256:
+        description: Reviewed canonical floor-tested Core wheel SHA256 (required when Core is selected)
+        required: false
+        default: ""
+        type: string
       mode:
         description: Validate artifacts only or publish them to PyPI
         required: true
@@ -190,12 +195,14 @@ jobs:
       - name: Publish packages in dependency order
         env:
           RELEASE_TAGS: ${{ inputs.release_tags }}
+          EXPECTED_CORE_SHA256: ${{ inputs.expected_core_sha256 }}
         run: |
           read -r -a release_tags <<< "$RELEASE_TAGS"
           uv run --no-project --with packaging python \
             scripts/release_set.py publish \
             --check-pypi \
             --artifacts-dir "$RUNNER_TEMP/release" \
+            --expected-core-sha256 "$EXPECTED_CORE_SHA256" \
             "${release_tags[@]}"
       - name: Wait for every version to become visible on PyPI
         env:

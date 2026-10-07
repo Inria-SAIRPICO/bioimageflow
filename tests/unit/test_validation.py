@@ -56,9 +56,17 @@ class TestIsImageType:
 class TestExtractImageSpec:
 
     def test_returns_spec(self):
-        spec = ImageSpec(semantics={Semantic.LABEL})
+        semantics = {Semantic.LABEL}
+        spec = ImageSpec(semantics=semantics)
         ann = Annotated[Path, spec]
-        assert extract_image_spec(ann) is spec
+        extracted = extract_image_spec(ann)
+        assert type(extracted) is ImageSpec
+        assert extracted == spec
+        captured_hash = hash(extracted)
+        assert captured_hash == hash(spec)
+        semantics.add(Semantic.INTENSITY)
+        assert extracted.semantics == frozenset({Semantic.LABEL})
+        assert hash(extracted) == captured_hash
 
     def test_returns_none_for_plain(self):
         assert extract_image_spec(int) is None

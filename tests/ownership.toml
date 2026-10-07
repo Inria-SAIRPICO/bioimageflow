@@ -24,6 +24,7 @@ edit_tests = [
     "tests/unit/test_local_capability_ci.py",
     "tests/unit/test_complete_runtime_gate.py",
     "tests/unit/test_core_candidate.py",
+    "tests/unit/test_release_core_wheel_identity.py",
     "tests/unit/test_release_tagging.py",
     "tests/unit/test_development_workflow.py",
     "tests/unit/test_core_python39_compat.py",

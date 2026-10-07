@@ -420,6 +420,7 @@ def test_release_workflow_stages_flat_downloads_by_package(tmp_path: Path) -> No
 def test_github_workflows_cover_normal_and_complete_validation() -> None:
     root = Path(__file__).parents[2]
     ci = _workflow(root, "ci.yml")
+    distributed = _workflow(root, "distributed.yml")
     complete = _workflow(root, "complete.yml")
 
     assert set(ci["jobs"]) == {
@@ -430,8 +431,6 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "local-worker-capability",
         "integration-tests",
         "compatibility-tests",
-        "parsl-fast-tests",
-        "parsl-process-tests",
         "deterministic-tests",
         "packages",
         "docs",
@@ -454,8 +453,8 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
     assert "-I check_core_array_lifetime.py" in capability_script
     assert "uv pip check" in capability_script
 
-    parsl_fast = ci["jobs"]["parsl-fast-tests"]
-    parsl_process = ci["jobs"]["parsl-process-tests"]
+    parsl_fast = distributed["jobs"]["parsl-fast-tests"]
+    parsl_process = distributed["jobs"]["parsl-process-tests"]
     assert isinstance(parsl_fast, dict)
     assert isinstance(parsl_process, dict)
     assert PARSL_FAST_TEST_COMMAND in _job_script(parsl_fast)
