@@ -1851,6 +1851,14 @@ Callable invocation captures its independent definition, omitted defaults and pe
 Root compute, explicit-target compute and compute_steps additionally capture one effective execution definition before setup or run-visible effects; supplied values and selected targets are mapped into that capture, while callbacks, cancellation, engine reservations, managers and result owners remain separately bound runtime authority.
 The same captured effective defaults feed validation, arguments and scientific parameter identity; later class-default, binding or configuration changes affect later admissions only.
 Captured Inputs/Outputs facades detach their declaration mapping and omitted defaults on the tool instance; they do not replace its executable class.
+Each captured node retains the exact declared output-class authority separately from its detached output-validation facade.
+Direct row and batch callbacks may return that original declared `Outputs` class or its nominal subclasses, including through a module-global alias, as well as the captured facade or an exact-field plain dictionary.
+The nominal gate never grants authority to an independently defined or loaded class merely because its name or fields match.
+Field order, requiredness, templates, defaults and scientific value validation use only the captured declaration, never the live nominal class's mutable annotations or defaults.
+Repeated capture preserves nominal authority while recapturing its corresponding facade; explicitly replacing `Outputs` captures the new declared class instead.
+Before Direct callbacks, a finite admission compares the retained nominal declaration and supported class defaults with that captured facade and refuses drift.
+This conservative check also applies to callbacks constructing `self.Outputs`; it does not synchronize external writers or freeze arbitrary module globals.
+A previously admitted captured cache record can be returned without invoking a callback or this dispatch check; nominal-default comparison is not additional proof of arbitrary scientific global-state closure.
 Semantic value capture preserves bound references and their owners without opening array storage or copying runtime locks.
 The carried tool class/origin selector remains the original executable identity; independently copied environment recipes do not turn that selector into verified executable-content closure.
 A rejected ordinary construction stages names, registration, symbolic targets and dependency replacement without publishing any of them.

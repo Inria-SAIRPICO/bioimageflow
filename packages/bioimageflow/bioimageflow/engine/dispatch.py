@@ -191,6 +191,12 @@ class _DispatchMixin:
         capture = self._capture_executable(node)
         compare_tool_declarations(capture.scientific_key["declaration"], describe_tool_declaration(tool))
         callbacks = capture.callbacks
+        output_declaration = getattr(node, "_captured_output_declaration", None)
+        if output_declaration is not None:
+            output_declaration.require_current_nominal(tool.Outputs)
+        nominal_output_type = (
+            None if output_declaration is None else output_declaration.nominal_type
+        )
         if has_batch:
             if not arguments_dicts and tool.row_consumption.value == "mapped":
                 return []
@@ -205,6 +211,7 @@ class _DispatchMixin:
                 tool.Outputs,
                 expected_rows=len(arguments_dicts),
                 row_consumption=tool.row_consumption.value,
+                nominal_output_type=nominal_output_type,
             )
             normalized = scope.publish_outputs(normalized)
             consumed = tuple(ConsumedRow(position, str(context.row_index)) for position, context in enumerate(row_contexts))
@@ -218,7 +225,9 @@ class _DispatchMixin:
             kwargs = {"context": context} if accepts_context else {}
             result = callbacks["process_row"](Arguments(**args_dict), **kwargs)
             assert tool.Outputs is not None
-            accepted = scope.publish_outputs([normalize_processing_row_outputs(result, tool.Outputs)])[0]
+            accepted = scope.publish_outputs([normalize_processing_row_outputs(
+                result, tool.Outputs, nominal_output_type=nominal_output_type,
+            )])[0]
             raw_results.append(OutputGroup((ConsumedRow(i, str(context.row_index)),), cast(Any, tuple(accepted))))
             self._emit_progress(
                 workflow,
