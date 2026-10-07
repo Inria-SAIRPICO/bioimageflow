@@ -159,12 +159,10 @@ class TestIntegration:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import importlib.util
-        import sys
-
         import bioimageflow.env_manager as em
 
         from bioimageflow.engine.common import NodePlanStatus
+        from tests.testkit.gui_validation import ordinary_planning_tool
 
         owned = tmp_path / "absent-planning-roots"
         runtime_root = owned / "wetlands"
@@ -182,31 +180,13 @@ class TestIntegration:
         monkeypatch.setattr(em.ManagedEnvironment, "runtime_content_receipt", _boom)
         monkeypatch.setattr(em.WorkerPool, "__init__", _boom)
 
-        # A normal selected source module keeps pytest assertion rewriting outside
-        # the managed tool's admitted primary package.
-        source = tmp_path / "planning_effect_tool.py"
-        source.write_text(
-            "from pathlib import Path\n"
-            "from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption\n"
-            "class PlanningTool(ProcessingTool):\n"
-            "    row_consumption = RowConsumption.MAPPED\n"
-            "    environment = EnvironmentSpec('planning-only', {'python': '>=3.9'})\n"
-            "    class Inputs(IOModel): input_image: Path\n"
-            "    class Outputs(IOModel): value: int\n"
-            "    def process_row(self, arguments):\n"
-            "        raise RuntimeError('planning executed science')\n"
-        )
-        spec = importlib.util.spec_from_file_location("planning_effect_tool", source)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        monkeypatch.setitem(sys.modules, spec.name, module)
-        spec.loader.exec_module(module)
+        planning_tool = ordinary_planning_tool(tmp_path, monkeypatch)
 
         storage_root = tmp_path / "results"
         wf = Workflow(storage_path=storage_root, engine="wetlands")
         with wf:
             load = FileLoader()(path=str(tmp_path))
-            module.PlanningTool()(input_image=load["path"])
+            planning_tool()(input_image=load["path"])
         # Bind the caller's controller owner before measuring planning effects.
         owner = wf.shared_memory_context
         storage_before = sorted(path.relative_to(storage_root) for path in storage_root.rglob("*"))

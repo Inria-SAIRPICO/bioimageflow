@@ -108,6 +108,7 @@ class TestPlan:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from wetlands import EnvironmentManager, ManagedEnvironment
+        from tests.testkit.gui_validation import ordinary_planning_tool
 
         def _boom(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Wetlands must not launch during plan()")
@@ -116,14 +117,18 @@ class TestPlan:
         monkeypatch.setattr(ManagedEnvironment, "start", _boom)
         managed_root = tmp_path / "missing-runtime"
         assert not managed_root.exists()
+        planning_tool = ordinary_planning_tool(tmp_path, monkeypatch)
 
         wf = Workflow(storage_path=tmp_path, engine="wetlands",
             wetlands_config={"root": managed_root})
         with wf:
             load = FileLoader()(path=str(tmp_path))
-            StubSegmenter()(input_image=load["path"])
-        plan = wf.plan()
-        assert plan
-        assert plan["StubSegmenter_1"].status.value == "pending_runtime"
-        assert plan["StubSegmenter_1"].final_result_key is None
-        assert not managed_root.exists()
+            planning_tool()(input_image=load["path"])
+        try:
+            plan = wf.plan()
+            assert plan
+            assert plan["PlanningTool_1"].status.value == "pending_runtime"
+            assert plan["PlanningTool_1"].final_result_key is None
+            assert not managed_root.exists()
+        finally:
+            wf.shared_memory_context.close()

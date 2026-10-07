@@ -686,6 +686,9 @@ It must not silently feed non-current `rec_A` into downstream nodes.
 
 ## Workflow Planning Semantics
 
+Planning loads the admitted selected record without array hydration or controller array-owner allocation.
+It preserves exact manifest/frame/address and asset-integrity validation, including reads and hashes of stored assets; ordinary computation still hydrates native and shared values.
+
 `Workflow.plan()` reports final result keys only when every consumed upstream selected record ID is known.
 For managed Processing, the selected backend must also have a valid ready runtime receipt for its augmented recipe.
 Missing or stale runtime content produces `PENDING_RUNTIME` with no final result key; planning does not provision, start workers, run probes or create runtime-state directories.

@@ -46,6 +46,31 @@ from tests.testkit.integration_tools import (
 )
 
 
+def ordinary_planning_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> type[ProcessingTool]:
+    """Load selected tool bytes without pytest rewriting the owning package."""
+    import importlib.util
+    import sys
+
+    source = tmp_path / "planning_effect_tool.py"
+    source.write_text(
+        "from pathlib import Path\n"
+        "from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption\n"
+        "class PlanningTool(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
+        "    environment = EnvironmentSpec('planning-only', {'python': '>=3.9'})\n"
+        "    class Inputs(IOModel): input_image: Path\n"
+        "    class Outputs(IOModel): value: int\n"
+        "    def process_row(self, arguments):\n"
+        "        raise RuntimeError('planning executed science')\n"
+    )
+    spec = importlib.util.spec_from_file_location("planning_effect_tool", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module.PlanningTool
+
+
 def _graph(
     *,
     nodes: list[dict[str, Any]] | None = None,

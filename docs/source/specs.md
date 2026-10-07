@@ -2819,6 +2819,9 @@ An engine owns one active operation: planning through an engine with an active c
 
 `Workflow.plan()` exposes cache status and selected-record information without executing nodes.
 Callers that need to report cache state should use `plan()` rather than reimplementing result-key composition.
+Planning admits the exact selected record and its asset integrity without hydrating native or shared array values, creating a controller array owner or allocating array backings.
+Record admission may still read, hash and validate stored array assets; metadata-only planning does not skip corruption checks or promise zero asset reads.
+Ordinary computation continues to hydrate the admitted selected values under its controller owner.
 
 ```python
 from bioimageflow import NodePlan, NodePlanStatus

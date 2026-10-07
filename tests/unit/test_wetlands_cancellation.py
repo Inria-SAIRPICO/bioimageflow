@@ -2,6 +2,9 @@
 
 from types import SimpleNamespace
 from typing import Any
+import importlib.util
+import sys
+import uuid
 
 import pytest
 from wetlands import ExecutionState
@@ -10,7 +13,7 @@ from bioimageflow import Workflow, WorkflowExecutionContext
 from bioimageflow.engine import DefaultEngine, WorkflowCancelledError
 from bioimageflow.engine.dispatch import _WetlandsTaskTracker
 from bioimageflow_core import ResourceSpec
-from tests.testkit.worker_timeout import _StubTool, _execution_contexts
+from tests.testkit.worker_timeout import _execution_contexts
 
 
 class _TaskState:
@@ -105,12 +108,15 @@ class _PartialSubmissionManager:
         self.interrupt_cleanup_once = interrupt_cleanup_once
         self.submit_calls = 0
         self.tasks: list[_DispatchTask] = []
+        self.shared_memory_grants: list[Any] = []
+        self.submission_error = ValueError("second submission failed")
 
     def submit_processing_task(self, *args: Any, **kwargs: Any) -> _DispatchTask:
-        del args, kwargs
+        del args
+        self.shared_memory_grants.append(kwargs["shared_memory_grant"])
         self.submit_calls += 1
         if self.fail_second and self.submit_calls == 2:
-            raise ValueError("second submission failed")
+            raise self.submission_error
         task = _DispatchTask(
             interrupt_cleanup_once=self.interrupt_cleanup_once
             and self.submit_calls == 1
@@ -133,24 +139,57 @@ def _dispatch_rows(
     *,
     max_concurrent: int | None = None,
 ) -> None:
-    engine = DefaultEngine(use_wetlands=False)
-    engine._use_wetlands = True
-    engine._env_manager = manager  # type: ignore[assignment]
-    workflow = Workflow(storage_path=tmp_path, engine="direct")
-    workflow._active_run_context = context
-    row_contexts, batch_context = _execution_contexts(3)
-    engine._dispatch_via_wetlands(
-        _StubTool(),
-        arguments_dicts=[{"a": 1}, {"a": 2}, {"a": 3}],
-        workflow=workflow,
-        node_name="cancel_node",
-        has_batch=False,
-        row_contexts=row_contexts,
-        batch_context=batch_context,
-        invocation_id=f"inv_{'1' * 32}",
-        cache_attempt_id=f"att_{'2' * 32}",
-        resources=ResourceSpec(max_concurrent=max_concurrent),
+    module_name = "cancellation_tool_" + uuid.uuid4().hex
+    source = tmp_path / (module_name + ".py")
+    source.write_text(
+        "from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption\n"
+        "class StubTool(ProcessingTool):\n"
+        "    row_consumption = RowConsumption.MAPPED\n"
+        "    environment = EnvironmentSpec('stub_wt_env', {})\n"
+        "    class Inputs(IOModel): a: int\n"
+        "    class Outputs(IOModel): value: float = 0.0\n"
+        "    def process_row(self, arguments, *, context=None): return self.Outputs()\n"
     )
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    engine = DefaultEngine(use_wetlands=True, env_manager=manager,  # type: ignore[arg-type]
+                           resource_lifetime="external")
+    workflow = Workflow(storage_path=tmp_path, engine="direct")
+    with workflow:
+        node = module.StubTool()(a=1, name="cancel_node")
+    reachable, dependencies, _ = engine._compile_execution_graph([node])
+    engine._compiled_ordinals = {
+        current: ordinal for ordinal, current in enumerate(engine._topological_sort(reachable, dependencies))
+    }
+    engine._capture_executable(node)
+    workflow._active_run_context = context
+    owner = workflow.shared_memory_context
+    row_contexts, batch_context = _execution_contexts(3)
+    try:
+        engine._dispatch_via_wetlands(
+            node.tool,
+            arguments_dicts=[{"a": 1}, {"a": 2}, {"a": 3}],
+            workflow=workflow,
+            node_name=node.name,
+            has_batch=False,
+            row_contexts=row_contexts,
+            batch_context=batch_context,
+            invocation_id=f"inv_{'1' * 32}",
+            cache_attempt_id=f"att_{'2' * 32}",
+            resources=ResourceSpec(max_concurrent=max_concurrent),
+        )
+    finally:
+        # These fake tasks have no physical worker; settle only their received
+        # grants after dispatch, without changing task cancel/wait/state effects.
+        for grant in manager.shared_memory_grants:
+            grant.drained()
+        assert owner.close().state == "closed"
+        engine.close()
+        if sys.modules.get(module_name) is module:
+            sys.modules.pop(module_name)
 
 
 def test_partial_submission_failure_drains_prior_task_despite_cleanup_interrupt(
@@ -163,9 +202,10 @@ def test_partial_submission_failure_drains_prior_task_despite_cleanup_interrupt(
         interrupt_cleanup_once=True,
     )
 
-    with pytest.raises(ValueError, match="second submission failed"):
+    with pytest.raises(ValueError, match="second submission failed") as observed:
         _dispatch_rows(tmp_path, manager, context)
 
+    assert observed.value is manager.submission_error
     assert manager.submit_calls == 2
     assert len(manager.tasks) == 1
     assert manager.tasks[0].cancel_calls == 1
@@ -228,7 +268,8 @@ class _CoincidentOutcomeManager(_PartialSubmissionManager):
         *args: Any,
         **kwargs: Any,
     ) -> _CoincidentOutcomeTask:
-        del args, kwargs
+        del args
+        self.shared_memory_grants.append(kwargs["shared_memory_grant"])
         self.submit_calls += 1
         task = _CoincidentOutcomeTask(self.context, self.outcome)
         self.tasks.append(task)

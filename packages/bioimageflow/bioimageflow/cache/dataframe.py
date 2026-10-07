@@ -38,6 +38,8 @@ def dataframe_lookup(
     storage_path: str | Path,
     node_name: str,
     sig_hash: str,
+    *,
+    hydrate_assets: bool = True,
 ) -> SelectedResult | None:
     """Bind one exact DataFrameTool cache selection, or return ``None`` on miss."""
     storage = Storage(storage_path)
@@ -46,7 +48,7 @@ def dataframe_lookup(
     if pointer is None:
         return None
     try:
-        return selected_result(storage, result_key, pointer.record_id, hydrate_assets=True)
+        return selected_result(storage, result_key, pointer.record_id, hydrate_assets=hydrate_assets)
     except Exception as exc:
         raise CacheCorruptionError("Cached dataframe is unreadable.") from exc
 

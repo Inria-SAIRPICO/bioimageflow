@@ -208,6 +208,10 @@ class _CacheRuntimeMixin:
         *,
         hydrate_assets: bool = True,
     ) -> Any:
+        if not hydrate_assets:
+            return self._check_node_cache_bound(
+                node, results, sig_hashes, workflow, hydrate_assets=False
+            )
         with workflow.shared_memory_context.activate():
             return self._check_node_cache_bound(
                 node, results, sig_hashes, workflow, hydrate_assets=hydrate_assets
@@ -285,7 +289,10 @@ class _CacheRuntimeMixin:
 
         # ── Cache lookup ──
         if isinstance(node.tool, DataFrameTool):
-            df = dataframe_lookup(workflow.storage_path, node.name, sig_hash)
+            df = dataframe_lookup(
+                workflow.storage_path, node.name, sig_hash,
+                hydrate_assets=hydrate_assets,
+            )
             if df is None:
                 return None, sig_hash
             self._pin_selected_result(node, df)
