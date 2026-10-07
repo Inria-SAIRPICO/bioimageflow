@@ -17,6 +17,16 @@ on:
         type: boolean
         required: false
         default: false
+      candidate_run_id:
+        description: Successful ordinary CI run at this commit containing the canonical packages artifact
+        type: string
+        required: false
+        default: ""
+      candidate_core_sha256:
+        description: Held SHA256 of the canonical Core wheel (requires candidate_run_id)
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -153,6 +163,9 @@ jobs:
     name: Core artifact contracts and array lifetime (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -168,9 +181,49 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.9"
+      - name: Select native build or held canonical Core candidate
+        id: core_candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || '' }}
+          CANDIDATE_SHA256: ${{ inputs.candidate_core_sha256 || '' }}
+          FLOOR_ONLY: ${{ inputs.core_floor_only || false }}
+        run: |
+          uv run --no-project --python 3.11 python scripts/check_core_candidate.py select \
+            --run-id "$CANDIDATE_RUN_ID" --sha256 "$CANDIDATE_SHA256" \
+            --event "$GITHUB_EVENT_NAME" --floor-only "$FLOOR_ONLY" --github-output "$GITHUB_OUTPUT"
+      - name: Admit exact successful ordinary candidate CI run
+        if: steps.core_candidate.outputs.candidate == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_SHA256: ${{ inputs.candidate_core_sha256 }}
+        run: |
+          uv run --no-project --python 3.11 python scripts/check_core_candidate.py run \
+            --run-id "$CANDIDATE_RUN_ID" --sha256 "$CANDIDATE_SHA256" \
+            --repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA" \
+            --source-root "$GITHUB_WORKSPACE" --receipt "$RUNNER_TEMP/core-candidate-run.json"
+      - name: Download the admitted ordinary packages artifact
+        if: steps.core_candidate.outputs.candidate == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packages
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/core-candidate-packages
+      - name: Verify canonical Core bytes before installation
+        id: candidate_wheel
+        if: steps.core_candidate.outputs.candidate == 'true'
+        run: |
+          uv run --no-project --python 3.11 python scripts/check_core_candidate.py wheel \
+            --artifacts "$RUNNER_TEMP/core-candidate-packages" \
+            --run-receipt "$RUNNER_TEMP/core-candidate-run.json" --source-root "$GITHUB_WORKSPACE" \
+            --receipt "$RUNNER_TEMP/core-candidate-wheel.json" --github-output "$GITHUB_OUTPUT"
       - name: Build current Core wheel without workspace sources
+        if: steps.core_candidate.outputs.candidate != 'true'
         run: uv build --package bioimageflow-core --no-sources --out-dir dist/core-array-lifetime
       - name: Install normal isolated artifact closure
+        env:
+          CANDIDATE_WHEEL: ${{ steps.candidate_wheel.outputs.wheel }}
         run: |
           uv venv --python "${{ matrix.python }}" "$RUNNER_TEMP/core-array-runtime"
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -178,16 +231,17 @@ jobs:
           else
             runtime_python="$RUNNER_TEMP/core-array-runtime/bin/python"
           fi
-          uv pip install --python "$runtime_python" --no-sources dist/core-array-lifetime/*.whl "numpy==1.26.4"
+          wheel_path="${CANDIDATE_WHEEL:-$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.0-py3-none-any.whl}"
+          uv pip install --python "$runtime_python" --no-sources "$wheel_path" "numpy==1.26.4"
           uv pip check --python "$runtime_python"
           echo "CORE_ARRAY_PYTHON=$runtime_python" >> "$GITHUB_ENV"
+          echo "CORE_ARRAY_WHEEL=$wheel_path" >> "$GITHUB_ENV"
       - name: Check source-disabled Core contracts and child/view/owner lifetimes
         run: |
           cp scripts/check_core_array_lifetime.py "$RUNNER_TEMP/check_core_array_lifetime.py"
-          wheel_path="$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.0-py3-none-any.whl"
           cd "$RUNNER_TEMP"
           "$CORE_ARRAY_PYTHON" -I check_core_array_lifetime.py \
-            --wheel "$wheel_path" --source-root "$GITHUB_WORKSPACE" \
+            --wheel "$CORE_ARRAY_WHEEL" --source-root "$GITHUB_WORKSPACE" \
             --expected-version 0.5.0 --expected-python "${{ matrix.python }}" \
             --root "$RUNNER_TEMP/core-array-witness" --receipt "$RUNNER_TEMP/core-array-receipt.json"
       - name: Upload exact capability receipt and child evidence
@@ -199,6 +253,8 @@ jobs:
             ${{ runner.temp }}/core-array-receipt.json
             ${{ runner.temp }}/core-array-witness/*-child.log
             ${{ runner.temp }}/core-array-witness/*-reply.json
+            ${{ runner.temp }}/core-candidate-run.json
+            ${{ runner.temp }}/core-candidate-wheel.json
           if-no-files-found: warn
           retention-days: 7
 

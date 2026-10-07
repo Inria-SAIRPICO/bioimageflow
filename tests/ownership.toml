@@ -14,12 +14,16 @@ sources = [
     "docs/generate_tool_package_docs.py",
     "scripts/release_set.py",
     "scripts/check_import_boundaries.py",
+    "scripts/check_complete_runtime_gate.py",
+    "scripts/check_core_candidate.py",
 ]
 edit_tests = [
     "tests/unit/test_viewer_requirements.py",
     "tests/unit/test_tool_package_doc_metadata.py",
     "tests/unit/test_release_tooling.py",
     "tests/unit/test_local_capability_ci.py",
+    "tests/unit/test_complete_runtime_gate.py",
+    "tests/unit/test_core_candidate.py",
     "tests/unit/test_release_tagging.py",
     "tests/unit/test_development_workflow.py",
     "tests/unit/test_core_python39_compat.py",

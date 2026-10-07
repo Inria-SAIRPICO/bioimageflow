@@ -437,6 +437,7 @@ def test_github_workflows_cover_normal_and_complete_validation() -> None:
         "docs",
     }
     assert set(complete["jobs"]) == {
+        "selection",
         "wetlands",
         "public-data",
         "external-binaries",

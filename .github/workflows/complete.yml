@@ -16,9 +16,20 @@ on:
           - public-data
           - external-binaries
           - model-runtimes
+      runtime_gate:
+        description: One affected runtime (requires suite=model-runtimes); all preserves the full suite
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - stardist
+          - instanseg
+          - nagini-api
+          - laptrack
 
 concurrency:
-  group: complete-${{ github.ref }}
+  group: complete-${{ github.ref }}-${{ inputs.suite || 'all' }}-${{ inputs.runtime_gate || 'all' }}
   cancel-in-progress: false
 
 permissions:
@@ -28,9 +39,25 @@ env:
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_LINK_MODE: copy
   UV_PYTHON: "3.11"
+  PYTHONDONTWRITEBYTECODE: "1"
+  COMPLETE_SUITE: ${{ inputs.suite || 'all' }}
+  COMPLETE_RUNTIME_GATE: ${{ inputs.runtime_gate || 'all' }}
 
 jobs:
+  selection:
+    name: Validate Complete selection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Refuse incompatible suite and runtime gate
+        run: >-
+          python3 -B scripts/check_complete_runtime_gate.py selection
+          --event "$GITHUB_EVENT_NAME" --suite "$COMPLETE_SUITE"
+          --gate "$COMPLETE_RUNTIME_GATE"
+
   wetlands:
+    needs: selection
     name: Complete Wetlands validation
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'wetlands'))
     continue-on-error: ${{ github.event_name == 'schedule' }}
@@ -51,6 +78,7 @@ jobs:
         run: uv run pytest -m "complete and wetlands" --run-complete -rsx
 
   public-data:
+    needs: selection
     name: Complete public-data validation
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'public-data'))
     continue-on-error: ${{ github.event_name == 'schedule' }}
@@ -83,6 +111,7 @@ jobs:
           exit "$test_status"
 
   external-binaries:
+    needs: selection
     name: Complete external-binary validation
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'external-binaries'))
     continue-on-error: ${{ github.event_name == 'schedule' }}
@@ -100,9 +129,26 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run complete external-binary tests
-        run: uv run pytest -m "complete and external_binary" --run-complete -rsx
+        run: >-
+          uv run pytest -m "complete and external_binary" --run-complete -rsx
+          --junitxml="${{ runner.temp }}/sairpico-junit.xml"
+      - name: Require all eight real SAIRPICO cases without skips
+        run: >-
+          uv run python scripts/check_complete_runtime_gate.py check-junit
+          --gate sairpico --report "${{ runner.temp }}/sairpico-junit.xml"
+          --output "${{ runner.temp }}/sairpico-receipt.json"
+
+      - name: Retain external-binary evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: complete-sairpico-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/sairpico-junit.xml
+            ${{ runner.temp }}/sairpico-receipt.json
 
   model-runtimes:
+    needs: selection
     name: Complete model-runtime validation
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'model-runtimes'))
     continue-on-error: ${{ github.event_name == 'schedule' }}
@@ -120,4 +166,53 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run complete model-runtime tests
+        if: env.COMPLETE_RUNTIME_GATE == 'all'
         run: uv run pytest -m "complete and model_runtime" --run-complete -rsx
+      - name: Capture the selected public runtime recipe
+        if: env.COMPLETE_RUNTIME_GATE != 'all'
+        id: runtime
+        run: >-
+          uv run python scripts/check_complete_runtime_gate.py plan
+          --gate "$COMPLETE_RUNTIME_GATE"
+          --output "${{ runner.temp }}/runtime-plan.json"
+          --requirements "${{ runner.temp }}/runtime-requirements.txt"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Prepare the isolated direct runtime
+        if: steps.runtime.outputs.direct == 'true'
+        run: |
+          uv venv --python "${{ steps.runtime.outputs.python }}" "${{ runner.temp }}/selected-runtime"
+          uv pip install --python "${{ runner.temp }}/selected-runtime/bin/python" \
+            --requirements "${{ runner.temp }}/runtime-requirements.txt" "pytest>=8.4.2,<10" \
+            --editable packages/bioimageflow-core --editable packages/bioimageflow \
+            --editable "${{ steps.runtime.outputs.project }}"
+          mkdir -p "${{ runner.temp }}/instanseg-models"
+          echo "INSTANSEG_BIOIMAGEIO_PATH=${{ runner.temp }}/instanseg-models" >> "$GITHUB_ENV"
+      - name: Require actual direct-runtime Python, pins and imports
+        if: steps.runtime.outputs.direct == 'true'
+        run: >-
+          "${{ runner.temp }}/selected-runtime/bin/python" -B
+          scripts/check_complete_runtime_gate.py preflight
+          --gate "$COMPLETE_RUNTIME_GATE" --plan "${{ runner.temp }}/runtime-plan.json"
+          --output "${{ runner.temp }}/runtime-preflight.json"
+      - name: Execute exactly the selected runtime case without skips
+        if: env.COMPLETE_RUNTIME_GATE != 'all'
+        env:
+          DIRECT_RUNTIME: ${{ steps.runtime.outputs.direct }}
+        run: |
+          runtime_python=.venv/bin/python
+          if [[ "$DIRECT_RUNTIME" == true ]]; then
+            runtime_python="${{ runner.temp }}/selected-runtime/bin/python"
+          fi
+          "$runtime_python" -B scripts/check_complete_runtime_gate.py run \
+            --gate "$COMPLETE_RUNTIME_GATE" --report "${{ runner.temp }}/runtime-junit.xml" \
+            --output "${{ runner.temp }}/runtime-receipt.json"
+      - name: Retain selected runtime evidence
+        if: always() && env.COMPLETE_RUNTIME_GATE != 'all'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: complete-runtime-${{ inputs.runtime_gate }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/runtime-plan.json
+            ${{ runner.temp }}/runtime-preflight.json
+            ${{ runner.temp }}/runtime-junit.xml
+            ${{ runner.temp }}/runtime-receipt.json

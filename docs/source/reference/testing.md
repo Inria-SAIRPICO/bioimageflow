@@ -159,10 +159,16 @@ uv run pytest packages/bioimageflow-common-tools/tests packages/bioimageflow-seg
 
 The **Complete validation** GitHub Actions workflow separates deterministic release validation from resource-dependent complete tests:
 
-- `release-validation` is manual-only and provides full deterministic Python 3.11 evidence before a release tag is created;
 - `wetlands`, `public-data`, `external-binaries`, and `model-runtimes` can be selected individually through a manual workflow dispatch;
 - the four resource-dependent suites run every Monday at 03:00 UTC to detect environment, download, binary, service, and model drift even when the repository has not changed;
-- the weekly schedule does not repeat `release-validation`, because equivalent deterministic coverage already runs for repository changes and is rerun by the release workflow.
+- deterministic coverage belongs to the ordinary exact-commit CI workflow rather than a duplicate Complete job.
+
+For a changed runtime, select `suite=model-runtimes` and one fixed `runtime_gate`: `stardist`, `instanseg`, `nagini-api`, or `laptrack`.
+The default `runtime_gate=all` preserves the existing full model-runtime selector and weekly schedule.
+Selection is validated before any resource job starts, and separate suite/gate concurrency keys keep independent targeted dispatches from replacing one another.
+The three direct runtimes use isolated interpreters and exact dependencies captured from the selected tool's public `EnvironmentSpec`; StarDist retains its managed worker recipe instead of treating its host interpreter as runtime evidence.
+Targeted gates require the exact selected JUnit case with no failures, errors, or skips, and the external-binary gate requires all eight real SAIRPICO cases.
+API/import coverage for `nagini-api` is explicitly narrower than native model inference.
 
 The corresponding local commands are:
 

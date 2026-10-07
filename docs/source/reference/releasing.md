@@ -173,6 +173,11 @@ The coordinated release workflow refuses to publish a commit without a successfu
 Manual capability runs, including the local-library mode, cannot satisfy this publication gate.
 
 The Core 0.5 scoped array surface additionally requires source-disabled public annotation/default, recipe, viewer, selected-primary and numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
+To verify the same canonical wheel on every floor, dispatch `ci.yml` with `core_floor_only=true`, `candidate_run_id` naming a successful ordinary push/pull-request CI run at the exact current commit, and `candidate_core_sha256` naming its held Core wheel hash.
+The paired optional inputs admit only that repository's ordinary `packages` artifact, the current Core filename/version, and the complete Git Python/typing member inventory before installing the unchanged wheel on each operating system.
+Without the candidate inputs, the existing per-platform normal builds remain available; their Windows checkout line endings do not establish identical wheel bytes across platforms.
+Candidate capability dispatches still cannot satisfy the ordinary exact-commit publication gate.
+The eventual immutable PyPI Core wheel must match the exact candidate SHA256 tested on Windows; a different published wheel blocks adoption until that wheel is validated.
 Run an additional resource-dependent suite only when the release changes that runtime surface:
 
 | Release surface | Additional suite in **Complete validation** |
@@ -185,6 +190,9 @@ Run an additional resource-dependent suite only when the release changes that ru
 
 Resource-dependent failures are non-blocking during weekly monitoring, but a manually selected suite is blocking and must pass before release.
 Do not make every package release wait for unrelated datasets, binaries, or models.
+For a changed supported runtime, the Complete workflow accepts a fixed `runtime_gate` with `suite=model-runtimes` and requires the selected actual case to pass without skips.
+InstanSeg, Nagini API, and LapTrack gates prepare isolated direct runtimes from their public recipes; StarDist keeps its managed worker boundary.
+The Nagini API gate proves its adapter interface, not model inference, and external-binary evidence requires all eight SAIRPICO cases.
 
 Preview the release set after CI succeeds:
 
