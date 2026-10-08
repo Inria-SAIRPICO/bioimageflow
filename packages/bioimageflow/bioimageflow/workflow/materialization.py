@@ -35,6 +35,7 @@ from .custom_sources import (
     _get_store_path,
     _resolve_custom_tool_class,
 )
+from .interfaces import _resolve_output_source
 
 if TYPE_CHECKING:
     from .model import Workflow
@@ -367,27 +368,27 @@ class _MaterializationMixin:
             source_node = built[source["node"]]
             from bioimageflow.workflow_node import WorkflowNode
 
-            if isinstance(source_node, WorkflowNode):
-                if source["column"] not in source_node.workflow._interface_outputs:
+            declaration = _resolve_output_source(source_node, source["column"])
+            if declaration is None:
+                if isinstance(source_node, WorkflowNode):
                     raise ValueError(
                         "Workflow output references an unknown child output port."
                     )
+                raise ValueError(
+                    "Workflow output references an unknown tool output column."
+                )
+            schema = copy.deepcopy(item.get("schema"))
+            if schema is None:
+                annotation, schema = declaration
             else:
-                output_schema = source_node.get_output_schema()
-                if output_schema is not None and source["column"] not in output_schema:
-                    raise ValueError(
-                        "Workflow output references an unknown tool output column."
-                    )
-            annotation = Any
-            if item.get("schema") is not None:
-                semantic = ResolvedSchema.from_columns({item["id"]: item["schema"]}).get(item["id"])
+                semantic = ResolvedSchema.from_columns({item["id"]: schema}).get(item["id"])
                 assert semantic is not None
                 annotation = semantic.annotation
             port = WorkflowOutputPort(
                 id=item["id"],
                 name=item["name"],
                 annotation=annotation,
-                schema=copy.deepcopy(item.get("schema")),
+                schema=schema,
                 source_node=source["node"],
                 source_output=source["column"],
                 viewer_addition=(
