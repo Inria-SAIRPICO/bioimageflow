@@ -37,6 +37,22 @@ if TYPE_CHECKING:
 _entry_tokens: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar("_workflow_entry_tokens", default=())
 
 
+def _resolve_output_source(
+    node: Node, column: str,
+) -> tuple[Any, dict[str, Any] | None] | None:
+    """Capture source semantics, distinguishing an unknown port from dynamic IO."""
+    from bioimageflow.workflow_node import WorkflowNode
+
+    if isinstance(node, WorkflowNode):
+        port = node.workflow._interface_outputs.get(column)
+        return None if port is None else (port.annotation, copy.deepcopy(port.schema))
+    resolved = node.get_resolved_output_schema()
+    semantic = resolved.get(column)
+    if semantic is not None:
+        return semantic.annotation, semantic.to_wire()
+    return (Any, None) if resolved.state == "dynamic" else None
+
+
 class _InterfacesMixin:
     def __init__(
         self,
@@ -222,22 +238,14 @@ class _InterfacesMixin:
         if port_id in self._interface_inputs or port_id in self._interface_outputs:
             raise ValueError(f"Workflow interface ID '{port_id}' is not unique.")
 
-        annotation: Any = Any
-        schema: dict[str, Any] | None = None
-        if isinstance(source.node, WorkflowNode):
-            child_port = source.node.workflow._interface_outputs.get(source.column)
-            if child_port is None:
+        declaration = _resolve_output_source(source.node, source.column)
+        if declaration is None:
+            if isinstance(source.node, WorkflowNode):
                 raise ValueError(
                     f"Unknown child workflow output port '{source.column}'."
                 )
-            annotation, schema = child_port.annotation, copy.deepcopy(child_port.schema)
-        else:
-            resolved = source.node.get_resolved_output_schema()
-            semantic = resolved.get(source.column)
-            if semantic is not None:
-                annotation, schema = semantic.annotation, semantic.to_wire()
-            elif resolved.state != "dynamic":
-                raise ValueError(f"Column '{source.column}' is not a resolved output of node '{source.node.name}'.")
+            raise ValueError(f"Column '{source.column}' is not a resolved output of node '{source.node.name}'.")
+        annotation, schema = declaration
         self._interface_outputs[port_id] = WorkflowOutputPort(
             id=port_id,
             name=name,

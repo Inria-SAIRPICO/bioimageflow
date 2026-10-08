@@ -3575,6 +3575,8 @@ DataFrame inputs target positional `DataFrameTool` inputs or child-workflow Data
 A symbolic input can fan out to multiple compatible targets, but cannot be used outside its active owner.
 
 `Workflow.output(name, source, *, id=None)` publishes an internal `ColumnRef`.
+Its annotation and detached schema come from the accepted source declaration, including a known port within a partially dynamic source or an already materialized child workflow output.
+Only a genuinely unresolved dynamic output remains unknown; an absent declared source port is an error.
 Interface names are unique across inputs and outputs, while IDs are immutable wire identities.
 The name `name` is reserved for invocation node naming and cannot be an input name.
 
@@ -3608,6 +3610,8 @@ A recursive node has `"type": "workflow"`, an inline `workflow` graph, and const
 Tool nodes use `"type": "tool"`.
 Edges have explicit `"column"` or `"dataframe"` variants and stable IDs.
 Version 2 adds only portable `viewer_additions` on tool/workflow nodes and `viewer_addition` on public workflow outputs.
+An omitted or null public-output `schema` infers the same source declaration as imperative `Workflow.output`, after child interfaces have materialized, preserving downstream type and image compatibility checks.
+A non-null carried schema remains the explicit interface authority, even when it differs from the source declaration; source endpoint validation still applies.
 Unknown variants, extra fields, unsupported schemas, malformed endpoints, duplicate IDs, and unversioned graphs are errors.
 
 `PackageRequirement` preserves an author's Python distribution spelling, exposes its PEP 503 `normalized_name`, and validates its optional PEP 440 `version` constraint.
