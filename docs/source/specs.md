@@ -1539,6 +1539,35 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 Tools are distributed as standard Python packages. The package version participates in result-key material for caching (see [Section 6.1](#61-result-key)). When a tool's package version changes, cached results for that tool are automatically invalidated.
 First-party BioImageFlow packages are released independently, so package references must use versions allowed by each distribution's declared compatibility requirements.
 
+#### Basic OMERO Transfer Package
+
+`bioimageflow-omero-tools` exposes `bioimageflow_omero_tools.omero.OmeroDownloadDataset` and `OmeroUploadImage` as mapped `ProcessingTool` classes.
+Its host dependency is Core `>=0.5.0,<0.6`; OMERO, Ice, keyring and image libraries are imported only inside worker operations.
+Both tools require explicit non-secret `host`, `username`, `port` (default `4064`) and positive `dataset_id` inputs.
+The worker reads the password from the local keyring service `bioimageflow-omero` using the key `{host}:{port}:{username}`.
+Passwords and session UUIDs must not enter tool inputs, outputs, templates, package source, result-key material or forwarded SDK diagnostics.
+The platform may populate the three connection fields from a saved Settings connection when creating a node; generic callers supply the same public fields without a platform import or hidden registry mutation.
+
+Download writes one owned OME-TIFF per dataset image using numeric dataset/image IDs in paths, and returns its image path, IDs, original image name, complete `TCZYX` shape, axes and dtype.
+All channels, timepoints and Z planes are retained; supported scalar dtypes are `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32` and `float64`.
+Upload accepts one unambiguous scalar TIFF/OME-TIFF series, or one grayscale uint8/uint16 or RGB/RGBA uint8 PNG image; palette PNG, implicit transparency keys, animations, ambiguous TIFF axes, multiple series and unsupported dtypes are refused before remote mutation.
+PNG color and alpha samples become separate OMERO channels without numeric conversion.
+Upload supports an optional image name, description and string-to-string map annotation and returns the created image/dataset/annotation IDs.
+This is a pixel transfer, not a Bio-Formats fileset importer: acquisition metadata, physical units, channel labels, color interpretation and original source bytes are not copied automatically.
+
+Normal result caching reuses the previously captured snapshot or uploaded object IDs.
+Callers use the normal force/cache-refresh execution controls for an intentional new upload or refreshed remote snapshot; no artificial operation-token input is provided.
+Each transfer owns and closes its session, uses finite Ice connection/call timeouts, suppresses SDK session diagnostics only for its active scope and restores its own logging filters afterward, including overlapping calls.
+Local output cleanup never removes a pre-existing path; remote rollback only attempts deletion of object IDs actually returned to that invocation.
+Rollback diagnostics retain those exact owned kind/ID pairs and explicitly qualify deletion as unverified, because the public SDK's finite wait may return without terminal deletion evidence.
+OMERO upload is not transactional: an SDK/server failure before an ID is returned can leave an incomplete remote object, and no name-based or unrelated-object deletion is attempted.
+
+The public `EnvironmentSpec` selects a pinned CPython 3.12 recipe with OMERO.py 5.23.0 and the official Ice 3.6.5 wheel for macOS arm64/x86_64 or glibc Linux x86_64 (glibc >=2.28).
+The recipe uses ordinary pip requirements and one direct wheel reference, without environment markers or installer flags.
+Other worker platforms are explicitly unsupported.
+Recipe selection occurs at import, so discovery of this package is also restricted to those supported host platforms.
+Recipe declaration tests and fake-service pixel/session tests do not establish worker provisioning, an accessible OS keyring backend, server compatibility or live roundtrip success; those require separate managed-worker and owned-object integration validation.
+
 #### Package Structure Requirements
 
 Tool packages **must use relative imports** for all intra-package references. This is critical for the versioned loading mechanism to work correctly:

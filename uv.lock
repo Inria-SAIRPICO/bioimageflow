@@ -21,6 +21,7 @@ members = [
     "bioimageflow-core",
     "bioimageflow-io-tools",
     "bioimageflow-measurement-tools",
+    "bioimageflow-omero-tools",
     "bioimageflow-phasor-tools",
     "bioimageflow-restoration-tools",
     "bioimageflow-sairpico-tools",
@@ -212,6 +213,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "bioimageflow-omero-tools"
+version = "0.1.0"
+source = { editable = "packages/bioimageflow-omero-tools" }
+dependencies = [
+    { name = "bioimageflow-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow-core" }]
+
+[[package]]
 name = "bioimageflow-phasor-tools"
 version = "0.1.0"
 source = { editable = "packages/bioimageflow-phasor-tools" }
@@ -319,6 +331,7 @@ dev = [
     { name = "bioimageflow-common-tools" },
     { name = "bioimageflow-io-tools" },
     { name = "bioimageflow-measurement-tools" },
+    { name = "bioimageflow-omero-tools" },
     { name = "bioimageflow-phasor-tools" },
     { name = "bioimageflow-restoration-tools" },
     { name = "bioimageflow-sairpico-tools" },
@@ -336,6 +349,7 @@ dev = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "packaging" },
     { name = "parsl" },
+    { name = "pillow" },
     { name = "psij-python" },
     { name = "pyright" },
     { name = "pytest" },
@@ -369,6 +383,7 @@ dev = [
     { name = "bioimageflow-common-tools", editable = "packages/bioimageflow-common-tools" },
     { name = "bioimageflow-io-tools", editable = "packages/bioimageflow-io-tools" },
     { name = "bioimageflow-measurement-tools", editable = "packages/bioimageflow-measurement-tools" },
+    { name = "bioimageflow-omero-tools", editable = "packages/bioimageflow-omero-tools" },
     { name = "bioimageflow-phasor-tools", editable = "packages/bioimageflow-phasor-tools" },
     { name = "bioimageflow-restoration-tools", editable = "packages/bioimageflow-restoration-tools" },
     { name = "bioimageflow-sairpico-tools", editable = "packages/bioimageflow-sairpico-tools" },
@@ -382,6 +397,7 @@ dev = [
     { name = "numpy", specifier = ">=1.23.5" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "parsl", specifier = ">=2026.5.25,<2026.6" },
+    { name = "pillow", specifier = ">=10.0" },
     { name = "psij-python", specifier = ">=0.9.11,<0.10" },
     { name = "pyright", specifier = ">=1.1.410" },
     { name = "pytest", specifier = ">=8.0" },

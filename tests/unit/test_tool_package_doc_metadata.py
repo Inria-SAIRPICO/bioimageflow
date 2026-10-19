@@ -32,6 +32,7 @@ def test_package_docs_parse_full_toml_and_use_declared_project_name(
     pages = build_pages([metadata])
     assert any("declared-tools" in path.parts for path in pages)
     assert any(metadata.title in content for content in pages.values())
+    assert all(content.endswith("\n") and not content.endswith("\n\n") for content in pages.values())
     monkeypatch.setattr(generator, "PACKAGES_DIR", tmp_path)
     monkeypatch.setattr(generator, "FIRST_PARTY_ORDER", ["checkout-label"])
     monkeypatch.delenv("BIOIMAGEFLOW_DOC_PACKAGE_PATHS", raising=False)

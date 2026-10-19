@@ -1,4 +1,4 @@
-"""Main-process requirements declared by the nine first-party tool packages."""
+"""Main-process requirements declared by the first-party tool packages."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ ROOT = Path(__file__).parents[2]
 EXPECTED = {
     "common": {"bioimageflow-core", "bioimageflow", "pandas"},
     "io": {"bioimageflow-core"},
+    "omero": {"bioimageflow-core"},
     "measurement": {"bioimageflow-core", "bioimageflow", "numpy", "pandas"},
     "phasor": {"bioimageflow-core"},
     "restoration": {"bioimageflow-core"},

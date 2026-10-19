@@ -22,6 +22,7 @@ OUTPUT_DIR = ROOT / "docs" / "source" / "tool_packages"
 FIRST_PARTY_ORDER = [
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
+    "bioimageflow-omero-tools",
     "bioimageflow-segmentation-tools",
     "bioimageflow-measurement-tools",
     "bioimageflow-phasor-tools",
@@ -273,7 +274,7 @@ def package_index(package: PackageDocs) -> str:
     toctree = ""
     if entries:
         toctree = "\n## Detailed Pages\n\n```{toctree}\n:maxdepth: 1\n\n" + "\n".join(entries) + "\n```\n"
-    return f"{GENERATED_HEADER}\n\n{include}\n{toctree}"
+    return f"{GENERATED_HEADER}\n\n{include}\n{toctree}".rstrip("\n") + "\n"
 
 
 def include_page(source: Path) -> str:

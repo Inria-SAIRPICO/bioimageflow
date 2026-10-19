@@ -1,0 +1,39 @@
+[project]
+name = "bioimageflow-omero-tools"
+version = "0.1.0"
+description = "Basic lossless OMERO dataset download and image upload tools for BioImageFlow"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "BioImageFlow Contributors" }]
+license = "BSD-4-Clause"
+license-files = ["LICENSE"]
+keywords = ["bioimage-analysis", "bioimageflow", "microscopy", "workflow", "omero"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = ["bioimageflow-core>=0.5.0,<0.6"]
+
+[project.urls]
+Homepage = "https://github.com/Inria-SAIRPICO/bioimageflow"
+Documentation = "https://bioimageflow.readthedocs.io/latest/"
+Repository = "https://github.com/Inria-SAIRPICO/bioimageflow"
+Issues = "https://github.com/Inria-SAIRPICO/bioimageflow/issues"
+
+[tool.uv.sources]
+bioimageflow-core = { workspace = true }
+
+[tool.hatch.build]
+exclude = ["/.DS_Store", "/.pytest_cache/", "/.ruff_cache/", "/__pycache__/", "/build/", "/dist/"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
