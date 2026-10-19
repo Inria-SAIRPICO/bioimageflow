@@ -32,7 +32,8 @@ _CORE_PKG = str(Path(__file__).resolve().parents[2] / "packages" / "bioimageflow
 
 stub_env = EnvironmentSpec(
     name="stub_test_env",
-    dependencies={"pip": [f"bioimageflow-core @ file://{_CORE_PKG}"], "python": "3.13"},
+    # The manager chooses the authoritative published or explicit source Core.
+    dependencies={"python": "3.13"},
 )
 
 gpu_env = EnvironmentSpec(

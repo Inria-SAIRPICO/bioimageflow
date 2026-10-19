@@ -343,6 +343,7 @@ class _DispatchMixin:
                     worker_timeout=worker_timeout,
                     shared_memory_grant=scope,
                     runtime_receipt=runtime_receipt,
+                    scoped_node_path=node_name,
                 )
                 tracker.register([task])
                 if workflow.cancel_requested:
@@ -442,6 +443,7 @@ class _DispatchMixin:
                         worker_timeout=worker_timeout,
                         shared_memory_grant=scopes[len(tasks)],
                         runtime_receipt=runtime_receipt,
+                        scoped_node_path=node_name,
                     )
                     active.append(task)
                     tasks.append(task)

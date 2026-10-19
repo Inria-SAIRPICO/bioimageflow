@@ -75,6 +75,46 @@ def test_matching_runtime_reuses_content_even_with_stale_replacement_permission(
     assert environment.start_count == 0
 
 
+def test_preparation_scope_is_per_call_and_never_memoized_with_shared_receipt(runtime):
+    preparations, admissions = [], {}
+    first = runtime.manager.admit_runtime(
+        runtime.spec, provision=True, admissions=admissions,
+        scoped_node_path="left/worker", on_preparation=preparations.append,
+    )
+    second = runtime.manager.admit_runtime(
+        runtime.spec, provision=True, admissions=admissions,
+        scoped_node_path="right/worker", on_preparation=preparations.append,
+    )
+    assert first is second
+    assert len(preparations) == 1
+    first_preparation = preparations[0]
+    assert first_preparation.scoped_node_path == "left/worker"
+    third = runtime.manager.admit_runtime(
+        runtime.spec, provision=True, scoped_node_path="next/worker",
+        on_preparation=preparations.append,
+    )
+    assert third == first
+    assert len(preparations) == 2 and preparations[1] is not first_preparation
+    assert preparations[1].scoped_node_path == "next/worker"
+    assert first_preparation.scoped_node_path == "left/worker"
+    assert first_preparation.requested_recipe_hash == preparations[1].requested_recipe_hash
+    assert len(runtime.public.provisioned_specs) == 1
+    assert runtime.public.environment(runtime.spec.name).start_count == 0
+
+
+def test_standalone_preparation_has_no_executable_scope(runtime):
+    preparations = []
+    runtime.manager.admit_runtime(runtime.spec, provision=True, on_preparation=preparations.append)
+    assert len(preparations) == 1 and preparations[0].scoped_node_path is None
+
+
+@pytest.mark.parametrize("scope", ["", 3])
+def test_invalid_preparation_scope_refuses_before_runtime_effects(runtime, scope):
+    with pytest.raises((TypeError, ValueError), match="scoped_node_path"):
+        runtime.manager.admit_runtime(runtime.spec, provision=True, scoped_node_path=scope)
+    assert runtime.public.provisioned_specs == [] and runtime.reads == []
+
+
 def test_planning_and_unauthorized_stale_admission_have_no_lifecycle_effects(runtime):
     manager, public, spec = runtime.manager, runtime.public, runtime.spec
     assert manager.admit_runtime(spec, provision=False) is None
