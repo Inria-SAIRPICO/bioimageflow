@@ -73,6 +73,14 @@ class EnvironmentPreparation:
     action: Literal["creating", "updating", "starting", "reusing"]
     requested_recipe_hash: str
     existing_recipe_hash: str | None = None
+    scoped_node_path: str | None = None
+
+
+def _validate_scoped_node_path(value: str | None) -> None:
+    if value is not None and not isinstance(value, str):
+        raise TypeError("scoped_node_path must be a non-empty str or None")
+    if value == "":
+        raise ValueError("scoped_node_path must be a non-empty str or None")
 
 
 def _manager_config(
@@ -311,6 +319,7 @@ class WetlandsEnvManager:
         on_preparation: Callable[[EnvironmentPreparation], None] | None = None,
         on_provision_event: Callable[[OperationEvent], None] | None = None,
         on_removal_event: Callable[[OperationEvent], None] | None = None,
+        scoped_node_path: str | None = None,
     ) -> RuntimeContentReceipt | None:
         """Admit ready content with observed, worker-free preparation.
 
@@ -319,7 +328,11 @@ class WetlandsEnvManager:
         replaces a memoized receipt. Planning (``provision=False``) is read-only.
         Observers and interruption ownership match explicit recreation; callers
         must independently fence the returned receipt at subsequent use.
+        ``scoped_node_path`` is the caller's canonical executable path, never a
+        display label. It belongs only to this call's observations, not to the
+        recipe or shared receipt; standalone lifecycle calls may omit it.
         """
+        _validate_scoped_node_path(scoped_node_path)
         if not isinstance(provision, bool) or not isinstance(replace_stale, bool):
             raise TypeError("provision and replace_stale must be bools")
         if replace_stale and not provision:
@@ -334,7 +347,9 @@ class WetlandsEnvManager:
 
         def preparation(action: Literal["creating", "updating", "reusing"], existing: str | None) -> None:
             if on_preparation is not None:
-                on_preparation(EnvironmentPreparation(name, action, recipe.recipe_hash, existing))
+                on_preparation(EnvironmentPreparation(
+                    name, action, recipe.recipe_hash, existing, scoped_node_path,
+                ))
 
         with self._lock:
             return RuntimeAdmission(self._manager).admit(
@@ -634,9 +649,16 @@ class WetlandsEnvManager:
         *,
         shared_memory_grant: Any = None,
         runtime_receipt: RuntimeContentReceipt | None = None,
+        scoped_node_path: str | None = None,
     ) -> Any:
+        """Submit an admitted task with its transient executable observation scope.
+
+        The scope is separate from the worker payload and does not participate
+        in pool ownership, runtime content identity or task serialization.
+        """
         with self._lock:
             try:
+                _validate_scoped_node_path(scoped_node_path)
                 pool = self.get_or_create(
                     env_spec, max_workers=max_workers, worker_timeout=worker_timeout,
                     runtime_receipt=runtime_receipt,

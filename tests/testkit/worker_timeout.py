@@ -190,6 +190,7 @@ class _StubEnvManager:
         *,
         shared_memory_grant=None,
         runtime_receipt=None,
+        scoped_node_path=None,
     ):
         self.last_worker_timeout = worker_timeout
         if shared_memory_grant is not None:

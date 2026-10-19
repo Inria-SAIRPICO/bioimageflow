@@ -107,7 +107,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.9.3"
+version = "0.9.4"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -356,7 +356,7 @@ dev = [
     { name = "sphinx-copybutton" },
     { name = "tifffile", version = "2025.5.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli" },
     { name = "wetlands" },
 ]
 
@@ -394,7 +394,7 @@ dev = [
     { name = "sphinx-autodoc-typehints", specifier = ">=3.0.1" },
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
     { name = "tifffile", specifier = ">=2023.7.10" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
+    { name = "tomli", specifier = ">=2.0.1" },
     { name = "wetlands", specifier = ">=2.6.1,<3" },
 ]
 

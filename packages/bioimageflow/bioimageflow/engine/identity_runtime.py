@@ -32,7 +32,7 @@ class _IdentityRuntimeMixin:
         assert self._env_manager is not None
         receipt = self._env_manager.admit_runtime(
             node.tool.environment, provision=provision,
-            admissions=self._runtime_admissions,
+            admissions=self._runtime_admissions, scoped_node_path=node.name,
         )
         self._node_runtime_receipts[node] = receipt
         return receipt

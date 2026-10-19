@@ -7,6 +7,7 @@ Pixi provisioning or physical worker processes.
 import hashlib
 import importlib.metadata
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -166,9 +167,13 @@ class ReceiptTool(ProcessingTool):
     owners = []
     engines = []
 
-    def workflow(*, backend="wetlands", names=("subject",)):
-        with Workflow(engine=backend, execution="sequential", storage_path=tmp_path / "records") as graph:
-            nodes = tuple(module.ReceiptTool()(name=name) for name in names)
+    def workflow(*, backend="wetlands", names=("subject",), execution="sequential", nested=False):
+        if nested:
+            with Workflow(name="definition", engine=backend) as child:
+                leaf = module.ReceiptTool()(name="leaf")
+                child.output("value", leaf["value"], id="value-output")
+        with Workflow(engine=backend, execution=execution, storage_path=tmp_path / "records") as graph:
+            nodes = (child(name="branch"),) if nested else tuple(module.ReceiptTool()(name=name) for name in names)
         owners.append(graph.shared_memory_context)
         engine = graph.create_engine(resource_lifetime="external", env_manager=manager) if backend == "wetlands" else graph.create_engine()
         engines.append(engine)
@@ -266,6 +271,61 @@ def test_shared_augmented_recipe_admits_once_per_operation_and_refreshes_next(ru
     assert runtime.provider.receipt_reads == 2
     assert all(selected[name][0] != changed[name][0] for name in selected)
     assert runtime.dependency.calls == [1, 1, 9, 9]
+
+
+@pytest.mark.parametrize("execution", ["sequential", "parallel"])
+def test_shared_runtime_admission_and_dispatch_keep_each_executable_scope(runtime, monkeypatch, execution):
+    """The same ready receipt is shared; the caller's node scope is not."""
+    admissions, submissions = [], []
+    admit = runtime.manager.admit_runtime
+    submit = runtime.manager.submit_processing_task
+    both_admitting = threading.Barrier(2) if execution == "parallel" else None
+
+    def observed_admit(spec, **kwargs):
+        scope = kwargs.get("scoped_node_path")
+        if both_admitting is not None:
+            both_admitting.wait(timeout=5)
+        receipt = admit(spec, **kwargs)
+        admissions.append((scope, receipt))
+        return receipt
+
+    def observed_submit(spec, payload, **kwargs):
+        submissions.append((kwargs.get("scoped_node_path"), payload["node_name"]))
+        return submit(spec, payload, **kwargs)
+
+    monkeypatch.setattr(runtime.manager, "admit_runtime", observed_admit)
+    monkeypatch.setattr(runtime.manager, "submit_processing_task", observed_submit)
+    graph, nodes, engine = runtime.workflow(names=("left", "right"), execution=execution)
+    _, selected = _compute(graph, nodes, engine)
+
+    assert set(selected) == {"left", "right"}
+    assert {scope for scope, _ in admissions} == {"left", "right"}
+    assert len(admissions) == 2 and admissions[0][1] is admissions[1][1]
+    assert sorted(submissions) == [("left", "left"), ("right", "right")]
+    assert runtime.provider.receipt_reads == 1
+    assert runtime.provider.provisions == []
+
+
+def test_runtime_preparation_uses_recursive_executable_path_before_started(runtime, monkeypatch):
+    admitted, preparations, progress = [], [], []
+    admit = runtime.manager.admit_runtime
+
+    def observed_admit(spec, **kwargs):
+        scope = kwargs.get("scoped_node_path")
+        admitted.append((scope, [event.node_name for event in progress if event.status == "started"]))
+        return admit(spec, **kwargs, on_preparation=preparations.append)
+
+    monkeypatch.setattr(runtime.manager, "admit_runtime", observed_admit)
+    graph, nodes, engine = runtime.workflow(nested=True)
+    graph.on_progress = progress.append
+    frame, selected = _compute(graph, nodes, engine)
+
+    assert frame["value"].tolist() == [1]
+    assert "branch/leaf" in selected
+    assert admitted == [("branch/leaf", [])]
+    assert len(preparations) == 1
+    assert preparations[0].scoped_node_path == "branch/leaf"
+    assert "branch/leaf" in {event.node_name for event in progress if event.status == "started"}
 
 
 def test_active_steps_refuse_same_engine_plan_without_erasing_admission(runtime):
