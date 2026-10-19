@@ -1,4 +1,4 @@
-# BioImageFlow OMERO Tools
+# bioimageflow-omero-tools
 
 Basic dataset download and image upload for BioImageFlow, requiring only `bioimageflow-core>=0.5.0,<0.6` for discovery.
 
