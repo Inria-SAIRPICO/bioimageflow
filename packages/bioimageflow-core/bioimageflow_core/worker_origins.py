@@ -13,10 +13,9 @@ import os
 from pathlib import Path
 import re
 import sys
-import threading
 from typing import Any, Dict, Iterator, Literal, Mapping, Optional, Tuple, Type, Union
 
-from bioimageflow_core.import_context import _import_names, _owns, admit_import_root, selected_import_root
+from bioimageflow_core.import_context import _import_names, _lock, _owns, admit_import_root, selected_import_root
 from bioimageflow_core.tool import ProcessingTool
 from bioimageflow_core.primary_content import (
     PrimaryContentProof, admit_primary_content, decode_primary_content,
@@ -149,8 +148,9 @@ _ORIGIN_TYPES: Dict[str, Tuple[Type[Any], Tuple[str, ...]]] = {
     ),
 }
 
-_instance_lock = threading.RLock()
+_instance_lock = _lock
 _instances: Dict[str, ProcessingTool] = {}
+_admitted: Dict[str, Tuple[Any, Type[ProcessingTool]]] = {}
 _source_modules: Dict[str, Any] = {}
 
 
@@ -685,49 +685,60 @@ def _load_worker_tool(origin: WorkerToolOrigin, *, admission: Any = None) -> Pro
         return tool
 
 
-@contextmanager
-def _selected_worker_tool(origin: WorkerToolOrigin, *, admission: Any = None) -> Iterator[ProcessingTool]:
-    """Reattest selected bytes and resident methods on every task admission."""
+def _worker_admission(origin: WorkerToolOrigin) -> Tuple[str, Any, Type[ProcessingTool]]:
+    """Admit one complete origin for this fixed worker environment generation."""
     validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
     identity = worker_tool_origin_identity(validated)
-    primary = admit_primary_content(validated.primary)
-    _require_origin_coverage(validated, primary)
-    aliases = {}
-    if isinstance(validated, SourceFileOrigin):
-        selected = Path(validated.path).resolve(strict=True)
-        aliases = {name: f"_bioimageflow_worker_{identity}"
-                   for name, path in primary.paths.items() if path == selected}
-        _require_owned_source_namespace(identity)
-    try:
+    with _instance_lock:
+        held = _admitted.get(identity)
+        if held is not None:
+            return identity, held[0], held[1]
+        primary = admit_primary_content(validated.primary)
+        _require_origin_coverage(validated, primary)
+        aliases = _primary_aliases(validated, identity, primary)
+        if isinstance(validated, SourceFileOrigin):
+            _require_owned_source_namespace(identity)
+        primary.attest_modules(aliases)
         with primary_import_context(primary, aliases=aliases):
-            with _instance_lock:
-                instance = _instances.get(identity)
-                if instance is None:
-                    candidate = _load_origin_class(validated, identity, primary)
-                    primary.attest(candidate)
-                    instance = candidate()
-                    primary.attest(instance)
-                    if admission is not None:
-                        _ = admission.observed_dependencies
-                    _instances[identity] = instance
-                else:
-                    primary.attest(instance)
+            candidate = _load_origin_class(validated, identity, primary)
+            primary.attest(candidate)
+        _admitted[identity] = (primary, candidate)
+        return identity, primary, candidate
+
+
+def _primary_aliases(origin: WorkerToolOrigin, identity: str, primary: Any) -> Dict[str, str]:
+    if not isinstance(origin, SourceFileOrigin):
+        return {}
+    selected = Path(origin.path).resolve()
+    return {name: f"_bioimageflow_worker_{identity}"
+            for name, path in primary.paths.items() if path == selected}
+
+
+@contextmanager
+def _selected_worker_tool(origin: WorkerToolOrigin, *, admission: Any = None) -> Iterator[ProcessingTool]:
+    """Reuse admitted source/class/instance facts for the complete origin."""
+    with _instance_lock:
+        identity, primary, candidate = _worker_admission(origin)
+        aliases = _primary_aliases(origin, identity, primary)
+        with primary_import_context(primary, aliases=aliases):
+            instance = _instances.get(identity)
+            if instance is None:
+                instance = candidate()
+                # Constructors may intentionally select instance callbacks;
+                # retain the existing first-admission compatibility check.
+                primary.attest(instance)
+                _instances[identity] = instance
             yield instance
-    except BaseException:
-        with _instance_lock:
-            cached = _instances.get(identity)
-            if cached is not None and type(cached).__module__ in primary.owned_modules:
-                _instances.pop(identity)
-            for name, module in primary.owned_modules.items():
-                if sys.modules.get(name) is not module and _source_modules.get(name) is module:
-                    _source_modules.pop(name)
-        raise
 
 
 def clear_worker_tool_instances() -> None:
-    """Clear the origin-aware instance cache."""
+    """Retire reusable worker admissions without unloading another live owner."""
     with _instance_lock:
         _instances.clear()
+        _admitted.clear()
+        # Keep actual admitted module ownership: an extant reference/run may
+        # still own those objects. A different captured origin gets a distinct
+        # namespace, and canonical namespace conflicts remain admission errors.
 
 
 def _require_owned_source_namespace(identity: str) -> None:
@@ -737,22 +748,8 @@ def _require_owned_source_namespace(identity: str) -> None:
 
 
 def _admit_origin_class(origin: WorkerToolOrigin) -> Type[ProcessingTool]:
-    """Admit a preflight class without constructing a tool instance."""
-    validated = decode_worker_tool_origin(encode_worker_tool_origin(origin))
-    identity = worker_tool_origin_identity(validated)
-    primary = admit_primary_content(validated.primary)
-    _require_origin_coverage(validated, primary)
-    aliases = {}
-    if isinstance(validated, SourceFileOrigin):
-        selected = Path(validated.path).resolve(strict=True)
-        aliases = {name: f"_bioimageflow_worker_{identity}"
-                   for name, path in primary.paths.items() if path == selected}
-        _require_owned_source_namespace(identity)
-    with primary_import_context(primary, aliases=aliases):
-        with _instance_lock:
-            candidate = _load_origin_class(validated, identity, primary)
-            primary.attest(candidate)
-            return candidate
+    """Admit/reuse a preflight class without constructing a tool instance."""
+    return _worker_admission(origin)[2]
 
 
 def _require_origin_coverage(origin: WorkerToolOrigin, primary: Any) -> None:

@@ -141,15 +141,34 @@ def test_new_b_digest_cannot_relabel_warmed_resident_a(selected):
     assert first.process_row(Arguments()).value == 1
 
 
-def test_warmed_instance_callback_replacement_refuses_before_science(selected):
+def test_warmed_worker_reuses_admitted_primary_and_class_until_clear(selected, monkeypatch):
+    import bioimageflow_core.worker_origins as worker_origins
+    from bioimageflow_core.primary_content import PrimaryContentAdmission
+
+    captures, attests = [], []
+    admit = worker_origins.admit_primary_content
+    attest = PrimaryContentAdmission.attest
+
+    def capture(proof):
+        captures.append(proof)
+        return admit(proof)
+
+    def compare(self, tool):
+        attests.append(tool)
+        return attest(self, tool)
+
+    monkeypatch.setattr(worker_origins, 'admit_primary_content', capture)
+    monkeypatch.setattr(PrimaryContentAdmission, 'attest', compare)
     instance = load_worker_tool(selected.origin)
-    def replacement(arguments):
-        selected.called.touch()
-        return instance.Outputs(value=9)
-    instance.process_row = replacement
-    with pytest.raises(ValueError, match="Resident/source|primary|Primary"):
-        load_worker_tool(selected.origin)
-    assert not selected.called.exists()
+    assert len(captures) == 1 and len(attests) == 2
+    for _ in range(10):
+        assert load_worker_tool(selected.origin) is instance
+    assert len(captures) == 1 and len(attests) == 2
+    clear_worker_tool_instances()
+    replacement = load_worker_tool(selected.origin)
+    assert replacement is not instance
+    assert len(captures) == 2 and len(attests) == 4
+    assert replacement.process_row(Arguments()).value == instance.process_row(Arguments()).value == 1
 
 
 def test_primary_proof_decode_is_pure_and_requires_every_owner(selected, monkeypatch):

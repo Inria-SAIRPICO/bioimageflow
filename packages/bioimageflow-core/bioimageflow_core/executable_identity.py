@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import dis
+from functools import lru_cache
 import hashlib
 import inspect
 import sys
@@ -242,6 +243,16 @@ def _code_index(code: CodeType, prefix: str = "") -> dict[str, CodeType]:
     return result
 
 
+@lru_cache(maxsize=128)
+def _source_analysis(source: bytes, interpreter: tuple[Any, ...]) -> tuple[ast.Module, dict[str, Any], dict[str, ast.AST], dict[str, CodeType]]:
+    # Exact bytes and interpreter/contract select the reusable non-executing
+    # analysis. Paths and mutable resident functions are never cache keys.
+    tree = ast.parse(source)
+    literals, definitions = _binding_index(tree)
+    codes = _code_index(compile(tree, "<admitted-source>", "exec", dont_inherit=True))
+    return tree, literals, definitions, codes
+
+
 def validate_source_callables(
     source: bytes, callbacks: Mapping[str, Callable[..., Any]], *, canonicalize: Canonicalizer,
 ) -> tuple[str, ...]:
@@ -252,9 +263,9 @@ def validate_source_callables(
     Returns explicit unknown initializer/dependency facts rather than claiming
     that matching primary code proves complete executable closure.
     """
-    tree = ast.parse(source)
-    literals, definitions = _binding_index(tree)
-    codes = _code_index(compile(tree, "<admitted-source>", "exec", dont_inherit=True))
+    tree, literals, definitions, codes = _source_analysis(
+        source, (sys.implementation.name, sys.version_info.major, sys.version_info.minor,
+                 sys.flags.optimize, "source-callables.v1"))
     unresolved: set[str] = set()
     for statement in tree.body:
         if isinstance(statement, (ast.Import, ast.ImportFrom)):

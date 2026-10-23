@@ -19,19 +19,18 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import sys
-import threading
 from types import FunctionType, MethodType, ModuleType
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple, Union
 from urllib.parse import unquote, urlparse
 
 from bioimageflow_core.executable_identity import validate_source_callables
+from bioimageflow_core.import_context import _lock
 
 PRIMARY_SCHEMA = "bioimageflow.primary_content.v1"
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _MODULE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _ROLES = ("__new__", "__init__", "process_row", "process_batch")
 _BUILTINS = {"object.__new__": object.__new__, "object.__init__": object.__init__}
-_lock = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -455,30 +454,26 @@ def capture_primary_package(package: str, package_root: Any) -> PrimaryContentAd
         members.append(PrimaryFileMember(module, str(path.resolve(strict=True)), hashlib.sha256(contents).hexdigest()))
         sources[module], paths[module] = contents, path.resolve(strict=True)
     proof = PrimaryContentProof(tuple(members), ())
-    return PrimaryContentAdmission(decode_primary_content(encode_primary_content(proof)), sources, paths)
+    return PrimaryContentAdmission(decode_primary_content(encode_primary_content(proof)), sources, paths,
+                                   package_roots={package: root})
 
 
 def _distribution_member(module: str, path: Path, digest: str, distribution_name: Optional[str] = None) -> PrimaryMember:
+    from bioimageflow_core.import_context import _distribution_members, _host_inventory
+    inventory = _host_inventory()
     if distribution_name is not None:
-        names = [distribution_name]
+        canonical = re.sub(r"[-_.]+", "-", distribution_name).lower()
+        distributions = inventory["providers"].get(canonical)
+        if not distributions:
+            distributions = (metadata.distribution(distribution_name),)
     else:
-        package_map = getattr(metadata, "packages_distributions", None)
-        if package_map is not None:
-            names = package_map().get(module.split(".")[0], [])
-        else:
-            # Python 3.9 predates packages_distributions(). Distribution-owned
-            # source admission still uses its actual top-level metadata.
-            from bioimageflow_core.import_context import _import_names
-            names = [item.metadata["Name"] for item in metadata.distributions()
-                     if module.split(".")[0] in _import_names(item)]
+        distributions = inventory["imports"].get(module.split(".")[0], ())
     matches = []
-    for name in names:
-        distribution = metadata.distribution(name)
+    for distribution in distributions:
         canonical = re.sub(r"[-_.]+", "-", distribution.metadata["Name"]).lower()
-        for item in distribution.files or ():
-            if Path(str(distribution.locate_file(item))).resolve() == path:
-                matches.append(PrimaryInstalledMember(module, canonical, distribution.version, str(item).replace("\\", "/"), digest))
-                break
+        relative = _distribution_members(distribution).get(path)
+        if relative is not None:
+            matches.append(PrimaryInstalledMember(module, canonical, distribution.version, relative, digest))
         else:
             relative = module.replace(".", "/") + ("/__init__.py" if path.name == "__init__.py" else ".py")
             if _editable_member_path(distribution, module, relative) == path:
@@ -490,8 +485,19 @@ def _distribution_member(module: str, path: Path, digest: str, distribution_name
     return PrimaryFileMember(module, str(path), digest)
 
 
-def capture_primary_content(tool_class: type, *, distribution: Optional[str] = None, package_root: Any = None) -> PrimaryContentAdmission:
-    """Read a finite primary snapshot and attest it without executing source."""
+def _recorded_owner(distribution: Any, path: Path) -> bool:
+    from bioimageflow_core.import_context import _distribution_members
+    return path in _distribution_members(distribution)
+
+
+def capture_primary_content(tool_class: type, *, distribution: Optional[str] = None,
+                            package_root: Any = None,
+                            package_admission: Optional[PrimaryContentAdmission] = None) -> PrimaryContentAdmission:
+    """Bind a class to held package bytes or capture fresh editable sources.
+
+    A supplied package admission belongs to an installed generation: its member
+    bytes remain authoritative until explicit retirement, independently of disk.
+    """
     source = Path(getattr(tool_class, "_bif_admitted_source_file", None) or inspect.getsourcefile(tool_class) or inspect.getfile(tool_class)).resolve(strict=True)
     top = tool_class.__module__.split(".")[0]
     root_module = sys.modules.get(top)
@@ -502,9 +508,12 @@ def capture_primary_content(tool_class: type, *, distribution: Optional[str] = N
                 else Path(namespace_paths[0]).resolve(strict=True) if len(namespace_paths) == 1 else source)
     else:
         root = Path(package_root).resolve(strict=True)
-    sources = {}
-    paths = {}
-    members = {}
+    sources = {} if package_admission is None else dict(package_admission.sources)
+    paths = {} if package_admission is None else dict(package_admission.paths)
+    members = {} if package_admission is None else {member.module: member for member in package_admission.proof.members}
+    if distribution is not None and package_admission is not None:
+        members = {module: _distribution_member(module, paths[module], member.source_hash, distribution)
+                   for module, member in members.items()}
 
     def add(module: str, path: Path, explicit_distribution: Optional[str] = None) -> None:
         path = path.resolve(strict=True)
@@ -512,14 +521,28 @@ def capture_primary_content(tool_class: type, *, distribution: Optional[str] = N
             if paths[module] != path:
                 raise ValueError("Primary module has conflicting source owners: " + module)
             return
+        from bioimageflow_core.import_context import _host_inventory
+        inventory = _host_inventory()
+        selected_member = path == root or root.is_dir() and root in path.parents
+        held = None if selected_member else inventory["sources"].get((module, path, explicit_distribution))
+        if held is not None:
+            member, contents = held
+            members[module], sources[module], paths[module] = member, contents, path
+            return
         contents = path.read_bytes()
         digest = hashlib.sha256(contents).hexdigest()
         member = (_distribution_member(module, path, digest, explicit_distribution)
                   if explicit_distribution is not None or not (path == root or root.is_dir() and root in path.parents)
                   else PrimaryFileMember(module, str(path), digest))
         members[module], sources[module], paths[module] = member, contents, path
+        if isinstance(member, PrimaryInstalledMember) and not selected_member:
+            owners = inventory["providers"].get(member.distribution, ())
+            # Editable owners participate in fresh source capture. Only actual
+            # installed RECORD members have a process-lifetime source boundary.
+            if any(_recorded_owner(owner, path) for owner in owners):
+                inventory["sources"][(module, path, explicit_distribution)] = (member, contents)
 
-    if root.is_dir():
+    if package_admission is None and root.is_dir():
         for path in sorted(root.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -528,7 +551,7 @@ def capture_primary_content(tool_class: type, *, distribution: Optional[str] = N
             relative = path.relative_to(root)
             parts = relative.parts[:-1] if path.name == "__init__.py" else (*relative.parts[:-1], path.stem)
             add(".".join((top, *parts)), path, distribution)
-    else:
+    elif package_admission is None:
         add(tool_class.__module__, source, distribution)
     callbacks = []
     for role in _ROLES:
@@ -550,7 +573,10 @@ def capture_primary_content(tool_class: type, *, distribution: Optional[str] = N
         callbacks.append(PrimaryCallback(role, module, function.__qualname__))
     proof = PrimaryContentProof(tuple(members[name] for name in sorted(members)), tuple(callbacks))
     admission = PrimaryContentAdmission(decode_primary_content(encode_primary_content(proof)), sources, paths)
-    admission.attest_modules()
+    if package_admission is None:
+        admission.attest_modules()
+    else:
+        admission.package_roots.update(package_admission.package_roots)
     admission.attest(tool_class)
     return admission
 
@@ -568,14 +594,40 @@ class _PrimaryLoader(importlib.abc.Loader):
         exec(compile(self.admission.sources[name], str(self.admission.paths[name]), "exec", dont_inherit=True), vars(module))
 
 
+class _PrimaryNamespaceLoader(importlib.abc.Loader):
+    def __init__(self, admission: PrimaryContentAdmission):
+        self.admission = admission
+
+    def create_module(self, spec: Any) -> None:
+        return None
+
+    def exec_module(self, module: ModuleType) -> None:
+        self.admission.own_module(module)
+
+
 class _PrimaryFinder(importlib.abc.MetaPathFinder):
     def __init__(self, admission: PrimaryContentAdmission, aliases: Mapping[str, str]):
         self.admission = admission
         self.members = {aliases.get(member.module, member.module): member for member in admission.proof.members}
+        self.namespaces: Dict[str, Path] = {}
+        for member in admission.proof.members:
+            parts = member.module.split(".")
+            location = admission.paths[member.module]
+            for count in range(1, len(parts)):
+                parent = ".".join(parts[:count])
+                name = aliases.get(parent, parent)
+                if name not in self.members:
+                    depth = len(parts) - count - (location.name != "__init__.py")
+                    self.namespaces[name] = location.parents[depth]
 
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
         member = self.members.get(fullname)
         if member is None:
+            namespace = self.namespaces.get(fullname)
+            if namespace is not None:
+                spec = importlib.machinery.ModuleSpec(fullname, _PrimaryNamespaceLoader(self.admission), is_package=True)
+                spec.submodule_search_locations = [str(namespace)]
+                return spec
             top, _, relative = fullname.partition(".")
             root = self.admission.package_roots.get(top)
             if root is not None:
@@ -594,13 +646,11 @@ def primary_import_context(admission: PrimaryContentAdmission, *, aliases: Optio
     """Preserve preexisting canonical owners; compile fresh admitted bytes."""
     aliases = {} if aliases is None else aliases
     with _lock:
-        admission.attest_modules(aliases)
         before = dict(sys.modules)
         finder = _PrimaryFinder(admission, aliases)
         sys.meta_path.insert(0, finder)
         try:
             yield admission
-            admission.attest_modules(aliases)
         except BaseException:
             for name, module in admission.owned_modules.items():
                 if name not in before and sys.modules.get(name) is module:

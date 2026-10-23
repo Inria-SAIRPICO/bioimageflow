@@ -17,6 +17,62 @@ from packaging.utils import canonicalize_name
 
 _lock = threading.RLock()
 _POLICIES = {"selected_installation", "managed_runtime"}
+_host: Optional[dict[str, Any]] = None
+_admissions: dict[tuple[Path, str, str], ImportRootAdmission] = {}
+_dependency_claims: dict[str, dict[tuple[Path, str], tuple[str, Any]]] = {}
+
+
+def _host_inventory() -> dict[str, Any]:
+    """Snapshot application distribution/import ownership once per process.
+
+    Selected tool roots have their own invalidation boundary. Updating the host
+    interpreter or its dependencies requires restarting the process.
+    """
+    global _host
+    with _lock:
+        if _host is None:
+            distributions = tuple(metadata.distributions())
+            imports: dict[str, list[Any]] = {}
+            providers: dict[str, list[Any]] = {}
+            names: dict[int, set[str]] = {}
+            facts: dict[int, tuple[str, str]] = {}
+            for distribution in distributions:
+                facts[id(distribution)] = (canonicalize_name(distribution.metadata["Name"] or ""), distribution.version)
+                providers.setdefault(facts[id(distribution)][0], []).append(distribution)
+                names[id(distribution)] = _import_names(distribution)
+                for name in names[id(distribution)]:
+                    imports.setdefault(name, []).append(distribution)
+            _host = dict(distributions=distributions, imports=imports, providers=providers,
+                         import_names=names, facts=facts, members={}, layouts={}, sources={})
+        return _host
+
+
+def _distribution_members(distribution: Any) -> dict[Path, str]:
+    """Parse each host distribution's RECORD member locations at most once."""
+    inventory = _host_inventory()
+    with _lock:
+        identity = id(distribution)
+        if identity in inventory["members"]:
+            return inventory["members"][identity]
+        members = {
+            Path(str(distribution.locate_file(member))).resolve(): str(member).replace("\\", "/")
+            for member in distribution.files or ()}
+        if identity in inventory["import_names"]:
+            inventory["members"][identity] = members
+        return members
+
+
+def invalidate_import_root(root: Any, *, import_package: str) -> None:
+    """Retire selected-root facts, keeping the application inventory fixed."""
+    path = Path(root).resolve()
+    with _lock:
+        for key in tuple(_admissions):
+            if key[:2] == (path, import_package):
+                del _admissions[key]
+        for name, claims in tuple(_dependency_claims.items()):
+            claims.pop((path, import_package), None)
+            if not claims:
+                del _dependency_claims[name]
 
 
 def _import_names(distribution: Any) -> set[str]:
@@ -67,15 +123,19 @@ def _owns(distribution: Any, module_name: str, module: Any, cache: dict[int, Any
     if not paths:
         return False
     identity = id(distribution)
-    if identity not in layouts:
-        layouts[identity] = (Path(str(distribution.locate_file(""))).resolve(),
-                             distribution.read_text("direct_url.json"))
-    installed_root, direct_text = layouts[identity]
+    inventory = _host_inventory()
+    host_owned = identity in inventory["import_names"]
+    selected_layouts = inventory["layouts"] if host_owned else layouts
+    if identity not in selected_layouts:
+        selected_layouts[identity] = (Path(str(distribution.locate_file(""))).resolve(),
+                                      distribution.read_text("direct_url.json"))
+    installed_root, direct_text = selected_layouts[identity]
     if not all(_within(path, installed_root) for path in paths) and not direct_text:
         return False
     if identity not in cache:
-        cache[identity] = {Path(str(distribution.locate_file(member))).resolve()
-                           for member in distribution.files or ()}
+        cache[identity] = (_distribution_members(distribution) if host_owned else
+                           {Path(str(distribution.locate_file(member))).resolve()
+                            for member in distribution.files or ()})
     members = cache[identity]
     if all(path in members for path in paths):
         return True
@@ -121,9 +181,8 @@ class ImportRootAdmission:
 
     @property
     def observed_dependencies(self) -> tuple[dict[str, str], ...]:
-        """Report active observed distribution authority, without pixel/code proof."""
-        with _lock:
-            return _validate(self)
+        """Report detached admitted dependency choices, without pixel/code proof."""
+        return tuple(dict(item) for item in self._snapshot["observed"])
 
 
 def _requirements(distributions: tuple[Any, ...]) -> tuple[Requirement, ...]:
@@ -148,6 +207,15 @@ def admit_import_root(
     path = Path(root).resolve(strict=True)
     if not path.is_dir():
         raise ValueError(f"Selected import root is not a directory: {path}")
+    key = (path, import_package, dependency_authority)
+    with _lock:
+        cached = _admissions.get(key)
+        if cached is not None:
+            return cached
+        return _admit_root(path, import_package, dependency_authority)
+
+
+def _admit_root(path: Path, import_package: str, dependency_authority: str) -> ImportRootAdmission:
     selected = tuple(metadata.distributions(path=[str(path)]))
     primary = tuple(distribution for distribution in selected
                     if import_package in _import_names(distribution))
@@ -160,8 +228,10 @@ def admit_import_root(
         requirement_sources = primary + (metadata.distribution("bioimageflow-core"),)
     admission = ImportRootAdmission(path, import_package, dependency_authority,
                                     selected, _requirements(requirement_sources), versions)
-    with _lock:
-        _validate(admission)
+    observed = _validate(admission)
+    _claim_dependencies(admission)
+    admission._snapshot["observed"] = observed
+    _admissions[(path, import_package, dependency_authority)] = admission
     return admission
 
 
@@ -169,15 +239,22 @@ def _validate(admission: ImportRootAdmission) -> tuple[dict[str, str], ...]:
     snapshot = admission._snapshot
     if not snapshot:
         selected_by_import: dict[str, list[Any]] = {}
-        providers: dict[str, list[Any]] = {}
-        distribution_facts: dict[int, tuple[str, str]] = {}
+        inventory = _host_inventory()
+        providers = {name: list(items) for name, items in inventory["providers"].items()}
+        distribution_facts: dict[int, tuple[str, str]] = dict(inventory["facts"])
         versions_by_name: dict[str, set[str]] = {}
-        import_names: dict[int, set[str]] = {}
-        environment = tuple(metadata.distributions())
-        for distribution in environment + admission._selected:
+        import_names: dict[int, set[str]] = dict(inventory["import_names"])
+        for distribution in admission._selected:
             fact = (canonicalize_name(distribution.metadata["Name"] or ""), distribution.version)
             distribution_facts[id(distribution)] = fact
             providers.setdefault(fact[0], []).append(distribution)
+        for claims in _dependency_claims.values():
+            for _, distribution in claims.values():
+                identity = id(distribution)
+                if identity not in distribution_facts:
+                    fact = (canonicalize_name(distribution.metadata["Name"] or ""), distribution.version)
+                    distribution_facts[identity] = fact
+                    providers.setdefault(fact[0], []).append(distribution)
         for distribution in admission._selected:
             names = _import_names(distribution)
             import_names[id(distribution)] = names
@@ -203,8 +280,8 @@ def _validate(admission: ImportRootAdmission) -> tuple[dict[str, str], ...]:
     selected_by_import = snapshot["selected_by_import"]
     providers = snapshot["providers"]
     distribution_facts = snapshot["distribution_facts"]
-    # This admission owns immutable metadata facts. Actual module objects and
-    # their file/namespace paths are read afresh at every context boundary.
+    # Resident membership is checked only at first admission. The resulting
+    # dependency choice stays fixed until controlled root retirement/restart.
     ownership = snapshot["ownership"]
     layouts = snapshot["layouts"]
     discovered = snapshot["discovered"]
@@ -254,6 +331,22 @@ def _validate(admission: ImportRootAdmission) -> tuple[dict[str, str], ...]:
             if identity not in snapshot["requirements"]:
                 snapshot["requirements"][identity] = _requirements((distribution,))
             requirements += snapshot["requirements"][identity]
+    # Check known dependency choices once, including selected lazy imports.
+    # An absent, unimported distribution is not controller admission authority:
+    # ProcessingTool runtime requirements can be supplied only by its worker.
+    for requirement in requirements:
+        normalized = canonicalize_name(requirement.name)
+        if any(name == normalized for name, _ in observed):
+            continue
+        candidates = providers.get(normalized, ())
+        selected = [item for item in candidates if item in admission._selected]
+        claims = _dependency_claims.get(normalized, {})
+        chosen = selected if admission.dependency_authority == "selected_installation" and selected else [item[1] for item in claims.values()] or list(candidates)
+        if not chosen:
+            continue
+        version = chosen[0].version
+        observed[(normalized, version)] = {"distribution": normalized, "version": version,
+                                           "authority": admission.dependency_authority}
     for normalized, version in observed:
         for requirement in requirements:
             if canonicalize_name(requirement.name) == normalized and version not in requirement.specifier:
@@ -267,6 +360,30 @@ def _validate(admission: ImportRootAdmission) -> tuple[dict[str, str], ...]:
     return tuple(observed[key] for key in sorted(observed))
 
 
+def _claim_dependencies(admission: ImportRootAdmission) -> None:
+    if admission.dependency_authority != "selected_installation":
+        return
+    selected = admission._snapshot["selected_by_import"]
+    choices = {canonicalize_name(item.metadata["Name"] or ""): item
+               for items in selected.values() for item in items}
+    for name, distribution in choices.items():
+        for version, _ in _dependency_claims.get(name, {}).values():
+            if version != distribution.version:
+                raise ImportError(f"Dependency {name!r} conflicts with selected installation: admitted {version}, selected {distribution.version}")
+    roots = []
+    host = _host_inventory()["import_names"]
+    for name, distribution in choices.items():
+        claims = _dependency_claims.setdefault(name, {})
+        if claims:
+            distribution = next(iter(claims.values()))[1]
+        claims[(admission.root, admission.import_package)] = (distribution.version, distribution)
+        if id(distribution) not in host:
+            root = str(Path(str(distribution.locate_file(""))).resolve())
+            if root not in roots:
+                roots.append(root)
+    admission._snapshot["dependency_roots"] = tuple(roots)
+
+
 @contextmanager
 def selected_import_root(admission: ImportRootAdmission) -> Iterator[ImportRootAdmission]:
     """Serialize owned contexts, restore caller paths, and preserve primary errors.
@@ -276,15 +393,15 @@ def selected_import_root(admission: ImportRootAdmission) -> Iterator[ImportRootA
     threads and arbitrary module/global mutation are not isolated by this lock.
     """
     with _lock:
-        _validate(admission)
         before = list(sys.path)
         if admission.dependency_authority == "selected_installation":
-            sys.path.insert(0, str(admission.root))
+            roots: list[str] = list(admission._snapshot.get("dependency_roots", ()))
+            if str(admission.root) not in roots:
+                roots.append(str(admission.root))
+            sys.path[:0] = roots
         try:
             yield admission
         except BaseException:
             raise
-        else:
-            _validate(admission)
         finally:
             sys.path[:] = before

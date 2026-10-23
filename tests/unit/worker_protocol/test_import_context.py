@@ -10,7 +10,7 @@ from types import ModuleType
 
 import pytest
 from bioimageflow_core import Arguments, VersionedModuleOrigin
-from bioimageflow_core.import_context import admit_import_root, selected_import_root
+from bioimageflow_core.import_context import admit_import_root, invalidate_import_root, selected_import_root
 from bioimageflow_core.worker_origins import clear_worker_tool_instances, load_worker_tool
 from tests.testkit.primary_content import source_proof
 
@@ -61,9 +61,13 @@ def _owned_modules():
     before = {name: module for name, module in sys.modules.items()
               if any(name == prefix or name.startswith(prefix + '.') for prefix in names)}
     before_path = list(sys.path)
+    from bioimageflow_core.import_context import _admissions
+    existing_admissions = set(_admissions)
     clear_worker_tool_instances()
     yield
     clear_worker_tool_instances()
+    for root, package, _ in set(_admissions) - existing_admissions:
+        invalidate_import_root(root, import_package=package)
     for name in list(sys.modules):
         if name not in before and any(name == prefix or name.startswith(prefix + '.') for prefix in names):
             sys.modules.pop(name)
@@ -184,16 +188,25 @@ def test_host_provided_sdk_requirement_is_checked_without_installed_copy(tmp_pat
     assert sys.path == before
 
 
-def test_admission_metadata_reads_stay_bounded_while_live_membership_revalidates(tmp_path, monkeypatch):
+def test_admission_reuses_metadata_and_validation_until_controlled_retirement(tmp_path, monkeypatch):
     import importlib.metadata as metadata
+    import bioimageflow_core.import_context as context
 
     _selected(tmp_path)
-    reads = []
-    original = metadata.PathDistribution.read_text
+    reads, validations = [], []
+    original_read = metadata.PathDistribution.read_text
+    original_validate = context._validate
+
     def read(distribution, filename):
         reads.append(filename)
-        return original(distribution, filename)
+        return original_read(distribution, filename)
+
+    def validate(admission):
+        validations.append(admission)
+        return original_validate(admission)
+
     monkeypatch.setattr(metadata.PathDistribution, 'read_text', read)
+    monkeypatch.setattr(context, '_validate', validate)
     admission = admit_import_root(tmp_path, import_package='witness_tools')
     with selected_import_root(admission):
         import witness_dependency
@@ -201,20 +214,77 @@ def test_admission_metadata_reads_stay_bounded_while_live_membership_revalidates
     warmed = len(reads)
     before = list(sys.path)
     for _ in range(20):
+        assert admit_import_root(tmp_path, import_package='witness_tools') is admission
         with selected_import_root(admission):
             assert witness_dependency.VALUE == 9
+        assert admission.observed_dependencies
     assert len(reads) == warmed
+    assert validations == [admission]
     assert sys.path == before
     assert admission.to_scientific_facts() == {'dependency_versions': {'witness-dependency': '9.0.0'}}
-    foreign = ModuleType('witness_dependency')
-    monkeypatch.setitem(sys.modules, 'witness_dependency', foreign)
-    with pytest.raises(ImportError, match='unknown loaded distribution ownership'):
-        with selected_import_root(admission):
-            pytest.fail('Live foreign replacement reached the tool callback')
-    assert sys.modules['witness_dependency'] is foreign and sys.path == before
-    monkeypatch.setitem(sys.modules, 'witness_dependency', witness_dependency)
     dependency_metadata = tmp_path / 'witness_dependency-9.0.0.dist-info' / 'METADATA'
     dependency_metadata.write_text(dependency_metadata.read_text().replace('Version: 9.0.0', 'Version: 10.0.0'))
+    # Installed facts remain fixed until the caller explicitly retires them.
+    assert admit_import_root(tmp_path, import_package='witness_tools') is admission
+    invalidate_import_root(tmp_path, import_package='witness_tools')
     with pytest.raises(ImportError, match='loaded version 10.0.0 does not satisfy witness-dependency==9.0.0'):
         admit_import_root(tmp_path, import_package='witness_tools')
     assert len(reads) > warmed
+
+
+def test_incompatible_unimported_dependency_claims_refuse_at_admission(tmp_path):
+    _selected(tmp_path / 'first', initializer=False)
+    first = admit_import_root(tmp_path / 'first', import_package='witness_tools')
+    assert 'witness_dependency' not in sys.modules
+    _selected(tmp_path / 'second', initializer=False, package='witness_two', requirement='witness-dependency>=1')
+    metadata = tmp_path / 'second/witness_dependency-9.0.0.dist-info/METADATA'
+    metadata.write_text(metadata.read_text().replace('Version: 9.0.0', 'Version: 1.0.0'))
+    with pytest.raises(ImportError, match='conflicts with selected installation'):
+        admit_import_root(tmp_path / 'second', import_package='witness_two')
+    invalidate_import_root(first.root, import_package=first.import_package)
+    second = admit_import_root(tmp_path / 'second', import_package='witness_two')
+    assert second.to_scientific_facts() == {'dependency_versions': {'witness-dependency': '1.0.0'}}
+
+
+def test_host_inventory_is_reused_when_selected_root_is_retired(tmp_path, monkeypatch):
+    import bioimageflow_core.import_context as context
+    first = context._host_inventory()
+    original = context.metadata.distributions
+    scans = []
+
+    def distributions(**kwargs):
+        if 'path' not in kwargs:
+            scans.append('host')
+        return original(**kwargs)
+
+    monkeypatch.setattr(context.metadata, 'distributions', distributions)
+    _selected(tmp_path, initializer=False)
+    admission = admit_import_root(tmp_path, import_package='witness_tools')
+    invalidate_import_root(tmp_path, import_package='witness_tools')
+    replacement = admit_import_root(tmp_path, import_package='witness_tools')
+    assert replacement is not admission
+    assert context._host_inventory() is first
+    assert scans == []
+
+
+def test_lazy_dependency_uses_its_first_admitted_root_after_path_restore(tmp_path):
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    _selected(first, initializer=False)
+    initial = admit_import_root(first, import_package='witness_tools')
+    _distribution(second, 'witness_two', '1.0.0', {'witness_two/__init__.py': ''}, ('witness-dependency==9.0.0',))
+    following = admit_import_root(second, import_package='witness_two')
+    assert 'witness_dependency' not in sys.modules
+    before = list(sys.path)
+    with selected_import_root(following):
+        import witness_dependency
+        assert witness_dependency.__file__ == str(initial.root / 'witness_dependency.py')
+        assert witness_dependency.VALUE == 9
+    assert sys.path == before
+
+
+def test_unimported_absent_runtime_dependency_does_not_block_declaration(tmp_path):
+    _selected(tmp_path, initializer=False, requirement='uninstalled-worker-only-library>=1')
+    admission = admit_import_root(tmp_path, import_package='witness_tools')
+    assert all(item['distribution'] != 'uninstalled-worker-only-library'
+               for item in admission.observed_dependencies)

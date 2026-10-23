@@ -414,7 +414,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--source-root", type=Path, required=True)
-    parser.add_argument("--expected-version", default="0.5.0")
+    parser.add_argument("--expected-version", default="0.5.1")
     parser.add_argument("--expected-python")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--receipt", type=Path)

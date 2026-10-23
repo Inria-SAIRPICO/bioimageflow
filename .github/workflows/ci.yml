@@ -226,7 +226,7 @@ jobs:
           else
             runtime_python="$RUNNER_TEMP/core-array-runtime/bin/python"
           fi
-          wheel_path="${CANDIDATE_WHEEL:-$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.0-py3-none-any.whl}"
+          wheel_path="${CANDIDATE_WHEEL:-$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.1-py3-none-any.whl}"
           uv pip install --python "$runtime_python" --no-sources "$wheel_path" "numpy==1.26.4"
           uv pip check --python "$runtime_python"
           echo "CORE_ARRAY_PYTHON=$runtime_python" >> "$GITHUB_ENV"
@@ -237,7 +237,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$CORE_ARRAY_PYTHON" -I check_core_array_lifetime.py \
             --wheel "$CORE_ARRAY_WHEEL" --source-root "$GITHUB_WORKSPACE" \
-            --expected-version 0.5.0 --expected-python "${{ matrix.python }}" \
+            --expected-version 0.5.1 --expected-python "${{ matrix.python }}" \
             --root "$RUNNER_TEMP/core-array-witness" --receipt "$RUNNER_TEMP/core-array-receipt.json"
       - name: Upload exact capability receipt and child evidence
         if: always()
