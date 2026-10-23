@@ -110,6 +110,8 @@ def tool_store_lazy_exports(tmp_path):
 @pytest.fixture(autouse=True)
 def _cleanup_sys_modules():
     yield
+    from bioimageflow import unload_versioned_packages
+    unload_versioned_packages([("dummy_tools", "1.0.0"), ("dummy_tools", "2.0.0"), ("lazy_tools", "1.0.0")])
     for k in [k for k in sys.modules if k.startswith(("dummy_tools", "lazy_tools"))]:
         del sys.modules[k]
     sys.path[:] = [
@@ -280,6 +282,8 @@ def tool_store_absolute_imports(tmp_path):
 
     record_distribution(pkg_dir.parent, "abs_tools", "1.0.0")
     yield store
+    from bioimageflow import unload_versioned_package
+    unload_versioned_package("abs_tools", "1.0.0", store)
     for k in [k for k in sys.modules if k.startswith("abs_tools")]:
         del sys.modules[k]
     sys.path[:] = [p for p in sys.path if "abs_tools" not in p]

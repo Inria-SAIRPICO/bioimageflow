@@ -180,7 +180,7 @@ def test_direct_step_dispatch_uses_its_admitted_callback(tmp_path, monkeypatch):
     steps.close()
 
 
-def test_declared_installed_version_token_keeps_manual_cache_invalidation(tmp_path, monkeypatch):
+def test_declared_installed_version_is_fixed_until_controller_restart(tmp_path, monkeypatch):
     from bioimageflow import Workflow
     from bioimageflow_core import EnvironmentSpec, IOModel, RowConsumption
 
@@ -196,26 +196,24 @@ def test_declared_installed_version_token_keeps_manual_cache_invalidation(tmp_pa
             self.calls.append(4)
             return self.Outputs(value=4)
 
-    version = "1.0"
-    original = importlib.metadata.version
-    def metadata_version(distribution):
-        if distribution == "different-distribution-name":
-            return version
-        return original(distribution)
-    monkeypatch.setattr(importlib.metadata, "version", metadata_version)
-    monkeypatch.setattr(importlib.metadata, "packages_distributions", lambda: {
-        Source.__module__.split(".", 1)[0]: ["different-distribution-name"],
-    })
+    import bioimageflow.worker_origins as origins
+    from types import SimpleNamespace
+    metadata = SimpleNamespace(metadata={"Name": "different-distribution-name"}, version="1.0")
+    inventory = {"imports": {Source.__module__.split(".", 1)[0]: [metadata]}, "providers": {},
+                 "facts": {id(metadata): ("different-distribution-name", "1.0")}}
+    monkeypatch.setattr(origins, "_host_inventory", lambda: inventory)
+    origins._host_distribution.cache_clear()
     with Workflow(engine="direct", storage_path=tmp_path / "records") as workflow:
         node = Source()(name="token")
     assert workflow.compute(node)["value"].tolist() == [4]
     assert workflow.compute(node)["value"].tolist() == [4]
     assert Source.calls == [4]
-    version = "2.0"
+    metadata.version = "2.0"
     assert workflow.compute(node)["value"].tolist() == [4]
-    assert Source.calls == [4, 4]
+    assert Source.calls == [4]
     assert workflow.compute(node)["value"].tolist() == [4]
-    assert Source.calls == [4, 4]
+    assert Source.calls == [4]
+    origins._host_distribution.cache_clear()
 
 
 def test_captured_output_contract_changes_key_and_actual_dtype(tmp_path, monkeypatch):
@@ -330,3 +328,43 @@ def test_direct_processing_refuses_changed_instance_declaration_before_method(tm
         step.execute()
     assert Source.calls == []
     steps.close()
+
+
+def test_editable_primary_capture_is_shared_only_within_its_operation(tmp_path, monkeypatch):
+    from bioimageflow.cache.identity import deterministic_serialize
+    from bioimageflow.worker_origins import ExecutableMetadata, capture_tool_executable
+
+    path = tmp_path / "operation_source.py"
+    source = '''from bioimageflow_core import ProcessingTool, IOModel, EnvironmentSpec, RowConsumption
+class Source(ProcessingTool):
+    row_consumption = RowConsumption.MAPPED
+    environment = EnvironmentSpec("operation-source", {})
+    class Inputs(IOModel): pass
+    class Outputs(IOModel): value: int
+    def process_row(self, arguments): return self.Outputs(value=1)
+'''
+    path.write_text(source)
+    module = ModuleType("operation_source")
+    module.__file__ = str(path)
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    exec(compile(source, str(path), "exec", dont_inherit=True), module.__dict__)
+    reads = []
+    read_bytes = Path.read_bytes
+    def observed_read(selected):
+        if selected == path:
+            reads.append(selected)
+        return read_bytes(selected)
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    metadata = ExecutableMetadata()
+    try:
+        first = capture_tool_executable(module.Source(), managed=True, canonicalize=deterministic_serialize, metadata=metadata)
+        second = capture_tool_executable(module.Source(), managed=True, canonicalize=deterministic_serialize, metadata=metadata)
+        assert first.scientific_key == second.scientific_key
+        assert reads == [path]
+        metadata.clear()
+        path.write_text(source.replace("value=1", "value=9"))
+        with pytest.raises(ValueError, match="Resident/source"):
+            capture_tool_executable(module.Source(), managed=True, canonicalize=deterministic_serialize, metadata=metadata)
+        assert reads == [path, path]
+    finally:
+        metadata.clear()

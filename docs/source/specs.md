@@ -1539,6 +1539,29 @@ Tools that do not need the Path/SharedArray dispatch can skip `load_image` entir
 Tools are distributed as standard Python packages. The package version participates in result-key material for caching (see [Section 6.1](#61-result-key)). When a tool's package version changes, cached results for that tool are automatically invalidated.
 First-party BioImageFlow packages are released independently, so package references must use versions allowed by each distribution's declared compatibility requirements.
 
+#### Installed generation lifetime
+
+Installed tool code and controller dependencies remain fixed between controlled installation, invalidation and process-restart boundaries.
+First admission validates the selected distribution/version, contained complete RECORD and declared compatibility, then retains the actual package bytes, classes and finite executable-source identity in a process-owned generation.
+Warm class lookup, planning and dispatch reuse those admitted facts without rehashing RECORD members, reconstructing global package ownership or repeatedly comparing installed bytecode with disk sources.
+The application distribution/import inventory is captured once per process; replacing controller dependencies requires restart, including a dependency retained from another tool store.
+Compatibility and deterministic lazy dependency selection still apply at first admission.
+
+`Workflow.from_dict(..., tool_store_path=...)` selects the same tool-store authority for all packaged tools in a recursive graph, without adding a serialized field or scientific cache-key input.
+`unload_versioned_package(package, version, store_path=None)` and atomic `unload_versioned_packages(selections, store_path=None)` are the explicit SDK retirement boundary.
+Physical package removal uses `versioned_package_mutation(selections, store_path=...)` to retire the same batch and block re-admission of its scoped namespaces until the mutation finishes, including across an asynchronous filesystem operation.
+The batch validates every selection, selected store and active operation before retiring any generation.
+Retirement refuses active materialization, computation and stepped-operation ownership instead of cancelling the run or removing its files; successful retirement removes only that generation's namespaces and selected-root admission.
+A later load admits current content afresh, and a retired class cannot acquire new execution authority without reload/recompilation.
+The same package/version selected from a different canonical store refuses while the original namespace remains resident; callers must retire the old selection safely before switching.
+Canonical store paths and process-local generation counters govern ownership and never enter scientific keys.
+
+Editable/unmanaged sources retain fresh finite capture at admission; represented helper and inherited source owners participate in the captured identity.
+Captured bytes and content-derived module identities connect execution to that source snapshot, while unchanged source analysis may reuse a bounded cache keyed by exact bytes and interpreter contract.
+An admitted run retains its captured bytes; a later supported edit is captured for the next run.
+Arbitrary in-place installed-file edits, live external package-manager changes and monkeypatching are unsupported until explicit reload/restart; no continuous detection is promised.
+This lifetime model does not weaken archive containment, initial package integrity, portable declaration validation, exact upstream cache-record selection or record-corruption checks.
+
 #### Package Structure Requirements
 
 Tool packages **must use relative imports** for all intra-package references. This is critical for the versioned loading mechanism to work correctly:
@@ -2647,8 +2670,10 @@ Single-file shared/archive origins retain exact single-file membership rather th
 An unadmitted preexisting synthetic source namespace is not executable authority merely because its file path matches; refusal preserves that module, while any reuse must retain the exact owning loader's source admission.
 Only successful tool admission and construction publishes an instance into the worker cache; failed loading or construction removes new source/version-scoped modules without removing preexisting namespace owners.
 Before construction, the worker admits the represented resident class and constructor/callback owners against the captured member bytes.
-After construction and on every instance-cache reuse, it validates the instance's actual bound scientific callbacks against that same proof before invoking the method.
-A changed selected member, stale resident callback or concrete constructor-induced callback replacement is refused before the applicable import, constructor or scientific method; an unchanged proven resident instance remains reusable.
+After initial construction, it validates the instance's bound scientific callbacks against that proof before publishing the cached instance.
+Subsequent tasks with the same complete origin reuse the held primary/class/instance admission and captured-byte import scope until explicit instance retirement or worker-process replacement.
+A mismatched selected member, stale resident class or concrete constructor-induced callback replacement at initial admission is refused before publication or scientific execution.
+Supported edits use a new captured source generation; mutation of already admitted installed files or callbacks is outside the generation contract.
 Refusal preserves preexisting namespace owners instead of unloading them to conceal a conflict; fresh owned failed-import publication retains the existing explicit retry contract.
 Shared origins with one canonical module name and conflicting roots therefore refuse the later root while retaining the first proven namespace and instance; they do not promise generic same-name Shared coexistence.
 Versioned private namespaces and archive content-scoped namespaces retain their independent coexistence contract.
@@ -2659,7 +2684,8 @@ For a Direct ProcessingTool, that identity includes both actual supported `proce
 An unchanged batch callback delegating to `self.process_row` therefore retains the row callback's supported code and closure authority; changing its captured factor selects a new scientific key and record.
 Dispatch still selects the declared row or batch strategy independently of which callback roots contribute to identity.
 A source-bound Direct tool carries its supported runtime callback facts alongside its admitted source digest; a DataFrameTool includes both actual `merge_dataframes` and `transform` callbacks, including inherited owners outside the selected source file.
-Managed primary admission captures represented source bytes and compares the resident controller callable, literal values and same-source helpers, including inherited owner members, with the no-execution compiled source before cache lookup; a concrete mismatch is refused rather than identifying resident code A as source bytes B.
+Managed editable/unmanaged primary admission freshly captures represented source bytes and checks resident callable/literal/helper parity before first use.
+Installed classes reuse their held package and RECORD-owned inherited-source facts; external editable inherited owners remain freshly captured within each operation; scientific identity is never refreshed from newer disk bytes for an older admitted class, and explicit retirement prevents its use by a new operation.
 Versioned and explicitly selected installed origins carry that same portable primary-content authority together with their admitted distribution membership and version, declared recipe and controller admission facts.
 Source, shared, versioned and archive origins are selected automatically through their usual Workflow paths.
 Installed origins remain explicit through `resolve_worker_tool_origin(tool, installed_distribution=...)` in `bioimageflow.worker_origins` and the SDK loader/task surface; discovering installed metadata does not silently select an Installed origin for a Workflow.
@@ -2755,7 +2781,8 @@ The key retains the captured declared tool/distribution version token and the in
 These declaration facts reuse the effective definition capture rather than copying default values or shared-array owners again; arbitrary custom annotation-validator closure remains explicitly unproved.
 The key includes the current declaration-attestation version so a reusable record created without that admission cannot bypass the current worker contract.
 Managed Processing keys include the admitted portable primary-content facts and their proof grammar; an earlier record without represented primary admission cannot bypass this contract.
-Changed selected member bytes or inherited executable owners require a new clean controller admission and key; a stale controller is refused before reusable lookup rather than labeling its retained callable with newer source bytes.
+Controlled replacement of selected installed content or a supported edit to represented source/inherited owners requires a new admission and the corresponding content key.
+A retired controller class is refused for new operations; an admitted class keeps its captured identity until retirement and never adopts newly read disk bytes.
 ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v2`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
 This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
 For managed Processing execution, `managed_runtime` retains the receipt's detached scientific facts and `content_digest`; generation IDs, raw recipe/lockfile hashes and operational paths are not scientific content salts.

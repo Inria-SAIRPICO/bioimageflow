@@ -68,6 +68,9 @@ from bioimageflow.engine import topological_order as topological_order
 from bioimageflow.tool_loader import (
     load_versioned_package as load_versioned_package,
     unload_versioned_package as unload_versioned_package,
+    unload_versioned_packages as unload_versioned_packages,
+    versioned_package_mutation as versioned_package_mutation,
+    resolve_tool_class as resolve_tool_class,
     get_tool_package_info as get_tool_package_info,
     require_tool_packages as require_tool_packages,
 )
@@ -327,6 +330,9 @@ __all__ = [
     "submit_workflow",
     "topological_order",
     "unload_versioned_package",
+    "unload_versioned_packages",
+    "versioned_package_mutation",
+    "resolve_tool_class",
     "validate_parameters",
     "validate_parsl_config_ref",
     "validate_remote_execution_profile",

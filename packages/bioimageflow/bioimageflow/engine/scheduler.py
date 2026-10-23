@@ -167,6 +167,7 @@ class DefaultEngine(
         self._node_selected_results: dict[Node, SelectedResult] = {}
         self._node_result_relations: dict[Node, Any] = {}
         self._node_executable_captures: dict[Node, Any] = {}
+        self._input_result_groups: list[Any] = []
         self._runtime_admissions: dict[tuple[str, str], Any] = {}
         self._node_runtime_receipts: dict[Node, Any] = {}
         from bioimageflow.worker_origins import ExecutableMetadata
@@ -219,6 +220,12 @@ class DefaultEngine(
                 self._node_runtime_receipts.clear()
                 self._executable_metadata.clear()
 
+    def _lease_tool_generations(self, nodes: list[Node]) -> None:
+        """Own every selected executable generation before callbacks or step yields."""
+        with self._cache_hit_lock:
+            for node in nodes:
+                self._executable_metadata.generation(type(node.tool))
+
     def _end_execution(self) -> None:
         with self._lifecycle_lock:
             self._execution_active = False
@@ -256,8 +263,23 @@ class DefaultEngine(
             return col_ref.node.output_name_for_id(col_ref.column)
         return col_ref.column
 
+    def _release_input_result_groups(self) -> None:
+        """Release only execution-owned input pins, independently of graph GC."""
+        groups, self._input_result_groups = self._input_result_groups, []
+        primary: BaseException | None = None
+        for group in groups:
+            try:
+                group.release()
+            except BaseException as error:
+                self._input_result_groups.append(group)
+                if primary is None:
+                    primary = error
+        if primary is not None:
+            raise primary
+
     def _cleanup_after_execution(self) -> None:
         self._backend.cleanup_execution(self)
+        self._release_input_result_groups()
 
     def close(self) -> None:
         """Close the engine and stop environments it owns.
@@ -267,9 +289,13 @@ class DefaultEngine(
         """
         with self._lifecycle_lock:
             if self._closed:
+                if not self._execution_active:
+                    self._release_input_result_groups()
                 return
             self._close_requested = True
             self._backend.close(self)
+            if not self._execution_active:
+                self._release_input_result_groups()
             self._closed = True
 
     def __enter__(self) -> "DefaultEngine":
@@ -345,6 +371,7 @@ class DefaultEngine(
                     order,
                     completion_dependencies,
                 )
+                self._lease_tool_generations(_executable)
 
                 results: dict[Node, pd.DataFrame] = {}
                 sig_hashes: dict[Node, str | None] = {}
@@ -431,6 +458,7 @@ class DefaultEngine(
             order,
             completion_dependencies,
         )
+        self._lease_tool_generations(executable)
 
         # Check that at least one target is executable
         executable_targets = [t for t in targets if t not in skipped]

@@ -14,22 +14,107 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Iterable
 from packaging.version import Version
 
 from bioimageflow.paths import get_tool_store_path
-from bioimageflow_core.import_context import admit_import_root, selected_import_root
-from bioimageflow_core.primary_content import capture_primary_package, primary_import_context
+from bioimageflow_core.import_context import (
+    ImportRootAdmission, _lock as _generation_lock, admit_import_root,
+    invalidate_import_root, selected_import_root,
+)
+from bioimageflow_core.primary_content import PrimaryContentAdmission, capture_primary_package, primary_import_context
 
 from bioimageflow.filesystem import publish_no_replace
-from bioimageflow.installation import admit_installation, installation_target, validate_installation_selectors
+from bioimageflow.installation import InstalledPackage, admit_installation, installation_target, validate_installation_selectors
 
 logger = logging.getLogger("bioimageflow")
 
 
+@dataclass(eq=False)
+class _InstallationGeneration:
+    """Held installation facts; counters govern lifetime, never scientific keys."""
+
+    store: Path
+    package: str
+    version: str
+    installation: InstalledPackage
+    import_admission: ImportRootAdmission
+    primary: PrimaryContentAdmission
+    module: ModuleType
+    classes: dict[type, dict[str, Any]] = field(default_factory=dict)
+    active_operations: int = 0
+    retired: bool = False
+
+    def acquire(self) -> None:
+        with _generation_lock:
+            if self.retired:
+                raise RuntimeError("Installed tool generation was retired; reload and recompile the workflow")
+            self.active_operations += 1
+
+    def release(self) -> None:
+        with _generation_lock:
+            if self.active_operations <= 0:
+                raise RuntimeError("Installed tool generation lease is already released")
+            self.active_operations -= 1
+
+
+_generations: dict[tuple[Path, str, str], _InstallationGeneration] = {}
+_resident_generations: dict[tuple[str, str], _InstallationGeneration] = {}
+_mutating_packages: dict[tuple[str, str], object] = {}
+
+
+def _require_available_selection(package: str, version: str) -> None:
+    if (package, version) in _mutating_packages:
+        raise RuntimeError(f"Cannot admit {package}=={version}: package mutation is in progress")
+
+
+def _tool_generation(klass: type) -> _InstallationGeneration | None:
+    generation = getattr(klass, "_bif_installation_generation", None)
+    return generation if isinstance(generation, _InstallationGeneration) else None
+
+
+@contextmanager
+def _generation_lease(klass: type):
+    generation = _tool_generation(klass)
+    if generation is not None:
+        generation.acquire()
+    try:
+        yield generation
+    finally:
+        if generation is not None:
+            generation.release()
+
+
 def load_versioned_package(
+    package: str, version: str, store_path: Path | None = None,
+) -> ModuleType:
+    """Return the held package generation, admitting immutable installed facts once.
+
+    Replacing installed files requires explicit unload after all admitted operations
+    release their ownership. A selected controller dependency change requires restart.
+    """
+    validate_installation_selectors(package, version, None)
+    store = Path(get_tool_store_path() if store_path is None else store_path).resolve()
+    with _generation_lock:
+        _require_available_selection(package, version)
+        generation = _generations.get((store, package, version))
+        if generation is not None:
+            return generation.module
+        resident = _resident_generations.get((package, version))
+        if resident is not None:
+            raise ImportError(f"Package {package}=={version} is already admitted from another store root {resident.store}")
+        try:
+            return _load_versioned_package(package, version, store)
+        except BaseException:
+            invalidate_import_root(store / package / version, import_package=package)
+            raise
+
+
+def _load_versioned_package(
     package: str,
     version: str,
     store_path: Path | None = None,
@@ -55,32 +140,17 @@ def load_versioned_package(
             f"Install with: bioimageflow install {package}=={version}"
         )
 
-    admit_installation(target, package, version)
+    installation = admit_installation(target, package, version)
     admission = admit_import_root(target, import_package=package)
 
     scoped_name = _scoped_name(package, version)
     primary = capture_primary_package(scoped_name, pkg_dir)
 
-    # Admit every cached namespace member before exposing a selected root.
-    previous = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == scoped_name or name.startswith(scoped_name + ".")
-    }
-    for name, module in previous.items():
-        if module is None:
-            raise ImportError(f"Cached module {name!r} has no selected store owner.")
-        relative = name[len(scoped_name) :].lstrip(".").split(".")
-        target = pkg_dir.joinpath(*relative) if relative != [""] else pkg_dir
-        expected = (
-            target / "__init__.py" if target.is_dir() else target.with_suffix(".py")
-        )
-        _require_selected_root(module, expected)
-    if scoped_name in previous:
-        cached = previous[scoped_name]
-        assert cached is not None
-        with selected_import_root(admission), primary_import_context(primary):
-            return cached
+    # Only a published generation may own this namespace.
+    previous = {name: module for name, module in sys.modules.items()
+                if name == scoped_name or name.startswith(scoped_name + ".")}
+    if previous:
+        raise ImportError(f"Cached module {scoped_name!r} has no admitted selected store owner")
 
     # Register top-level package
     init_path = pkg_dir / "__init__.py"
@@ -121,49 +191,84 @@ def load_versioned_package(
     finally:
         sys.meta_path.remove(hook)
 
+    generation = _InstallationGeneration(store_path, package, version, installation, admission, primary, mod)
+    from bioimageflow_core.tool import BaseTool
+    for module in primary.owned_modules.values():
+        for obj in tuple(vars(module).values()):
+            if (isinstance(obj, type) and issubclass(obj, BaseTool)
+                    and obj.__module__.split(".", 1)[0] == scoped_name):
+                generation.classes.setdefault(obj, {})
+                setattr(obj, "_bif_installation_generation", generation)
+    _generations[(store_path, package, version)] = generation
+    _resident_generations[(package, version)] = generation
     return mod
 
 
-def _require_selected_root(module: ModuleType, expected: Path) -> None:
-    source = getattr(module, "__file__", None)
-    if source is None and expected.name == "__init__.py" and not expected.exists():
-        locations: tuple[str, ...] = tuple(vars(module).get("__path__", ()))
-        if locations and all(
-            Path(location).resolve() == expected.parent.resolve()
-            for location in locations
-        ):
-            return
-    if not isinstance(source, str) or Path(source).resolve() != expected.resolve():
-        raise ImportError(
-            f"Cached module {module.__name__!r} conflicts with selected store root {expected.parent}."
-        )
+def unload_versioned_package(package: str, version: str, store_path: Path | None = None) -> None:
+    """Retire one selected generation after its admitted operations release ownership."""
+    unload_versioned_packages(((package, version),), store_path=store_path)
 
 
-def unload_versioned_package(package: str, version: str) -> None:
-    """Remove all sys.modules entries for a scoped package version.
+def unload_versioned_packages(
+    selections: Iterable[tuple[str, str]], store_path: Path | None = None,
+) -> None:
+    """Retire selected generations together, refusing all if any remains owned.
 
-    Also removes canonical name aliases owned by those exact module objects.
-    Caller search paths are preserved.
+    Omitting the store selects resident package/versions. A supplied store can
+    never retire a generation admitted from another root. No admission changes
+    if a selector, selected root or active-operation preflight is refused.
     """
-    prefix = _scoped_name(package, version)
+    with _generation_lock:
+        selected = set(selections)
+        for package, version in selected:
+            validate_installation_selectors(package, version, None)
+            _require_available_selection(package, version)
+        store = None if store_path is None else Path(store_path).resolve()
+        generations = []
+        for package, version in selected:
+            generation = _resident_generations.get((package, version))
+            if generation is None:
+                continue
+            if store is not None and store != generation.store:
+                raise ImportError("Cannot unload a package admitted from another store root")
+            if generation.active_operations:
+                raise RuntimeError(f"Cannot unload {package}=={version}: active admitted operations still own this generation")
+            generations.append(generation)
+        for generation in generations:
+            generation.retired = True
+            owned = {id(module) for module in generation.primary.owned_modules.values()}
+            for name, module in tuple(sys.modules.items()):
+                if id(module) in owned:
+                    sys.modules.pop(name, None)
+            invalidate_import_root(generation.installation.root, import_package=generation.package)
+            _generations.pop((generation.store, generation.package, generation.version))
+            _resident_generations.pop((generation.package, generation.version))
 
-    # Remove scoped entries and collect their module objects
-    scoped_mods: set[int] = set()
-    to_remove = [k for k in sys.modules if k == prefix or k.startswith(f"{prefix}.")]
-    for k in to_remove:
-        mod = sys.modules.pop(k, None)
-        if mod is not None:
-            scoped_mods.add(id(mod))
 
-    # Remove canonical aliases (entries that point to the same module objects)
-    canonical_to_remove = [
-        k
-        for k, mod in sys.modules.items()
-        if mod is not None and id(mod) in scoped_mods
-    ]
-    for k in canonical_to_remove:
-        del sys.modules[k]
+@contextmanager
+def versioned_package_mutation(
+    selections: Iterable[tuple[str, str]], store_path: Path | None = None,
+):
+    """Retire and reserve selected namespaces through controlled physical mutation.
 
+    Entry refuses all changes while any selection is owned or already reserved.
+    The reservation prevents concurrent re-admission until context exit, including
+    across an await, without holding a thread lock during the caller's operation.
+    Failure releases the reservation; the retired classes remain unavailable.
+    """
+    selected = tuple(set(selections))
+    reservation = object()
+    with _generation_lock:
+        unload_versioned_packages(selected, store_path=store_path)
+        for selection in selected:
+            _mutating_packages[selection] = reservation
+    try:
+        yield
+    finally:
+        with _generation_lock:
+            for selection in selected:
+                if _mutating_packages.get(selection) is reservation:
+                    del _mutating_packages[selection]
 
 
 def get_tool_package_info(tool: Any) -> tuple[str | None, str | None, str]:
@@ -180,12 +285,25 @@ def resolve_tool_class(
     version: str,
     canonical_module: str,
     class_name: str,
+    *, store_path: Path | None = None,
 ) -> type:
     """Resolve a tool class from a loaded versioned package.
 
     Given the canonical module path (e.g., ``dummy_tools.alpha``) and the
     class name, find the class in the corresponding scoped module.
     """
+    validate_installation_selectors(package, version, None)
+    with _generation_lock:
+        _require_available_selection(package, version)
+        generation = _resident_generations.get((package, version))
+        if generation is None:
+            raise ImportError(f"Package {package}=={version} has no admitted generation")
+        if store_path is not None and Path(store_path).resolve() != generation.store:
+            raise ImportError("Cannot resolve a class from another selected store root")
+        return _resolve_tool_class(package, version, canonical_module, class_name)
+
+
+def _resolve_tool_class(package: str, version: str, canonical_module: str, class_name: str) -> type:
     scoped = _scoped_name(package, version)
 
     # Convert canonical module to scoped: "dummy_tools.alpha" -> "dummy_tools__1_0_0.alpha"

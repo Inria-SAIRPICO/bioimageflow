@@ -233,12 +233,17 @@ def test_identical_content_new_generation_reuses_with_pool_closed(runtime):
     assert runtime.dependency.calls == [1]
 
 
-def test_missing_runtime_plan_is_pending_without_provision_start_or_probe(runtime):
+def test_missing_runtime_plan_is_pending_without_provision_start_or_probe(runtime, monkeypatch):
     graph, nodes, engine = runtime.workflow()
     runtime.provider.selected = None
     assert not runtime.provider.root.exists()
     before = (len(runtime.provider.provisions), runtime.provider.starts, runtime.provider.submissions, runtime.provider.receipt_reads)
+    def expensive_capture(*args, **kwargs):
+        raise AssertionError("Missing-runtime diagnostics requested full executable admission")
+    monkeypatch.setattr(engine, "_capture_executable", expensive_capture)
     plan = graph.plan(engine=engine)
+    assert plan["subject"].logical_signature
+    assert graph.plan(engine=engine)["subject"].logical_signature == plan["subject"].logical_signature
     assert plan["subject"].status.value == "pending_runtime"
     assert plan["subject"].final_result_key is None and plan["subject"].selected_record_id is None
     assert before == (len(runtime.provider.provisions), runtime.provider.starts, runtime.provider.submissions, runtime.provider.receipt_reads)
@@ -399,3 +404,14 @@ def test_later_cached_step_refuses_replaced_generation_without_content_rescan(ru
     assert runtime.provider.receipt_reads == reads + 1
     assert (runtime.provider.starts, runtime.provider.submissions) == before
     assert runtime.dependency.calls == [1, 1]
+
+
+def test_ready_cache_lookup_requires_full_executable_admission(runtime, monkeypatch):
+    graph, nodes, engine = runtime.workflow()
+    def reject_capture(*args, **kwargs):
+        raise ValueError("Executable admission refused before reusable lookup")
+    monkeypatch.setattr(engine, "_capture_executable", reject_capture)
+    with pytest.raises(ValueError, match="admission refused"):
+        graph.plan(engine=engine)
+    assert runtime.provider.starts == runtime.provider.submissions == 0
+    assert runtime.dependency.calls == []

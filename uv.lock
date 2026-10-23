@@ -107,7 +107,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.9.4"
+version = "0.9.5"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -165,7 +165,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-core"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/bioimageflow-core" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },

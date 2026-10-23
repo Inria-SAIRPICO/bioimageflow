@@ -202,7 +202,8 @@ Executable admission occurs before cache lookup.
 Ordinary Direct tools use `runtime_callable` identity from the actual retained primary callbacks, semantic code/constants/defaults, supported immutable globals/closures, and same-source helpers.
 The engine calls those retained callbacks; it does not obtain execution proof from a later `inspect` of mutable source files or a package version label.
 Mutable observational globals, opaque initializer/imported/native dependencies, arbitrary instance state and concurrent global mutation remain outside that finite proof.
-Source-backed managed tools use `captured_source`: one source read and non-executing resident code/literal/helper comparison precede lookup, and the retained worker origin verifies the same digest before cold loading.
+Source-backed managed tools use `captured_source`: editable/unmanaged admission captures current represented bytes and checks supported resident/source parity before lookup, and the retained worker origin verifies the same digest before cold loading.
+Installed generations reuse their admitted source/class facts; warm planning and dispatch do not compare installed code against newly read disk bytes.
 Proof-bearing embedded sources use their admitted source/bundle content authority for Direct and managed execution, with single-file namespaces qualified by both source ID and content.
 Installed/versioned managed tools retain `declared_installation` authority with distribution membership/version, declared recipe, and controller callable evidence; this does not certify worker or transitive installed dependency byte equality.
 Node provenance records the exact admitted executable authority and its qualifications, separately from a descriptive declared version.
@@ -220,9 +221,12 @@ Changed editable sources require owned physical drain and recreation, rather tha
 Selected primary-tool attestation and arbitrary external changes outside owned provider publication remain separately qualified.
 Embedded captured bytes provide stronger source authority, but do not seal arbitrary post-load class mutations.
 Declared distribution/version tokens remain manual cache invalidators, including installed import packages whose distribution names differ.
-Capture is memoized only within the owned operation; there is no global cache keyed by mutable source paths.
-Distribution discovery shares one package map across import roots within that operation, while version and absent metadata facts refresh on the next compute, plan or stepped operation.
-Selected version-store metadata remains tied to its exact root.
+Instance declarations, effective parameters, upstream selections and live record-integrity decisions remain operation-owned.
+Installed package/class content is retained by the selected immutable generation and the controller dependency inventory is fixed for the process lifetime.
+Editable source capture stays fresh at the supported boundary, with bounded analysis reuse keyed by captured bytes rather than mutable paths.
+Explicit retirement/reload or process restart invalidates the corresponding authority; selected version-store metadata remains tied to its exact canonical root.
+Process-local counters and operational paths do not salt scientific keys.
+Pending-runtime/upstream diagnostic signatures can use cheap admitted facts without constructing a reusable result key; real cache lookup and dispatch still require complete executable/runtime admission.
 
 The result key should be encoded as a namespaced digest token, for example:
 

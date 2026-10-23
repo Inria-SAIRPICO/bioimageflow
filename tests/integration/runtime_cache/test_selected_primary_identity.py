@@ -119,6 +119,19 @@ def _controller(root, kind, stale):
             path.write_text(path.read_text().replace('stream.write("1\\n")', 'stream.write("9\\n")').replace("value=1", "value=9"))
             if kind == "versioned":
                 _write_metadata(path.parent.parent)
+            if kind == "versioned":
+                # Installed bytes are held until the caller explicitly retires
+                # this selection; unsupported live disk edits do not change it.
+                assert compute() == first
+                assert workflow.plan(engine=engine)["subject"].cached
+                from bioimageflow import unload_versioned_package
+                unload_versioned_package("selected_primary_tools", "1.0.0", root / "store")
+                for operation in (lambda: workflow.plan(engine=engine), compute):
+                    with pytest.raises(RuntimeError, match="retired.*recompile"):
+                        operation()
+                replacement = load_versioned_package("selected_primary_tools", "1.0.0", root / "store")
+                assert replacement.WitnessTool is not tool_type
+                return first
             namespace = {name: item for name, item in sys.modules.items() if item is module or name.startswith(tool_type.__module__.split(".")[0] + ".")}
             before = (provider.submissions, provider.starts, provider.receipt_reads)
             original = Storage.load_current
@@ -131,7 +144,9 @@ def _controller(root, kind, stale):
                         operation()
             finally:
                 Storage.load_current = original
-            assert (provider.submissions, provider.starts, provider.receipt_reads) == before
+            # Read-only runtime readiness now precedes expensive editable-code
+            # admission; no worker starts, scientific calls or record reads occur.
+            assert (provider.submissions, provider.starts) == before[:2]
             assert all(sys.modules[name] is item for name, item in namespace.items())
         return first
     finally:
@@ -149,7 +164,7 @@ def _fresh_controller(root, kind, stale):
 
 @pytest.mark.parametrize("kind", ["source", "shared", "versioned"])
 @pytest.mark.parametrize("callback", ["row", "batch"])
-def test_selected_inherited_primary_refuses_stale_controller_and_clean_b_reuses(tmp_path, kind, callback):
+def test_selected_inherited_primary_respects_source_and_installed_lifetimes(tmp_path, kind, callback):
     _source(tmp_path, kind, callback)
     first = _fresh_controller(tmp_path, kind, True)
     assert first["values"] == [1]

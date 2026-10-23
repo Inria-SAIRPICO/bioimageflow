@@ -8,10 +8,11 @@ import inspect
 import json
 from pathlib import Path
 import re
+from functools import lru_cache
 from dataclasses import dataclass, field
-from contextlib import nullcontext
-from bioimageflow_core.import_context import ImportRootAdmission, admit_import_root, selected_import_root
-from bioimageflow_core.primary_content import PrimaryContentAdmission, capture_primary_content
+from contextlib import contextmanager, ExitStack
+from bioimageflow_core.import_context import ImportRootAdmission, _host_inventory, admit_import_root, selected_import_root
+from bioimageflow_core.primary_content import PrimaryContentAdmission, capture_primary_content, primary_import_context
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
@@ -54,16 +55,9 @@ def _find_distribution(
     package_map: Mapping[str, list[str]] | None = None,
 ) -> tuple[str, str]:
     if root is None:
-        packages = importlib.metadata.packages_distributions() if package_map is None else package_map
-        names = packages.get(import_package, [])
-        candidates = []
-        for name in names:
-            try:
-                candidates.append(
-                    (_canonical_distribution(name), importlib.metadata.version(name))
-                )
-            except importlib.metadata.PackageNotFoundError:
-                continue
+        inventory = _host_inventory()
+        candidates = [inventory["facts"][id(dist)]
+                      for dist in inventory["imports"].get(import_package, ())]
     else:
         candidates = [
             (
@@ -83,13 +77,56 @@ def _find_distribution(
     return unique[0]
 
 
+@lru_cache(maxsize=None)
+def _host_distribution(import_package: str, distribution: str | None) -> tuple[str, str] | None:
+    """Freeze host metadata at first selection; controller changes require restart."""
+    if distribution is not None:
+        canonical = _canonical_distribution(distribution)
+        providers = _host_inventory()["providers"].get(canonical, ())
+        if len(providers) != 1:
+            raise ValueError(f"Cannot resolve exactly one host distribution for {distribution!r}")
+        return _host_inventory()["facts"][id(providers[0])]
+    try:
+        return _find_distribution(import_package)
+    except ValueError:
+        return None
+
+
 @dataclass
 class ExecutableMetadata:
     """Metadata facts owned by one admission operation, never a global cache."""
 
     _imports: dict[tuple[str, str, str | None], ImportRootAdmission] = field(default_factory=dict)
-    _packages: Mapping[str, list[str]] | None = None
-    _versions: dict[tuple[str, str], tuple[str, str] | None] = field(default_factory=dict)
+    _generations: set[Any] = field(default_factory=set)
+    _primary_origins: dict[type, tuple[WorkerToolOrigin, PrimaryContentAdmission]] = field(default_factory=dict)
+    _source_bytes: dict[Path, bytes] = field(default_factory=dict)
+
+    def worker_origin(self, tool: Any) -> tuple[WorkerToolOrigin, PrimaryContentAdmission]:
+        klass = type(tool)
+        if klass not in self._primary_origins:
+            self._primary_origins[klass] = _resolve_worker_tool_origin(tool)
+        elif not _class_primary_is_fixed(klass):
+            # Source is captured once per operation; effective instance owners
+            # still have to match that capture before actual managed lookup.
+            self._primary_origins[klass][1].attest(tool)
+        return self._primary_origins[klass]
+
+    def source_bytes(self, path: Path) -> bytes:
+        if path not in self._source_bytes:
+            self._source_bytes[path] = path.read_bytes()
+        return self._source_bytes[path]
+
+    def generation(self, klass: type) -> Any:
+        """Hold the actual loaded installation until this operation finishes."""
+        from bioimageflow.tool_loader import _tool_generation
+        generation = _tool_generation(klass)
+        if generation is not None and generation not in self._generations:
+            generation.acquire()
+            self._generations.add(generation)
+        return generation
+
+    def __del__(self) -> None:
+        self.clear()
 
     def import_admission(self, root: str, package: str, version: str | None = None) -> ImportRootAdmission:
         """Share one metadata admission per immutable selection in this operation."""
@@ -101,25 +138,18 @@ class ExecutableMetadata:
         return self._imports[key]
 
     def resolve(self, import_root: str, distribution: str | None) -> tuple[str, str] | None:
-        key = ("distribution", distribution) if distribution is not None else ("package", import_root)
-        if key not in self._versions:
-            if distribution is not None:
-                self._versions[key] = (_canonical_distribution(distribution), importlib.metadata.version(distribution))
-            else:
-                if self._packages is None:
-                    self._packages = importlib.metadata.packages_distributions()
-                try:
-                    self._versions[key] = _find_distribution(import_root, package_map=self._packages)
-                except ValueError:
-                    self._versions[key] = None
-        return self._versions[key]
+        return _host_distribution(import_root, distribution)
 
     def clear(self) -> None:
+        for generation in self._generations:
+            generation.release()
+        self._generations.clear()
         self._imports.clear()
-        self._packages = None
-        self._versions.clear()
+        self._primary_origins.clear()
+        self._source_bytes.clear()
 
 
+@lru_cache(maxsize=None)
 def _verify_declared_distribution(
     distribution_name: str,
     import_package: str,
@@ -181,6 +211,56 @@ def _versioned_store_root(source_file: Path, import_package: str, version: str) 
     )
 
 
+_installed_class_origins: dict[tuple[type, str], tuple[WorkerToolOrigin, PrimaryContentAdmission]] = {}
+_fixed_primary_classes: set[type] = set()
+
+
+def _primary_is_fixed(admission: PrimaryContentAdmission, selected: Mapping[str, bytes] | None = None) -> bool:
+    """Only selected installed bytes and real host RECORD members are fixed."""
+    from bioimageflow_core.import_context import _distribution_members
+    inventory = _host_inventory()
+    for member in admission.proof.members:
+        if selected is not None and member.module in selected:
+            continue
+        distribution = getattr(member, "distribution", None)
+        providers = inventory["providers"].get(distribution, ())
+        if not any(admission.paths[member.module] in _distribution_members(provider) for provider in providers):
+            return False
+    return True
+
+
+def _class_primary_is_fixed(klass: type) -> bool:
+    from bioimageflow.tool_loader import _tool_generation
+    generation = _tool_generation(klass)
+    return (generation.classes.get(klass, {}).get("fixed", False) if generation is not None
+            else klass in _fixed_primary_classes)
+
+
+def _versioned_generation_origin(tool_class: type, generation: Any) -> tuple[WorkerToolOrigin, PrimaryContentAdmission]:
+    from bioimageflow_core.import_context import _lock
+    with _lock:
+        facts = generation.classes.setdefault(tool_class, {})
+        if "worker_origin" not in facts or not facts["fixed"]:
+            admission = capture_primary_content(
+                tool_class, package_root=generation.installation.root / generation.package,
+                package_admission=generation.primary,
+            )
+            facts["fixed"] = _primary_is_fixed(admission, generation.primary.sources)
+            facts["primary"] = admission
+            facts["source_file"] = Path(inspect.getsourcefile(tool_class) or inspect.getfile(tool_class)).resolve(strict=True)
+            facts["source_hash"] = admission.source_hash(facts["source_file"])
+            facts["worker_origin"] = VersionedModuleOrigin(
+                distribution=generation.installation.distribution,
+                import_package=generation.package,
+                version=generation.version,
+                canonical_module=getattr(tool_class, "_bif_canonical_module", tool_class.__module__),
+                scoped_module=tool_class.__module__,
+                store_root=str(generation.installation.root),
+                class_name=tool_class.__name__, primary=admission.proof,
+            )
+        return facts["worker_origin"], facts["primary"]
+
+
 def resolve_worker_tool_origin(
     tool: ProcessingTool | type[ProcessingTool],
     *,
@@ -198,10 +278,25 @@ def _resolve_worker_tool_origin(
     *,
     installed_distribution: str | None = None,
 ) -> tuple[WorkerToolOrigin, PrimaryContentAdmission]:
+    from bioimageflow_core.import_context import _lock
+    with _lock:
+        return _resolve_worker_tool_origin_locked(tool, installed_distribution=installed_distribution)
+
+
+def _resolve_worker_tool_origin_locked(
+    tool: ProcessingTool | type[ProcessingTool], *, installed_distribution: str | None = None,
+) -> tuple[WorkerToolOrigin, PrimaryContentAdmission]:
     """Share one held primary admission between identity and worker dispatch."""
     tool_class = tool if isinstance(tool, type) else type(tool)
     if not issubclass(tool_class, ProcessingTool):
         raise TypeError("Worker origins can only be built for ProcessingTool classes.")
+    from bioimageflow.tool_loader import _generation_lease
+    with _generation_lease(tool_class) as generation:
+        if generation is not None:
+            return _versioned_generation_origin(tool_class, generation)
+    declared = installed_distribution or getattr(tool_class, "_bif_worker_distribution", None)
+    if isinstance(declared, str) and (tool_class, declared) in _installed_class_origins:
+        return _installed_class_origins[(tool_class, declared)]
     source_file = Path(getattr(tool_class, "_bif_admitted_source_file", None) or inspect.getsourcefile(tool_class) or inspect.getfile(tool_class))
     source_file = source_file.resolve(strict=True)
     class_name = tool_class.__name__
@@ -280,13 +375,19 @@ def _resolve_worker_tool_origin(
         )
         admission = capture_primary_content(tool_class, distribution=declared_distribution)
         admission.attest(tool)
-        return InstalledModuleOrigin(
+        result = InstalledModuleOrigin(
             distribution=declared_distribution,
             version=version,
             module=canonical_module,
             class_name=class_name,
             primary=admission.proof,
         ), admission
+        # Editable distribution owners still capture current source on each
+        # operation. Only ordinary installed RECORD members have fixed bytes.
+        if _primary_is_fixed(admission):
+            _installed_class_origins[(tool_class, declared_distribution)] = result
+            _fixed_primary_classes.add(tool_class)
+        return result
 
     import_root = _package_import_root(source_file, tool_class.__module__)
     if import_root is not None:
@@ -323,9 +424,23 @@ class ExecutableCapture:
     worker_origin: WorkerToolOrigin | None
     qualification: tuple[str, ...]
     import_admission: ImportRootAdmission | None = None
+    _owned_metadata: ExecutableMetadata | None = field(default=None, repr=False, compare=False)
+    _generation: Any = field(default=None, repr=False, compare=False)
 
+    @contextmanager
     def execution_context(self):
-        return nullcontext() if self.import_admission is None else selected_import_root(self.import_admission)
+        if self._generation is not None:
+            self._generation.acquire()
+        try:
+            with ExitStack() as contexts:
+                if self.import_admission is not None:
+                    contexts.enter_context(selected_import_root(self.import_admission))
+                if self._generation is not None:
+                    contexts.enter_context(primary_import_context(self._generation.primary))
+                yield
+        finally:
+            if self._generation is not None:
+                self._generation.release()
 
     def dependency_provenance(self) -> tuple[dict[str, str], ...]:
         return () if self.import_admission is None else self.import_admission.observed_dependencies
@@ -345,21 +460,43 @@ def _declaration_identity(tool: Any) -> dict[str, Any]:
     }
 
 
+def tool_diagnostic_facts(tool: Any, *, metadata: ExecutableMetadata) -> dict[str, Any]:
+    """Fresh cheap pending-plan facts, never authority for cache lookup or dispatch."""
+    klass = type(tool)
+    generation = metadata.generation(klass)
+    facts = {
+        "module": getattr(klass, "_bif_canonical_module", klass.__module__),
+        "class": klass.__qualname__,
+        "declared_version": getattr(klass, "_bif_package_version", None),
+        "declaration": _declaration_identity(tool),
+        "custom_source_hash": getattr(klass, "_bif_custom_source_hash", None),
+        "execution_contract": EXECUTION_CONTRACT_VERSION,
+    }
+    if generation is not None:
+        facts.update(generation.primary.scientific_facts())
+        facts.update(generation.import_admission.to_scientific_facts())
+    return facts
+
+
 def capture_tool_executable(
     tool: Any, *, managed: bool, canonicalize: Callable[[Any], str],
     metadata: ExecutableMetadata | None = None,
 ) -> ExecutableCapture:
     """Capture actual callbacks before lookup; never infer code from a version label.
 
-    Managed admission compares supported inherited primary callbacks and
-    constructors with held source reads before lookup. Worker dispatch carries
-    that proof and must verify the current primary members and resident instance.
-    Opaque initializers and transitive imported dependencies remain qualified.
+    Installed primary facts stay bound to their admitted generation; editable
+    owners are freshly captured once per operation. Effective declarations and
+    bound callbacks remain per-node facts. Worker dispatch carries that held
+    origin; opaque initializer and transitive dependency closure remain qualified.
     """
     from bioimageflow_core.executable_identity import runtime_callable_identity, validate_source_callables
     from bioimageflow_core.declarations import DECLARATION_CONTRACT_VERSION
 
     klass = type(tool)
+    owned_metadata = ExecutableMetadata() if metadata is None else None
+    admission_metadata = owned_metadata if metadata is None else metadata
+    assert admission_metadata is not None
+    generation = admission_metadata.generation(klass)
     if isinstance(tool, ProcessingTool):
         names = ("process_batch",) if klass.process_batch is not ProcessingTool.process_batch else ("process_row",)
     else:
@@ -376,7 +513,6 @@ def capture_tool_executable(
     declared_distribution = getattr(klass, "_bif_worker_distribution", None)
     if declared_version is None and not getattr(klass, "_bif_custom_source_hash", None):
         import_root = canonical_module.split(".", 1)[0]
-        admission_metadata = ExecutableMetadata() if metadata is None else metadata
         fact = admission_metadata.resolve(import_root, declared_distribution)
         if fact is not None:
             declared_distribution, declared_version = fact
@@ -391,20 +527,25 @@ def capture_tool_executable(
     import_admission = None
     package = getattr(klass, "_bif_package", None)
     if isinstance(package, str) and declared_version is not None:
-        source_file = Path(inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
-        selected_root = _versioned_store_root(source_file, package, declared_version)
-        admission_metadata = ExecutableMetadata() if metadata is None else metadata
-        import_admission = admission_metadata.import_admission(str(selected_root), package, declared_version)
+        if generation is not None:
+            import_admission = generation.import_admission
+        else:
+            source_file = Path(inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
+            selected_root = _versioned_store_root(source_file, package, declared_version)
+            import_admission = admission_metadata.import_admission(str(selected_root), package, declared_version)
         key.update(import_admission.to_scientific_facts())
     if managed or isinstance(custom_hash, str):
-        path = Path(getattr(klass, "_bif_admitted_source_file", None) or inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True)
         if managed:
-            origin, primary_admission = _resolve_worker_tool_origin(tool)
-            source_digest = primary_admission.source_hash(path)
+            origin, primary_admission = admission_metadata.worker_origin(tool)
+        path = (generation.classes[klass]["source_file"] if managed and generation is not None
+                else Path(getattr(klass, "_bif_admitted_source_file", None) or inspect.getsourcefile(klass) or inspect.getfile(klass)).resolve(strict=True))
+        if managed:
+            source_digest = (generation.classes[klass]["source_hash"] if generation is not None
+                             else primary_admission.source_hash(path))
             qualification = primary_admission.qualification
             key.update(primary_admission.scientific_facts())
         else:
-            source = path.read_bytes()
+            source = admission_metadata.source_bytes(path)
             source_digest = hashlib.sha256(source).hexdigest()
             local_callbacks = {name: callback for name, callback in identity_callbacks.items()
                                if Path(getattr(callback, "__func__", callback).__code__.co_filename).resolve() == path}
@@ -438,4 +579,4 @@ def capture_tool_executable(
         # objects or execution resources.
         key["declared_dependencies"] = json.loads(canonicalize(environment.dependencies))
     qualification = tuple(sorted(set(qualification) | {"custom annotation validator closure unproved"}))
-    return ExecutableCapture(MappingProxyType(key), MappingProxyType(callbacks), origin, qualification, import_admission)
+    return ExecutableCapture(MappingProxyType(key), MappingProxyType(callbacks), origin, qualification, import_admission, owned_metadata, generation)

@@ -51,6 +51,7 @@ class _MaterializationMixin:
         source_records: list[dict[str, Any]],
         auto_install: bool,
         storage_path: str | Path,
+        tool_store_path: Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -107,7 +108,7 @@ class _MaterializationMixin:
         if errors is not None:
             errors.extend(ValidationError(kind="missing_input", message="Edge references an unknown node.", node=edge["target_node"], edge_id=edge["id"]) for edge in _admission["missing_edges"])
 
-        store = _get_store_path()
+        store = _get_store_path() if tool_store_path is None else tool_store_path
         built: dict[str, Node] = {}
         previous = get_active_workflow()
         set_active_workflow(wf)
@@ -186,6 +187,7 @@ class _MaterializationMixin:
                                     source_records=source_records,
                                     auto_install=auto_install,
                                     storage_path=storage_path,
+                                    tool_store_path=store,
                                     partial=partial,
                                     errors=child_errors,
                                     graph_stack=graph_stack,
@@ -442,8 +444,11 @@ class _MaterializationMixin:
                 pkg_ver,
                 node_data["tool_module"],
                 node_data["tool_class"],
+                store_path=store,
             )
         else:
             module = importlib.import_module(node_data["tool_module"])
             tool_class = getattr(module, node_data["tool_class"])
-        return tool_class()
+        from bioimageflow.tool_loader import _generation_lease
+        with _generation_lease(tool_class):
+            return tool_class()
