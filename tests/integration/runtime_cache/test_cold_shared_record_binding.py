@@ -1,6 +1,7 @@
 """Cold record admission reuses only its own sealed shared-array values."""
 
 from pathlib import Path
+import gc
 
 import numpy as np
 import pandas as pd
@@ -61,7 +62,19 @@ def _publish_processing(storage_path, reference, run_suffix):
         row_relation=relation.to_dict())
 
 
-def test_cold_processing_keeps_two_backings_and_exact_record_value(tmp_path):
+@pytest.fixture
+def paused_cyclic_gc():
+    """Execution-owned pins must drain without collecting captured graph cycles."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_cold_processing_keeps_two_backings_and_exact_record_value(tmp_path, paused_cyclic_gc):
     owner_root = tmp_path / "owner"
     owner = SharedMemoryContext(owner_root)
     reader_owner = SharedMemoryContext(tmp_path / "reader")
@@ -208,3 +221,62 @@ def test_dataframe_nested_sealed_leaf_reuses_backing_after_exact_admission(tmp_p
     finally:
         assert owner.close().state == "closed"
         assert reader_owner.close().state == "closed"
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_active_engine_close_preserves_shared_input_until_callback_finishes(tmp_path, paused_cyclic_gc, monkeypatch, cleanup_failure):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from bioimageflow import DataFrameTool
+
+    entered, release = threading.Event(), threading.Event()
+    owner = SharedMemoryContext(tmp_path / "owner")
+    values, failures = [], []
+    if cleanup_failure:
+        from bioimageflow import ResultGroup
+        release_group = ResultGroup.release
+        def fail_once(group):
+            if group.group_id.startswith("inputs_") and not failures:
+                failures.append("input cleanup")
+                raise OSError("Temporary input cleanup failed")
+            return release_group(group)
+        monkeypatch.setattr(ResultGroup, "release", fail_once)
+
+    class Blocked(DataFrameTool):
+        accepts_upstream = False
+        class Inputs(IOModel):
+            pixels: SharedArray
+        class Outputs(IOModel):
+            value: int
+        def transform(self, dataframe, arguments):
+            entered.set()
+            assert release.wait(timeout=5), "The active callback was never resumed"
+            with open_shared_array(arguments.pixels) as pixels:
+                values.append(int(pixels[0]))
+                return pd.DataFrame({"value": [int(pixels[0])]})
+
+    producer = owner.create(np.array([7], dtype="uint16"))
+    with Workflow(engine="direct", storage_path=tmp_path / "records", shared_memory_context=owner) as workflow:
+        node = Blocked()(pixels=producer)
+    engine = workflow.create_engine()
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            job = executor.submit(workflow.compute, node, engine=engine)
+            try:
+                assert entered.wait(timeout=5), "The shared-input callback never started"
+                engine.close()
+            finally:
+                release.set()
+            if cleanup_failure:
+                with pytest.raises(OSError, match="Temporary input cleanup failed"):
+                    job.result(timeout=5)
+                assert owner.status().pending_leases == 1
+                engine.close()
+            else:
+                assert job.result(timeout=5)["value"].tolist() == [7]
+            assert values == [7]
+        assert owner.status().pending_leases == 0
+    finally:
+        release.set()
+        engine.close()
+        assert owner.close().state == "closed"

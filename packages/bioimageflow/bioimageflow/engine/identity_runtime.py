@@ -134,9 +134,12 @@ class _IdentityRuntimeMixin:
         diagnostic: bool = False,
     ) -> str:
         """Compute the logical digest for any node type."""
-        capture = self._capture_executable(node)
         from bioimageflow.cache.identity import deterministic_serialize
-        tool_facts = dict(capture.scientific_key)
+        if diagnostic:
+            from bioimageflow.worker_origins import tool_diagnostic_facts
+            tool_facts = tool_diagnostic_facts(node.tool, metadata=self._executable_metadata)
+        else:
+            tool_facts = dict(self._capture_executable(node).scientific_key)
         if self._use_wetlands and isinstance(node.tool, ProcessingTool):
             receipt = self._node_runtime_receipts.get(node)
             if receipt is None:

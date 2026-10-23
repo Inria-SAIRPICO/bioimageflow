@@ -105,6 +105,8 @@ def data_dir(tmp_path):
 def _cleanup_scoped_modules():
     """Remove scoped and canonical dummy_tools modules after each test."""
     yield
+    from bioimageflow import unload_versioned_packages
+    unload_versioned_packages([("dummy_tools", "1.0.0"), ("dummy_tools", "2.0.0")])
     to_remove = [k for k in sys.modules
                  if k.startswith("dummy_tools__") or k.startswith("dummy_tools")]
     for k in to_remove:

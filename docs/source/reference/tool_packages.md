@@ -56,7 +56,10 @@ A manually selected affected resource suite is additionally blocking; unrelated 
 Reusable cache lookup and execution consume one admitted executable capture rather than reconstructing source or package selectors after a cache hit.
 Captured custom tools retain their admitted source content and canonical module/class identity; loading another single-file source with the same logical ID must not retarget the earlier definition.
 Ordinary Direct tools remain supported and cacheable from their actual retained primary callbacks and represented code, defaults, closed literal state and same-source helper facts, with configured values and declarations supplied by the effective definition capture.
-Managed source admission compiles captured bytes without executing imports and refuses proven resident/source primary, literal-global, helper or default mismatches before lookup; these controller-local bytecode comparisons are not cross-Python worker tokens.
+Managed editable/unmanaged source admission compiles captured bytes without executing imports and refuses supported resident/source mismatches before first use.
+Stable installed generations retain the admitted package source and actual RECORD-owned inherited facts instead of repeating source capture or bytecode attestation.
+External editable inherited owners remain freshly captured once per operation, even when the defining tool is installed.
+These controller-local checks are not cross-Python worker tokens.
 Current ProcessingTask/result v4 uses the shared Core declaration projector: the loaded instance must match the requested portable IO contract before the scientific method, and the controller checks the successful digest before output acceptance.
 This does not prove arbitrary constructor/module initializer effects, custom validator behavior or installed/transitive dependency bytes.
 Retaining a callback prevents later method replacement from selecting another function, but does not freeze arbitrary module globals or closures after admission.
@@ -75,9 +78,14 @@ Pip failure preserves the detailed `RuntimeError` and original cause while clean
 Installation admission resolves the import member without executing its initializer; actual loading/construction are later gates, and arbitrary initializer side effects are not sandboxed.
 These checks establish bounded requested-package readiness rather than universal dependency isolation or controller/worker installed-content equality.
 
-Versioned controller/local loading uses `selected_installation` dependency authority: compatible preloaded distributions need actual membership/version evidence, and unequal or unknown ownership is refused without purging foreign modules.
+Versioned controller/local loading uses `selected_installation` dependency authority: first admission checks selected distribution membership/version and compatibility without purging foreign modules.
+The process retains its application dependency inventory and each selected installation generation; warm lookup and context entry/exit do not reconstruct that ownership.
+A controller dependency replacement requires process restart.
 Loading, initialization and tool callbacks use a scoped locked search-path context that restores caller paths; managed workers use `managed_runtime` authority in their own environment, without falling back to the entire controller store for dependencies.
-Active imports and applicable requirements are checked before successful publication, preserving the primary tool exception on failure.
+Initial active imports and applicable requirements are checked before successful publication, preserving the primary tool exception on failure.
+Explicit `unload_versioned_package` or atomic `unload_versioned_packages` retires only the selected store generations after active operations release ownership; ordinary file edits are not an installed-package update API.
+Physical package removal uses `versioned_package_mutation(selections, store_path=...)` to retire the same batch and block re-admission of its scoped namespaces until the mutation finishes, including across an asynchronous filesystem operation.
+Editable source snapshots remain fresh, while arbitrary monkeypatches and external installed-file/environment mutations during an admitted lifetime have no automatic detection guarantee.
 This is bounded dependency admission, not an environment solver, universal transitive-byte proof or sandbox for arbitrary trusted initializer/global effects.
 
 ## Package-Owned Documentation Contract
@@ -92,3 +100,10 @@ The main docs include first-party package docs through generated wrapper pages, 
 Custom packages can opt into local documentation builds with `[tool.bioimageflow.docs]` metadata in their `pyproject.toml`.
 Discovery parses complete TOML and uses the valid declared project name, normalized under PEP 503, for package identity, deduplication and wrapper paths; the checkout directory can have a different name.
 See the [custom tool package how-to guide](../how-to/custom_tool_package) for the package layout, documentation contract, and test expectations.
+
+### Explicit store selection in workflow loading
+
+`Workflow.from_dict(..., tool_store_path=path)` selects one canonical tool-store root for the entire recursive graph, including embedded workflows.
+Omitting it uses the ordinary configured store.
+The path is admission authority only and is not serialized into the graph or included in scientific cache keys.
+A resident package/version from another root is refused until its ownership has drained and it is explicitly retired.

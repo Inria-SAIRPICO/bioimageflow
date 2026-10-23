@@ -149,3 +149,30 @@ def test_literal_facts_are_closed_before_custom_canonicalizer():
     evidence = _identity(transform)
     assert len(evidence["digest"]) == 64
     assert evidence["unresolved"] == ()
+
+
+def test_source_analysis_reuses_exact_bytes_and_has_a_finite_budget(monkeypatch):
+    import bioimageflow_core.executable_identity as identity
+    identity._source_analysis.cache_clear()
+    parsed = []
+    original = identity.ast.parse
+
+    def parse(source, *args, **kwargs):
+        parsed.append(source)
+        return original(source, *args, **kwargs)
+
+    monkeypatch.setattr(identity.ast, 'parse', parse)
+    source = b'def callback(): return 1\n'
+    namespace = {}
+    exec(compile(source, 'first.py', 'exec'), namespace)
+    first = namespace['callback']
+    exec(compile(source, 'second.py', 'exec'), namespace)
+    second = namespace['callback']
+    identity.validate_source_callables(source, {'callback': first}, canonicalize=_canonical)
+    identity.validate_source_callables(source, {'callback': second}, canonicalize=_canonical)
+    assert parsed == [source]
+    assert identity._source_analysis.cache_info().maxsize == 128
+    changed = source.replace(b'return 1', b'return 2')
+    with pytest.raises(ValueError, match='Resident/source callable mismatch'):
+        identity.validate_source_callables(changed, {'callback': first}, canonicalize=_canonical)
+    assert parsed == [source, changed]

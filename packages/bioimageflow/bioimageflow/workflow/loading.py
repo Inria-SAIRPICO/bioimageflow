@@ -236,6 +236,7 @@ class _LoadingMixin:
         validate_only: Literal[True],
         partial: bool = False,
         auto_install: bool = True,
+        tool_store_path: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -252,6 +253,7 @@ class _LoadingMixin:
         validate_only: Literal[False] = False,
         partial: bool = False,
         auto_install: bool = True,
+        tool_store_path: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -267,6 +269,7 @@ class _LoadingMixin:
         validate_only: bool = False,
         partial: bool = False,
         auto_install: bool = True,
+        tool_store_path: str | Path | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
         engine: str | None = None,
         execution: str | None = None,
@@ -297,6 +300,9 @@ class _LoadingMixin:
         storage_path
             Runtime storage root for cache records, provenance, run views,
             transient workspaces, and materialized outputs.
+        tool_store_path
+            Installed package store used for the complete recursive graph.
+            Defaults to the process-configured tool store when omitted.
         on_progress, engine, execution, wetlands_config
             Passed to :class:`Workflow`. ``None`` means "use the values
             from ``data['config']`` (or defaults)".
@@ -310,10 +316,14 @@ class _LoadingMixin:
         """
         errors: list[ValidationError] = []
         try:
+            from .custom_sources import _get_store_path
+
+            selected_store = Path(_get_store_path() if tool_store_path is None else tool_store_path).resolve()
             wf = cls._from_recursive_dict(
                 data,
                 auto_install=auto_install,
                 storage_path=storage_path,
+                tool_store_path=selected_store,
                 on_progress=on_progress,
                 engine=engine,
                 execution=execution,
@@ -351,6 +361,7 @@ class _LoadingMixin:
         *,
         auto_install: bool,
         storage_path: str | Path,
+        tool_store_path: Path,
         on_progress: Callable[[ProgressEvent], None] | None,
         engine: str | None,
         execution: str | None,
@@ -367,6 +378,7 @@ class _LoadingMixin:
             source_records=source_records,
             auto_install=auto_install,
             storage_path=storage_path,
+            tool_store_path=tool_store_path,
             on_progress=on_progress,
             engine=engine,
             execution=execution,

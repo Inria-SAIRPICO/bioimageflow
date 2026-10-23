@@ -222,6 +222,10 @@ def broken_lazy_tool_store(tmp_path):
 def _cleanup_sys_modules():
     """Remove any dummy_tools scoped and canonical modules after each test."""
     yield
+    from bioimageflow.tool_loader import _resident_generations, unload_versioned_package
+    for package, version in tuple(_resident_generations):
+        if package in {"dummy_tools", "lazy_tools", "broken_lazy_tools"}:
+            unload_versioned_package(package, version)
     to_remove = [
         k
         for k in sys.modules

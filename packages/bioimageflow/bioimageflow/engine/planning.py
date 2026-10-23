@@ -133,7 +133,6 @@ class _PlanningMixin:
             )
             return
 
-        self._capture_executable(node)
         if (
             self._use_wetlands
             and isinstance(node.tool, ProcessingTool)

@@ -102,10 +102,13 @@ class _NodeExecutionMixin:
         from bioimageflow.result_groups import bind_result_group
         import uuid
 
-        admitted, _inputs_group = bind_result_group(
+        admitted, inputs_group = bind_result_group(
             publish_inputs([node._constant_bindings, node._args]),
             node_name=node.name, group_id="inputs_" + uuid.uuid4().hex,
         )
+        if inputs_group is not None:
+            with self._cache_hit_lock:
+                self._input_result_groups.append(inputs_group)
         node._constant_bindings, captured_args = admitted
         node._args = list(captured_args)
 
