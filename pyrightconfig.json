@@ -24,6 +24,7 @@
     "packages/bioimageflow-core",
     "packages/bioimageflow-common-tools",
     "packages/bioimageflow-io-tools",
+    "packages/bioimageflow-omero-tools",
     "packages/bioimageflow-measurement-tools",
     "packages/bioimageflow-restoration-tools",
     "packages/bioimageflow-sairpico-tools",

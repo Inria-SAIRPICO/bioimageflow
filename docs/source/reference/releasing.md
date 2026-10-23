@@ -32,7 +32,7 @@ Choose the version bump from the selected package's public behavior:
 First-party dependency ranges identify the single supported current release cohort.
 Tool compatibility remains Core `>=0.5.0,<0.6`; BioImageFlow 0.9.5 itself requires Core `>=0.5.1,<0.6` for generation admission.
 The first-party orchestrator range remains `>=0.9.0,<1`, and Wetlands remains `>=2.6.1,<3`.
-All nine first-party tool packages use that Core range; common, measurement, spot and tracking also use the current orchestrator range.
+All first-party tool packages use that Core range; common, measurement, spot and tracking also use the current orchestrator range.
 These ranges must resolve and pass current scientific and tool-authoring controls before publication.
 There is no obligation to preserve old DTOs, wire schemas, aliases or dependency floors solely for backward compatibility.
 Essential scientific types, file workflows, durable results and current ownership/cancellation semantics remain mandatory.
@@ -73,6 +73,10 @@ Trusted Publisher/account eligibility is still an external prerequisite, and no 
 
 The same workflow identity can be registered for every independently versioned distribution in this repository.
 Normal publishers support this one-repository-to-many-projects relationship.
+
+The new `bioimageflow-omero-tools` project requires its own PyPI publisher authorization before its first release.
+If the project does not yet exist, verify or register its pending GitHub Actions publisher for owner `Inria-SAIRPICO`, repository `bioimageflow`, workflow `release.yml` and environment `pypi` before the reviewed first publication; after creation, verify the project's normal publisher registration.
+Existing publisher registrations for other BioImageFlow distributions do not authorize this new project, and a passing local wheel installation does not establish registry availability or publishing eligibility.
 
 PyPI currently prevents two pending GitHub publishers from using the same owner, repository, workflow, and environment for different future project names.
 It also limits an account to three simultaneous pending publishers.

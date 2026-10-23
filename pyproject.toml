@@ -11,6 +11,7 @@ dev = [
     "bioimageflow>=0.9.0,<1",
     "bioimageflow-common-tools>=0.2.2",
     "bioimageflow-io-tools>=0.2.2",
+    "bioimageflow-omero-tools>=0.1.0",
     "bioimageflow-measurement-tools>=0.2.2",
     "bioimageflow-phasor-tools>=0.1.0",
     "bioimageflow-segmentation-tools>=0.3.2",
@@ -22,6 +23,7 @@ dev = [
     "imageio>=2.31.0",
     "numpy>=1.23.5",
     "packaging>=24.0",
+    "Pillow>=10.0",
     "parsl>=2026.5.25,<2026.6",
     "psij-python>=0.9.11,<0.10",
     "pytest>=8.0",
@@ -49,6 +51,7 @@ bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
 bioimageflow-io-tools = { workspace = true }
+bioimageflow-omero-tools = { workspace = true }
 bioimageflow-measurement-tools = { workspace = true }
 bioimageflow-phasor-tools = { workspace = true }
 bioimageflow-segmentation-tools = { workspace = true }
