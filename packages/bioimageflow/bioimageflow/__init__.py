@@ -320,6 +320,7 @@ __all__ = [
     "plan_distributed_execution",
     "prepare_remote_submission",
     "require_tool_packages",
+    "resolve_tool_class",
     "result_groups",
     "serialize_constant",
     "serialize_image_spec",
@@ -331,9 +332,8 @@ __all__ = [
     "topological_order",
     "unload_versioned_package",
     "unload_versioned_packages",
-    "versioned_package_mutation",
-    "resolve_tool_class",
     "validate_parameters",
     "validate_parsl_config_ref",
     "validate_remote_execution_profile",
+    "versioned_package_mutation",
 ]
