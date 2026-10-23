@@ -25,9 +25,39 @@ class RuntimeGate:
     project: str
     imports: tuple[str, ...] = ()
     cases: tuple[str, ...] = ()
+    additional_selectors: tuple[str, ...] = ()
+    identities: tuple[tuple[str, str], ...] = ()
+    timeout_seconds: int | None = None
 
 
 _SEGMENTATION = "packages/bioimageflow-segmentation-tools/tests/"
+_TASK_API = "tests/integration/test_wetlands_task_api.py"
+_CANCELLATION = "tests/integration/test_wetlands_cancellation.py"
+_WETLANDS_SMOKE = "tests/integration/test_wetlands_smoke.py"
+_COMMON_WETLANDS = "packages/bioimageflow-common-tools/tests/test_common_complete_wetlands.py"
+_TASK_API_IDENTITIES = tuple(
+    ("tests.integration.test_wetlands_task_api." + classname, name)
+    for classname, names in (
+        ("TestRowParallelism", (
+            "test_single_worker_produces_correct_results", "test_multi_worker_same_results",
+            "test_row_ordering_preserved", "test_error_propagation_with_cleanup", "test_batch_tool_via_submit",
+        )),
+        ("TestWetlandsResourceRequirements", (
+            "test_gpu_tool_runs_without_mutating_worker_environment", "test_get_environment_override",
+            "test_workflow_level_max_workers_default",
+        )),
+        ("TestSubRowProgress", (
+            "test_row_progress_events_emitted", "test_failed_event_on_error", "test_batch_progress_events",
+        )),
+        ("TestBranchParallelism", (
+            "test_independent_branches_concurrent", "test_results_identical_to_sequential",
+            "test_dataframe_tool_never_concurrent", "test_sequential_engine_deterministic",
+        )),
+    )
+    for name in names
+)
+MODEL_GATES = ("stardist", "instanseg", "nagini-api", "laptrack")
+WETLANDS_GATES = ("wetlands-local", "wetlands-published")
 GATES = {
     "stardist": RuntimeGate(
         _SEGMENTATION + "test_execution.py::test_stardist_runtime_segments_tiny_synthetic_image",
@@ -59,8 +89,29 @@ GATES = {
                "wiener-deconvolution", "spitfire-deconvolution", "median-denoising",
                "cimg-denoising", "hotspot-detection"),
     ),
+    "wetlands-local": RuntimeGate(
+        _TASK_API, "", "", "",
+        additional_selectors=(
+            _CANCELLATION + "::test_cancel_reaches_active_rows_and_drains_submitted_window",
+            _CANCELLATION + "::test_cancel_reaches_active_batch_and_drains_it",
+            _WETLANDS_SMOKE + "::test_configured_logging_routes_wetlands_worker_streams",
+            _COMMON_WETLANDS + "::test_connected_components_labels_binary_objects_through_wetlands",
+        ),
+        identities=_TASK_API_IDENTITIES + (
+            ("tests.integration.test_wetlands_cancellation", "test_cancel_reaches_active_rows_and_drains_submitted_window"),
+            ("tests.integration.test_wetlands_cancellation", "test_cancel_reaches_active_batch_and_drains_it"),
+            ("tests.integration.test_wetlands_smoke", "test_configured_logging_routes_wetlands_worker_streams"),
+            ("packages.bioimageflow-common-tools.tests.test_common_complete_wetlands",
+             "test_connected_components_labels_binary_objects_through_wetlands"),
+        ),
+        timeout_seconds=3600,
+    ),
+    "wetlands-published": RuntimeGate(
+        _WETLANDS_SMOKE + "::test_processing_tool_executes_through_published_wetlands",
+        "", "", "", timeout_seconds=1200,
+    ),
 }
-RUNTIME_CHOICES = ("all", "stardist", "instanseg", "nagini-api", "laptrack")
+RUNTIME_CHOICES = ("all", *MODEL_GATES, *WETLANDS_GATES)
 SUITES = ("all", "wetlands", "public-data", "external-binaries", "model-runtimes")
 
 
@@ -71,12 +122,14 @@ def validate_selection(suite: str, gate: str, event: str = "workflow_dispatch") 
         raise ValueError("Unsupported Complete event")
     if event == "schedule" and (suite, gate) != ("all", "all"):
         raise ValueError("Scheduled Complete validation retains all defaults")
-    if gate != "all" and suite != "model-runtimes":
-        raise ValueError("A targeted runtime gate requires suite=model-runtimes")
+    if gate in MODEL_GATES and suite != "model-runtimes":
+        raise ValueError("A targeted model/runtime gate requires suite=model-runtimes")
+    if gate in WETLANDS_GATES and suite != "wetlands":
+        raise ValueError("A targeted Wetlands gate requires suite=wetlands")
 
 
 def runtime_plan(gate: str) -> dict[str, Any]:
-    if gate not in GATES or gate == "sairpico":
+    if gate not in MODEL_GATES:
         raise ValueError("Expected one selected model/runtime gate")
     from bioimageflow_core import EnvironmentSpec
 
@@ -143,40 +196,51 @@ def preflight(gate: str, plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def check_junit(gate: str, path: Path) -> dict[str, Any]:
+def expected_identities(gate: str) -> tuple[tuple[str, str], ...]:
     if gate not in GATES:
         raise ValueError("Unknown runtime report gate")
     selected = GATES[gate]
+    if selected.identities:
+        return selected.identities
     filename, function = selected.selector.split("::")
     classname = filename.removesuffix(".py").replace("/", ".")
-    expected = {function + f"[{case}]" for case in selected.cases} if selected.cases else {function}
+    names = tuple(function + f"[{case}]" for case in selected.cases) if selected.cases else (function,)
+    return tuple((classname, name) for name in names)
+
+
+def check_junit(gate: str, path: Path) -> dict[str, Any]:
+    expected = set(expected_identities(gate))
     root = ET.parse(path).getroot()
     if root.tag not in ("testsuite", "testsuites"):
         raise ValueError("Expected a JUnit testsuite report")
     cases = list(root.iter("testcase"))
-    names = [case.get("name") for case in cases]
-    if len(cases) != len(expected) or set(names) != expected:
+    identities = [(case.get("classname"), case.get("name")) for case in cases]
+    if len(cases) != len(expected) or set(identities) != expected:
         raise ValueError("Runtime report does not contain exactly the selected case identities")
     for case in cases:
-        if case.get("classname") != classname:
-            raise ValueError("Unexpected runtime testcase module")
         if any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
             raise ValueError("A required runtime case failed or skipped")
     for suite in root.iter("testsuite"):
         if any(int(suite.get(name, "0")) != 0 for name in ("failures", "errors", "skipped")):
             raise ValueError("Runtime report includes failures, errors or skips")
     return {"gate": gate, "passed": len(cases), "failed": 0, "errors": 0,
-            "skipped": 0, "cases": names, "source_sha": os.environ.get("GITHUB_SHA")}
+            "skipped": 0, "cases": [name for _, name in identities],
+            "case_identities": [{"classname": classname, "name": name} for classname, name in identities],
+            "source_sha": os.environ.get("GITHUB_SHA")}
 
 
 def run_pytest(gate: str, report: Path, output: Path) -> int:
     """Run only the fixed selector, rejecting a missing/skipped green report."""
     if gate not in GATES:
         raise ValueError("Unknown selected runtime")
+    if gate == "wetlands-published" and "BIOIMAGEFLOW_CORE_SOURCE" in os.environ:
+        raise ValueError("The published Wetlands gate refuses BIOIMAGEFLOW_CORE_SOURCE")
+    selected = GATES[gate]
+    bounds = {"timeout": selected.timeout_seconds} if selected.timeout_seconds is not None else {}
     result = subprocess.run([
-        sys.executable, "-B", "-m", "pytest", GATES[gate].selector,
+        sys.executable, "-B", "-m", "pytest", selected.selector, *selected.additional_selectors,
         "--run-complete", "-p", "no:cacheprovider", "-rsx", f"--junitxml={report}",
-    ], check=False)
+    ], check=False, **bounds)
     receipt = check_junit(gate, report)
     _write_json(output, receipt)
     return result.returncode

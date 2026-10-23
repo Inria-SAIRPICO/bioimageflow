@@ -17,7 +17,7 @@ on:
           - external-binaries
           - model-runtimes
       runtime_gate:
-        description: One affected runtime (requires suite=model-runtimes); all preserves the full suite
+        description: One affected runtime (must match its suite); all preserves the full suite
         required: true
         default: all
         type: choice
@@ -27,6 +27,8 @@ on:
           - instanseg
           - nagini-api
           - laptrack
+          - wetlands-local
+          - wetlands-published
 
 concurrency:
   group: complete-${{ github.ref }}-${{ inputs.suite || 'all' }}-${{ inputs.runtime_gate || 'all' }}
@@ -75,7 +77,31 @@ jobs:
       - name: Install workspace
         run: uv sync --locked --all-packages --group dev
       - name: Run complete Wetlands tests
+        if: env.COMPLETE_RUNTIME_GATE == 'all'
         run: uv run pytest -m "complete and wetlands" --run-complete -rsx
+      - name: Run fixed local WorkerPool gate against checked-out Core
+        if: env.COMPLETE_RUNTIME_GATE == 'wetlands-local'
+        env:
+          BIOIMAGEFLOW_CORE_SOURCE: ${{ github.workspace }}/packages/bioimageflow-core
+        run: >-
+          uv run python scripts/check_complete_runtime_gate.py run
+          --gate wetlands-local --report "${{ runner.temp }}/wetlands-junit.xml"
+          --output "${{ runner.temp }}/wetlands-receipt.json"
+      - name: Run fixed published Core provenance and worker gate
+        if: env.COMPLETE_RUNTIME_GATE == 'wetlands-published'
+        run: >-
+          uv run python scripts/check_complete_runtime_gate.py run
+          --gate wetlands-published --report "${{ runner.temp }}/wetlands-junit.xml"
+          --output "${{ runner.temp }}/wetlands-receipt.json"
+      - name: Retain fixed Wetlands gate evidence
+        if: always() && env.COMPLETE_RUNTIME_GATE != 'all'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: complete-${{ inputs.runtime_gate }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/wetlands-junit.xml
+            ${{ runner.temp }}/wetlands-receipt.json
+          if-no-files-found: error
 
   public-data:
     needs: selection

@@ -177,6 +177,9 @@ The **Complete validation** GitHub Actions workflow separates deterministic rele
 
 For a changed runtime, select `suite=model-runtimes` and one fixed `runtime_gate`: `stardist`, `instanseg`, `nagini-api`, or `laptrack`.
 The default `runtime_gate=all` preserves the existing full model-runtime selector and weekly schedule.
+For local WorkerPool execution, loading or lifecycle changes, select `suite=wetlands,runtime_gate=wetlands-local` to require the fixed 19 real task API, cancellation, worker logging and ConnectedComponents cases against checked-out Core, without skips.
+After publishing and verifying Core, select `suite=wetlands,runtime_gate=wetlands-published` for the fixed public-index provenance and actual worker execution case before publishing the dependent SDK or adopting it in the platform.
+These gates retain exact case identities, JUnit and source-SHA receipts; `runtime_gate=all` continues to run the complete Wetlands suite.
 Selection is validated before any resource job starts, and separate suite/gate concurrency keys keep independent targeted dispatches from replacing one another.
 The three direct runtimes use isolated interpreters and exact dependencies captured from the selected tool's public `EnvironmentSpec`; StarDist retains its managed worker recipe instead of treating its host interpreter as runtime evidence.
 Targeted gates require the exact selected JUnit case with no failures, errors, or skips, and the external-binary gate requires all eight real SAIRPICO cases.

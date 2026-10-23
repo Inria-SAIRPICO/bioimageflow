@@ -199,6 +199,13 @@ Run an additional resource-dependent suite only when the release changes that ru
 
 Resource-dependent failures are non-blocking during weekly monitoring, but a manually selected suite is blocking and must pass before release.
 Do not make every package release wait for unrelated datasets, binaries, or models.
+Changes to local WorkerPool execution, loading, environment lifecycle or cancellation require `suite=wetlands,runtime_gate=wetlands-local` at the release commit.
+This fixed gate requires all 19 real task API, mapped/batch cancellation, worker logging and ConnectedComponents cases without skips, with the checked-out Core selected explicitly.
+Changes to individual tool environments additionally require their affected runtime gates.
+Public-index Core provenance is a separate `suite=wetlands,runtime_gate=wetlands-published` gate, requiring the exact published-worker smoke case without a Core-source override.
+For a coordinated Core/SDK release, pass ordinary exact-commit CI, canonical Core floor checks and the local gate first; publish Core alone and verify its bytes, then pass the published gate before publishing the dependent SDK or adopting it in the platform.
+Both package tags may identify the same reviewed commit, with publication dispatched as two dependency-ordered selections.
+The default `all` gate preserves each complete suite and scheduled validation unchanged.
 For a changed supported runtime, the Complete workflow accepts a fixed `runtime_gate` with `suite=model-runtimes` and requires the selected actual case to pass without skips.
 InstanSeg, Nagini API, and LapTrack gates prepare isolated direct runtimes from their public recipes; StarDist keeps its managed worker boundary.
 The Nagini API gate proves its adapter interface, not model inference, and external-binary evidence requires all eight SAIRPICO cases.
