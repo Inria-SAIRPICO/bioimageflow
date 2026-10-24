@@ -7,7 +7,12 @@ from typing import Annotated
 
 import pytest
 
-from bioimageflow import Workflow, inspect_viewing_requirements, serialize_output_schema
+from bioimageflow import (
+    Workflow,
+    derive_viewing_requirements,
+    inspect_viewing_requirements,
+    serialize_output_schema,
+)
 from bioimageflow.launcher.payload import serialize_workflow_payload
 from bioimageflow.viewing import ViewingRequirementEntry, ViewingRequirementsManifest
 from bioimageflow_core import (
@@ -384,3 +389,83 @@ def test_published_requirements_inherit_and_augment_recursively(tmp_path: Path) 
         storage_path=tmp_path / "restored",
     )
     assert restored.get_output_viewer_spec("parent-image") == resolved
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_partial_missing_tool_keeps_unknown_viewing_entry_at_each_depth(tmp_path, monkeypatch, depth):
+    import output_schema_test_tools as declarations
+
+    monkeypatch.setattr(declarations, "callback_calls", 0)
+    workflow = Workflow(name="leaf", storage_path=tmp_path / "leaf", engine="direct")
+    with workflow:
+        declarations.KnownImage()(name="missing")
+    for level in range(depth):
+        parent = Workflow(name=f"parent-{level}", storage_path=tmp_path / f"parent-{level}", engine="direct")
+        with parent:
+            workflow(name=f"nested-{level}")
+        workflow = parent
+    graph = workflow.to_dict()
+    leaf = graph
+    scope = []
+    for _ in range(depth):
+        [node] = leaf["nodes"]
+        scope.append(node["name"])
+        leaf = node["workflow"]
+    leaf["nodes"][0]["tool_module"] = "missing_viewing_manifest_dependency"
+
+    loaded, errors = Workflow.from_dict(
+        graph, storage_path=tmp_path / "loaded", validate_only=True,
+        partial=True, auto_install=False,
+    )
+
+    assert [(error.kind, error.path, error.node) for error in errors] == [
+        ("unknown_tool", tuple(scope), "missing")
+    ]
+    identity = "/".join([*scope, "missing"]) + "::tool-output/*"
+    manifest = derive_viewing_requirements(loaded)
+    assert manifest.complete is False
+    assert manifest.outputs == {
+        identity: ViewingRequirementEntry("unknown", reason="The node's tool metadata could not be loaded.")
+    }
+    assert declarations.callback_calls == 0
+
+
+def test_partial_nested_manifest_preserves_healthy_siblings_and_inherited_viewers(tmp_path, monkeypatch):
+    import output_schema_test_tools as declarations
+
+    monkeypatch.setattr(declarations, "callback_calls", 0)
+    child = Workflow(name="child", storage_path=tmp_path / "child", engine="direct")
+    with child:
+        declarations.KnownImage()(name="missing")
+        healthy = declarations.KnownImage()(name="healthy", viewer_additions={"image": DECLARED})
+        child.output("image", healthy["image"], id="child-image", viewer_addition=ViewerSpec(
+            NapariRequirement(recommended_packages=["child-helper"]),
+        ))
+    parent = Workflow(name="parent", storage_path=tmp_path / "parent", engine="direct")
+    with parent:
+        nested = child(name="nested", viewer_additions={"child-image": ViewerSpec(
+            NapariRequirement(required_packages=["invocation-reader"]),
+        )})
+        declarations.KnownImage()(name="healthy", viewer_additions={"image": DECLARED})
+        parent.output("image", nested["image"], id="parent-image", viewer_addition=ViewerSpec(
+            NapariRequirement(recommended_packages=["parent-helper"]),
+        ))
+    expected = derive_viewing_requirements(parent).to_dict()
+    del expected["outputs"]["nested/missing::tool-output/image"]
+    expected["outputs"]["nested/missing::tool-output/*"] = ViewingRequirementEntry(
+        "unknown", reason="The node's tool metadata could not be loaded.",
+    ).to_dict()
+    expected["complete"] = False
+    graph = parent.to_dict()
+    graph["nodes"][0]["workflow"]["nodes"][0]["tool_module"] = "missing_viewing_manifest_dependency"
+
+    loaded, errors = Workflow.from_dict(
+        graph, storage_path=tmp_path / "loaded", validate_only=True,
+        partial=True, auto_install=False,
+    )
+
+    assert [(error.kind, error.path, error.node) for error in errors] == [
+        ("unknown_tool", ("nested",), "missing")
+    ]
+    assert derive_viewing_requirements(loaded).to_dict() == expected
+    assert declarations.callback_calls == 0

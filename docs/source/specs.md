@@ -3716,6 +3716,7 @@ Graph-level external path references retain their existing reference semantics; 
 Captured source roots stay valid for all live compiled owners and relative helper/asset reads; eager staging deletion is not permitted merely because initial import finished.
 Tool records refer to it through `source_module`, so equal class names from different source IDs cannot shadow one another.
 The viewing-requirement manifest is a derived export snapshot keyed by scoped output identity and can be inspected before tool dependencies load; known/unknown entries prevent missing metadata from being represented as an empty successful declaration.
+Partial materialization represents every missing expected node at every recursive depth with an unknown scoped `tool-output/*` entry, while retaining known siblings and accepted published-output viewer requirements.
 The manifest captures its entries independently of the constructor mapping; each `outputs` or `to_dict()` projection is detached, so caller edits cannot change held entries or completeness.
 Manifest completeness is boolean, and each entry carries a `ViewerSpec` or `None`; a known entry with no additional viewer requirements remains valid.
 `Workflow.to_archive_dict()` and ZIP export produce this artifact form, while `Workflow.to_dict()` remains the editable graph boundary.
