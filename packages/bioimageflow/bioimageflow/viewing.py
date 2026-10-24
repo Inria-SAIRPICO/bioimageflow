@@ -178,6 +178,16 @@ def derive_viewing_requirements(workflow: Any) -> ViewingRequirementsManifest:
                         viewer=node.get_output_viewer_spec(output),
                     )
                 )
+        expected = definition._expected_node_names
+        if expected is not None:
+            for missing in sorted(expected - set(definition._nodes)):
+                missing_scope = f"{scope}/{missing}" if scope else missing
+                outputs[_output_identity(missing_scope, "tool-output", "*")] = (
+                    ViewingRequirementEntry(
+                        status="unknown",
+                        reason="The node's tool metadata could not be loaded.",
+                    )
+                )
 
     visit(workflow, "")
     for output_id in workflow._interface_outputs:
@@ -187,15 +197,6 @@ def derive_viewing_requirements(workflow: Any) -> ViewingRequirementsManifest:
                 viewer=workflow.get_output_viewer_spec(output_id),
             )
         )
-    expected = workflow._expected_node_names
-    if expected is not None:
-        for missing in sorted(expected - set(workflow._nodes)):
-            outputs[_output_identity(missing, "tool-output", "*")] = (
-                ViewingRequirementEntry(
-                    status="unknown",
-                    reason="The node's tool metadata could not be loaded.",
-                )
-            )
     return ViewingRequirementsManifest(
         outputs=outputs,
         complete=all(entry.status == "known" for entry in outputs.values()),
