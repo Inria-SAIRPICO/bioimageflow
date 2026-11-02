@@ -17,7 +17,6 @@ ROOT = Path(__file__).parents[2]
 EXPECTED = {
     "common": {"bioimageflow-core", "bioimageflow", "pandas"},
     "io": {"bioimageflow-core"},
-    "omero": {"bioimageflow-core"},
     "measurement": {"bioimageflow-core", "bioimageflow", "numpy", "pandas"},
     "phasor": {"bioimageflow-core"},
     "restoration": {"bioimageflow-core"},
