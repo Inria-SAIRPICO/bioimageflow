@@ -9,7 +9,7 @@ import traceback
 import pytest
 
 from bioimageflow_core import ExecutionContext
-from bioimageflow_omero_tools.connection import KEYRING_SERVICE, OmeroToolError, omero_session
+from bioimageflow_common_tools._omero_connection import KEYRING_SERVICE, OmeroToolError, omero_session
 
 
 pytestmark = pytest.mark.package_tools

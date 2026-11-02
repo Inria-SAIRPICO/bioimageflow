@@ -1562,10 +1562,11 @@ An admitted run retains its captured bytes; a later supported edit is captured f
 Arbitrary in-place installed-file edits, live external package-manager changes and monkeypatching are unsupported until explicit reload/restart; no continuous detection is promised.
 This lifetime model does not weaken archive containment, initial package integrity, portable declaration validation, exact upstream cache-record selection or record-corruption checks.
 
-#### Basic OMERO Transfer Package
+#### Basic OMERO Transfers in Common Tools
 
-`bioimageflow-omero-tools` exposes `bioimageflow_omero_tools.omero.OmeroDownloadDataset` and `OmeroUploadImage` as mapped `ProcessingTool` classes.
-Its host dependency is Core `>=0.5.0,<0.6`; OMERO, Ice, keyring and image libraries are imported only inside worker operations.
+`bioimageflow-common-tools` exposes `bioimageflow_common_tools.omero.OmeroDownloadDataset` and `OmeroUploadImage` as mapped `ProcessingTool` classes.
+The OMERO declaration module depends only on Core `>=0.5.0,<0.6` and the standard library; OMERO, Ice, keyring and image libraries are imported only inside worker operations.
+These tools do not add install-time dependencies to the common-tools package, whose ordinary table tools retain their existing BioImageFlow and pandas requirements.
 Both tools require explicit non-secret `host`, `username`, `port` (default `4064`) and positive `dataset_id` inputs.
 The worker reads the password from the local keyring service `bioimageflow-omero` using the key `{host}:{port}:{username}`.
 Passwords and session UUIDs must not enter tool inputs, outputs, templates, package source, result-key material or forwarded SDK diagnostics.
@@ -1588,7 +1589,10 @@ OMERO upload is not transactional: an SDK/server failure before an ID is returne
 The public `EnvironmentSpec` selects a pinned CPython 3.12 recipe with OMERO.py 5.23.0 and the official Ice 3.6.5 wheel for macOS arm64/x86_64 or glibc Linux x86_64 (glibc >=2.28).
 The recipe uses ordinary pip requirements and one direct wheel reference, without environment markers or installer flags.
 Other worker platforms are explicitly unsupported.
-Recipe selection occurs at import, so discovery of this package is also restricted to those supported host platforms.
+The fourteen ordinary common-tools discovery exports remain available independently of OMERO host support.
+The common-tools `__all__` discovery exports add the two OMERO tools only on the supported host tuples, so an unsupported optional recipe cannot prevent versioned registration of the ordinary tools.
+Explicit import of `bioimageflow_common_tools.omero`, including access to either lazy top-level OMERO class, constructs its real host-specific recipe and refuses unsupported platforms clearly.
+Recipe inspection helpers remain importable on every host; no fallback recipe, package alias or separate OMERO distribution is supplied.
 Recipe declaration tests and fake-service pixel/session tests do not establish worker provisioning, an accessible OS keyring backend, server compatibility or live roundtrip success; those require separate managed-worker and owned-object integration validation.
 
 

@@ -21,6 +21,8 @@ tools/inner_join
 tools/join_on_column
 tools/label_overlaps
 tools/mosaic
+tools/omero_download_dataset
+tools/omero_upload_image
 tools/select_columns
 tools/table_from_csv
 tools/write_table

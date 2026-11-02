@@ -1,14 +1,14 @@
-# bioimageflow-omero-tools
+# OmeroDownloadDataset
 
 Two basic mapped tools transfer pixels through the public OMERO.py gateway without a platform-server dependency.
 
 ## Tools
 
-`OmeroDownloadDataset` requires explicit `host`, `username`, `dataset_id` and optional `port=4064`.
+`bioimageflow_common_tools.omero.OmeroDownloadDataset` requires explicit `host`, `username`, `dataset_id` and optional `port=4064`.
 It returns one row per image: `image` (owned OME-TIFF Path), `dataset_id`, `image_id`, `image_name`, `axes="TCZYX"`, `shape` and `dtype`.
 All channels, timepoints and Z planes are retained.
 
-`OmeroUploadImage` has the same connection/dataset fields plus required `image`, optional `image_name`, `description` and `metadata` (string-to-string map).
+`bioimageflow_common_tools.omero.OmeroUploadImage` has the same connection/dataset fields plus required `image`, optional `image_name`, `description` and `metadata` (string-to-string map).
 It accepts one unambiguous scalar TIFF/OME-TIFF series, or grayscale uint8/uint16 and RGB/RGBA uint8 PNG.
 PNG color and alpha samples become separate OMERO channels with unchanged values.
 It returns `dataset_id`, `image_id` and optional `annotation_id`.
@@ -23,10 +23,12 @@ Store credentials in the worker-accessible OS keyring service `bioimageflow-omer
 The platform Settings page uses the same contract and may populate the saved non-secret connection fields when creating a node.
 No password input or platform import is required by either tool.
 Do not put credentials into parameters, metadata or artifacts.
-The package's host dependency is Core `>=0.5.0,<0.6`; worker-only imports are lazy.
+The OMERO declaration module requires only Core `>=0.5.0,<0.6`; worker-only imports are lazy and add no common-tools install-time dependencies.
 The worker recipe uses CPython 3.12, OMERO.py 5.23.0, Ice 3.6.5 and pinned image/keyring dependencies, selecting an official Ice wheel for macOS arm64/x86_64 or glibc Linux x86_64 (glibc >=2.28).
 Other platforms are unsupported.
-Recipe selection at import also restricts package discovery to those supported hosts.
+Common-tools retains its ordinary tools on every supported package host.
+Its discovery exports include the two OMERO tools only on those supported OMERO host tuples.
+Explicit import of `bioimageflow_common_tools.omero` or OMERO recipe construction on another host raises a clear unsupported-platform error, without a substitute recipe.
 Actual worker OS-keyring availability and live-server access require separate validation.
 
 ## Cached execution and ownership

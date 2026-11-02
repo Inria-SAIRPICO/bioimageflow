@@ -74,9 +74,8 @@ Trusted Publisher/account eligibility is still an external prerequisite, and no 
 The same workflow identity can be registered for every independently versioned distribution in this repository.
 Normal publishers support this one-repository-to-many-projects relationship.
 
-The new `bioimageflow-omero-tools` project requires its own PyPI publisher authorization before its first release.
-If the project does not yet exist, verify or register its pending GitHub Actions publisher for owner `Inria-SAIRPICO`, repository `bioimageflow`, workflow `release.yml` and environment `pypi` before the reviewed first publication; after creation, verify the project's normal publisher registration.
-Existing publisher registrations for other BioImageFlow distributions do not authorize this new project, and a passing local wheel installation does not establish registry availability or publishing eligibility.
+The basic OMERO tools ship in the existing `bioimageflow-common-tools` distribution.
+Their release uses that project's normal Trusted Publisher and the same exact-source CI and reviewed-artifact gates; no separate OMERO project or pending publisher is required.
 
 PyPI currently prevents two pending GitHub publishers from using the same owner, repository, workflow, and environment for different future project names.
 It also limits an account to three simultaneous pending publishers.

@@ -22,7 +22,6 @@ OUTPUT_DIR = ROOT / "docs" / "source" / "tool_packages"
 FIRST_PARTY_ORDER = [
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
-    "bioimageflow-omero-tools",
     "bioimageflow-segmentation-tools",
     "bioimageflow-measurement-tools",
     "bioimageflow-phasor-tools",

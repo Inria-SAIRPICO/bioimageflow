@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Iterator
 
-from .connection import OmeroToolError
+from ._omero_connection import OmeroToolError
 
 
 PIXEL_DTYPES = frozenset({"int8", "uint8", "int16", "uint16", "int32", "uint32", "float32", "float64"})

@@ -26,7 +26,6 @@ SELECTED_PACKAGE_ENV = "BIOIMAGEFLOW_PACKAGE_ARTIFACTS_PACKAGE"
 TOOL_PACKAGE_NAMES = {
     "bioimageflow-common-tools",
     "bioimageflow-io-tools",
-    "bioimageflow-omero-tools",
     "bioimageflow-measurement-tools",
     "bioimageflow-phasor-tools",
     "bioimageflow-restoration-tools",
@@ -40,7 +39,6 @@ PUBLIC_IMPORT_MODULES = {
     "bioimageflow-common-tools": "bioimageflow_common_tools",
     "bioimageflow-core": "bioimageflow_core",
     "bioimageflow-io-tools": "bioimageflow_io_tools",
-    "bioimageflow-omero-tools": "bioimageflow_omero_tools",
     "bioimageflow-measurement-tools": "bioimageflow_measurement_tools",
     "bioimageflow-phasor-tools": "bioimageflow_phasor_tools",
     "bioimageflow-restoration-tools": "bioimageflow_restoration_tools",

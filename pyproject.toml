@@ -9,9 +9,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "bioimageflow>=0.9.0,<1",
-    "bioimageflow-common-tools>=0.2.2",
+    "bioimageflow-common-tools>=0.3.0",
     "bioimageflow-io-tools>=0.2.2",
-    "bioimageflow-omero-tools>=0.1.0",
     "bioimageflow-measurement-tools>=0.2.2",
     "bioimageflow-phasor-tools>=0.1.0",
     "bioimageflow-segmentation-tools>=0.3.2",
@@ -51,7 +50,6 @@ bioimageflow = { workspace = true }
 bioimageflow-common-tools = { workspace = true }
 bioimageflow-core = { workspace = true }
 bioimageflow-io-tools = { workspace = true }
-bioimageflow-omero-tools = { workspace = true }
 bioimageflow-measurement-tools = { workspace = true }
 bioimageflow-phasor-tools = { workspace = true }
 bioimageflow-segmentation-tools = { workspace = true }
