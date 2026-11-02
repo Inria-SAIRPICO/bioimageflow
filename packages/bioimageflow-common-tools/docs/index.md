@@ -1,11 +1,14 @@
 # bioimageflow-common-tools
 
-`bioimageflow-common-tools` is the small glue package for workflows that need sources, table loading, table joins, filtering, column selection, table export, label overlap checks, connected component labeling, or visual mosaics.
+`bioimageflow-common-tools` is the small glue package for workflows that need sources, table loading, table joins, filtering, column selection, table export, label overlap checks, connected component labeling, visual mosaics, or basic OMERO transfers.
 It should stay lightweight and process orchestration-oriented; domain-heavy segmentation, restoration, spot, tracking, and large-format IO tools belong in their specialized packages.
 
 Install-time libraries for the public tools are BioImageFlow and pandas.
 Image-processing tools import imageio, scikit-image, NumPy, and Pillow only inside worker methods and obtain them from the shared `GENERAL_ENV`.
-The package is intended for users who need to assemble or inspect workflows without installing deep-learning dependencies.
+The OMERO tools use a separate pinned managed worker recipe; OMERO.py, Ice, keyring and image readers add no common-tools install-time dependencies.
+Their discovery exports are available on macOS arm64/x86_64 and Linux x86_64, with glibc >=2.28 required by the Linux worker.
+Other hosts retain all ordinary common tools; explicit OMERO imports or recipe construction refuse the unsupported platform.
+The package is intended for users who need to assemble or inspect workflows without installing deep-learning or OMERO SDK dependencies.
 
 `ExtractChannel` is no longer exported by this package.
 Use `SelectChannel` from `bioimageflow-io-tools` instead.
@@ -26,6 +29,8 @@ Use `SelectChannel` from `bioimageflow-io-tools` instead.
 - [ConnectedComponents](tools/connected_components.md): label face-connected foreground components in a binary image.
 - [LabelOverlaps](tools/label_overlaps.md): count pixel overlaps between label images.
 - [Mosaic](tools/mosaic.md): build a grid image from workflow rows.
+- [OmeroDownloadDataset](tools/omero_download_dataset.md): download complete dataset images as owned OME-TIFF files.
+- [OmeroUploadImage](tools/omero_upload_image.md): upload one basic TIFF/OME-TIFF or PNG image and optional simple metadata.
 
 ## Demo Workflow
 

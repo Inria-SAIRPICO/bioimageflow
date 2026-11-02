@@ -1,6 +1,7 @@
 """Small public OMERO transfers; host discovery imports only BioImageFlow Core."""
 
 import logging
+import platform
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -9,9 +10,12 @@ from bioimageflow_core import (
     IOModel, ProcessingTool, RowConsumption,
 )
 
-from .connection import OmeroToolError, connection_fields, omero_session, positive_id, runtime_scratch
-from .environments import OMERO_ENV
-from .pixels import AXES, download_image, read_upload_image, upload_planes
+from ._omero_connection import OmeroToolError, connection_fields, omero_session, positive_id, runtime_scratch
+from ._omero_environments import omero_environment
+from ._omero_pixels import AXES, download_image, read_upload_image, upload_planes
+
+
+OMERO_ENV = omero_environment(platform.system(), platform.machine())
 
 
 class _ConnectionInputs(IOModel):

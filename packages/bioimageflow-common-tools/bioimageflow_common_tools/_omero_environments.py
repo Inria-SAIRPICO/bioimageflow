@@ -1,8 +1,11 @@
 """Public, explicitly pinned OMERO recipes for supported local workers."""
 
-import platform
+from __future__ import annotations
 
-from bioimageflow_core import EnvironmentSpec
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bioimageflow_core import EnvironmentSpec
 
 
 _WHEELS = {
@@ -10,6 +13,11 @@ _WHEELS = {
     ("Darwin", "x86_64"): "https://github.com/glencoesoftware/zeroc-ice-py-macos-universal2/releases/download/20240131/zeroc_ice-3.6.5-cp312-cp312-macosx_11_0_universal2.whl",
     ("Linux", "x86_64"): "https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_x86_64.whl",
 }
+
+
+def omero_platform_supported(system: str, machine: str) -> bool:
+    """Whether an official worker wheel exists for this host tuple."""
+    return (system, machine) in _WHEELS
 
 
 def omero_environment(system: str, machine: str) -> EnvironmentSpec:
@@ -20,6 +28,8 @@ def omero_environment(system: str, machine: str) -> EnvironmentSpec:
         raise ValueError(
             "OMERO tools require macOS arm64/x86_64 or glibc Linux x86_64."
         ) from None
+    from bioimageflow_core import EnvironmentSpec
+
     return EnvironmentSpec(
         name="bioimageflow-omero",
         dependencies={
@@ -34,6 +44,3 @@ def omero_environment(system: str, machine: str) -> EnvironmentSpec:
             ],
         },
     )
-
-
-OMERO_ENV = omero_environment(platform.system(), platform.machine())

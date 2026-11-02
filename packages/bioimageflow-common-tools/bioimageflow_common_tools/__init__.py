@@ -1,7 +1,10 @@
 """BioImageFlow Common Tools — reusable bioimage analysis tools."""
 
 from importlib import import_module
+import platform
 from typing import TYPE_CHECKING, Any
+
+from ._omero_environments import omero_platform_supported
 
 if TYPE_CHECKING:
     from .connected_components import ConnectedComponents as ConnectedComponents
@@ -14,6 +17,8 @@ if TYPE_CHECKING:
     from .merge import InnerJoin as InnerJoin
     from .merge import JoinOnColumn as JoinOnColumn
     from .mosaic import Mosaic as Mosaic
+    from .omero import OmeroDownloadDataset as OmeroDownloadDataset
+    from .omero import OmeroUploadImage as OmeroUploadImage
     from .table import FilterTableRows as FilterTableRows
     from .table import SelectColumns as SelectColumns
     from .table import TableFromCsv as TableFromCsv
@@ -32,6 +37,8 @@ _EXPORTS = {
     "JoinOnColumn": ("merge", "JoinOnColumn"),
     "LabelOverlaps": ("label_overlaps", "LabelOverlaps"),
     "Mosaic": ("mosaic", "Mosaic"),
+    "OmeroDownloadDataset": ("omero", "OmeroDownloadDataset"),
+    "OmeroUploadImage": ("omero", "OmeroUploadImage"),
     "SelectColumns": ("table", "SelectColumns"),
     "TableFromCsv": ("table", "TableFromCsv"),
     "WriteTable": ("table", "WriteTable"),
@@ -53,6 +60,13 @@ __all__ = [
     "TableFromCsv",
     "WriteTable",
 ]
+
+
+# Versioned discovery eagerly resolves __all__. Keep unsupported OMERO recipes
+# from preventing discovery of the ordinary common tools. Explicit OMERO access
+# still imports its module and reports the unsupported-platform refusal.
+if omero_platform_supported(platform.system(), platform.machine()):
+    __all__ += ["OmeroDownloadDataset", "OmeroUploadImage"]
 
 
 def __getattr__(name: str) -> Any:

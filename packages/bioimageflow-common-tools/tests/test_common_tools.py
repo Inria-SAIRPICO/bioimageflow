@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +53,7 @@ def test_common_exports_exclude_moved_heavy_tools() -> None:
 def test_common_package_all_exports_only_public_tools() -> None:
     import bioimageflow_common_tools as common
 
-    assert sorted(common.__all__) == [
+    expected = [
         "Collect",
         "Concat",
         "ConnectedComponents",
@@ -68,6 +69,11 @@ def test_common_package_all_exports_only_public_tools() -> None:
         "TableFromCsv",
         "WriteTable",
     ]
+    from bioimageflow_common_tools._omero_environments import omero_platform_supported
+
+    if omero_platform_supported(platform.system(), platform.machine()):
+        expected += ["OmeroDownloadDataset", "OmeroUploadImage"]
+    assert sorted(common.__all__) == sorted(expected)
     assert "table" not in common.__all__
     assert all(issubclass(getattr(common, name), BaseTool) for name in common.__all__)
 
@@ -110,6 +116,8 @@ def test_common_docs_list_only_public_tools() -> None:
     assert "[Files](tools/files.md)" in public_tools
     assert "Mosaic" in public_tools
     assert "[Mosaic](tools/mosaic.md)" in public_tools
+    assert "[OmeroDownloadDataset](tools/omero_download_dataset.md)" in public_tools
+    assert "[OmeroUploadImage](tools/omero_upload_image.md)" in public_tools
     assert "Atlas" not in public_tools
     assert "ConvertImage" not in public_tools
 
@@ -122,7 +130,7 @@ def test_common_pyproject_keeps_worker_dependencies_out_of_main_environment() ->
     }
 
     assert "pandas" in dependencies
-    assert {"imageio", "numpy", "pillow"}.isdisjoint(dependencies)
+    assert {"imageio", "numpy", "pillow", "tifffile", "omero-py", "zeroc-ice", "keyring"}.isdisjoint(dependencies)
 
 
 def test_generate_creates_parameter_table_and_resolves_output_schema() -> None:

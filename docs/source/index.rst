@@ -90,7 +90,6 @@ Features
    tool_packages/index
    tool_packages/bioimageflow-common-tools/index
    tool_packages/bioimageflow-io-tools/index
-   tool_packages/bioimageflow-omero-tools/index
    tool_packages/bioimageflow-segmentation-tools/index
    tool_packages/bioimageflow-measurement-tools/index
    tool_packages/bioimageflow-phasor-tools/index
