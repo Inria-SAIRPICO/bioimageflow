@@ -101,7 +101,7 @@ def _run_sftp(
         )
 
 
-def _load_manifest(path: Path) -> dict[str, Any]:
+def _load_manifest(path: Path, *, native_storage: bool = False) -> dict[str, Any]:
     try:
         if path.is_symlink() or not path.is_file():
             raise ValueError("manifest is not a regular file")
@@ -143,13 +143,14 @@ def _load_manifest(path: Path) -> dict[str, Any]:
         return_manifest = validate_return_manifest_structure(
             value["return_manifest"]
         )
+        storage_path_type = Path if native_storage else PurePosixPath
         if (
             type(value["run_id"]) is not str
             or return_manifest["run_id"] != value["run_id"]
             or type(value["storage_path"]) is not str
-            or not PurePosixPath(value["storage_path"]).is_absolute()
-            or value["storage_path"].startswith("//")
-            or str(PurePosixPath(value["storage_path"])) != value["storage_path"]
+            or not storage_path_type(value["storage_path"]).is_absolute()
+            or (not native_storage and value["storage_path"].startswith("//"))
+            or storage_path_type(value["storage_path"]).as_posix() != value["storage_path"]
         ):
             raise WorkflowResultIntegrityError(
                 "Downloaded result manifest has inconsistent run binding.",
@@ -513,7 +514,7 @@ def _install_local_result_bundle(
                 exc.message,
                 details={"internal_code": exc.code},
             ) from exc
-        loaded = _load_manifest(candidate / "manifest.json")
+        loaded = _load_manifest(candidate / "manifest.json", native_storage=True)
         if loaded != manifest:
             raise WorkflowResultIntegrityError(
                 "Built result manifest changed before installation.",
@@ -569,7 +570,7 @@ def _verify_existing_local_result_bundle(
     """Verify an installed local bundle by its exact expected identity."""
     if destination.is_symlink() or not destination.is_dir():
         raise WorkflowResultDestinationError("Result destination already exists.")
-    manifest = _load_manifest(destination / "manifest.json")
+    manifest = _load_manifest(destination / "manifest.json", native_storage=True)
     if (
         manifest["digest"] != expected_digest
         or manifest["run_id"] != run.id

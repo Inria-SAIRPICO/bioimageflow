@@ -118,7 +118,7 @@ def test_owned_return_root_waits_for_a_second_same_root_group(tmp_path, attached
     first_reference = first.at["0", "image"]
     root = Path(first_reference.bound_owner.descriptor()["owner_root"])
     root.relative_to(hydration)
-    manifest = _load_manifest(destination / "manifest.json")
+    manifest = _load_manifest(destination / "manifest.json", native_storage=True)
     second = load_public_return_from_bundle(
         destination,
         manifest["return_manifest"],
@@ -157,7 +157,7 @@ def test_return_loader_does_not_close_a_caller_supplied_owner(tmp_path, attached
     destination = tmp_path / "export"
     exported = context.export_result(result, destination=destination)
     values.append(exported)
-    manifest = _load_manifest(destination / "manifest.json")
+    manifest = _load_manifest(destination / "manifest.json", native_storage=True)
     assets = _verify_tree(destination, manifest)
     supplied = SharedMemoryContext(tmp_path / "caller-owner")
     try:
@@ -249,10 +249,10 @@ def test_bundle_only_export_installs_the_same_bundle_without_hydration(
     assert not (hydration / "bioimageflow-return-shared").exists()
     installed = context.export_result_bundle(result, destination=destination)
     assert installed == destination
-    first = _load_manifest(installed / "manifest.json")
+    first = _load_manifest(installed / "manifest.json", native_storage=True)
     _verify_tree(installed, first)
     repeated = context.export_result_bundle(result, destination=destination)
     assert repeated == installed
-    assert _load_manifest(installed / "manifest.json")["digest"] == first["digest"]
+    assert _load_manifest(installed / "manifest.json", native_storage=True)["digest"] == first["digest"]
     assert not (hydration / "bioimageflow-return-shared").exists()
     _assert_pixels(result.at["0", "image"])

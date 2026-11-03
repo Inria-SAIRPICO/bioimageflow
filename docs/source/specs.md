@@ -2346,6 +2346,7 @@ Historical result loading never consults `current.json`.
 `WorkflowRun.export_result(destination)` and `RemoteWorkflowRun.export_result(destination)` build or download the same immutable verified result bundle through a private sibling and atomic destination installation.
 `WorkflowRun.load_result()` reads the local retained return without exporting it.
 An existing destination is idempotent only when its full expected bundle digest, run ID, storage binding, manifest, and entry digests match.
+Local result installation and reuse validate the storage binding as an absolute canonical native path, including Windows drive and extended-length paths. Remote result downloads retain absolute canonical POSIX storage bindings; both paths retain full digest, run identity and entry verification.
 All export failures derive from `WorkflowResultExportError`; destination conflicts raise `WorkflowResultDestinationError`, bundle verification raises `WorkflowResultIntegrityError`, actual SSH/SFTP failures raise `SSHTransportError`, and unavailable retained assets raise `WorkflowRunResultUnavailableError`.
 `WorkflowExecutionContext.export_result(value, destination=...)` creates the same bundle for a successful attached Direct, Wetlands, or Parsl run from engine-neutral provider outcomes.
 Attached root exports preserve published output names while resolving exact provider addresses without the synthetic execution-root prefix; genuine nested workflow names remain part of those addresses.
