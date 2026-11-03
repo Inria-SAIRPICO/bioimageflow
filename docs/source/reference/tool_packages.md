@@ -56,6 +56,7 @@ A manually selected affected resource suite is additionally blocking; unrelated 
 Reusable cache lookup and execution consume one admitted executable capture rather than reconstructing source or package selectors after a cache hit.
 Captured custom tools retain their admitted source content and canonical module/class identity; loading another single-file source with the same logical ID must not retarget the earlier definition.
 Ordinary Direct tools remain supported and cacheable from their actual retained primary callbacks and represented code, defaults, closed literal state and same-source helper facts, with configured values and declarations supplied by the effective definition capture.
+Closed literal evidence includes slices, represented by their recursively captured start, stop and step values, including slice constants emitted by Python 3.14. Cyclic or unsupported components remain outside closed evidence; mutable slice components cannot become immutable global or closure facts.
 Managed editable/unmanaged source admission compiles captured bytes without executing imports and refuses supported resident/source mismatches before first use.
 Stable installed generations retain the admitted package source and actual RECORD-owned inherited facts instead of repeating source capture or bytecode attestation.
 External editable inherited owners remain freshly captured once per operation, even when the defining tool is installed.

@@ -137,7 +137,7 @@ jobs:
 
   core-python314-tests:
     if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
-    name: Core IOModel (Python 3.14)
+    name: Core IOModel and callable identity (Python 3.14)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -147,10 +147,10 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.9"
-      - name: Run Core annotation tests
+      - name: Run Core annotation and executable identity tests
         run: >-
           uv run --no-project --python 3.14 --with pytest --with numpy --with packaging
-          pytest tests/integration/test_io_model.py -k "not passthrough"
+          pytest tests/integration/test_io_model.py tests/unit/test_executable_identity.py -k "not passthrough"
         env:
           PYTHONPATH: packages/bioimageflow-core
 
@@ -226,7 +226,7 @@ jobs:
           else
             runtime_python="$RUNNER_TEMP/core-array-runtime/bin/python"
           fi
-          wheel_path="${CANDIDATE_WHEEL:-$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.1-py3-none-any.whl}"
+          wheel_path="${CANDIDATE_WHEEL:-$GITHUB_WORKSPACE/dist/core-array-lifetime/bioimageflow_core-0.5.2-py3-none-any.whl}"
           uv pip install --python "$runtime_python" --no-sources "$wheel_path" "numpy==1.26.4"
           uv pip check --python "$runtime_python"
           echo "CORE_ARRAY_PYTHON=$runtime_python" >> "$GITHUB_ENV"
@@ -237,7 +237,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$CORE_ARRAY_PYTHON" -I check_core_array_lifetime.py \
             --wheel "$CORE_ARRAY_WHEEL" --source-root "$GITHUB_WORKSPACE" \
-            --expected-version 0.5.1 --expected-python "${{ matrix.python }}" \
+            --expected-version 0.5.2 --expected-python "${{ matrix.python }}" \
             --root "$RUNNER_TEMP/core-array-witness" --receipt "$RUNNER_TEMP/core-array-receipt.json"
       - name: Upload exact capability receipt and child evidence
         if: always()
