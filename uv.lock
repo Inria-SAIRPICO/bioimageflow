@@ -108,7 +108,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.9.6"
+version = "0.9.7"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
