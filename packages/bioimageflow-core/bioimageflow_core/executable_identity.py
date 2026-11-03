@@ -37,7 +37,7 @@ def _literal(value: Any, *, immutable: bool = False, active: Optional[set[int]] 
         return {"type": "str", "value": value}
     if type(value) is bytes:
         return {"type": "bytes", "value": value.hex()}
-    allowed = (tuple, frozenset) if immutable else (tuple, list, dict, set, frozenset)
+    allowed = (tuple, frozenset, slice) if immutable else (tuple, list, dict, set, frozenset, slice)
     if type(value) not in allowed:
         raise TypeError("Value is outside closed literal evidence")
     active = set() if active is None else active
@@ -45,6 +45,11 @@ def _literal(value: Any, *, immutable: bool = False, active: Optional[set[int]] 
         raise TypeError("Cyclic literal state is not closed evidence")
     active.add(id(value))
     try:
+        if type(value) is slice:
+            return {"type": "slice", "items": [
+                _literal(item, immutable=immutable, active=active)
+                for item in (value.start, value.stop, value.step)
+            ]}
         if type(value) is dict:
             items = [[_literal(k, active=active), _literal(v, active=active)]
                      for k, v in value.items()]

@@ -2710,6 +2710,7 @@ Versioned private namespaces and archive content-scoped namespaces retain their 
 Before reusable cache lookup, the controller admits the actual executable authority for the selected local execution strategy.
 Captured custom-source bytes provide one content authority for Direct and managed execution; ordinary Direct runtime-callable authority and ordinary source-backed managed captured-source authority are distinct.
 Direct identity describes actual callable code and constants, nested code, defaults and closure values, and representable referenced literal globals and same-source helper functions.
+Representable literal evidence includes slice values through recursively captured start, stop and step components, including Python 3.14 compiler constants. Cyclic or unsupported components are rejected, and mutable components remain unresolved in immutable global or closure evidence.
 For a Direct ProcessingTool, that identity includes both actual supported `process_row` and `process_batch` callbacks even when dispatch selects an overridden batch callback.
 An unchanged batch callback delegating to `self.process_row` therefore retains the row callback's supported code and closure authority; changing its captured factor selects a new scientific key and record.
 Dispatch still selects the declared row or batch strategy independently of which callback roots contribute to identity.

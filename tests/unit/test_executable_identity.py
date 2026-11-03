@@ -36,6 +36,45 @@ def test_actual_nested_constants_and_typed_values_change_identity():
     assert _identity(boolean.transform)["digest"] != _identity(integer.transform)["digest"]
 
 
+@pytest.mark.parametrize("replacement", ["2::2", "1:5:2", "1::3"])
+def test_compiled_slices_have_stable_distinct_identity_and_source_admission(replacement):
+    source = "def transform(values): return values[1::2]\n"
+    one = _module(source, "/first/tool.py")
+    same = _module(source, "/second/tool.py")
+    changed = _module(source.replace("1::2", replacement))
+    assert one.transform(list(range(6))) == [1, 3, 5]
+    assert _identity(one.transform) == _identity(same.transform)
+    assert _identity(one.transform)["digest"] != _identity(changed.transform)["digest"]
+    assert validate_source_callables(
+        source.encode(), {"transform": one.transform}, canonicalize=_canonical,
+    ) == ()
+    with pytest.raises(ValueError, match="Resident/source"):
+        validate_source_callables(
+            source.replace("1::2", replacement).encode(),
+            {"transform": one.transform}, canonicalize=_canonical,
+        )
+
+
+def test_slice_defaults_capture_components_without_accepting_cyclic_state():
+    def transform(selection=slice(None, 5, -1)):
+        return selection
+
+    before = _identity(transform)
+    assert before["unresolved"] == ()
+    transform.__defaults__ = (slice(None, 6, -1),)
+    assert _identity(transform)["digest"] != before["digest"]
+    contents = []
+    contents.append(slice(contents))
+    transform.__defaults__ = (contents[0],)
+    assert _identity(transform)["unresolved"] == ("callback:transform:defaults",)
+
+
+def test_slice_global_with_mutable_component_remains_unresolved():
+    module = _module("SELECTION=None\ndef transform(): return SELECTION\n")
+    module.SELECTION = slice([1], None, None)
+    assert _identity(module.transform)["unresolved"] == ("callback:transform:global:SELECTION",)
+
+
 def test_identity_ignores_source_path_line_locations_and_observer_mutation():
     source = "CALLS=[]\ndef transform():\n CALLS.append('called')\n return 4\n"
     one = _module(source, "/first/tool.py")
