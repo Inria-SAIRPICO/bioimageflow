@@ -137,7 +137,7 @@ jobs:
 
   core-python314-tests:
     if: github.event_name != 'workflow_dispatch' || !inputs.core_floor_only
-    name: Core IOModel (Python 3.14)
+    name: Core IOModel and callable identity (Python 3.14)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -147,10 +147,10 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.9"
-      - name: Run Core annotation tests
+      - name: Run Core annotation and executable identity tests
         run: >-
           uv run --no-project --python 3.14 --with pytest --with numpy --with packaging
-          pytest tests/integration/test_io_model.py -k "not passthrough"
+          pytest tests/integration/test_io_model.py tests/unit/test_executable_identity.py -k "not passthrough"
         env:
           PYTHONPATH: packages/bioimageflow-core
 
