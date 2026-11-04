@@ -21,6 +21,15 @@ UNIT_DISTRIBUTED_PATHS = {
 INTEGRATION_DISTRIBUTED_PATHS = {"tests/integration/parsl", "tests/integration/launcher"}
 
 
+def test_installed_core_floor_witness_exercises_output_file_contract(tmp_path):
+    from scripts.check_core_array_lifetime import output_file_contract_checks
+
+    assert output_file_contract_checks(tmp_path) == {
+        "family": "installed-core-output-file-declarations-projection", "result": "PASS",
+    }
+    assert not list(tmp_path.iterdir()), "The declaration/projection witness must not perform scientific IO"
+
+
 def test_ordinary_local_ci_excludes_exact_distributed_paths_and_preserves_shared_controls():
     ci = _workflow(ROOT, "ci.yml")
     assert "local_library_only" not in ci["on"]["workflow_dispatch"]["inputs"]

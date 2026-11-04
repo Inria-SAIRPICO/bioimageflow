@@ -38,7 +38,9 @@ These ranges must resolve and pass current scientific and tool-authoring control
 There is no obligation to preserve old DTOs, wire schemas, aliases or dependency floors solely for backward compatibility.
 Essential scientific types, file workflows, durable results and current ownership/cancellation semantics remain mandatory.
 A downstream package needs a metadata release when its declared cohort changes.
-The selected base release set contains Core, BioImageFlow and the eight already published tool packages; Phasor’s first publisher remains a separate gate.
+The output-file ownership candidate contains twelve distributions: Core, BioImageFlow and all ten first-party tool packages, including Phasor and OMERO.
+Building and testing these twelve candidates does not establish that each project is published or authorized for publication.
+Phasor's first publisher and OMERO's bootstrap each remain separate registry authorization gates; verify their actual project and publisher state before including them in an authorized release selection.
 
 ## Check Package Status
 
@@ -182,7 +184,7 @@ The coordinated release workflow refuses to publish a commit without a successfu
 It does not admit a manual capability run or the separate distributed workflow as release-qualifying evidence.
 Manual capability runs, including floor-only dispatches, cannot satisfy this publication gate.
 
-The Core 0.5 scoped array surface additionally requires source-disabled public annotation/default, recipe, viewer, selected-primary and numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
+Core additionally requires source-disabled public annotation/default, exact/base output declarations, detached read-only destination projections, recipe, viewer, selected-primary and numeric file/mmap lifetime witnesses on Linux and Windows, including Python 3.9/NumPy 1.26 and current Python, without broad model matrices.
 To verify the same canonical wheel on every floor, dispatch `ci.yml` with `core_floor_only=true`, `candidate_run_id` naming a successful ordinary push/pull-request CI run at the exact current commit, and `candidate_core_sha256` naming its held Core wheel hash.
 The paired optional inputs admit only that repository's ordinary `packages` artifact, the current Core filename/version, and the complete Git Python/typing member inventory before installing the unchanged wheel on each operating system.
 Without the candidate inputs, the existing per-platform normal builds remain available; their Windows checkout line endings do not establish identical wheel bytes across platforms.

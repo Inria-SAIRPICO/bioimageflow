@@ -230,6 +230,63 @@ def transport_case(args: argparse.Namespace, owner, input_ref, origin, *, fail: 
                     "physical_exit_before_grant_drain": True, "expected_failure": fail}
 
 
+def output_file_contract_checks(root: Path) -> dict:
+    """Exercise exact/base declarations and nonempty worker-floor projections."""
+    import operator
+    import pickle
+
+    import bioimageflow_core as core
+
+    groups = (core.FileGroup.per_row(), core.FileGroup.once(), core.FileGroup.by("image", "channel"))
+    assert [group.to_dict() for group in groups] == [
+        {"kind": "per_row", "keys": []}, {"kind": "once", "keys": []},
+        {"kind": "by", "keys": ["image", "channel"]},
+    ]
+    refused(lambda: core.FileGroup.by("image", "image"), ValueError)
+    refused(lambda: core.PathBase("tiles/{image.stem}", group=groups[1]), ValueError)
+
+    class Outputs(core.IOModel):
+        mask: Path = core.Template("{image.stem}_{group_index}.tif", group=groups[2])
+        tiles: Path = core.PathBase("tiles/{image.stem}")
+        reference: Path
+
+    fields = core.describe_io_model(Outputs)["fields"]
+    assert fields["mask"]["output_file"] == {
+        "role": "exact", "pattern": "{image.stem}_{group_index}.tif", "group": groups[2].to_dict(),
+    }
+    assert fields["tiles"]["output_file"] == {
+        "role": "base", "pattern": "tiles/{image.stem}", "group": None,
+    }
+    assert fields["reference"]["output_file"] is None
+
+    root = root.resolve()
+    assets, work = root / "assets", root / "work"
+    item = core.PlannedFile(assets / "mask.tif", 0, (("image", root / "source.tif"), ("channel", None)),
+                            (0, 1), (0,))
+    supplied = {"mask": [item]}
+    context = core.ExecutionContext(root, assets, work, work / "rows", batch_dir=work / "batch",
+                                    output_files=supplied)
+    supplied["mask"].clear()
+    supplied.clear()
+    assert context.output_files["mask"] == (item,)
+    refused(lambda: operator.setitem(context.output_files, "mask", ()), TypeError)
+    key = item.key
+    key["image"] = root / "other.tif"
+    assert item.key["image"] == root / "source.tif"
+    restored = core.ExecutionContext.from_dict(json.loads(json.dumps(context.to_dict())))
+    assert restored == context and restored.output_files["mask"][0].key["channel"] is None
+    copied = pickle.loads(pickle.dumps(restored))
+    assert copied == context
+    refused(lambda: operator.setitem(copied.output_files, "mask", ()), TypeError)
+    malformed = context.to_dict()
+    malformed["output_files"]["mask"][0]["row_positions"] = [0, 0]
+    refused(lambda: core.ExecutionContext.from_dict(malformed), ValueError)
+    malformed = context.to_dict()
+    malformed["output_files"]["mask"][0]["path"] = str(root / "outside.tif")
+    refused(lambda: core.ExecutionContext.from_dict(malformed), ValueError)
+    return {"family": "installed-core-output-file-declarations-projection", "result": "PASS"}
+
+
 def core_contract_checks() -> list:
     """Exercise installed worker-floor APIs without importing the controller."""
     import importlib
@@ -283,7 +340,8 @@ def core_contract_checks() -> list:
     assert defaults == {"count": 2, "path": None, "values": [1, 2]}
     defaults["values"].append(9)
     assert Inputs.capture_defaults()["values"] == [1, 2]
-    cases = [{"family": "installed-core-import-annotations-defaults", "result": "PASS", "modules": modules}]
+    cases = [{"family": "installed-core-import-annotations-defaults", "result": "PASS", "modules": modules},
+             output_file_contract_checks(Path.cwd() / "output-file-floor")]
 
     recipe = {"python": "3.9", "pip": ["sample==1.0"], "channels": ["conda-forge"],
               "local": [{"name": "sample", "path": Path("held-project"), "editable": True,
@@ -452,7 +510,7 @@ def main() -> int:
         record["duration_seconds"] = time.monotonic() - started
         args.receipt.parent.mkdir(parents=True, exist_ok=True)
         args.receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    print("Eight Core artifact contract/lifetime families PASS; 0 skipped.")
+    print(f"{len(record['cases'])} Core artifact contract/lifetime families PASS; 0 skipped.")
     return 0
 
 
