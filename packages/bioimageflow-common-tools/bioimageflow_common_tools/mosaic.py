@@ -7,6 +7,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
+    FileGroup,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -73,7 +74,7 @@ class Mosaic(ProcessingTool):
                 display_name="Mosaic image",
                 description="Composite mosaic image (grid of all input tiles).",
             ),
-        ] = Template("{node_name}_mosaic.png")
+        ] = Template("{node_name}_mosaic.png", group=FileGroup.once())
         image_count: Annotated[int, GUIMeta(
             display_name="Image count",
             description="Number of input tiles assembled in the mosaic.",
@@ -95,6 +96,10 @@ class Mosaic(ProcessingTool):
         tile_width = _optional_positive_integer(first.tile_width, "Tile width")
         tile_height = _optional_positive_integer(first.tile_height, "Tile height")
         output_path = Path(first.mosaic_path)
+        planned = getattr(context, "output_files", {}).get("mosaic_path")
+        if planned is not None:
+            destination, = planned
+            output_path = destination.path
         for args in arguments_list[1:]:
             settings = (
                 _positive_integer(args.columns, "Columns"),

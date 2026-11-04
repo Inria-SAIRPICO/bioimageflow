@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from bioimageflow_core import (
     Arguments, Category, Connectable, ExecutionContext, GUIMeta, ImageSpec,
-    IOModel, ProcessingTool, RowConsumption,
+    IOModel, PathBase, ProcessingTool, RowConsumption,
 )
 
 from .connection import OmeroToolError, connection_fields, omero_session, positive_id, runtime_scratch
@@ -53,7 +53,7 @@ class OmeroDownloadDataset(ProcessingTool):
         pass
 
     class Outputs(IOModel):
-        image: Annotated[Path, ImageSpec()]
+        image: Annotated[Path, ImageSpec()] = PathBase("omero/image.ome.tif")
         dataset_id: int
         image_id: int
         image_name: str
@@ -67,7 +67,7 @@ class OmeroDownloadDataset(ProcessingTool):
         scratch = runtime_scratch(context)
         assert context is not None
         # A row-owned asset directory avoids collisions across mapped rows.
-        destination_dir = context.assets_dir / scratch.name
+        destination_dir = Path(getattr(arguments, "image", context.assets_dir / "image.ome.tif")).parent / scratch.name
         destination_dir.mkdir(parents=True, exist_ok=True)
         created: list[Path] = []
         try:

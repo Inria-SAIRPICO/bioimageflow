@@ -23,8 +23,8 @@ from bioimageflow_core.worker_origins import (
 )
 
 
-TASK_SCHEMA = "bioimageflow.processing_task.v4"
-RESULT_SCHEMA = "bioimageflow.processing_result.v4"
+TASK_SCHEMA = "bioimageflow.processing_task.v5"
+RESULT_SCHEMA = "bioimageflow.processing_result.v5"
 _TASK_ID_RE = re.compile(r"^task_[0-9a-f]{16}$")
 _INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
 _ATTEMPT_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
@@ -38,6 +38,7 @@ _CONTEXT_FIELDS = {
     "row_dir",
     "batch_dir",
     "row_index",
+    "output_files",
 }
 
 
@@ -65,7 +66,7 @@ class ProcessingTask:
     batch_arguments: Dict[str, Any] = field(default_factory=dict)
     reference_rows: Tuple[ReferenceRow, ...] = ()
     shared_memory_context: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_task.v4"] = field(
+    schema: Literal["bioimageflow.processing_task.v5"] = field(
         default=TASK_SCHEMA, init=False
     )
 
@@ -94,7 +95,7 @@ class ProcessingTaskResult:
     declaration_digest: str
     groups: Tuple[OutputGroup, ...]
     metrics: Optional[Dict[str, Any]] = None
-    schema: Literal["bioimageflow.processing_result.v4"] = field(
+    schema: Literal["bioimageflow.processing_result.v5"] = field(
         default=RESULT_SCHEMA, init=False
     )
 

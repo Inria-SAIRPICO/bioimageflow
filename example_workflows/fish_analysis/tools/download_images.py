@@ -15,6 +15,7 @@ from bioimageflow_core import (
     GUIMeta,
     IOModel,
     ProcessingTool,
+    PathBase,
     RowConsumption,
 )
 
@@ -53,7 +54,7 @@ class DownloadImages(ProcessingTool):
                 display_name="Path",
                 description="Local path of the downloaded file.",
             ),
-        ]
+        ] = PathBase("downloads/download")
         filename: Annotated[
             str,
             GUIMeta(
@@ -80,7 +81,7 @@ class DownloadImages(ProcessingTool):
         if context is None:
             raise RuntimeError("DownloadImages requires an execution context.")
 
-        output_dir = context.assets_dir
+        output_dir = Path(getattr(arguments, "path", context.assets_dir / "download")).parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
         urls = [u.strip() for u in arguments.urls.strip().split("\n") if u.strip()]

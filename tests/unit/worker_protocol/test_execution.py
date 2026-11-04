@@ -41,6 +41,7 @@ def _context(run_dir: Path, *, row_index: str | None) -> dict[str, str | None]:
             None if row_index is not None else str(run_dir / "work" / "batch")
         ),
         "row_index": row_index,
+        "output_files": {},
     }
 
 

@@ -24,7 +24,6 @@ from .common import (
     _declared_zero_row_scalar_outputs,
     _explicit_template_output_columns,
     _path_output_columns,
-    _resolve_staged_output_path,
     _shared_array_output_columns,
     canonical_dataframe_digest,
     compute_env_hash,
@@ -447,34 +446,22 @@ class _NodeExecutionMixin:
         failure = AttemptFailure.capture(storage, result_key, attempt_id)
         try:
             row_args = self._resolve_defaults(node, input_annotations)
-            path_input_fields = [
-                name
-                for name, annotation in input_annotations.items()
-                if is_path_type(annotation)
-            ]
-            context = self._build_template_context(
-                node.name,
-                "0",
-                row_args,
-                path_input_fields=path_input_fields,
-                upstream_nodes={},
-                results={},
-                idx="0",
-            )
-            for out_field, template in templates.items():
-                row_args[out_field] = _resolve_staged_output_path(
-                    real_assets_dir, template, context
-                )
             arguments_dicts = [] if collective else [row_args]
             batch_values, reference_rows = row_args, ()
 
+            file_plan = self._plan_output_files(
+                node, arguments_dicts, aligned_index, templates, real_assets_dir,
+                batch_values, reference_rows, {}, {},
+            )
             # --- Dispatch & build output ---
             row_contexts, batch_context = self._build_execution_contexts(
                 staging_dir,
                 real_assets_dir,
                 aligned_index,
             )
-            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows)
+            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows,
+                                    output_files=file_plan.output_files)
+            row_contexts = self._output_file_row_contexts(node, row_contexts, file_plan)
             raw_results = self._dispatch_tool(
                 node.tool,
                 arguments_dicts,
@@ -485,6 +472,7 @@ class _NodeExecutionMixin:
                 invocation_id=invocation_id,
                 cache_attempt_id=attempt_id,
             )
+            file_plan.validate_outputs(raw_results, row_consumption=node.tool.row_consumption.value)
             assembled = self._build_output_dataframe(
                 raw_results, aligned_index, node.tool, row_consumption=node.tool.row_consumption.value,
                 node_name=node.name, result_key=result_key,
@@ -512,7 +500,7 @@ class _NodeExecutionMixin:
                     aligned_index,
                     df,
                     declared_path_columns,
-                ),
+                ) + file_plan.manifest_only_artifacts(df),
                 row_relation=assembled.relation.to_dict(),
                 declared_scalar_outputs=_declared_zero_row_scalar_outputs(
                     node.tool,
@@ -649,13 +637,19 @@ class _NodeExecutionMixin:
                 node, results, input_annotations, templates, path_input_fields, real_assets_dir,
             ) if collective else ({}, ())
 
+            file_plan = self._plan_output_files(
+                node, arguments_dicts, execution_index, templates, real_assets_dir,
+                batch_values, reference_rows, upstream_nodes, results,
+            )
             # --- Dispatch & build output ---
             row_contexts, batch_context = self._build_execution_contexts(
                 staging_dir,
                 real_assets_dir,
                 execution_index,
             )
-            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows)
+            batch_context = replace(batch_context, batch_arguments=Arguments(**batch_values), reference_rows=reference_rows,
+                                    output_files=file_plan.output_files)
+            row_contexts = self._output_file_row_contexts(node, row_contexts, file_plan)
             raw_results = self._dispatch_tool(
                 node.tool,
                 arguments_dicts,
@@ -666,6 +660,7 @@ class _NodeExecutionMixin:
                 invocation_id=invocation_id,
                 cache_attempt_id=attempt_id,
             )
+            file_plan.validate_outputs(raw_results, row_consumption=node.tool.row_consumption.value)
             input_relations = [self._result_relation(provider) for provider in upstream_nodes.values()]
             input_relation = next((relation for relation in input_relations if relation is not None), None)
             assembled = self._build_output_dataframe(
@@ -697,7 +692,7 @@ class _NodeExecutionMixin:
                     execution_index,
                     df,
                     declared_path_columns,
-                ),
+                ) + file_plan.manifest_only_artifacts(df),
                 row_relation=assembled.relation.to_dict(),
                 declared_scalar_outputs=_declared_zero_row_scalar_outputs(
                     node.tool,

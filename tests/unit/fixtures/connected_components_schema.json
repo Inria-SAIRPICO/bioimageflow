@@ -53,6 +53,11 @@
       "default": "{input_image.stem}_labels.tif",
       "description": "Label image where each connected component has a unique integer ID.",
       "display_name": "Label image",
+      "file_group": {
+        "description": "One file per input row",
+        "keys": [],
+        "kind": "per_row"
+      },
       "group": null,
       "image_spec": {
         "dtypes": [
@@ -70,6 +75,7 @@
       "max": null,
       "min": null,
       "nullable": false,
+      "output_role": "exact",
       "required": false,
       "step": null,
       "template": "{input_image.stem}_labels.tif",

@@ -55,6 +55,7 @@ def _context(tmp_path, *, row: bool) -> dict[str, str | None]:
         "row_dir": str(run_dir / "work" / "rows" / "000000") if row else None,
         "batch_dir": None if row else str(run_dir / "work" / "batch"),
         "row_index": "sample" if row else None,
+        "output_files": {},
     }
 
 
@@ -144,7 +145,7 @@ def test_processing_result_has_exact_round_trip(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_task.v5"),
+        lambda payload: payload.update(schema="bioimageflow.processing_task.v6"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_id="task_1"),
         lambda payload: payload.update(invocation_id="run_" + "1" * 32),
@@ -175,7 +176,7 @@ def test_batch_requires_batch_context(tmp_path) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload.update(schema="bioimageflow.processing_result.v5"),
+        lambda payload: payload.update(schema="bioimageflow.processing_result.v6"),
         lambda payload: payload.update(mode="future"),
         lambda payload: payload.update(task_retry=True),
         lambda payload: payload.update(extra=True),

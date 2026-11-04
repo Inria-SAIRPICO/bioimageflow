@@ -235,7 +235,7 @@ class TestExtractGUIMeta:
     def test_returns_gui_meta(self):
         meta = GUIMeta(connectable=Connectable.NEVER, min=0.0, max=10.0, step=0.5)
         ann = Annotated[float, meta]
-        assert extract_gui_meta(ann) is meta
+        assert extract_gui_meta(ann) is ann.__metadata__[-1]
 
     def test_returns_none_for_plain_type(self):
         assert extract_gui_meta(float) is None
@@ -249,9 +249,9 @@ class TestExtractGUIMeta:
         spec = ImageSpec(semantics={Semantic.INTENSITY})
         meta = GUIMeta(connectable=Connectable.BY_DEFAULT)
         ann = Annotated[Path, spec, meta]
-        assert extract_gui_meta(ann) is meta
+        assert extract_gui_meta(ann) is ann.__metadata__[-1]
         # ImageSpec is still extractable via its own function
-        assert get_args(ann)[1] is spec
+        assert get_args(ann)[1] == spec
 
 
 class TestSharedArray:

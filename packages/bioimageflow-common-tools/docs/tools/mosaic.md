@@ -5,6 +5,8 @@ It is a batch tool: all input rows are read, optionally resized, and pasted into
 
 Inputs are `input_image`, `columns`, `tile_width`, and `tile_height`.
 Outputs are `mosaic_path` and `image_count`.
+`mosaic_path` declares `FileGroup.once()`: all rows contribute to one exact file, so repeating its destination across tiles is intentional.
+The engine rejects a template that gives different names to members of that single group before composing the image.
 The core library is Pillow.
 
 Use it for quick visual QC of image batches or restored/segmented outputs.
@@ -38,3 +40,4 @@ The result retains association to all input images without duplicating the mosai
 
 Unreadable images fail through Pillow.
 Invalid or inconsistent layout settings fail before the mosaic is written, and large batches can create large memory allocations.
+Grouping does not change the collective result's association to all consumed images.

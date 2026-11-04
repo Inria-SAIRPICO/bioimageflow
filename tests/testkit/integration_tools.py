@@ -22,6 +22,7 @@ from bioimageflow_core import (
     Semantic,
     SharedArray,
     Template,
+    PathBase,
 )
 from bioimageflow import (
     DataFrameTool,
@@ -183,7 +184,7 @@ class StubTiler(ProcessingTool):
         ] = 4
 
     class Outputs(IOModel):
-        tile: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = Template(
+        tile: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})] = PathBase(
             "{input_image.stem}_tile_{row_index}.png"
         )
 
@@ -247,7 +248,7 @@ class StubBatchExploder(ProcessingTool):
         ]
 
     class Outputs(IOModel):
-        crop: Path = Template("{input_image.stem}_crop_{row_index}.png")
+        crop: Path = PathBase("{input_image.stem}_crop_{row_index}.png")
 
     def process_batch(
         self, arguments_list: list[Any], *, context: object | None = None
@@ -456,7 +457,7 @@ class CellposeTrain(CellposeBase):
         ] = 100
 
     class Outputs(IOModel):
-        model_path: Path = Template("{node_name}_model")
+        model_path: Path = Template("{node_name}_model_{row_index}")
 
     def process_batch(
         self, arguments_list: list[Any], *, context: object | None = None

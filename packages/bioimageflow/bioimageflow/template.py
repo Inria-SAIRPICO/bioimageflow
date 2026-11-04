@@ -10,7 +10,7 @@ from bioimageflow.validation import is_path_type, validate_output_template_defau
 
 logger = logging.getLogger("bioimageflow")
 
-_SPECIAL_VARS = {'node_name', 'row_index', 'timestamp', 'ext'}
+_SPECIAL_VARS = {'node_name', 'row_index', 'timestamp', 'ext', 'group_index'}
 _VALID_PROPERTIES = {'stem', 'name', 'ext', 'exts'}
 
 
@@ -21,46 +21,25 @@ def get_output_templates(
 ) -> dict[str, str]:
     """Extract templates from explicit Template defaults.
 
-    New Path outputs without a Template default use the built-in default template.
-    A same-named input is preserved unless an explicit Template or override supplies a destination.
+    Plain Path outputs are returned references and never implicit destinations.
+    Overrides may replace only explicit Template or PathBase patterns.
     Non-path outputs may not declare Template defaults.
     """
     templates: dict[str, str] = {}
     output_annotations = outputs_cls._get_all_annotations()
-    input_annotations = inputs_cls._get_all_annotations()
 
     validate_output_template_defaults(outputs_cls)
 
-    # Count path-typed input fields for {ext} resolution
-    path_input_fields = [
-        name for name, ann in input_annotations.items()
-        if is_path_type(ann)
-    ]
-
     for name, ann in output_annotations.items():
-        if not is_path_type(ann):
-            continue
-        default = getattr(outputs_cls, name, None)
-        if isinstance(default, Template):
-            templates[name] = default.pattern
-        elif (
-            name in input_annotations
-            and is_path_type(input_annotations[name])
-            and not (
-                overrides and isinstance(overrides.get(name), str) and overrides[name]
-            )
-        ):
-            continue
-        else:
-            # Default template
-            if len(path_input_fields) == 1:
-                templates[name] = "{node_name}_{row_index}{ext}"
-            else:
-                templates[name] = "{node_name}_{row_index}"
-
+        if is_path_type(ann):
+            default = getattr(outputs_cls, name, None)
+            if isinstance(default, Template):
+                templates[name] = default.pattern
     if overrides:
         for name, template in overrides.items():
-            if name in templates and isinstance(template, str) and template:
+            if isinstance(template, str) and template:
+                if name not in templates:
+                    raise ValueError(f"Output {name!r} is a returned reference, not a writable template. Declare an intended write with Template(...) or a generated naming family with PathBase(...) in the editable tool definition, or upgrade its incompatible tool package. Remove the override only if this output is a true returned reference.")
                 templates[name] = template
     return templates
 

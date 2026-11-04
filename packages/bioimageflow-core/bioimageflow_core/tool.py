@@ -35,14 +35,53 @@ class RowConsumption(str, Enum):
     COLLECTIVE = "collective"
 
 
+@dataclass(frozen=True)
+class FileGroup:
+    """The rows contributing to one exact writable output file."""
+
+    kind: str
+    keys: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("per_row", "once", "by"):
+            raise ValueError("Unsupported file group kind")
+        if type(self.keys) is not tuple or any(type(key) is not str or not key for key in self.keys):
+            raise TypeError("File group keys must be nonempty input names")
+        if len(set(self.keys)) != len(self.keys):
+            raise ValueError("File group keys must be unique")
+        if (self.kind == "by") != bool(self.keys):
+            raise ValueError("Only keyed file groups require input names")
+
+    @classmethod
+    def per_row(cls) -> "FileGroup":
+        return cls("per_row")
+
+    @classmethod
+    def once(cls) -> "FileGroup":
+        return cls("once")
+
+    @classmethod
+    def by(cls, *inputs: str) -> "FileGroup":
+        return cls("by", inputs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "keys": list(self.keys)}
+
+
 if TYPE_CHECKING:
 
     class Template(Path):
         """Type-only facade for ProcessingTool output path templates."""
 
         pattern: str
+        group: Optional[FileGroup]
 
-        def __new__(cls, pattern: str) -> "Template": ...
+        def __new__(cls, pattern: str, *, group: Optional[FileGroup] = None) -> "Template": ...
+
+    class PathBase(Template):
+        """A naming base whose actual generated paths are chosen by the tool."""
+
+        def __new__(cls, pattern: str) -> "PathBase": ...
 
 else:
 
@@ -51,15 +90,27 @@ else:
         """Explicit marker for ProcessingTool output path templates."""
 
         pattern: str
+        group: Optional[FileGroup] = None
 
         def __post_init__(self) -> None:
             if not isinstance(self.pattern, str):
                 raise TypeError("Template pattern must be a string.")
             if self.pattern == "":
                 raise ValueError("Template pattern must not be empty.")
+            if self.group is not None and not isinstance(self.group, FileGroup):
+                raise TypeError("Template group must be a FileGroup")
 
         def __str__(self) -> str:
             return self.pattern
+
+    @dataclass(frozen=True)
+    class PathBase(Template):
+        """A customizable naming base without exact-file ownership."""
+
+        def __post_init__(self) -> None:
+            super().__post_init__()
+            if self.group is not None:
+                raise ValueError("PathBase does not declare exact file groups")
 
 
 class IOModel:
@@ -188,6 +239,21 @@ class ProcessingTool(BaseTool):
                 f"{cls.__name__} declares collective row consumption and must "
                 "implement process_batch"
             )
+        inputs = cls.Inputs._get_all_annotations()
+        for name in outputs._get_all_annotations():
+            declaration = getattr(outputs, name, None)
+            if not isinstance(declaration, Template) or isinstance(declaration, PathBase):
+                continue
+            group = declaration.group
+            if group is None:
+                if row_consumption is RowConsumption.COLLECTIVE:
+                    raise TypeError(f"{cls.__name__}.{name} must declare a FileGroup")
+                group = FileGroup.per_row()
+            if group.kind != "per_row" and not has_process_batch:
+                raise TypeError("Shared file groups require whole-node process_batch")
+            missing = set(group.keys) - set(inputs)
+            if missing:
+                raise TypeError(f"FileGroup references unknown inputs: {sorted(missing)}")
 
     def __call__(
         self,

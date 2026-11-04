@@ -4,7 +4,7 @@ Writing Custom Tools
 BioImageFlow has two kinds of tools. This guide shows how to write each.
 
 An isolated ProcessingTool must expose the same semantic Inputs/Outputs declaration in the controller and its worker environment.
-Current task/result v4 carries the captured declaration and checks the loaded instance before the scientific method runs; differing field order, portable types, requiredness/nullability or supported image/bound constraints refuse with a field path.
+Current task/result v5 carries the captured declaration and checks the loaded instance before the scientific method runs; differing field order, portable types, requiredness/nullability or supported image/bound constraints refuse with a field path.
 Python class names and GUI presentation do not affect this comparison, and effective defaults/templates remain captured argument values rather than declaration-token values.
 Dynamic DataFrameTools without declared Outputs and resolved Passthrough schemas remain controller-side contracts; this worker check does not add ProcessingTool requirements to them.
 
@@ -154,7 +154,11 @@ Anatomy:
 - **Inputs**: fields annotated with types. Fields with defaults are optional
   parameters; fields without defaults are required bindings.
 - **Outputs**: path fields with ``Template(...)`` defaults are **output path templates**
-  resolved by the engine before ``process_row`` is called.
+  resolved and checked before the affected scientific callback.
+  ``Template`` declares an exact writable destination; ``PathBase`` declares a
+  naming base for generated files, while bare ``Path`` outputs are returned references.
+  Collective exact outputs declare ``FileGroup.once()``, ``FileGroup.by(...)``
+  or ``FileGroup.per_row()`` explicitly; mapped exact outputs default to per-row ownership.
 - **process_row**: receives an :class:`~bioimageflow_core.Arguments` namespace
   with all resolved input and output values. Returns an ``Outputs`` instance.
 

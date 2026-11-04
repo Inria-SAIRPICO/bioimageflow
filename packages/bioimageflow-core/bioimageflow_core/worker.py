@@ -186,6 +186,7 @@ def _execute_tool(invocation: ProcessingTask, tool: Any, *, task: Any) -> Dict[s
         raise ValueError("Task row_consumption does not match the admitted tool declaration.")
     declaration = describe_tool_declaration(tool)
     compare_tool_declarations(invocation.declaration, declaration)
+    _validate_output_file_contexts(invocation, declaration)
     output_type = tool.Outputs
     if output_type is None:
         raise TypeError(f"{type(tool).__name__} does not declare Outputs.")
@@ -205,3 +206,119 @@ def _execute_tool(invocation: ProcessingTask, tool: Any, *, task: Any) -> Dict[s
         declaration_digest=declaration_digest(declaration),
         groups=groups,
     ))
+
+
+def _validate_output_file_contexts(invocation: ProcessingTask, declaration: Dict[str, Any]) -> None:
+    """Admit complete ownership once per batch, or one projection per row chunk."""
+    exact = {name: item["output_file"] for name, item in declaration["outputs"]["fields"].items()
+             if item["output_file"] is not None and item["output_file"]["role"] == "exact"}
+    rows = {row.position: row for row in invocation.rows}
+    references = {row.position: row for row in invocation.reference_rows}
+    contexts = ([(invocation.batch_context, None)] if invocation.mode == "process_batch" else
+                [(row.context, row.position) for row in invocation.rows])
+    all_owners: Dict[Any, str] = {}
+    all_paths: Dict[str, Any] = {}
+    for raw, context_position in contexts:
+        if raw is None:
+            if exact:
+                raise ValueError("Exact writable outputs require an admitted file context")
+            continue
+        context = ExecutionContext.from_dict(raw)
+        if set(context.output_files) != set(exact):
+            raise ValueError("Output file context does not match exact output declaration")
+        expected_positions = set(rows) if context_position is None else {context_position}
+        for name, files in context.output_files.items():
+            contract = exact[name]["group"]
+            kind, keys = contract["kind"], contract["keys"]
+            if invocation.mode == "row_chunk" and kind != "per_row":
+                raise ValueError("Shared file groups require whole-node process_batch")
+            row_owners: Dict[int, Any] = {}
+            reference_owners: Dict[int, Any] = {}
+            group_keys = set()
+            for item in files:
+                if list(item.key) != keys:
+                    raise ValueError("Planned file key does not match declared grouping")
+                if kind == "per_row" and (len(item.row_positions) != 1 or item.reference_positions
+                                          or item.group_index != item.row_positions[0]):
+                    raise ValueError("Per-row file must belong to one actual observation")
+                if kind == "once" and item.group_index != 0:
+                    raise ValueError("Whole-batch file requires one group")
+                identity = tuple((key, _file_key_identity(value)) for key, value in item.key.items())
+                if kind == "by" and identity in group_keys:
+                    raise ValueError("Duplicate keyed file owner")
+                group_keys.add(identity)
+                for position in item.row_positions:
+                    if position not in expected_positions or position in row_owners:
+                        raise ValueError("Invalid or duplicated file observation membership")
+                    row_owners[position] = item
+                for position in item.reference_positions:
+                    if kind != "by" or position not in references or position in reference_owners:
+                        raise ValueError("Invalid or duplicated file reference membership")
+                    reference_owners[position] = item
+                owner, path = (name, item.group_index), str(item.path)
+                if owner in all_owners and all_owners[owner] != path:
+                    raise ValueError("One file owner has inconsistent destinations")
+                if path in all_paths and all_paths[path] != owner:
+                    raise ValueError("Distinct file owners have the same destination")
+                all_owners[owner], all_paths[path] = path, owner
+                observations = [rows[position].arguments for position in item.row_positions]
+                observations += [references[position].arguments for position in item.reference_positions]
+                if not observations:
+                    observations = [invocation.batch_arguments]
+                if kind == "by":
+                    for values in observations:
+                        for key, expected in item.key.items():
+                            # A same-name exact destination replaces that input
+                            # argument; its original source is the admitted key.
+                            if key not in exact and not _same_file_key(values.get(key), expected):
+                                raise ValueError("File group key disagrees with contributing inputs")
+            if set(row_owners) != expected_positions:
+                raise ValueError("File plan must cover each observation exactly once")
+            for position, item in row_owners.items():
+                if not _matches_file_destination(rows[position].arguments.get(name), item.path):
+                    raise ValueError("Observation arguments disagree with admitted destination")
+            if context_position is None:
+                if len({item.group_index for item in files}) != len(files):
+                    raise ValueError("Duplicate planned file group index")
+                if kind == "by":
+                    eligible = set()
+                    for position, reference in references.items():
+                        present = [key in reference.arguments for key in keys]
+                        if any(present) and not all(present):
+                            raise ValueError("Reference contains an incomplete composite file key")
+                        if all(present):
+                            eligible.add(position)
+                    if set(reference_owners) != eligible:
+                        raise ValueError("Keyed file plan must cover each eligible reference exactly once")
+                    for position, item in reference_owners.items():
+                        if not _matches_file_destination(references[position].arguments.get(name), item.path):
+                            raise ValueError("Reference arguments disagree with admitted destination")
+                elif kind == "once":
+                    eligible = bool(rows) or invocation.row_consumption == "collective"
+                    if len(files) != int(eligible):
+                        raise ValueError("Whole-batch file plan has an incorrect owner count")
+                    if files and not _matches_file_destination(invocation.batch_arguments.get(name), files[0].path):
+                        raise ValueError("Batch arguments disagree with admitted destination")
+
+
+def _file_key_identity(value: Any) -> Any:
+    from pathlib import Path
+    if isinstance(value, Path):
+        return ("path", str(value))
+    if type(value) is float:
+        return ("float", value.hex())
+    return (type(value).__name__, value)
+
+
+def _same_file_key(actual: Any, expected: Any) -> bool:
+    from pathlib import Path
+    if isinstance(expected, Path):
+        return isinstance(actual, (str, Path)) and Path(actual) == expected
+    if type(actual).__module__.startswith("numpy") and getattr(actual, "ndim", None) == 0:
+        actual = actual.item()
+    return type(actual) is type(expected) and actual == expected
+
+
+def _matches_file_destination(value: Any, expected: Any) -> bool:
+    from pathlib import Path
+    return isinstance(value, (str, Path)) and Path(value) == expected

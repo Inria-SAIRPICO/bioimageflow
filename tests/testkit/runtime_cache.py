@@ -44,6 +44,7 @@ from bioimageflow_core import (
     ProcessingTool,
     RowConsumption,
     Template,
+    PathBase,
 )
 
 from bioimageflow_core.types import ImageSpec, Semantic, SharedArray
@@ -178,7 +179,7 @@ class DefaultTemplateZeroRowWriter(ProcessingTool):
         text: str = "default"
 
     class Outputs(IOModel):
-        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{node_name}_{row_index}")
         count: int
 
     def process_row(
@@ -275,7 +276,7 @@ class EscapingSourceAssetWriter(ProcessingTool):
         directory: Path
 
     class Outputs(IOModel):
-        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+        mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = PathBase(
             "mask_{row_index}.txt"
         )
 
@@ -386,7 +387,7 @@ class EscapingColumnBoundWriter(ProcessingTool):
         directory: Path
 
     class Outputs(IOModel):
-        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template(
+        output: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = PathBase(
             "owned_{row_index}.txt"
         )
 

@@ -36,7 +36,7 @@ def test_tool_package_runtime_dependency_matrix() -> None:
         assert actual == expected, project_path
         requirements = {Requirement(value).name: Requirement(value) for value in project["dependencies"]}
         core = requirements["bioimageflow-core"].specifier
-        assert set((item.operator, item.version) for item in core) == {(">=", "0.5.0"), ("<", "0.6")}
+        assert set((item.operator, item.version) for item in core) == {(">=", "0.6.0"), ("<", "0.7")}
         if "bioimageflow" in requirements:
             orchestrator = requirements["bioimageflow"].specifier
-            assert set((item.operator, item.version) for item in orchestrator) == {(">=", "0.9.0"), ("<", "1")}
+            assert set((item.operator, item.version) for item in orchestrator) == {(">=", "0.10.0"), ("<", "1")}

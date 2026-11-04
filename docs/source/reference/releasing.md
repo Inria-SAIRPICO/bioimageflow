@@ -30,8 +30,9 @@ Choose the version bump from the selected package's public behavior:
 - Major: breaking changes after the package reaches `1.0.0`.
 
 First-party dependency ranges identify the single supported current release cohort.
-Tool compatibility remains Core `>=0.5.0,<0.6`; BioImageFlow 0.9.5 itself requires Core `>=0.5.1,<0.6` for generation admission.
-The first-party orchestrator range remains `>=0.9.0,<1`, and Wetlands remains `>=2.6.1,<3`.
+The output-file ownership cohort requires Core `>=0.6.0,<0.7` and BioImageFlow `>=0.10.0,<1`; Wetlands remains `>=2.6.1,<3`.
+The minor version boundary makes the removal of implicit Path destinations and the exact-template ownership contract explicit.
+First-party writable declarations, naming bases, worker protocol and cache contract must be migrated and tested together; existing saved tool-package pins are not silently rebound.
 All first-party tool packages use that Core range; common, measurement, spot and tracking also use the current orchestrator range.
 These ranges must resolve and pass current scientific and tool-authoring controls before publication.
 There is no obligation to preserve old DTOs, wire schemas, aliases or dependency floors solely for backward compatibility.

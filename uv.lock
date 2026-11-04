@@ -108,7 +108,7 @@ wheels = [
 
 [[package]]
 name = "bioimageflow"
-version = "0.9.7"
+version = "0.10.0"
 source = { editable = "packages/bioimageflow" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -148,7 +148,7 @@ provides-extras = ["parsl", "psij", "cluster"]
 
 [[package]]
 name = "bioimageflow-common-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-common-tools" }
 dependencies = [
     { name = "bioimageflow" },
@@ -166,7 +166,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-core"
-version = "0.5.2"
+version = "0.6.0"
 source = { editable = "packages/bioimageflow-core" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -182,7 +182,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-io-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-io-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -193,7 +193,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-measurement-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-measurement-tools" }
 dependencies = [
     { name = "bioimageflow" },
@@ -214,7 +214,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-omero-tools"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/bioimageflow-omero-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -225,7 +225,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-phasor-tools"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/bioimageflow-phasor-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -236,7 +236,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-restoration-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-restoration-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -247,7 +247,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-sairpico-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-sairpico-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -258,7 +258,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-segmentation-tools"
-version = "0.3.2"
+version = "0.4.0"
 source = { editable = "packages/bioimageflow-segmentation-tools" }
 dependencies = [
     { name = "bioimageflow-core" },
@@ -269,7 +269,7 @@ requires-dist = [{ name = "bioimageflow-core", editable = "packages/bioimageflow
 
 [[package]]
 name = "bioimageflow-spot-tools"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "packages/bioimageflow-spot-tools" }
 dependencies = [
     { name = "bioimageflow" },
@@ -295,7 +295,7 @@ requires-dist = [
 
 [[package]]
 name = "bioimageflow-tracking-tools"
-version = "0.3.2"
+version = "0.4.0"
 source = { editable = "packages/bioimageflow-tracking-tools" }
 dependencies = [
     { name = "bioimageflow" },

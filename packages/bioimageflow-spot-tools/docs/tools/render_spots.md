@@ -4,6 +4,7 @@
 
 Inputs are `spot_id`, `y`, `x`, `image_shape` or `reference_image`, `radius`, and `label_mode`.
 Output is `output_image` plus `spot_count`.
+The writable image declares `FileGroup.by("reference_image")`; an absent optional reference is one legitimate shape-based group.
 
 ## Dependencies and Core Libraries
 
@@ -27,6 +28,8 @@ The collective result contains one output row per rendered reference image, asso
 The aggregate is not repeated for each spot.
 When `reference_image` is connected, rows are grouped by reference image and rendered independently.
 Use an output template containing `{reference_image.stem}` when a batch contains multiple reference images so that groups cannot overwrite one another.
+If source stems repeat, use `{group_index}` to distinguish their planned files.
+All rows contributing to one file must agree on its name; the engine reports collisions or disagreement with template-expansion details before writing.
 Coordinates use nearest-pixel rounding with exact half values rounded upward, disks include pixels exactly on their radius, and later rows overwrite earlier rows where disks overlap.
 With `label_mode=True`, the output is a `uint32` label image that preserves positive `spot_id` values exactly and reserves `0` for background.
 In label mode, `spot_count` is the number of distinct positive labels visible in the final image.

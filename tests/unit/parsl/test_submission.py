@@ -120,6 +120,7 @@ def test_batch_task_is_one_whole_node_envelope() -> None:
             "row_dir": None,
             "batch_dir": "/shared/run/work/batch",
             "row_index": None,
+            "output_files": {},
         },
     )
 

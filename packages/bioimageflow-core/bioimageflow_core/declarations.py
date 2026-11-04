@@ -9,13 +9,13 @@ import json
 from typing import Any, Annotated, Union, get_args, get_origin
 import types
 
-from .tool import IOModel
+from .tool import FileGroup, IOModel, PathBase, Template
 from .type_descriptors import decode_annotation, encode_annotation
 from .types import ImageSpec, annotation_metadata, extract_gui_meta
 
-DECLARATION_CONTRACT_VERSION = "bioimageflow.tool_declaration.v1"
+DECLARATION_CONTRACT_VERSION = "bioimageflow.tool_declaration.v2"
 _CONSTRAINTS = {"min", "max", "gt", "ge", "lt", "le", "multiple_of", "min_length", "max_length"}
-_FIELD_KEYS = {"type_spec", "required", "nullable", "constraints", "image_spec"}
+_FIELD_KEYS = {"type_spec", "required", "nullable", "constraints", "image_spec", "output_file"}
 _IMAGE_KEYS = {"semantics", "layouts", "dtypes", "formats"}
 
 
@@ -73,10 +73,19 @@ def describe_io_model(model: Any, *, passthrough: bool = False) -> Any:
         "fields": {
             name: {"type_spec": encode_annotation(annotation),
                    "required": not hasattr(model, name), "nullable": _nullable(annotation),
-                   "constraints": _constraints(annotation), "image_spec": _image(annotation)}
+                   "constraints": _constraints(annotation), "image_spec": _image(annotation),
+                   "output_file": _output_file(getattr(model, name, None))}
             for name, annotation in annotations.items()
         },
     }, "model")
+
+
+def _output_file(value: Any) -> Any:
+    if not isinstance(value, Template):
+        return None
+    return {"role": "base" if isinstance(value, PathBase) else "exact",
+            "pattern": value.pattern,
+            "group": None if isinstance(value, PathBase) else (value.group or FileGroup.per_row()).to_dict()}
 
 
 def describe_tool_declaration(tool: Any) -> dict[str, Any]:
@@ -121,6 +130,19 @@ def _validate_model(value: Any, path: str) -> dict[str, Any]:
                 if (type(items) is not list or any(type(item) is not str for item in items)
                         or items != sorted(set(items))):
                     raise ValueError(f"{field_path}.image_spec.{key} must be sorted unique strings")
+        output_file = field["output_file"]
+        if output_file is not None:
+            _exact(output_file, {"role", "pattern", "group"}, f"{field_path}.output_file")
+            if output_file["role"] not in ("exact", "base") or type(output_file["pattern"]) is not str or not output_file["pattern"]:
+                raise ValueError(f"{field_path}.output_file requires a role and pattern")
+            if output_file["role"] == "base":
+                if output_file["group"] is not None:
+                    raise ValueError("Naming bases have no exact file group")
+            else:
+                group = _exact(output_file["group"], {"kind", "keys"}, "file group")
+                if type(group["keys"]) is not list:
+                    raise ValueError("File group keys must be a list")
+                FileGroup(group["kind"], tuple(group["keys"]))
     return deepcopy(model)
 
 

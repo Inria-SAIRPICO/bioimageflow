@@ -358,7 +358,9 @@ Package-specific releases use annotated tags such as `bioimageflow-core-v0.5.0` 
 `scripts/release_set.py tag --dry-run` discovers and validates the pending release set, while `tag --push REMOTE` creates and atomically pushes every required annotated tag.
 Release-set publication validates all selected artifact pairs before the first upload and then follows dependency order.
 Sets containing Core also require the reviewed canonical floor-tested wheel SHA256; a missing or different digest stops every upload.
-The declared current candidate cohort is Core `>=0.5.0,<0.6`, BioImageFlow `>=0.9.0,<1` and Wetlands `>=2.6.1,<3`.
+The declared current candidate cohort is Core `>=0.6.0,<0.7`, BioImageFlow `>=0.10.0,<1` and Wetlands `>=2.6.1,<3`.
+Exact file outputs use `Template(..., group=FileGroup.per_row()/once()/by(...))`; bare Path outputs are references and `PathBase(...)` explicitly represents generated filename families.
+The owner planner refuses conflicting destinations before scientific callbacks, independently of which image-writing library a tool uses.
 First-party tools declare the applicable Core and BioImageFlow bounds; BioImageFlow owns the Wetlands dependency.
 Selected local artifact proofs do not certify all supported OS/interpreter/scientific recipes or establish current candidate availability on PyPI; the deep S/T/C library milestone precedes publication.
 See the [release operator guide](docs/source/reference/releasing.md) for setup, actual deployment controls and release steps.

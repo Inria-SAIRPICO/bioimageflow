@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bioimageflow_core import Template
+from bioimageflow_core import FileGroup, Template
 from bioimageflow_core.tool import IOModel
 from bioimageflow.template import get_output_templates, resolve_template, validate_template
 
@@ -161,7 +161,7 @@ class TestGetOutputTemplates:
             result: Path
 
         templates = get_output_templates(Out, Inp)
-        assert "{ext}" in templates["result"]
+        assert "result" not in templates
 
     def test_non_path_fields_skipped(self):
         class Inp(IOModel):
@@ -194,8 +194,8 @@ def test_input_path_echo_preserves_source_and_generates_declared_destinations(tm
 
         class Outputs(IOModel):
             source: Path
-            explicit: Path = Template("explicit.txt")
-            generated: Path
+            explicit: Path = Template("explicit.txt", group=FileGroup.once() if consumption == "collective" else FileGroup.per_row())
+            generated: Path = Template("{node_name}_{group_index}.txt", group=FileGroup.once() if consumption == "collective" else FileGroup.per_row())
 
         def process(self, arguments, *, context=None):
             assert Path(arguments.source) == source
@@ -231,8 +231,9 @@ def test_nullable_path_echo_keeps_default_and_allows_explicit_override():
         source: Path | None
         generated: Path
 
-    assert get_output_templates(Out, Inp) == {"generated": "{node_name}_{row_index}{ext}"}
-    assert get_output_templates(Out, Inp, {"source": "copied.txt"})["source"] == "copied.txt"
+    assert get_output_templates(Out, Inp) == {}
+    with pytest.raises(ValueError, match="returned reference"):
+        get_output_templates(Out, Inp, {"source": "copied.txt"})
 
 
 def test_scalar_input_name_does_not_suppress_path_destination():
@@ -242,4 +243,4 @@ def test_scalar_input_name_does_not_suppress_path_destination():
     class Out(IOModel):
         result: Path
 
-    assert "result" in get_output_templates(Out, Inp)
+    assert "result" not in get_output_templates(Out, Inp)

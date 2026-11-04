@@ -268,3 +268,9 @@ edit_tests = [
     "tests/unit/test_workflow_clean_api.py",
 ]
 precommit_suites = ["unit", "parsl-fast"]
+
+[[areas]]
+name = "exact-output-file-planning"
+sources = ["packages/bioimageflow/bioimageflow/output_planning.py"]
+edit_tests = ["tests/unit/test_output_file_planning.py", "tests/integration/test_output_file_planning.py", "tests/integration/test_output_file_worker.py"]
+precommit_suites = ["unit", "integration"]

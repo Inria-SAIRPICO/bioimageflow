@@ -44,7 +44,7 @@ Current processing contracts
 ----------------------------
 
 The public logical DTOs are ``ProcessingTask``, ``RowInvocation``, ``ConsumedRow``, ``OutputGroup`` and ``ProcessingTaskResult``.
-Task/result v4 codecs preserve one current typed grammar and exact correlation, including row consumption, declaration attestation and the ordered consumed-row identities;
+Task/result v5 codecs preserve one current typed grammar and exact correlation, including row consumption, declaration attestation and the ordered consumed-row identities;
 decode is pure and cannot attach, allocate or register owners.
 Physical ``mode`` chooses row-chunk or batch execution independently of mapped or collective input meaning.
 Mapped results have one singleton-consumption group per input and retain zero/one/many output expansion.
@@ -59,7 +59,7 @@ Each optional callback receives a leaf and the keyword ``is_key``; it owns the e
 Keys remain exactly None, bool, int, float, str or bytes; container nodes are refused in key positions before callbacks, and a decoded leaf cannot introduce a container or an unsupported object.
 Custom asset decoders must refuse key roles before hydration and validate record ownership rather than interpret task grant references as persisted assets.
 The encoding callback sees native arrays without a preliminary copy and SharedArray references with their bound owner intact.
-Default callbacks retain Task4 wire values and pure decoding without attachment; explicit custom callbacks own any leaf I/O they perform.
+Default callbacks retain Task5 wire values and pure decoding without attachment; explicit custom callbacks own any leaf I/O they perform.
 
 ``describe_tool_declaration(tool)`` captures the actual concrete Inputs/Outputs semantic declaration through the shared finite annotation grammar.
 ``describe_io_model(model, passthrough=False)`` projects ordered fields without serializing defaults or GUI values; ``None`` remains an explicit absent declaration for controller-only tools.
@@ -172,3 +172,22 @@ Shared-array ownership
 
 .. automodule:: bioimageflow_core.shared_memory
    :members: SharedMemoryContext, SharedArrayLease, CleanupStatus, WorkerGrant, collect_input_scopes, validate_scope_descriptor
+
+Exact output files
+------------------
+
+``Template(pattern, group=...)`` declares an exact writable Path destination.
+``FileGroup.per_row()``, ``FileGroup.once()`` and ``FileGroup.by(*inputs)`` identify independent owners within one output field.
+Mapped templates default to per-row ownership; collective templates declare ownership explicitly.
+The computation's ``RowConsumption`` and returned-record lineage remain independent of file grouping.
+Shared groups require one whole-node batch callback, including vectorized mapped callbacks, rather than independently dispatched row writers.
+
+Bare Path outputs are returned references, while ``PathBase(pattern)`` explicitly supplies a customizable base for filenames generated internally.
+Overrides may replace declared patterns, not ownership or reference roles.
+The public output schema exposes ``output_role`` and ``file_group`` so editors do not infer writable intent from a Path annotation.
+
+``ExecutionContext.output_files[field]`` contains immutable ``PlannedFile`` entries with destination path, deterministic group index, named key values, and observation/reference positions.
+The controller checks all exact owners before dispatch; the worker admits the projection before science and exact returned paths are checked before publication.
+Keyed reference-only groups never become fabricated observations.
+The ``{group_index}`` token identifies a file group within the captured input order; it is not a permanent external identity.
+See :doc:`/how-to/output_templating` and :doc:`/specs` for ownership, collision diagnostics and migration from implicit Path destinations.

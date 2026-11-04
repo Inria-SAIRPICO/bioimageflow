@@ -7,6 +7,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
+    FileGroup,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -270,7 +271,7 @@ class RenderSpots(ProcessingTool):
                 dtypes={"uint8", "uint32"},
             ),
             GUIMeta("Rendered spots"),
-        ] = Template("rendered_spots.tif")
+        ] = Template("rendered_spots.tif", group=FileGroup.by("reference_image"))
         spot_count: Annotated[int, GUIMeta("Spot count")]
 
     def process_batch(
@@ -280,6 +281,32 @@ class RenderSpots(ProcessingTool):
         context: Any = None,
     ) -> Any:
         references = [Arguments(**reference.arguments) for reference in getattr(context, "reference_rows", ())]
+        planned = getattr(context, "output_files", {}).get("output_image")
+        if planned is not None:
+            rendered: list[Any] = []
+            for destination in planned:
+                observations = [
+                    arguments_list[position]
+                    for position in destination.row_positions
+                    if _has_spot_coordinate(arguments_list[position])
+                ]
+                if observations:
+                    rendered.extend(self._render_group(observations))
+                    continue
+                reference = (
+                    arguments_list[destination.row_positions[0]]
+                    if destination.row_positions
+                    else (
+                        references[destination.reference_positions[0]]
+                        if destination.reference_positions
+                        else getattr(context, "batch_arguments", None)
+                    )
+                )
+                values = dict(vars(reference)) if reference is not None else {}
+                values.update(reference_image=destination.key["reference_image"], output_image=destination.path)
+                rendered.extend(_blank_rendered_spots_output(self, Arguments(**values)))
+            return rendered
+
         rows_by_source: dict[Path | None, list[Arguments]] = {}
         for row in arguments_list:
             reference = getattr(row, "reference_image", None)
@@ -441,7 +468,7 @@ class SpotsToLabels(ProcessingTool):
                 semantics={Semantic.LABEL}, layouts={Layout.PLANAR}, dtypes={"uint32"}
             ),
             GUIMeta("Spot labels"),
-        ] = Template("spots_labels.tif")
+        ] = Template("spots_labels.tif", group=FileGroup.once())
         label_count: Annotated[int, GUIMeta("Label count")]
 
     def _blank_coordinate_output(self, arguments: Arguments) -> list[Any]:

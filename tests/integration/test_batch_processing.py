@@ -15,7 +15,7 @@ import pandas as pd
 
 from bioimageflow import DataFrameTool
 from bioimageflow import Workflow
-from bioimageflow_core import Arguments, IOModel, ProcessingTool, RowConsumption, Template
+from bioimageflow_core import FileGroup, Arguments, IOModel, ProcessingTool, RowConsumption, Template
 
 from tests.testkit.integration_tools import (
     FileLoader,
@@ -96,7 +96,7 @@ class EmptyBatchProbe(ProcessingTool):
         value: int
 
     class Outputs(IOModel):
-        output: Path = Template("probe.txt")
+        output: Path = Template("probe.txt", group=FileGroup.once())
 
     def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
         type(self).called = True
@@ -111,7 +111,7 @@ class EmptyBatchReducer(ProcessingTool):
         value: int
 
     class Outputs(IOModel):
-        output: Path = Template("empty_reducer.txt")
+        output: Path = Template("empty_reducer.txt", group=FileGroup.once())
         count: int
 
     def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:
@@ -133,7 +133,7 @@ class ReferencedBatchReducer(ProcessingTool):
         path: Path
 
     class Outputs(IOModel):
-        output: Path = Template("{path.stem}_empty.txt")
+        output: Path = Template("{path.stem}_empty.txt", group=FileGroup.by("path"))
         source_name: str
 
     def process_batch(self, arguments_list: list[Any], *, context: object | None = None) -> Any:

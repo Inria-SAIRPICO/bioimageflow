@@ -13,7 +13,6 @@ from .common import (
     Path,
     _absolute_runtime_path,
     _batch_work_dir,
-    _resolve_staged_output_path,
     _rows_work_dir,
     _safe_work_dir_name,
     _to_python,
@@ -25,6 +24,53 @@ from .common import (
 
 
 class _ArgumentsMixin:
+    def _output_file_row_contexts(self, node: Node, contexts: list[ExecutionContext], plan: Any) -> list[ExecutionContext]:
+        from dataclasses import replace
+        from bioimageflow_core import ProcessingTool
+        if type(node.tool).process_batch is not ProcessingTool.process_batch:
+            # A batch carries its full ownership plan once, in batch_context.
+            return contexts
+        indexed = [{field: [] for field in plan.output_files} for _ in contexts]
+        for field, files in plan.output_files.items():
+            for item in files:
+                for position in item.row_positions:
+                    indexed[position][field].append(item)
+        return [replace(context, output_files={field: tuple(items) for field, items in projection.items()})
+                for context, projection in zip(contexts, indexed)]
+
+    def _plan_output_files(
+        self, node: Node, arguments: list[dict[str, Any]], indexes: list[Any],
+        templates: dict[str, str], assets_dir: Path, batch_values: dict[str, Any],
+        references: tuple[Any, ...], upstream_nodes: dict[str, Node], results: dict[Node, pd.DataFrame],
+    ) -> Any:
+        from bioimageflow.output_planning import OutputPlanningEvidence
+
+        input_fields = [name for name, annotation in node.tool.Inputs._get_all_annotations().items() if is_path_type(annotation)]
+        timestamp = str(int(time.time()))
+        contexts = [self._build_template_context(node.name, str(index), values, input_fields,
+                    upstream_nodes, results, index, timestamp) for index, values in zip(indexes, arguments)]
+        reference_contexts = [self._build_template_context(node.name, row.row_index, row.arguments,
+                              input_fields, {}, {}, row.row_index, timestamp) for row in references]
+        batch_context = self._build_template_context(node.name, "batch", batch_values, input_fields, {}, {}, "batch", timestamp)
+        for values in [*contexts, *reference_contexts, batch_context]:
+            for field in input_fields:
+                if values.get(field) is not None:
+                    values[field] = Path(values[field])
+        evidence = OutputPlanningEvidence.capture(node_id=node.name, assets_dir=assets_dir,
+                    tool=node.tool, row_contexts=contexts, row_indexes=[str(index) for index in indexes],
+                    reference_contexts=reference_contexts, batch_context=batch_context, templates=templates)
+        plan = evidence.check_templates()
+        for values, paths in zip(arguments, plan.row_paths):
+            values.update(paths)
+        for row, paths in zip(references, plan.reference_paths):
+            row.arguments.update(paths)
+        # A collective batch gets only whole-invocation paths, never one arbitrary keyed file.
+        if node.tool.row_consumption.value == "collective":
+            for field in plan.output_files:
+                batch_values.pop(field, None)
+        batch_values.update(plan.batch_paths)
+        return plan
+
     def _resolve_constant_arguments(
         self,
         node: Node,
@@ -96,8 +142,6 @@ class _ArgumentsMixin:
     ) -> list[dict[str, Any]]:
         """Resolve per-row arguments for all rows in the aligned index."""
         arguments_dicts: list[dict[str, Any]] = []
-        timestamp = str(int(time.time()))
-
         # Pre-compute index sets for O(1) lookup
         index_sets: dict[str, set[str]] = {
             n.name: set(str(i) for i in results[n].index)
@@ -113,23 +157,6 @@ class _ArgumentsMixin:
                 input_annotations,
                 index_sets,
             )
-            context = self._build_template_context(
-                node.name,
-                str(idx),
-                row_args,
-                path_input_fields,
-                upstream_nodes,
-                results,
-                idx,
-                timestamp,
-            )
-            for out_field, template in templates.items():
-                row_args[out_field] = _resolve_staged_output_path(
-                    assets_dir,
-                    template,
-                    context,
-                )
-
             arguments_dicts.append(row_args)
         return arguments_dicts
 
@@ -142,9 +169,6 @@ class _ArgumentsMixin:
         from bioimageflow_core import ReferenceRow
 
         values = self._resolve_defaults(node, input_annotations)
-        context = self._build_template_context(node.name, "batch", values, path_input_fields, {}, results, "batch")
-        for field, template in templates.items():
-            values[field] = _resolve_staged_output_path(assets_dir, template, context)
         selected: dict[tuple[Node, str], dict[str, Any]] = {}
         for field in getattr(node.tool, "collective_reference_inputs", ()):
             reference = node._column_bindings.get(field)
@@ -158,9 +182,6 @@ class _ArgumentsMixin:
         rows = []
         for position, ((_, index), arguments) in enumerate(selected.items()):
             self._normalize_path_arguments(arguments, input_annotations)
-            reference_context = self._build_template_context(node.name, index, arguments, path_input_fields, {}, results, index)
-            for field, template in templates.items():
-                arguments[field] = _resolve_staged_output_path(assets_dir, template, reference_context)
             rows.append(ReferenceRow(position, index, arguments))
         return values, tuple(rows)
 

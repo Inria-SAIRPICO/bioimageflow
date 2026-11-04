@@ -111,7 +111,7 @@ bioimageflow-core (all environments)       bioimageflow (main process only)
 ```
 
 The framework automatically adds `bioimageflow-core` to the dependencies of every Wetlands environment.
-BioImageFlow 0.9.0 requires `bioimageflow-core>=0.5.0,<0.6` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
+BioImageFlow 0.10.0 requires `bioimageflow-core>=0.6.0,<0.7` in both the orchestrator and processing workers so annotation resolution has the same supported contract across execution boundaries.
 
 The orchestrator package exposes its final public imports explicitly while implementation modules remain focused.
 The scheduler owns graph, cache, progress, and failure semantics; execution-specific processing dispatch is isolated behind the `ProcessingBackend` protocol so all backends use those semantics.
@@ -340,7 +340,7 @@ The `path_picker` field is a GUI-only hint for path-typed inputs: `"file"` offer
 - `nullable` is determined solely by the type annotation: `True` iff the annotation (after unwrapping `Annotated[...]`) is a `Union` whose args include `NoneType`. It is independent of whether a default exists. GUIs should use `nullable` (not `required`) to decide whether to expose a "set to null" affordance.
 - The `type` display name strips `None` from unions — `Optional[int]` displays as `"int"` — because the None-ness is carried by `nullable`, not by `type`.
 
-Output fields retain `type`, `type_spec`, `required`, `nullable`, `default`, `image_spec` and optional template/viewer metadata; requiredness and nullability remain independent just as for inputs. `template` is present when a `ProcessingTool` path output declares a `Template(...)` default. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. For a `Passthrough` subclass (see §3.5 `DataFrameTool`), schema inspection represents inherited upstream columns and retains any added declared output fields and their type/image/viewer metadata.
+Output fields retain `type`, `type_spec`, `required`, `nullable`, `default`, `image_spec` and optional template/viewer metadata; requiredness and nullability remain independent just as for inputs. `output_role` identifies exact destinations, naming bases and returned references; `file_group` carries the immutable owner kind/keys and its display description for exact destinations. `template` is present for explicit `Template(...)` and `PathBase(...)` declarations. `viewer` is present when an output annotation carries the worker-safe `ViewerSpec` described in §14.3. If an output annotation carries `GUIMeta`, the serialized output entry also includes JSON-safe `GUIMeta` fields (`connectable`, `display_name`, `description`, `group`, `min`, `max`, `step`) so GUIs can label output pins and tooltips. For a `Passthrough` subclass (see §3.5 `DataFrameTool`), schema inspection represents inherited upstream columns and retains any added declared output fields and their type/image/viewer metadata.
 Configured node resolution joins inherited Passthrough ports with declared additions before publishing its detached projection.
 Static native declarations and configured resolver results have distinct authorities: an override's resolved type and metadata must not be replaced by the same-named raw Outputs annotation.
 Known heterogeneous Any and genuinely dynamic schemas remain valid; resolution failure is explicit, and a dynamic upstream does not become an empty known schema.
@@ -704,11 +704,15 @@ class ExecutionContext:
     row_index: str | None = None  # original input row index for process_row
     batch_arguments: Arguments | None = None
     reference_rows: tuple[ReferenceRow, ...] = ()
+    output_files: Mapping[str, tuple[PlannedFile, ...]] = field(default_factory=dict)
 ```
 
 `context.work_dir` is shared by every call for the node and always points to `run_dir/work/`. `context.rows_dir` is the shared row scratch parent, `run_dir/work/rows/`. For `process_row`, `context.row_dir` is the private scratch directory for that row: `run_dir/work/rows/<safe_row_id>/`. For `process_batch`, `context.batch_dir` is the private batch scratch directory: `run_dir/work/batch/`.
 A supplied row context must use the row-directory role and carry the exact corresponding `RowInvocation.row_index`; a supplied batch context must use the batch-directory role with no row index.
-An absent optional row context remains valid; present contexts are correlated without coercing or normalizing row indices.
+For row calls or chunks, an absent optional row context is valid only when no exact writable declaration requires its owner projection; present contexts are correlated without coercing or normalizing row indices.
+Whole-node batches transport the complete file plan once in the batch context, while observation contexts may be absent or carry scratch-only projections.
+The output-files mapping is read-only and detached from the controller's held admission plan.
+Exact writable declarations require complete owner/member coverage and matching argument paths before scientific callbacks, rather than accepting an empty or swapped owner list.
 
 Runtime scratch directories are for intermediate and implicit runtime files only. Declared outputs must still be written to paths from `Arguments` and returned through `Outputs`. Tools wrapping external binaries that create files relative to their current directory should pass `cwd=context.row_dir` from `process_row` or `cwd=context.batch_dir` from `process_batch` to `subprocess.run()` or equivalent. Shared generated runtime resources that are reused across rows should be placed under `context.work_dir`, preferably in a tool-named child directory. The engine must not use process-wide `os.chdir()`, because direct execution can run nodes in threads.
 
@@ -1203,8 +1207,8 @@ class IOModel:
 ```
 
 - **`Inputs`**: Declared on both `ProcessingTool` and `DataFrameTool`. Fields typed as `Annotated[Path, ImageSpec(...)]` or `ImageShared` represent data dependencies; scalar fields represent parameters. Default values are supported.
-- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. New path outputs without a `Template(...)` default use the built-in default template.
-A same-named Path input/output without an explicit `Template(...)` or configured output-template override preserves the admitted input path rather than replacing it with a generated destination. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
+- **`Outputs`**: Required on `ProcessingTool`, optional on `DataFrameTool`. On `ProcessingTool`, path fields with `Template(...)` defaults are **output templates** resolved by the engine before execution (see [Section 7.1](#71-output-templating-engine)); fields without `Template(...)` defaults (e.g., `cell_count: int`) are computed values returned by the tool. Bare Path outputs are returned references; `PathBase(...)` explicitly declares a naming base for generated file families, and `Template(...)` declares an exact writable destination.
+An output-template override may replace a declared pattern but cannot make a bare returned reference writable. On `DataFrameTool`, `Outputs` enables construction-time validation of downstream column references. `DataFrameTool` may also declare `class Outputs(Passthrough): pass` to indicate that all input columns are preserved.
 
 Both models use only standard-library types and `bioimageflow-core` types.
 **Accepted target — S04:** IOModel construction performs structural field admission; editor/declaration validation and resolved runtime scientific validation remain distinct phases.
@@ -1565,7 +1569,7 @@ This lifetime model does not weaken archive containment, initial package integri
 #### Basic OMERO Transfer Package
 
 `bioimageflow-omero-tools` exposes `bioimageflow_omero_tools.omero.OmeroDownloadDataset` and `OmeroUploadImage` as mapped `ProcessingTool` classes.
-Its host dependency is Core `>=0.5.0,<0.6`; OMERO, Ice, keyring and image libraries are imported only inside worker operations.
+Its host dependency is Core `>=0.6.0,<0.7`; OMERO, Ice, keyring and image libraries are imported only inside worker operations.
 Both tools require explicit non-secret `host`, `username`, `port` (default `4064`) and positive `dataset_id` inputs.
 The worker reads the password from the local keyring service `bioimageflow-omero` using the key `{host}:{port}:{username}`.
 Passwords and session UUIDs must not enter tool inputs, outputs, templates, package source, result-key material or forwarded SDK diagnostics.
@@ -2626,7 +2630,7 @@ When `node.compute()` is called:
 
    1. **Index Alignment:** Collect all upstream nodes referenced via column bindings. Compute the aligned index — the finest-grained index that is compatible with all upstream indices (see [Section 5.3](#53-dataframe-semantics)). If upstream indices are incompatible (no common lineage), raise `IndexAlignmentError`.
    2. **Value Resolution:** For each row in the aligned index, materialize input values from the column bindings. The orchestrator validates resolved values using Pydantic models built from the tool's `IOModel` declarations. Path-typed values are converted to absolute runtime paths in the orchestrator.
-   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). Ordinary admitted Workflow Processing resolves paths before dispatch beneath the selected reusable-attempt `assets/` directory.
+   3. **Output Templating:** Resolve output path templates for every row (see [Section 7.1](#71-output-templating-engine)). The owner planner checks one destination per file group and no shared destination across different owners before the affected scientific callback or worker submission, independently of the writer library. Ordinary admitted Workflow Processing resolves paths beneath the selected reusable-attempt `assets/` directory.
    4. **Cache Check:** Resolve the concrete scientific key from node identity, resolved arguments, admitted tool/environment identity, and pinned provider/selector record references. A valid selected record is loaded immediately. An unavailable upstream selection is an invariant error before scientific dispatch or workspace acquisition, not a silent non-reusable Processing fallback.
    5. **Execution Context:** Allocate a required invocation ID and use `cache/v1/results/<result-shard>/<result-key>/attempts/<attempt-id>/staging/`. Build one `ExecutionContext` per input row and one batch context with shared `assets/`, `work/`, and `rows/` roots plus private row/batch directories. Public Storage transient workspaces remain a separate explicit caller contract.
    6. **Serialization:** Encode each worker-boundary call as strict `ProcessingTask`. Every task has a task ID and invocation ID; `cache_attempt_id` is present only for reusable execution.
@@ -2643,8 +2647,8 @@ When `node.compute()` is called:
 The immutable backend dispatch request contains resolved arguments and contexts, ordered aligned positions, the scoped node, active run context, required invocation identity, and optional reusable-attempt identity.
 The scheduler owns cache lookup, publication, dataframe construction, progress, cancellation, and failure semantics around this request.
 
-Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v4`.
-The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v4`.
+Worker backends encode the request as `ProcessingTask` with schema `bioimageflow.processing_task.v5`.
+The result uses `ProcessingTaskResult` with schema `bioimageflow.processing_result.v5`.
 Both envelopes echo task ID, scoped node, invocation ID, optional cache attempt ID, retry number, physical mode and logical `row_consumption` exactly.
 The public logical DTOs are `ProcessingTask`, `RowInvocation`, `ConsumedRow`, `OutputGroup` and `ProcessingTaskResult`; there are no historical task/result DTO aliases or wire fallbacks.
 A task carries the mandatory portable `declaration` captured from the admitted tool instance's Inputs/Outputs; a successful result carries the actual loaded instance's `declaration_digest`.
@@ -2653,8 +2657,8 @@ After origin admission and construction, the worker compares its loaded instance
 The controller verifies the successful result's declaration digest against that same captured contract before accepting output values or publishing a reusable record.
 Declaration mismatch is an execution error through the existing exception channel, not a nullable digest or an error-shaped successful result.
 This ProcessingTool admission does not narrow local DataFrameTool dynamic/no-Outputs, known-empty or Passthrough contracts, and does not sandbox constructor/module-initializer effects or seal arbitrary later class and process-global state.
-A task contains the actual ordered observation `rows`, a separate typed `batch_arguments` dictionary and ordered genuine `reference_rows`; its filesystem `batch_context` remains a path-only projection.
-Pure Task4 decoding enforces the scratch-context role/index correlations from §3.4 before tool import or scientific callbacks; `process_batch` requires its batch-role context, while optional per-row contexts may remain `None`.
+A task contains the actual ordered observation `rows`, a separate typed `batch_arguments` dictionary and ordered genuine `reference_rows`; its execution contexts also carry the admitted exact-file owner projection.
+Pure Task5 decoding enforces scratch-context role/index correlations and finite planned-file path/key/member grammar from §3.4 before tool import or scientific callbacks; `process_batch` requires its batch-role context, while optional per-row contexts may remain `None`.
 A result contains `groups`, each with ordered `consumed_rows` entries `(position, row_index)` and an output tuple.
 Mapped results contain exactly one group per task observation with its exact singleton consumed identity, permitting zero, one or many outputs.
 Collective execution requires `process_batch` physical mode and returns exactly one group associated with all actual task observations in order; an empty task has one group with `consumed_rows=()` and may still return outputs.
@@ -2815,7 +2819,7 @@ The key includes the current declaration-attestation version so a reusable recor
 Managed Processing keys include the admitted portable primary-content facts and their proof grammar; an earlier record without represented primary admission cannot bypass this contract.
 Controlled replacement of selected installed content or a supported edit to represented source/inherited owners requires a new admission and the corresponding content key.
 A retired controller class is refused for new operations; an admitted class keeps its captured identity until retirement and never adopts newly read disk bytes.
-ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v2`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
+ProcessingTool and DataFrameTool keys also carry `execution_contract`, currently `bioimageflow.execution.v3`, so changes to framework execution semantics invalidate earlier records even when the tool source and declaration are unchanged.
 This semantic epoch changes only when execution behavior requires invalidation; pure performance changes do not advance it, and it introduces no cache-format migration.
 For managed Processing execution, `managed_runtime` retains the receipt's detached scientific facts and `content_digest`; generation IDs, raw recipe/lockfile hashes and operational paths are not scientific content salts.
 With the same declared recipe and other key facts, identical admitted content recreated in a new operational generation retains normal reuse, while changed admitted runtime content cannot reuse an earlier computation merely because the declared recipe and lockfile hash are unchanged.
@@ -3006,9 +3010,32 @@ Distinct same-basename URLs cannot reuse each other's bytes; an identical URL ma
 
 ### 7.1 Output Templating Engine
 
-BioImageFlow enforces structured file naming to prevent overwrites and maintain order. Path output fields in `ProcessingTool.Outputs` with `Template(...)` defaults are treated as path templates, resolved by the engine before dispatch. (DataFrameTool does not use output templating — it returns DataFrames directly.)
+BioImageFlow resolves explicit ProcessingTool file destinations before dispatch and refuses conflicting declared owners before the affected node starts scientific work.
+DataFrameTool path columns are returned values, not writable declarations.
 
-**Template declaration rule:** Templates must be declared explicitly with `Template("...")` on fields whose type annotation is Path-based (`Path` or `Annotated[Path, ...]`). Non-path fields cannot declare `Template(...)`. Plain string or `Path` defaults containing template expressions are invalid and raise an error.
+**Template declaration rule:** `Template("...", group=...)` declares an exact writable destination on a Path-based output (`Path` or `Annotated[Path, ...]`).
+`PathBase("...")` declares a naming base whose generated paths are chosen by the tool.
+A bare Path output is a returned reference and receives no implicit template.
+Overrides replace an explicitly declared pattern; they cannot turn a reference into a write or change its group.
+Non-path fields cannot declare either marker; plain string or Path defaults containing template expressions remain invalid.
+
+`FileGroup.per_row()` declares one potential file per actual observation position, independently of its display index string.
+`FileGroup.once()` declares one potential file for the invocation.
+`FileGroup.by("input", ...)` declares one potential file per distinct admitted scalar/path key tuple, using full typed input values rather than filename stems.
+Mapped templates default to `per_row()`; collective templates declare their group explicitly.
+`process_row` supports per-row destinations only; a whole-node `process_batch` supports any group under either row-consumption mode, without splitting shared writes into independently dispatched chunks.
+`RowConsumption` continues to describe input independence and record lineage rather than file count.
+
+Members of one owner `(invocation, output field, group identity)` must resolve to one path.
+Different owners in the same assets namespace must resolve to different normalized paths, including different output fields.
+Mosaic's tiles share one `once()` owner; TracksToLabels groups by full `label_image` and rejects distinct source owners with the same rendered filename.
+Actual selected reference-only sources establish keyed owners without synthetic observations or Cartesian products of unrelated reference fields.
+Empty-input callback behavior retains the existing row-consumption contract; declaring a file alone does not request execution.
+One planned file may be referenced by many records or retained as a manifest-only artifact when no records are returned.
+
+Batch callbacks consume admitted groups through `context.output_files[field]`, whose immutable `PlannedFile` entries contain `path`, `group_index`, named key values, and observation/reference member positions.
+Row arguments retain applicable resolved destinations, and `once()` destinations are also available in batch arguments.
+Missing key values and unresolved template variables refuse explicitly; the engine does not choose an arbitrary representative input to make a grouped template appear valid.
 
 **Available template variables:**
 
@@ -3016,6 +3043,7 @@ BioImageFlow enforces structured file naming to prevent overwrites and maintain 
 |---------------------------|--------------------------------------------------------|
 | `{node_name}`             | Name of the current node/step                          |
 | `{row_index}`             | Global index of the item in the DataFrame              |
+| `{group_index}`           | Deterministic filename-safe ordinal of this field's file group |
 | `{<input_field>.name}`    | Original filename of the named input path field        |
 | `{<input_field>.stem}`    | Filename without extension                             |
 | `{<input_field>.ext}`     | Last file extension (e.g., `.gz`)                      |
@@ -3029,8 +3057,9 @@ Bare `{<input_field>}` may use an admitted scalar field without granting path at
 **Accepted target — S08:** Known missing variables and unsafe paths refuse before effects; deferred values resolve before the affected dispatch.
 Capture timestamp and template inputs once for the invocation, reject overlapping writers/colliding resolved outputs, and keep zero-row assets or scalar facts in manifests without fabricating dataframe rows.
 
-**Default template:** New Path output fields without a `Template(...)` default use `{node_name}_{row_index}{ext}` when the tool has exactly one path input, otherwise `{node_name}_{row_index}`.
-A same-named Path input/output without an explicit template or configured override preserves the actual admitted input path; explicit `Template(...)` defaults and output-template overrides remain destination declarations.
+**Group index:** Per-row groups follow admitted observation order; keyed groups follow first occurrence in observations, then unseen eligible reference groups; a once group uses `0`.
+All members of a group receive the same index.
+It is deterministic for the admitted inputs, not a persistent source identifier across changed selections or order.
 
 **`{ext}` resolution:** If the tool has exactly one input path field, `{ext}` resolves to its extension. Otherwise (zero or multiple input paths), `{ext}` resolves to an empty string — the tool author must specify the extension explicitly in the template (e.g., `.tif` or `{input_image.ext}`).
 
@@ -3041,7 +3070,18 @@ class Outputs(IOModel):
 ```
 For a row where `input_image` is `/data/cell_01.tif` and `row_index` is `3`, this resolves to `cell_01_mask_3.png`.
 
-**1-to-N output naming:** The resolved template passed in `Arguments` acts as a **base path**. The tool may mutate it to create non-colliding names (e.g., `base_path.with_name(f"{base_path.stem}_tile{i}{base_path.suffix}")`). The engine builds the output DataFrame from the paths returned in `Outputs` objects, not from the pre-resolved templates.
+**1-to-N output naming:** Many records may reference one admitted exact file.
+A tool deriving additional filenames explicitly uses `PathBase`, for example `tile: Path = PathBase("{input_image.stem}_tile_{row_index}.tif")`.
+The engine builds the DataFrame from returned paths; it does not promise complete pre-write collision detection for naming bases or undeclared internal writes.
+Returned exact-template paths must belong to the admitted owner for their field and applicable row scope before publication.
+This is a cooperative execution contract, not a filesystem sandbox for arbitrary Python.
+
+`OutputPathCollisionError` reports different owners targeting one path with code `output_path_collision`.
+`OutputGroupDestinationMismatchError` reports one owner targeting different paths with code `output_group_destination_mismatch`.
+Structured reports retain effective templates, group identity, accurate counts and bounded literal/token expansion examples.
+Bounded lightweight evidence checks proposed overrides with the same resolver without retaining image arrays or workers; unavailable complete evidence cannot certify a correction.
+Neither error authorizes automatic renaming or overwriting.
+Processing identity includes explicit output roles, grouping and a versioned contract, preventing unsafe historical records from becoming newly verified cache hits while retaining old read/export access.
 
 ### 7.2 Directory Structure
 
@@ -3368,7 +3408,7 @@ These acceptance guarantees cover represented numeric values, not arbitrary Pyth
 - **Binding errors** (`BindingError`): Raised at graph construction time when a required input field has no source (no column reference, no constant, no default). Lists the missing field and available sources.
 - **Column not found** (`ColumnNotFoundError`): Raised at graph construction time when a column reference (`node["col"]` or node shorthand) refers to a column that does not exist in the upstream node's output schema. Includes available columns and close-match suggestions. For DataFrameTool upstreams without `Outputs`, this check is deferred to execution time.
 - **Index alignment errors** (`IndexAlignmentError`): Raised at execution time when a ProcessingTool references columns from upstream nodes whose indices have no common lineage. The user must insert a merge DataFrameTool to combine the data explicitly.
-- **Template errors**: Known invalid variables refuse at graph construction; deferred values and path/collision checks refuse before the affected processing dispatch.
+- **Template errors**: Known invalid variables refuse at graph construction; deferred values and path/owner checks refuse before affected dispatch. `OutputPathCollisionError` identifies different file owners targeting one path; `OutputGroupDestinationMismatchError` identifies one owner resolving to several paths. Their public structured reports and bounded correction evidence preserve template expansion details without launching workers or mutating workflow templates.
 - **Worker exceptions:** Remote exceptions are raised as `WorkerTaskError`; Parsl uses the public `ParslTaskError` subtype. Errors include scoped node, tool origin, route, task ID, invocation ID, optional cache attempt ID, row position/range, original type/message, and remote traceback when available.
 - **DataFrameTool exceptions:** Exceptions raised in `merge_dataframes` or `transform` propagate directly since they run in the main process.
 - **Disabled node errors** (`DisabledNodeError`): Raised at execution time when all requested target nodes are disabled or have disabled upstream dependencies. When only some targets are disabled in a multi-target `compute()` call, the disabled targets are silently omitted from the result dict.
@@ -3766,7 +3806,7 @@ from wetlands import EnvironmentSpec
 spec = EnvironmentSpec(
     python="3.12.*",
     conda=("cellpose==3.1.0",),
-    pypi=("bioimageflow-core>=0.5.0,<0.6",),
+    pypi=("bioimageflow-core>=0.6.0,<0.7",),
 )
 environment = manager.provision("cellpose_env", spec).wait_for()
 ```

@@ -14,6 +14,9 @@ from bioimageflow.node import get_active_workflow
 
 
 PUBLIC_EXPORTS = {
+    "OutputPlanningError", "OutputPathCollisionError", "OutputGroupDestinationMismatchError",
+    "OutputPlanningEvidence", "OutputFilePlan", "output_file_declarations",
+    "inspect_output_files", "inspect_workflow_output_files", "inspect_constant_output_files",
     "BackendNotSupportedError",
     "BindingError",
     "CLUSTER_DIAGNOSTIC_CATEGORIES",

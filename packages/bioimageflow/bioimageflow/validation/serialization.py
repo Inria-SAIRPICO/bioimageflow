@@ -445,6 +445,17 @@ def serialize_output_schema(tool_class: type[BaseTool] | BaseTool) -> dict[str, 
             _add_gui_meta_fields(entry, gui_meta)
         if template is not None:
             entry["template"] = template
+        from bioimageflow_core import FileGroup, PathBase
+        if is_path_type(annotation):
+            entry["output_role"] = "base" if isinstance(raw_default, PathBase) else "exact" if isinstance(raw_default, Template) else "reference"
+            if isinstance(raw_default, Template) and not isinstance(raw_default, PathBase):
+                group = raw_default.group or FileGroup.per_row()
+                description = ("One file per input row" if group.kind == "per_row" else
+                               "One file for the whole batch" if group.kind == "once" else
+                               "One file per distinct " + ", ".join(group.keys))
+                entry["file_group"] = dict(group.to_dict(), description=description)
+            else:
+                entry["file_group"] = None
         if viewer_spec is not None:
             entry["viewer"] = viewer_spec.to_dict()
         schema[field_name] = entry

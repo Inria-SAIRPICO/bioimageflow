@@ -9,7 +9,7 @@ import pytest
 from bioimageflow import NodePlanStatus, Workflow
 from bioimageflow.engine import WorkflowCancelledError
 from bioimageflow.storage import Storage
-from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, RowConsumption, Semantic
+from bioimageflow_core import Arguments, IOModel, ImageSpec, ProcessingTool, RowConsumption, Semantic, Template
 
 from tests.testkit.integration_tools import (
     AddColumn,
@@ -148,7 +148,7 @@ class TestFailureAndCancellation:
             environment = imageio_env
 
             class Inputs(IOModel):
-                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{node_name}_{row_index}{ext}")
 
             class Outputs(IOModel):
                 result: int
@@ -213,7 +213,7 @@ class TestFailureAndCancellation:
                 input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
             class Outputs(IOModel):
-                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
+                mask: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{node_name}_{row_index}{ext}")
 
             def process_row(self, arguments: Arguments, *, context: object | None = None) -> Any:
                 Path(arguments.mask).parent.mkdir(parents=True, exist_ok=True)

@@ -33,8 +33,7 @@ class StubDefaultTemplate(ProcessingTool):
         input_image: Annotated[Path, ImageSpec(semantics={Semantic.INTENSITY})]
 
     class Outputs(IOModel):
-        result: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})]
-        # No default → uses default template: {node_name}_{row_index}{ext}
+        result: Annotated[Path, ImageSpec(semantics={Semantic.LABEL})] = Template("{node_name}_{row_index}{ext}")
 
     def process_row(self, arguments: Arguments, *, context: object | None = None):
         Path(arguments.result).parent.mkdir(parents=True, exist_ok=True)

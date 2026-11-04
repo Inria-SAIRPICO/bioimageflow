@@ -1,6 +1,6 @@
 [project]
 name = "bioimageflow-omero-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "Basic lossless OMERO dataset download and image upload tools for BioImageFlow"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
-dependencies = ["bioimageflow-core>=0.5.0,<0.6"]
+dependencies = ["bioimageflow-core>=0.6.0,<0.7"]
 
 [project.urls]
 Homepage = "https://github.com/Inria-SAIRPICO/bioimageflow"

@@ -209,7 +209,7 @@ Installed/versioned managed tools retain `declared_installation` authority with 
 Node provenance records the exact admitted executable authority and its qualifications, separately from a descriptive declared version.
 That authority includes the captured instance facades' portable input/output types, requiredness, nullability, image constraints and supported declared bounds, preserving dynamic outputs and Passthrough as distinct states.
 Captured parameter/default/template values remain separate; arbitrary custom annotation validator closure is unproved.
-Current task/result v4 attests the represented portable IO declaration before the worker scientific method and validates its successful digest before controller output acceptance.
+Current task/result v5 attests the represented portable IO declaration before the worker scientific method and validates its successful digest before controller output acceptance.
 The declaration contract version joins every executable key, preventing reuse of records from the prior unattested contract.
 A matching cache record reuses that exact declaration contract without starting a worker solely to compare it; arbitrary initializer effects, custom validators and post-load mutations remain outside this declaration proof.
 Managed Processing separately admits a ready runtime content receipt before key computation and lookup, using the dispatch manager's augmented recipe.

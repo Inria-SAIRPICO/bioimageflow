@@ -80,7 +80,7 @@ def test_dataframe_tool_packages_declare_the_current_orchestrator_cohort() -> No
         assert {
             (specifier.operator, specifier.version)
             for specifier in requirement.specifier
-        } == {(">=", "0.9.0"), ("<", "1")}
+        } == {(">=", "0.10.0"), ("<", "1")}
 
 
 def test_auto_selection_uses_only_pending_packages(tmp_path: Path) -> None:

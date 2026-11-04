@@ -4,6 +4,8 @@
 
 Inputs are `spot_id`, `y`, `x`, `image_shape`, and `radius`.
 Outputs are `label_image` and `label_count`.
+The exact writable `label_image` declares `FileGroup.once()`, so the entire batch owns one destination.
+Different filenames among its contributing rows are a template disagreement rather than independent output files.
 
 ## Dependencies and Core Libraries
 

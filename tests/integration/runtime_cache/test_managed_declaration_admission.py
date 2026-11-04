@@ -70,6 +70,7 @@ def test_loaded_declaration_is_admitted_before_scientific_method(tmp_path, monke
             "run_dir": str(run_dir), "assets_dir": str(run_dir / "assets"),
             "work_dir": str(run_dir / "work"), "rows_dir": str(row_dir.parent),
             "row_dir": str(row_dir), "batch_dir": None, "row_index": "sample",
+            "output_files": {},
         }),),
     )
     clear_worker_tool_instances()

@@ -61,7 +61,7 @@ Managed editable/unmanaged source admission compiles captured bytes without exec
 Stable installed generations retain the admitted package source and actual RECORD-owned inherited facts instead of repeating source capture or bytecode attestation.
 External editable inherited owners remain freshly captured once per operation, even when the defining tool is installed.
 These controller-local checks are not cross-Python worker tokens.
-Current ProcessingTask/result v4 uses the shared Core declaration projector: the loaded instance must match the requested portable IO contract before the scientific method, and the controller checks the successful digest before output acceptance.
+Current ProcessingTask/result v5 uses the shared Core declaration projector: the loaded instance must match the requested portable IO contract before the scientific method, and the controller checks the successful digest before output acceptance.
 This does not prove arbitrary constructor/module initializer effects, custom validator behavior or installed/transitive dependency bytes.
 Retaining a callback prevents later method replacement from selecting another function, but does not freeze arbitrary module globals or closures after admission.
 Mutable observational globals, dynamic initializers, opaque imported/native modules and installed transitive dependencies remain explicitly qualified; current paths, package labels and matching primary code alone are not complete executable-content proof.

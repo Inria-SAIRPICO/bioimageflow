@@ -27,7 +27,7 @@ from bioimageflow_core import (
     WorkerToolOrigin,
 )
 
-EXECUTION_CONTRACT_VERSION = "bioimageflow.execution.v2"
+EXECUTION_CONTRACT_VERSION = "bioimageflow.execution.v3"
 
 
 def _canonical_distribution(value: str) -> str:

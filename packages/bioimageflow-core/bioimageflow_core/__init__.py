@@ -36,11 +36,14 @@ from bioimageflow_core.tool import (
     ProcessingTool as ProcessingTool,
     RowConsumption as RowConsumption,
     Template as Template,
+    PathBase as PathBase,
+    FileGroup as FileGroup,
 )
 from bioimageflow_core.arguments import (
     Arguments as Arguments,
     ExecutionContext as ExecutionContext,
     ReferenceRow as ReferenceRow,
+    PlannedFile as PlannedFile,
 )
 from bioimageflow_core.shared_memory import (
     CleanupStatus as CleanupStatus,
@@ -110,6 +113,7 @@ __all__ = [
     "EnvironmentSpec",
     "ExecutionContext",
     "ExternalCommandError",
+    "FileGroup",
     "GENERAL_ENV",
     "GUIMeta",
     "IOModel",
@@ -120,7 +124,9 @@ __all__ = [
     "NapariRequirement",
     "OutputGroup",
     "PackageRequirement",
+    "PathBase",
     "PathPicker",
+    "PlannedFile",
     "PrimaryBuiltinCallback",
     "PrimaryCallback",
     "PrimaryContentProof",

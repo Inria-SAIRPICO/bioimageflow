@@ -9,7 +9,7 @@ import pytest
 from bioimageflow import DataFrameTool, IndexAlignmentError, Workflow, WorkflowExecutionContext
 from bioimageflow.storage import Storage
 from bioimageflow_common_tools import CrossJoin
-from bioimageflow_core import Arguments, GENERAL_ENV, IOModel, ProcessingTool, RowConsumption, Template
+from bioimageflow_core import FileGroup, Arguments, GENERAL_ENV, IOModel, ProcessingTool, RowConsumption, Template
 
 
 class OrderedValues(DataFrameTool):
@@ -57,7 +57,7 @@ class EmptyArtifactBatch(SumBatch):
     class Outputs(IOModel):
         total: int
         consumed_count: int
-        artifact: Path = Template("empty-aggregate.txt")
+        artifact: Path = Template("empty-aggregate.txt", group=FileGroup.once())
 
     def process_batch(self, arguments_list: list[Arguments], *, context: Any = None) -> Any:
         assert arguments_list == [], "a collective empty batch has no fabricated observation"

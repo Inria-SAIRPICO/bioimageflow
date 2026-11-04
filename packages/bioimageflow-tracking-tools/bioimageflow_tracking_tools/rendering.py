@@ -7,6 +7,7 @@ from bioimageflow_core import (
     Arguments,
     Category,
     Connectable,
+    FileGroup,
     GENERAL_ENV,
     GUIMeta,
     ImageSpec,
@@ -56,7 +57,7 @@ class TracksToLabels(ProcessingTool):
                 dtypes={"uint32"},
             ),
             GUIMeta("Track labels"),
-        ] = Template("{label_image.stem}_tracks.tif")
+        ] = Template("{label_image.stem}_tracks.tif", group=FileGroup.by("label_image"))
         track_count: Annotated[int, GUIMeta("Track count")]
 
     def process_batch(
@@ -67,6 +68,22 @@ class TracksToLabels(ProcessingTool):
     ) -> Any:
         import imageio.v3 as iio
         import numpy as np
+
+        planned = getattr(context, "output_files", {}).get("output_label_image")
+        if planned is not None:
+            rendered: list[Any] = []
+            for destination in planned:
+                observations = [arguments_list[position] for position in destination.row_positions]
+                reference = Arguments(
+                    label_image=destination.key["label_image"],
+                    output_label_image=destination.path,
+                )
+                rendered.extend(
+                    self._render_tracks(observations, iio=iio, np=np)
+                    if observations
+                    else self._render_empty(reference, iio=iio, np=np)
+                )
+            return rendered
 
         references = [Arguments(**reference.arguments) for reference in getattr(context, "reference_rows", ())]
         batch = getattr(context, "batch_arguments", None)

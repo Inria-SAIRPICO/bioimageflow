@@ -345,7 +345,7 @@ class Tool(ProcessingTool):
         run_dir = tmp_path / "run"
         batch_context = dict(run_dir=str(run_dir), assets_dir=str(run_dir / "assets"),
             work_dir=str(run_dir / "work"), rows_dir=str(run_dir / "work/rows"),
-            row_dir=None, batch_dir=str(run_dir / "work/batch"), row_index=None)
+            row_dir=None, batch_dir=str(run_dir / "work/batch"), row_index=None, output_files={})
         invocation = ProcessingTask(
             task_id="task_0000000000000000", node_name="lazy_helper",
             invocation_id="inv_" + "1" * 32, cache_attempt_id=None,
