@@ -23,7 +23,7 @@ Store credentials in the worker-accessible OS keyring service `bioimageflow-omer
 The platform Settings page uses the same contract and may populate the saved non-secret connection fields when creating a node.
 No password input or platform import is required by either tool.
 Do not put credentials into parameters, metadata or artifacts.
-The package's host dependency is Core `>=0.5.0,<0.6`; worker-only imports are lazy.
+The package's host dependency is Core `>=0.6.0,<0.7`; worker-only imports are lazy.
 The worker recipe uses CPython 3.12, OMERO.py 5.23.0, Ice 3.6.5 and pinned image/keyring dependencies, selecting an official Ice wheel for macOS arm64/x86_64 or glibc Linux x86_64 (glibc >=2.28).
 Other platforms are unsupported.
 Recipe selection at import also restricts package discovery to those supported hosts.
