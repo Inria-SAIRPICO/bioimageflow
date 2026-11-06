@@ -1,6 +1,6 @@
 # bioimageflow-omero-tools
 
-Basic dataset download and image upload for BioImageFlow, requiring only `bioimageflow-core>=0.5.0,<0.6` for discovery.
+Basic dataset download and image upload for BioImageFlow, requiring only `bioimageflow-core>=0.6.0,<0.7` for discovery.
 
 - `bioimageflow_omero_tools.omero.OmeroDownloadDataset`: download every image in a dataset to an owned OME-TIFF and report image/dataset IDs, original name, complete `TCZYX` shape and dtype.
 - `bioimageflow_omero_tools.omero.OmeroUploadImage`: upload one TIFF/OME-TIFF or grayscale/RGB(A) PNG to an existing dataset, with optional image name, description and simple string metadata; return image/dataset/annotation IDs.
